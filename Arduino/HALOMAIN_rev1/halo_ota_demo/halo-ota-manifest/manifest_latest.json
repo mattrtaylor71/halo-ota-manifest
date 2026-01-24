@@ -1,0 +1,9 @@
+{
+  "version": "0.5.2",
+  "bin_url": "https://mattrtaylor71.github.io/halo-ota-manifest/artifacts/sense_dummy_0.5.2.bin",
+  "sha256": "d9fa01a131129d112ccd65c157d74114d279652eaf4713430365bd0e88beb9dc",
+  "size": 1064240,
+  "min_version": "0.0.0",
+  "artifact_fw_version": "0.5.2",
+  "build_id": "0.5.2-Jan 23 2026-16:16:44-unknown"
+}
