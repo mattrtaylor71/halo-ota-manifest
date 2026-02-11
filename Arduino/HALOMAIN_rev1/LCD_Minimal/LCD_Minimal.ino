@@ -162,6 +162,10 @@ static volatile unsigned long last_touch_or_input_ms = 0;
 static volatile uint32_t ui_loop_counter = 0;
 static unsigned long last_heartbeat_ms = 0;
 #define UI_HEARTBEAT_INTERVAL_MS 2000
+/* Display busy overlay when flush submit fails (soft fault) */
+static lv_obj_t *display_busy_overlay = NULL;
+static unsigned long display_busy_hide_at_ms = 0;
+#define DISPLAY_BUSY_OVERLAY_MS 1000
 static unsigned long sleep_entry_time = 0;
 static unsigned long last_sleep_skip_log_ms = 0;
 static char last_sleep_skip_reason[32] = "";
@@ -4522,19 +4526,41 @@ static void ui_task(void *arg) {
     bool processed_anything = false;
 
     ui_loop_counter++;
+    uint32_t submit_ok = 0, submit_fail = 0;
+    int outstanding = 0, soft_fault = 0;
+    lcd_bsp_get_flush_submit_stats(&submit_ok, &submit_fail, &outstanding, &soft_fault);
+
+    if (soft_fault) {
+      lcd_bsp_clear_flush_soft_fault();
+      if (!display_busy_overlay) {
+        display_busy_overlay = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(display_busy_overlay, 120, 40);
+        lv_obj_center(display_busy_overlay);
+        lv_obj_t *lbl = lv_label_create(display_busy_overlay);
+        lv_label_set_text(lbl, "Display busy");
+        lv_obj_center(lbl);
+        lv_obj_set_style_bg_opa(display_busy_overlay, LV_OPA_80, 0);
+        lv_obj_set_style_bg_color(display_busy_overlay, lv_color_hex(0x404040), 0);
+      }
+      lv_obj_clear_flag(display_busy_overlay, LV_OBJ_FLAG_HIDDEN);
+      display_busy_hide_at_ms = millis() + DISPLAY_BUSY_OVERLAY_MS;
+    }
+    if (display_busy_hide_at_ms && millis() >= display_busy_hide_at_ms) {
+      if (display_busy_overlay) lv_obj_add_flag(display_busy_overlay, LV_OBJ_FLAG_HIDDEN);
+      display_busy_hide_at_ms = 0;
+    }
+
     {
       unsigned long now_hb = millis();
       if ((now_hb - last_heartbeat_ms) >= UI_HEARTBEAT_INTERVAL_MS) {
         last_heartbeat_ms = now_hb;
-        uint32_t submit_ok = 0, submit_fail = 0, outstanding = 0;
-        lcd_bsp_get_flush_submit_stats(&submit_ok, &submit_fail, &outstanding);
         size_t heap_internal = esp_get_free_heap_size();
         size_t heap_min = esp_get_minimum_free_heap_size();
         size_t heap_psram = 0;
 #if (CONFIG_SPIRAM_USE_MALLOC || CONFIG_SPIRAM)
         heap_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
 #endif
-        Serial.printf("[UI_HB] heap=%u min=%u psram=%u hwm=%u loop=%lu tick_ms=%lu input_ms=%lu flush_ok=%lu fail=%lu out=%lu\n",
+        Serial.printf("[UI_HB] heap=%u min=%u psram=%u hwm=%u loop=%lu tick_ms=%lu input_ms=%lu flush_ok=%lu fail=%lu out=%d soft_fault=%d\n",
                       (unsigned)heap_internal,
                       (unsigned)heap_min,
                       (unsigned)heap_psram,
@@ -4544,7 +4570,8 @@ static void ui_task(void *arg) {
                       (unsigned long)last_touch_or_input_ms,
                       (unsigned long)submit_ok,
                       (unsigned long)submit_fail,
-                      (unsigned long)outstanding);
+                      outstanding,
+                      soft_fault);
       }
     }
 

@@ -25,6 +25,7 @@ extern esp_err_t esp_lcd_panel_io_wait_tx_done(esp_lcd_panel_io_handle_t io, int
 static uint32_t flush_fail_count = 0;
 static volatile uint32_t s_flush_submit_ok = 0;
 static volatile uint32_t s_flush_submit_fail = 0;
+static volatile int s_flush_soft_fault = 0;
 static bool display_reset_requested = false;
 static lv_disp_drv_t *s_flush_pending_drv = NULL;
 static unsigned long s_flush_start_ms = 0;
@@ -434,10 +435,15 @@ uint32_t lcd_bsp_get_flush_outstanding(void) {
   return flush_outstanding_count;
 }
 
-void lcd_bsp_get_flush_submit_stats(uint32_t *ok, uint32_t *fail, uint32_t *outstanding) {
+void lcd_bsp_get_flush_submit_stats(uint32_t *ok, uint32_t *fail, int *outstanding, int *soft_fault) {
   if (ok) *ok = s_flush_submit_ok;
   if (fail) *fail = s_flush_submit_fail;
-  if (outstanding) *outstanding = flush_outstanding_count;
+  if (outstanding) *outstanding = (int)flush_outstanding_count;
+  if (soft_fault) *soft_fault = s_flush_soft_fault;
+}
+
+void lcd_bsp_clear_flush_soft_fault(void) {
+  s_flush_soft_fault = 0;
 }
 
 uint32_t lcd_bsp_get_flush_fail_count(void) {
@@ -544,6 +550,7 @@ static void example_lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_
   if (ret != ESP_OK) {
     if (flush_outstanding_count > 0) flush_outstanding_count--;
     s_flush_submit_fail++;
+    s_flush_soft_fault = 1;
     printf("[LCD_FLUSH] panel_io draw_bitmap failed err=0x%x outstanding=%lu queue_depth=%d\n",
            (unsigned)ret, (unsigned long)flush_outstanding_count, SH8601_PANEL_IO_QSPI_TRANS_QUEUE_DEPTH);
     s_flush_pending_drv = NULL;
