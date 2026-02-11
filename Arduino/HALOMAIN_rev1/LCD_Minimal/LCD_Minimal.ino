@@ -160,6 +160,92 @@ static bool scroll_pending_redraw = false;
 static uint32_t invalidates_this_sec = 0;
 static uint32_t invalidates_per_sec = 0;
 static unsigned long last_invalidates_sec_start_ms = 0;
+// Flush completion gate (must complete exactly once per flush, and only from UI/LVGL task)
+typedef enum {
+  FLUSH_REASON_SPI_DONE = 1,
+  FLUSH_REASON_QUEUE_FAIL = 2,
+  FLUSH_REASON_TIMEOUT = 3,
+} flush_reason_t;
+static volatile bool g_flush_inflight = false;
+static volatile bool g_flush_ready_sent = false;
+static volatile uint32_t g_flush_seq = 0;
+static volatile uint32_t g_flush_start_ms = 0;
+static lv_disp_drv_t *g_flush_drv = NULL;
+
+static const char* flush_reason_name(uint8_t reason) {
+  switch (reason) {
+    case FLUSH_REASON_SPI_DONE:
+      return "spi_done";
+    case FLUSH_REASON_QUEUE_FAIL:
+      return "queue_fail";
+    case FLUSH_REASON_TIMEOUT:
+      return "timeout";
+    default:
+      return "unknown";
+  }
+}
+
+static void finish_flush_from_ui_task(const char* reason, uint32_t seq_expected) {
+  TaskHandle_t current = xTaskGetCurrentTaskHandle();
+  const char* task_name = pcTaskGetName(NULL);
+  if (ui_task_handle != NULL && current != ui_task_handle) {
+    Serial.printf("[FLUSH] finish called from non-UI task=%s\n", task_name ? task_name : "unknown");
+  }
+  if (!g_flush_inflight) {
+    return;
+  }
+  if (g_flush_ready_sent) {
+    return;
+  }
+  if (seq_expected != g_flush_seq) {
+    return;
+  }
+  if (g_flush_drv == NULL) {
+    return;
+  }
+  g_flush_ready_sent = true;
+  g_flush_inflight = false;
+  unsigned long now_ms = millis();
+  unsigned long dt_ms = (now_ms >= g_flush_start_ms) ? (now_ms - g_flush_start_ms) : 0;
+  lv_disp_flush_ready(g_flush_drv);
+  Serial.printf("[FLUSH] ready reason=%s seq=%lu dt_ms=%lu task=%s\n",
+                reason ? reason : "unknown",
+                (unsigned long)g_flush_seq,
+                dt_ms,
+                task_name ? task_name : "unknown");
+}
+
+extern "C" uint32_t lcd_flush_begin(lv_disp_drv_t *drv) {
+  g_flush_inflight = true;
+  g_flush_ready_sent = false;
+  g_flush_seq++;
+  g_flush_start_ms = millis();
+  g_flush_drv = drv;
+  return g_flush_seq;
+}
+
+extern "C" void lcd_flush_request_finish(uint8_t reason, uint32_t seq, bool from_isr) {
+  bool on_ui_task = (ui_task_handle == NULL) || (xTaskGetCurrentTaskHandle() == ui_task_handle);
+  if (!from_isr && on_ui_task) {
+    finish_flush_from_ui_task(flush_reason_name(reason), seq);
+    return;
+  }
+  if (app_event_queue == NULL) {
+    return;
+  }
+  app_event_t evt = {EVT_FLUSH_FINISH, {0}};
+  evt.data.flush_finish.seq = seq;
+  evt.data.flush_finish.reason = reason;
+  if (from_isr) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xQueueSendFromISR(app_event_queue, &evt, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken == pdTRUE) {
+      portYIELD_FROM_ISR();
+    }
+  } else {
+    xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(10));
+  }
+}
 static void ui_count_invalidate(void) {
   invalidates_this_sec++;
 }
@@ -692,6 +778,7 @@ typedef enum {
   EVT_STOP_GLOWING,   // From UART: UI task calls stop_glowing_animation + lv_timer_handler
   EVT_START_GLOWING,  // From UART: UI task calls start_glowing_animation(reason)
   EVT_UI_STATUS_IDLE, // From UART: UI task calls set_status_reset_visible(false), stop_glowing if needed
+  EVT_FLUSH_FINISH,   // From ISR/other tasks: UI task finishes LVGL flush
 } app_event_type_t;
 
 typedef struct app_event_t {
@@ -717,6 +804,10 @@ typedef struct app_event_t {
     struct {
       char state[32];
     } provision_status;
+    struct {
+      uint32_t seq;
+      uint8_t reason;
+    } flush_finish;
   } data;
 } app_event_t;
 
@@ -4832,6 +4923,10 @@ static void ui_task(void *arg) {
           stop_glowing_animation();
           ui_lvgl_tick();
         }
+        processed_anything = true;
+      } else if (evt.type == EVT_FLUSH_FINISH) {
+        finish_flush_from_ui_task(flush_reason_name(evt.data.flush_finish.reason),
+                                  evt.data.flush_finish.seq);
         processed_anything = true;
       } else if (evt.type == EVT_LIST_REPLACED) {
         // List was replaced (from UART task) - stop glowing, then swap pending → active and render
