@@ -38,12 +38,11 @@ bool lcd_bsp_display_reset_requested(void);
 void lcd_bsp_reset_flush_fail_count(void);
 unsigned long lcd_bsp_flush_inflight_age_ms(void);
 uint32_t lcd_bsp_get_flush_outstanding(void);
+void lcd_bsp_get_flush_submit_stats(uint32_t *ok, uint32_t *fail, uint32_t *outstanding);
 uint32_t lcd_bsp_get_flush_fail_count(void);
 void lcd_bsp_reset_panel(void);
 uint32_t lcd_bsp_get_avg_flush_ms(void);
 uint32_t lcd_bsp_get_flushes_per_sec(void);
-uint32_t lcd_flush_begin(lv_disp_drv_t *drv);
-void lcd_flush_request_finish(uint8_t reason, uint32_t seq, bool from_isr);
 static void example_lvgl_touch_cb(lv_indev_drv_t *drv, lv_indev_data_t *data);
 #ifdef __cplusplus
 }

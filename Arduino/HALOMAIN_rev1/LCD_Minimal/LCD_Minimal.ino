@@ -152,120 +152,16 @@ static volatile unsigned long touch_ignore_until = 0;
 static volatile unsigned long scroll_ignore_until = 0;
 /* Throttle scroll-driven redraws to avoid SPI "color failed" when scrolling fast.
  * We do NOT call lv_obj_invalidate on the whole screen: ui_refresh_from_state -> ui_update_list
- * only updates the 7 list row labels (text/style), so LVGL invalidates just those areas.
- * During REFRESH_INFLIGHT we use SCROLL_REFRESH_MIN_MS_INFLIGHT for stricter debounce. */
+ * only updates the 7 list row labels (text/style), so LVGL invalidates just those areas. */
 static unsigned long last_scroll_refresh_ms = 0;
 static bool scroll_pending_redraw = false;
-/* Counters: invalidates in current 1s window, last second's rate, and when window started */
-static uint32_t invalidates_this_sec = 0;
-static uint32_t invalidates_per_sec = 0;
-static unsigned long last_invalidates_sec_start_ms = 0;
-// Flush completion gate (must complete exactly once per flush, and only from UI/LVGL task)
-typedef enum {
-  FLUSH_REASON_SPI_DONE = 1,
-  FLUSH_REASON_QUEUE_FAIL = 2,
-  FLUSH_REASON_TIMEOUT = 3,
-} flush_reason_t;
-static volatile bool g_flush_inflight = false;
-static volatile bool g_flush_ready_sent = false;
-static volatile uint32_t g_flush_seq = 0;
-static volatile uint32_t g_flush_start_ms = 0;
-static lv_disp_drv_t *g_flush_drv = NULL;
-
-static const char* flush_reason_name(uint8_t reason) {
-  switch (reason) {
-    case FLUSH_REASON_SPI_DONE:
-      return "spi_done";
-    case FLUSH_REASON_QUEUE_FAIL:
-      return "queue_fail";
-    case FLUSH_REASON_TIMEOUT:
-      return "timeout";
-    default:
-      return "unknown";
-  }
-}
-
-static void finish_flush_from_ui_task(const char* reason, uint32_t seq_expected) {
-  TaskHandle_t current = xTaskGetCurrentTaskHandle();
-  if (ui_task_handle != NULL && current != ui_task_handle) {
-    return;
-  }
-  if (!g_flush_inflight) {
-    return;
-  }
-  if (g_flush_ready_sent) {
-    return;
-  }
-  if (seq_expected != g_flush_seq) {
-    return;
-  }
-  if (g_flush_drv == NULL) {
-    return;
-  }
-  lvgl_assert_locked();
-  g_flush_ready_sent = true;
-  g_flush_inflight = false;
-  unsigned long now_ms = millis();
-  unsigned long dt_ms = (now_ms >= g_flush_start_ms) ? (now_ms - g_flush_start_ms) : 0;
-  lv_disp_flush_ready(g_flush_drv);
-  g_flush_drv = NULL;
-  Serial.printf("[FLUSH] ready reason=%s seq=%lu dt_ms=%lu\n",
-                reason ? reason : "unknown",
-                (unsigned long)g_flush_seq,
-                (unsigned long)dt_ms);
-}
-
-extern "C" uint32_t lcd_flush_begin(lv_disp_drv_t *drv) {
-  g_flush_inflight = true;
-  g_flush_ready_sent = false;
-  g_flush_seq++;
-  g_flush_start_ms = millis();
-  g_flush_drv = drv;
-  return g_flush_seq;
-}
-
-extern "C" void lcd_flush_request_finish(uint8_t reason, uint32_t seq, bool from_isr) {
-  bool on_ui_task = (ui_task_handle == NULL) || (xTaskGetCurrentTaskHandle() == ui_task_handle);
-  if (!from_isr && on_ui_task && lvgl_lock_held_by_current_task()) {
-    finish_flush_from_ui_task(flush_reason_name(reason), seq);
-    return;
-  }
-  if (app_event_queue == NULL) {
-    return;
-  }
-  app_event_t evt = {EVT_FLUSH_FINISH, {0}};
-  evt.data.flush_finish.seq = seq;
-  evt.data.flush_finish.reason = reason;
-  if (from_isr) {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xQueueSendFromISR(app_event_queue, &evt, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken == pdTRUE) {
-      portYIELD_FROM_ISR();
-    }
-  } else {
-    xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(10));
-  }
-}
-static void ui_count_invalidate(void) {
-  invalidates_this_sec++;
-}
-static void ui_stats_tick(void) {
-  unsigned long now_ms = millis();
-  if (last_invalidates_sec_start_ms == 0) {
-    last_invalidates_sec_start_ms = now_ms;
-    return;
-  }
-  if ((now_ms - last_invalidates_sec_start_ms) >= 1000) {
-    invalidates_per_sec = invalidates_this_sec;
-    invalidates_this_sec = 0;
-    last_invalidates_sec_start_ms = now_ms;
-  }
-}
-uint32_t ui_get_invalidates_per_sec(void) { return invalidates_per_sec; }
-uint32_t ui_get_avg_flush_ms(void) { return lcd_bsp_get_avg_flush_ms(); }
-
-#define SCROLL_REFRESH_MIN_MS         50
-#define SCROLL_REFRESH_MIN_MS_INFLIGHT 50   // Debounce list redraw during REFRESH_INFLIGHT (30-50ms cadence max)
+#define SCROLL_REFRESH_MIN_MS 50
+/* Minimal telemetry for freeze triage (no watchdog) */
+static volatile unsigned long last_ui_tick_ms = 0;
+static volatile unsigned long last_touch_or_input_ms = 0;
+static volatile uint32_t ui_loop_counter = 0;
+static unsigned long last_heartbeat_ms = 0;
+#define UI_HEARTBEAT_INTERVAL_MS 2000
 static unsigned long sleep_entry_time = 0;
 static unsigned long last_sleep_skip_log_ms = 0;
 static char last_sleep_skip_reason[32] = "";
@@ -779,7 +675,6 @@ typedef enum {
   EVT_STOP_GLOWING,   // From UART: UI task calls stop_glowing_animation + lv_timer_handler
   EVT_START_GLOWING,  // From UART: UI task calls start_glowing_animation(reason)
   EVT_UI_STATUS_IDLE, // From UART: UI task calls set_status_reset_visible(false), stop_glowing if needed
-  EVT_FLUSH_FINISH,   // From ISR/other tasks: UI task finishes LVGL flush
 } app_event_type_t;
 
 typedef struct app_event_t {
@@ -805,10 +700,6 @@ typedef struct app_event_t {
     struct {
       char state[32];
     } provision_status;
-    struct {
-      uint32_t seq;
-      uint8_t reason;
-    } flush_finish;
   } data;
 } app_event_t;
 
@@ -1244,6 +1135,7 @@ static void convert_date_mmddyyyy_to_yyyymmdd(const char* input, char* output, s
 
 static void user_activity_bump(const char* reason) {
   last_user_activity_ms = millis();
+  last_touch_or_input_ms = millis();
   user_activity_since_sleep = true;
   if (sleep_retry_requires_user) {
     sleep_retry_requires_user = false;
@@ -1903,12 +1795,10 @@ static void start_glowing_animation(const char* op) {
   lv_anim_init(processing_anim);
   lv_anim_set_var(processing_anim, processing_indicator);
   lv_anim_set_exec_cb(processing_anim, processing_glow_anim_cb);
-  // During REFRESH_INFLIGHT throttle to low FPS: longer anim = fewer invalidates (halo widget only, no full-screen)
-  uint32_t anim_ms = (refresh_state == REFRESH_INFLIGHT) ? 2000 : 1000;
-  lv_anim_set_time(processing_anim, (uint32_t)anim_ms);
+  lv_anim_set_time(processing_anim, 1000);  // 1 second to fade from max to min
   lv_anim_set_values(processing_anim, LV_OPA_COVER, LV_OPA_20);  // From max brightness (255) to min brightness (~51)
   lv_anim_set_repeat_count(processing_anim, LV_ANIM_REPEAT_INFINITE);  // Repeat forever
-  lv_anim_set_playback_time(processing_anim, (uint32_t)anim_ms);
+  lv_anim_set_playback_time(processing_anim, 1000);  // 1 second to fade back from min to max
   lv_anim_start(processing_anim);
   
   is_glowing_animation = true;
@@ -1934,7 +1824,6 @@ static void stop_glowing_animation(void) {
     lv_obj_add_flag(processing_indicator, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_border_width(processing_indicator, 0, LV_PART_MAIN);
     lv_obj_set_style_border_opa(processing_indicator, LV_OPA_TRANSP, LV_PART_MAIN);
-    ui_count_invalidate();
     lv_obj_invalidate(processing_indicator);  // Minimal: only the halo object, not whole screen
   }
   is_glowing_animation = false;
@@ -1944,76 +1833,15 @@ static void stop_glowing_animation(void) {
   Serial.println("[ANIM] Stopped glowing processing animation");
 }
 
-// UI watchdog: progress timestamp updated on each successful lv_timer_handler run
-static unsigned long last_lvgl_progress_ms = 0;
-static bool ui_watchdog_recovery_pending = false;
-static unsigned long ui_watchdog_recovery_start_ms = 0;
-#define UI_WATCHDOG_STALL_MS       2000
-#define UI_WATCHDOG_FLUSH_STUCK_MS 250
-#define UI_WATCHDOG_RECOVERY_GRACE_MS 800
-
 static inline void ui_lvgl_tick() {
   if (!g_lvgl_running || g_sleep_transition) {
     return;
   }
   lvgl_assert_locked();
+  last_ui_tick_ms = millis();
   lv_timer_handler();
+  last_ui_tick_ms = millis();
   lvgl_timer_calls++;
-  last_lvgl_progress_ms = millis();
-}
-
-static void ui_watchdog_dump_diagnostics(const char* reason) {
-  unsigned long flush_age = lcd_bsp_flush_inflight_age_ms();
-  Serial.printf("[UI_WATCHDOG] %s: heap_free=%u heap_min=%u task_hwm=%u flush_out=%lu flush_fail=%lu flush_age_ms=%lu invalidates_per_sec=%lu avg_flush_ms=%lu\n",
-                 reason,
-                 (unsigned)esp_get_free_heap_size(),
-                 (unsigned)esp_get_minimum_free_heap_size(),
-                 (unsigned)uxTaskGetStackHighWaterMark(NULL),
-                 (unsigned long)lcd_bsp_get_flush_outstanding(),
-                 (unsigned long)lcd_bsp_get_flush_fail_count(),
-                 flush_age,
-                 (unsigned long)invalidates_per_sec,
-                 (unsigned long)lcd_bsp_get_avg_flush_ms());
-}
-
-static void ui_watchdog_check(void) {
-  if (g_in_light_sleep || g_sleep_transition) {
-    ui_watchdog_recovery_pending = false;
-    return;
-  }
-  unsigned long now_ms = millis();
-  unsigned long progress_age = (now_ms >= last_lvgl_progress_ms) ? (now_ms - last_lvgl_progress_ms) : 0;
-  unsigned long flush_age = lcd_bsp_flush_inflight_age_ms();
-
-  /* Only treat as stall after we've seen at least one lv_timer_handler run (avoid false trigger at boot when last_lvgl_progress_ms is 0) */
-  bool stall = (last_lvgl_progress_ms != 0 && progress_age > UI_WATCHDOG_STALL_MS);
-  bool flush_stuck = (flush_age > UI_WATCHDOG_FLUSH_STUCK_MS);
-  if (!stall && !flush_stuck) {
-    if (ui_watchdog_recovery_pending && (now_ms - ui_watchdog_recovery_start_ms) > UI_WATCHDOG_RECOVERY_GRACE_MS) {
-      ui_watchdog_recovery_pending = false;
-    }
-    return;
-  }
-
-  if (!ui_watchdog_recovery_pending) {
-    ui_watchdog_dump_diagnostics(stall ? "lvgl_stall" : "flush_stuck");
-    lcd_bsp_reset_panel();
-    lcd_bsp_reset_flush_fail_count();
-    ui_watchdog_recovery_pending = true;
-    ui_watchdog_recovery_start_ms = now_ms;
-    return;
-  }
-
-  if ((now_ms - ui_watchdog_recovery_start_ms) < UI_WATCHDOG_RECOVERY_GRACE_MS) {
-    return;
-  }
-  progress_age = (now_ms >= last_lvgl_progress_ms) ? (now_ms - last_lvgl_progress_ms) : 0;
-  flush_age = lcd_bsp_flush_inflight_age_ms();
-  if (progress_age > UI_WATCHDOG_STALL_MS || flush_age > UI_WATCHDOG_FLUSH_STUCK_MS) {
-    ui_watchdog_dump_diagnostics("still_stuck_restart");
-    esp_restart();
-  }
-  ui_watchdog_recovery_pending = false;
 }
 
 static uint32_t wifi_creds_checksum(const char* ssid, const char* pass) {
@@ -3093,7 +2921,6 @@ static void ui_refresh_from_state(const app_state_t *s) {
     Serial.printf("[UI] ERROR: Invalid count in ui_refresh_from_state: %d\n", s->count);
     return;
   }
-  ui_count_invalidate();
   // Update list display
   ui_update_list(s);
   
@@ -4694,12 +4521,35 @@ static void ui_task(void *arg) {
     app_event_t evt;
     bool processed_anything = false;
 
-    ui_watchdog_check();
-    ui_stats_tick();
+    ui_loop_counter++;
+    {
+      unsigned long now_hb = millis();
+      if ((now_hb - last_heartbeat_ms) >= UI_HEARTBEAT_INTERVAL_MS) {
+        last_heartbeat_ms = now_hb;
+        uint32_t submit_ok = 0, submit_fail = 0, outstanding = 0;
+        lcd_bsp_get_flush_submit_stats(&submit_ok, &submit_fail, &outstanding);
+        size_t heap_internal = esp_get_free_heap_size();
+        size_t heap_min = esp_get_minimum_free_heap_size();
+        size_t heap_psram = 0;
+#if (CONFIG_SPIRAM_USE_MALLOC || CONFIG_SPIRAM)
+        heap_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+#endif
+        Serial.printf("[UI_HB] heap=%u min=%u psram=%u hwm=%u loop=%lu tick_ms=%lu input_ms=%lu flush_ok=%lu fail=%lu out=%lu\n",
+                      (unsigned)heap_internal,
+                      (unsigned)heap_min,
+                      (unsigned)heap_psram,
+                      (unsigned)uxTaskGetStackHighWaterMark(NULL),
+                      (unsigned long)ui_loop_counter,
+                      (unsigned long)last_ui_tick_ms,
+                      (unsigned long)last_touch_or_input_ms,
+                      (unsigned long)submit_ok,
+                      (unsigned long)submit_fail,
+                      (unsigned long)outstanding);
+      }
+    }
 
-    /* Deferred scroll redraw: avoid flooding SPI when we throttled the last scroll. During REFRESH_INFLIGHT use stricter cadence. */
-    unsigned long scroll_min_ms = (refresh_state == REFRESH_INFLIGHT) ? (unsigned long)SCROLL_REFRESH_MIN_MS_INFLIGHT : (unsigned long)SCROLL_REFRESH_MIN_MS;
-    if (scroll_pending_redraw && (millis() - last_scroll_refresh_ms >= scroll_min_ms)) {
+    /* Deferred scroll redraw: avoid flooding SPI when we throttled the last scroll */
+    if (scroll_pending_redraw && (millis() - last_scroll_refresh_ms >= SCROLL_REFRESH_MIN_MS)) {
       ui_refresh_from_state(&g_active);
       ui_lvgl_tick();
       last_scroll_refresh_ms = millis();
@@ -4801,11 +4651,10 @@ static void ui_task(void *arg) {
                 }
               }
             
-            // Update UI: throttle redraws to avoid SPI queue overflow on fast scroll. During REFRESH_INFLIGHT use stricter cadence (30-50ms max).
+            // Update UI: throttle redraws to avoid SPI queue overflow on fast scroll
             int sel_before = g_active.selected_index;
             unsigned long now_scroll = millis();
-            unsigned long scroll_min_ms = (refresh_state == REFRESH_INFLIGHT) ? (unsigned long)SCROLL_REFRESH_MIN_MS_INFLIGHT : (unsigned long)SCROLL_REFRESH_MIN_MS;
-            if (now_scroll - last_scroll_refresh_ms >= scroll_min_ms) {
+            if (now_scroll - last_scroll_refresh_ms >= SCROLL_REFRESH_MIN_MS) {
               ui_refresh_from_state(&g_active);
               ui_lvgl_tick();
               last_scroll_refresh_ms = now_scroll;
@@ -4918,19 +4767,12 @@ static void ui_task(void *arg) {
           ui_lvgl_tick();
         }
         processed_anything = true;
-      } else if (evt.type == EVT_FLUSH_FINISH) {
-        finish_flush_from_ui_task(flush_reason_label(evt.data.flush_finish.reason), evt.data.flush_finish.seq);
-        processed_anything = true;
       } else if (evt.type == EVT_UI_STATUS_IDLE) {
         set_status_reset_visible(false);
         if (is_glowing_animation) {
           stop_glowing_animation();
           ui_lvgl_tick();
         }
-        processed_anything = true;
-      } else if (evt.type == EVT_FLUSH_FINISH) {
-        finish_flush_from_ui_task(flush_reason_name(evt.data.flush_finish.reason),
-                                  evt.data.flush_finish.seq);
         processed_anything = true;
       } else if (evt.type == EVT_LIST_REPLACED) {
         // List was replaced (from UART task) - stop glowing, then swap pending → active and render
@@ -5759,7 +5601,7 @@ void setup() {
   waiting_for_sense_logged = false;
   
   Serial.println("LCD ESP32-S3: booting...");
-  Serial.println("[BOOT] safe_mode_timeout_flush_disabled=0");
+  Serial.println("[BOOT] safe_mode_timeout_flush_disabled=1");
   esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
   Serial.printf("[WAKE_CAUSE] cause=%d\n", (int)wake_cause);
   const char* wake_cause_label = "OTHER";
@@ -5891,7 +5733,10 @@ void loop() {
   if (millis() < touch_ignore_until) {
     touch_detected = false;
   }
-  
+  if (touch_detected) {
+    last_touch_or_input_ms = millis();
+  }
+
   bool skip_main_loop = false;
   if (g_ship_ota_wake_window && !g_ui_initialized) {
     if (touch_detected) {
