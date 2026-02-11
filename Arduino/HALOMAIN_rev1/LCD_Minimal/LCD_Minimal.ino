@@ -187,9 +187,8 @@ static const char* flush_reason_name(uint8_t reason) {
 
 static void finish_flush_from_ui_task(const char* reason, uint32_t seq_expected) {
   TaskHandle_t current = xTaskGetCurrentTaskHandle();
-  const char* task_name = pcTaskGetName(NULL);
   if (ui_task_handle != NULL && current != ui_task_handle) {
-    Serial.printf("[FLUSH] finish called from non-UI task=%s\n", task_name ? task_name : "unknown");
+    return;
   }
   if (!g_flush_inflight) {
     return;
@@ -203,16 +202,17 @@ static void finish_flush_from_ui_task(const char* reason, uint32_t seq_expected)
   if (g_flush_drv == NULL) {
     return;
   }
+  lvgl_assert_locked();
   g_flush_ready_sent = true;
   g_flush_inflight = false;
   unsigned long now_ms = millis();
   unsigned long dt_ms = (now_ms >= g_flush_start_ms) ? (now_ms - g_flush_start_ms) : 0;
   lv_disp_flush_ready(g_flush_drv);
-  Serial.printf("[FLUSH] ready reason=%s seq=%lu dt_ms=%lu task=%s\n",
+  g_flush_drv = NULL;
+  Serial.printf("[FLUSH] ready reason=%s seq=%lu dt_ms=%lu\n",
                 reason ? reason : "unknown",
                 (unsigned long)g_flush_seq,
-                dt_ms,
-                task_name ? task_name : "unknown");
+                (unsigned long)dt_ms);
 }
 
 extern "C" uint32_t lcd_flush_begin(lv_disp_drv_t *drv) {
@@ -226,7 +226,7 @@ extern "C" uint32_t lcd_flush_begin(lv_disp_drv_t *drv) {
 
 extern "C" void lcd_flush_request_finish(uint8_t reason, uint32_t seq, bool from_isr) {
   bool on_ui_task = (ui_task_handle == NULL) || (xTaskGetCurrentTaskHandle() == ui_task_handle);
-  if (!from_isr && on_ui_task) {
+  if (!from_isr && on_ui_task && lvgl_lock_held_by_current_task()) {
     finish_flush_from_ui_task(flush_reason_name(reason), seq);
     return;
   }
@@ -263,6 +263,7 @@ static void ui_stats_tick(void) {
 }
 uint32_t ui_get_invalidates_per_sec(void) { return invalidates_per_sec; }
 uint32_t ui_get_avg_flush_ms(void) { return lcd_bsp_get_avg_flush_ms(); }
+
 #define SCROLL_REFRESH_MIN_MS         50
 #define SCROLL_REFRESH_MIN_MS_INFLIGHT 50   // Debounce list redraw during REFRESH_INFLIGHT (30-50ms cadence max)
 static unsigned long sleep_entry_time = 0;
@@ -4917,6 +4918,9 @@ static void ui_task(void *arg) {
           ui_lvgl_tick();
         }
         processed_anything = true;
+      } else if (evt.type == EVT_FLUSH_FINISH) {
+        finish_flush_from_ui_task(flush_reason_label(evt.data.flush_finish.reason), evt.data.flush_finish.seq);
+        processed_anything = true;
       } else if (evt.type == EVT_UI_STATUS_IDLE) {
         set_status_reset_visible(false);
         if (is_glowing_animation) {
@@ -5755,7 +5759,7 @@ void setup() {
   waiting_for_sense_logged = false;
   
   Serial.println("LCD ESP32-S3: booting...");
-  Serial.println("[BOOT] safe_mode_timeout_flush_disabled=1");
+  Serial.println("[BOOT] safe_mode_timeout_flush_disabled=0");
   esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
   Serial.printf("[WAKE_CAUSE] cause=%d\n", (int)wake_cause);
   const char* wake_cause_label = "OTHER";
