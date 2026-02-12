@@ -28,6 +28,12 @@
 #include <errno.h>
 #include <string.h>
 #include <time.h>
+#if __has_include(<esp_crt_bundle.h>)
+#include <esp_crt_bundle.h>
+#define HAS_CRT_BUNDLE 1
+#else
+#define HAS_CRT_BUNDLE 0
+#endif
 #include "audio_bsp.h"  // Audio recording support
 #include "../halo_ota_demo/firmware/shared/HaloPins.h"
 #ifndef HALO_BOARD_SENSE
@@ -319,6 +325,16 @@ static bool get_presign(PresignReply& out);
 static bool net_ready_for_tls(char* why, size_t why_len);
 static void scan_terminal_reset();
 static void scan_send_terminal_status(const char* phase, const char* text, const char* mode);
+static void tls_configure(WiFiClientSecure& client, const char* reason);
+static void log_wifi_snapshot(const char* label);
+static void log_http_failure_details(const char* label, const char* url, int http_code, WiFiClientSecure* client);
+static void presign_set_error_text(const char* text);
+static const char* presign_error_text();
+static bool ensure_time_valid(const char* reason);
+static bool ensure_wifi_ready(const char* reason, uint32_t timeout_ms);
+static bool wifi_hard_reset_and_reconnect(const char* reason, uint32_t timeout_ms);
+static void wifi_recover_if_needed(const char* reason, int http_code);
+static bool http_post_json_with_retries(const char* url, const String& body, int& http_code, String& resp_body, const char* label, const char* api_key, const char* bearer);
 static bool put_to_presigned_url(const String& url, const uint8_t* buf, size_t len, const char* contentType);
 static bool connect_to_mqtt();
 static void mqtt_ensure_connected();
@@ -355,6 +371,8 @@ static volatile bool foreground_active = false;
 static OpJob current_job = {OP_LIST_REFRESH, PRI_BG, 0, 0, OP_IDLE, false, "", ""};
 static TaskHandle_t op_worker_task_handle = NULL;  // Handle to suspend/resume task
 static bool scan_terminal_sent = false;
+static char presign_last_error_text[64] = "";
+static bool sntp_started = false;
 
 #ifndef HALO_SENSE_PROD_WRAPPER
 static volatile bool g_lcd_ota_done = false;
@@ -2201,23 +2219,6 @@ static bool warmup_and_capture(camera_fb_t*& fb) {
 
 // ── Presign Functions ──────────────────────────────────────────────
 static bool do_presign_request(const char* url, PresignReply& out, int& http_code, String& resp_body) {
-  WiFiClientSecure tls; 
-  tls.setInsecure();
-  HTTPClient http;
-  if (!http.begin(tls, url)) { 
-    Serial.println("[PRESIGN] HTTP begin() failed"); 
-    return false; 
-  }
-
-  http.addHeader("Content-Type", "application/json");
-  if (API_KEY && API_KEY[0]) {
-    http.addHeader("x-api-key", API_KEY);
-  }
-  if (BEARER_TOKEN && BEARER_TOKEN[0]) {
-    String auth = String("Bearer ") + BEARER_TOKEN;
-    http.addHeader("Authorization", auth);
-  }
-
   StaticJsonDocument<256> doc;
   doc["device_id"] = DEVICE_ID;
   doc["user_id"]   = USER_ID;
@@ -2227,14 +2228,12 @@ static bool do_presign_request(const char* url, PresignReply& out, int& http_cod
   
   Serial.printf("[PRESIGN] Using job_type: %s\n", current_job_type.c_str());
   Serial.println("[PRESIGN] POST " + String(url));
-  http_code = http.POST(body);
-  resp_body = http.getString();
-  http.end();
-
+  if (!http_post_json_with_retries(url, body, http_code, resp_body, "PRESIGN", API_KEY, BEARER_TOKEN)) {
+    Serial.printf("[PRESIGN] Request failed with code %d\n", http_code);
+    return false;
+  }
   Serial.printf("[PRESIGN] HTTP %d\n", http_code);
   if (resp_body.length()) Serial.println("[PRESIGN] Body: " + resp_body);
-
-  if (http_code < 200 || http_code >= 300) return false;
 
   StaticJsonDocument<768> r;
   auto err = deserializeJson(r, resp_body);
@@ -2311,19 +2310,214 @@ static void scan_send_terminal_status(const char* phase, const char* text, const
   uart_send_ui_status_extended("SCAN", phase, text ? text : "", mode);
 }
 
+static void presign_set_error_text(const char* text) {
+  if (!text || !text[0]) {
+    presign_last_error_text[0] = '\0';
+    return;
+  }
+  strncpy(presign_last_error_text, text, sizeof(presign_last_error_text) - 1);
+  presign_last_error_text[sizeof(presign_last_error_text) - 1] = '\0';
+}
+
+static const char* presign_error_text() {
+  return presign_last_error_text[0] ? presign_last_error_text : "Presign failed (net). Tap to retry.";
+}
+
+static void tls_configure(WiFiClientSecure& client, const char* reason) {
+#if HAS_CRT_BUNDLE
+  client.setCACertBundle(esp_crt_bundle_attach);
+  Serial.printf("[TLS] using crt bundle reason=%s\n", reason ? reason : "unknown");
+#else
+  client.setCACert(rootCA);
+  Serial.printf("[TLS] using root CA reason=%s\n", reason ? reason : "unknown");
+#endif
+  client.setTimeout(15000);
+}
+
+static void log_wifi_snapshot(const char* label) {
+  IPAddress ip = WiFi.localIP();
+  IPAddress gw = WiFi.gatewayIP();
+  IPAddress mask = WiFi.subnetMask();
+  IPAddress dns1 = WiFi.dnsIP(0);
+  IPAddress dns2 = WiFi.dnsIP(1);
+  int32_t rssi = WiFi.RSSI();
+  Serial.printf("[WIFI] %s status=%d rssi=%ld ip=%s gw=%s mask=%s dns1=%s dns2=%s\n",
+                label ? label : "snapshot",
+                (int)WiFi.status(),
+                (long)rssi,
+                ip.toString().c_str(),
+                gw.toString().c_str(),
+                mask.toString().c_str(),
+                dns1.toString().c_str(),
+                dns2.toString().c_str());
+}
+
+static void log_http_failure_details(const char* label, const char* url, int http_code, WiFiClientSecure* client) {
+  const bool is_https = url && (strncmp(url, "https://", 8) == 0);
+  char tls_err_msg[128] = {0};
+  int tls_err = 0;
+  if (client) {
+    tls_err = client->lastError(tls_err_msg, sizeof(tls_err_msg));
+  }
+  Serial.printf("[HTTP_FAIL] label=%s code=%d err=%s errno=%d tls_err=%d tls_msg=%s url=%s https=%d heap=%u\n",
+                label ? label : "http",
+                http_code,
+                HTTPClient::errorToString(http_code).c_str(),
+                errno,
+                tls_err,
+                tls_err_msg,
+                url ? url : "",
+                is_https ? 1 : 0,
+                (unsigned)ESP.getFreeHeap());
+  log_wifi_snapshot(label);
+}
+
+static bool ensure_time_valid(const char* reason) {
+  time_t now = time(nullptr);
+  if (now >= 1700000000) {
+    return true;
+  }
+  if (!sntp_started) {
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+    sntp_started = true;
+    Serial.printf("[SNTP] start reason=%s\n", reason ? reason : "unknown");
+  }
+  unsigned long start = millis();
+  const unsigned long wait_ms = 10000;
+  while ((millis() - start) < wait_ms) {
+    now = time(nullptr);
+    if (now >= 1700000000) {
+      Serial.printf("[SNTP] synced epoch=%ld\n", (long)now);
+      return true;
+    }
+    delay(200);
+  }
+  Serial.printf("[SNTP] sync_timeout epoch=%ld\n", (long)now);
+  return false;
+}
+
+static bool ensure_wifi_ready(const char* reason, uint32_t timeout_ms) {
+  if (WiFi.status() == WL_CONNECTED) {
+    return true;
+  }
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    if (ensure_wifi_connected(reason, timeout_ms)) {
+      log_wifi_snapshot("wifi_ready");
+      return true;
+    }
+    delay(200);
+  }
+  return false;
+}
+
+static bool wifi_hard_reset_and_reconnect(const char* reason, uint32_t timeout_ms) {
+  const char* ssid = WIFI_SSID;
+  const char* pass = WIFI_PASS;
+#ifdef HALO_SENSE_PROD_WRAPPER
+  char provision_ssid[64];
+  char provision_pass[64];
+  if (halo_get_provisioned_wifi(provision_ssid, sizeof(provision_ssid),
+                                provision_pass, sizeof(provision_pass))) {
+    ssid = provision_ssid;
+    pass = provision_pass;
+  }
+#endif
+  if (!ssid || !ssid[0]) {
+    Serial.println("[WIFI_RECOVER] no_ssid");
+    return false;
+  }
+  Serial.printf("[WIFI_RECOVER] hard_reset reason=%s ssid=%s\n",
+                reason ? reason : "unknown",
+                ssid);
+  WiFi.disconnect(true, true);
+  delay(200);
+  WiFi.mode(WIFI_OFF);
+  delay(200);
+  WiFi.mode(WIFI_STA);
+  delay(200);
+  WiFi.begin(ssid, pass);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - start) < timeout_ms) {
+    delay(200);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    log_wifi_snapshot("wifi_recovered");
+    return true;
+  }
+  Serial.printf("[WIFI_RECOVER] failed status=%d\n", (int)WiFi.status());
+  return false;
+}
+
+static void wifi_recover_if_needed(const char* reason, int http_code) {
+  if (http_code >= 0) {
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    ensure_wifi_ready(reason ? reason : "http_fail", 15000);
+    return;
+  }
+  wifi_hard_reset_and_reconnect(reason ? reason : "http_fail", 15000);
+}
+
+static bool http_post_json_with_retries(const char* url, const String& body, int& http_code, String& resp_body, const char* label, const char* api_key, const char* bearer) {
+  static const unsigned long backoff_ms[] = {500, 1500, 3500};
+  const int max_attempts = 3;
+  presign_set_error_text("");
+  for (int attempt = 0; attempt < max_attempts; ++attempt) {
+    Serial.printf("[%s] attempt=%d/%d url=%s\n",
+                  label ? label : "HTTP",
+                  attempt + 1,
+                  max_attempts,
+                  url ? url : "");
+    if (!ensure_wifi_ready("http_ready", 15000)) {
+      presign_set_error_text("Wi-Fi not ready");
+      log_wifi_snapshot("wifi_not_ready");
+      delay(backoff_ms[attempt]);
+      continue;
+    }
+    if (!ensure_time_valid("http_ready")) {
+      presign_set_error_text("Time not set");
+      log_wifi_snapshot("time_not_ready");
+      delay(backoff_ms[attempt]);
+      continue;
+    }
+    WiFiClientSecure client;
+    tls_configure(client, label);
+    HTTPClient http;
+    if (!http.begin(client, url)) {
+      http_code = -1;
+      resp_body = "";
+      presign_set_error_text("Presign failed (net). Tap to retry.");
+      log_http_failure_details(label, url, http_code, &client);
+      wifi_recover_if_needed("http_begin", http_code);
+      delay(backoff_ms[attempt]);
+      continue;
+    }
+    http.addHeader("Content-Type", "application/json");
+    if (api_key && api_key[0]) {
+      http.addHeader("x-api-key", api_key);
+    }
+    if (bearer && bearer[0]) {
+      String auth = String("Bearer ") + bearer;
+      http.addHeader("Authorization", auth);
+    }
+    http_code = http.POST(body);
+    resp_body = http.getString();
+    http.end();
+    if (http_code >= 200 && http_code < 300) {
+      return true;
+    }
+    presign_set_error_text("Presign failed (net). Tap to retry.");
+    log_http_failure_details(label, url, http_code, &client);
+    wifi_recover_if_needed("http_post", http_code);
+    delay(backoff_ms[attempt]);
+  }
+  return false;
+}
+
 // ── Check-in Presign Function (Grocery Recognition API) ───────
 static bool get_presign_checkin(PresignReply& out, const char* expiry_date = NULL) {
-  WiFiClientSecure tls; 
-  tls.setInsecure();
-  HTTPClient http;
-  
   String presign_url = String(CHECKIN_API_BASE_URL) + String(CHECKIN_PRESIGN_ENDPOINT);
-  if (!http.begin(tls, presign_url)) { 
-    Serial.println("[CHECKIN_PRESIGN] HTTP begin() failed"); 
-    return false; 
-  }
-
-  http.addHeader("Content-Type", "application/json");
 
   // Build request body for check-in API
   StaticJsonDocument<256> doc;
@@ -2346,17 +2540,14 @@ static bool get_presign_checkin(PresignReply& out, const char* expiry_date = NUL
   Serial.println("[CHECKIN_PRESIGN] POST " + presign_url);
   Serial.println("[CHECKIN_PRESIGN] Body: " + body);
   
-  int http_code = http.POST(body);
-  String resp_body = http.getString();
-  http.end();
-
-  Serial.printf("[CHECKIN_PRESIGN] HTTP %d\n", http_code);
-  if (resp_body.length()) Serial.println("[CHECKIN_PRESIGN] Body: " + resp_body);
-
-  if (http_code < 200 || http_code >= 300) {
+  int http_code = 0;
+  String resp_body;
+  if (!http_post_json_with_retries(presign_url.c_str(), body, http_code, resp_body, "CHECKIN_PRESIGN", NULL, NULL)) {
     Serial.printf("[CHECKIN_PRESIGN] Request failed with code %d\n", http_code);
     return false;
   }
+  Serial.printf("[CHECKIN_PRESIGN] HTTP %d\n", http_code);
+  if (resp_body.length()) Serial.println("[CHECKIN_PRESIGN] Body: " + resp_body);
 
   StaticJsonDocument<768> r;
   auto err = deserializeJson(r, resp_body);
@@ -3317,45 +3508,29 @@ static void op_worker_task(void *arg) {
                 
                 Serial.println("[OP_WORKER] SCAN: Using check-in presign API");
                 const char* expiry = (current_job.expiry_date[0] != '\0') ? current_job.expiry_date : NULL;
-                char net_why[32];
-                if (!net_ready_for_tls(net_why, sizeof(net_why))) {
-                  time_t now = time(nullptr);
-                  Serial.printf("[PRESIGN_BLOCKED] reason=%s wifi_status=%d epoch=%ld\n",
-                                net_why,
-                                (int)WiFi.status(),
-                                (long)now);
+                bool presign_success = get_presign_checkin(upload_presign, expiry);
+                
+                if (!presign_success) {
+                  Serial.println("[OP_WORKER] SCAN: Presign step FAILED");
                   if (captured_image_buffer != NULL) {
                     free(captured_image_buffer);
                     captured_image_buffer = NULL;
                     captured_image_size = 0;
                   }
-                  scan_send_terminal_status("ERROR", "Wi-Fi not ready", job.mode);
+                  scan_send_terminal_status("ERROR", presign_error_text(), job.mode);
                   current_job.state = OP_DONE;
                 } else {
-                  bool presign_success = get_presign_checkin(upload_presign, expiry);
-                
-                  if (!presign_success) {
-                    Serial.println("[OP_WORKER] SCAN: Presign step FAILED");
-                    if (captured_image_buffer != NULL) {
-                      free(captured_image_buffer);
-                      captured_image_buffer = NULL;
-                      captured_image_size = 0;
-                    }
-                    scan_send_terminal_status("ERROR", "Presign failed", job.mode);
-                    current_job.state = OP_DONE;
-                  } else {
-                    Serial.printf("[OP_WORKER] SCAN: Presign OK — job_id: %s\n", upload_presign.job_id.c_str());
-                    current_scan_job_id = upload_presign.job_id;
+                  Serial.printf("[OP_WORKER] SCAN: Presign OK — job_id: %s\n", upload_presign.job_id.c_str());
+                  current_scan_job_id = upload_presign.job_id;
                   
-                    // State: UPLOAD - Upload stored image to S3
-                    // Ensure state is set to OP_UPLOAD (not OP_DONE) so upload code executes
-                    current_job.state = OP_UPLOAD;
-                    uart_send_ui_status_extended("SCAN", "UPLOADING", "Uploading image…", job.mode);
+                  // State: UPLOAD - Upload stored image to S3
+                  // Ensure state is set to OP_UPLOAD (not OP_DONE) so upload code executes
+                  current_job.state = OP_UPLOAD;
+                  uart_send_ui_status_extended("SCAN", "UPLOADING", "Uploading image…", job.mode);
                   
-                    // We'll upload the copied buffer directly in the upload section below
-                    Serial.printf("[OP_WORKER] SCAN: Ready to upload copied image: %u bytes, buf=%p, state=%d\n", 
-                                 captured_image_size, captured_image_buffer, current_job.state);
-                  }
+                  // We'll upload the copied buffer directly in the upload section below
+                  Serial.printf("[OP_WORKER] SCAN: Ready to upload copied image: %u bytes, buf=%p, state=%d\n", 
+                               captured_image_size, captured_image_buffer, current_job.state);
                 }
               }
             }
@@ -3370,80 +3545,70 @@ static void op_worker_task(void *arg) {
           
           // Get presigned URL - use meal nutrition API
           Serial.println("[OP_WORKER] SCAN: Using meal nutrition presign API");
-          char net_why[32];
-          if (!net_ready_for_tls(net_why, sizeof(net_why))) {
-            time_t now = time(nullptr);
-            Serial.printf("[PRESIGN_BLOCKED] reason=%s wifi_status=%d epoch=%ld\n",
-                          net_why,
-                          (int)WiFi.status(),
-                          (long)now);
-            scan_send_terminal_status("ERROR", "Wi-Fi not ready", job.mode);
+          bool presign_success = get_presign(upload_presign);
+          
+          if (!presign_success) {
+            Serial.println("[OP_WORKER] SCAN: Presign step FAILED");
+            scan_send_terminal_status("ERROR", presign_error_text(), job.mode);
             current_job.state = OP_DONE;
           } else {
-            bool presign_success = get_presign(upload_presign);
-          
-            if (!presign_success) {
-              Serial.println("[OP_WORKER] SCAN: Presign step FAILED");
-              scan_send_terminal_status("ERROR", "Presign failed", job.mode);
+            Serial.printf("[OP_WORKER] SCAN: Presign OK — job_id: %s\n", upload_presign.job_id.c_str());
+            current_scan_job_id = upload_presign.job_id;
+            
+            // Calculate delay for user positioning (2 seconds total)
+            unsigned long elapsed = millis() - presign_start_time;
+            unsigned long target_delay = 2000;
+            if (elapsed < target_delay) {
+              unsigned long remaining_delay = target_delay - elapsed;
+              Serial.printf("[OP_WORKER] SCAN: Presign took %lums, waiting %lums more for positioning\n", 
+                            elapsed, remaining_delay);
+              delay(remaining_delay);
+            }
+            
+            // State: CAPTURE - Capture image
+            uart_send_ui_status_extended("SCAN", "CAPTURING", "Capturing image…", job.mode);
+            Serial.println("[OP_WORKER] SCAN: Initializing camera...");
+            if (!init_camera()) {
+              Serial.println("[OP_WORKER] SCAN: Camera initialization FAILED");
+              deinit_camera();
+              scan_send_terminal_status("ERROR", "Camera init failed", job.mode);
               current_job.state = OP_DONE;
             } else {
-              Serial.printf("[OP_WORKER] SCAN: Presign OK — job_id: %s\n", upload_presign.job_id.c_str());
-              current_scan_job_id = upload_presign.job_id;
-            
-              // Calculate delay for user positioning (2 seconds total)
-              unsigned long elapsed = millis() - presign_start_time;
-              unsigned long target_delay = 2000;
-              if (elapsed < target_delay) {
-                unsigned long remaining_delay = target_delay - elapsed;
-                Serial.printf("[OP_WORKER] SCAN: Presign took %lums, waiting %lums more for positioning\n", 
-                              elapsed, remaining_delay);
-                delay(remaining_delay);
-              }
-            
-              // State: CAPTURE - Capture image
-              uart_send_ui_status_extended("SCAN", "CAPTURING", "Capturing image…", job.mode);
-              Serial.println("[OP_WORKER] SCAN: Initializing camera...");
-              if (!init_camera()) {
-                Serial.println("[OP_WORKER] SCAN: Camera initialization FAILED");
+              if (!warmup_and_capture(fb)) {
+                Serial.println("[OP_WORKER] SCAN: Camera capture FAILED");
                 deinit_camera();
-                scan_send_terminal_status("ERROR", "Camera init failed", job.mode);
+                scan_send_terminal_status("ERROR", "Camera failed", job.mode);
                 current_job.state = OP_DONE;
               } else {
-                if (!warmup_and_capture(fb)) {
-                  Serial.println("[OP_WORKER] SCAN: Camera capture FAILED");
+                Serial.printf("[OP_WORKER] SCAN: Captured %u bytes (%dx%d)\n", fb->len, fb->width, fb->height);
+
+                // Copy image so we can power down camera immediately
+                if (captured_image_buffer != NULL) {
+                  free(captured_image_buffer);
+                  captured_image_buffer = NULL;
+                }
+                captured_image_buffer = (uint8_t*)malloc(fb->len);
+                if (captured_image_buffer == NULL) {
+                  Serial.println("[OP_WORKER] SCAN: ERROR - Failed to allocate memory for image copy!");
+                  esp_camera_fb_return(fb);
                   deinit_camera();
-                  scan_send_terminal_status("ERROR", "Camera failed", job.mode);
+                  scan_send_terminal_status("ERROR", "Memory failed", job.mode);
                   current_job.state = OP_DONE;
                 } else {
-                  Serial.printf("[OP_WORKER] SCAN: Captured %u bytes (%dx%d)\n", fb->len, fb->width, fb->height);
+                  memcpy(captured_image_buffer, fb->buf, fb->len);
+                  captured_image_size = fb->len;
+                  Serial.printf("[OP_WORKER] SCAN: Copied %u bytes to buffer at %p\n", captured_image_size, captured_image_buffer);
+                  esp_camera_fb_return(fb);
+                  fb = nullptr;
+                  Serial.println("[OP_WORKER] SCAN: Powering down camera after capture...");
+                  deinit_camera();
 
-                  // Copy image so we can power down camera immediately
-                  if (captured_image_buffer != NULL) {
-                    free(captured_image_buffer);
-                    captured_image_buffer = NULL;
-                  }
-                  captured_image_buffer = (uint8_t*)malloc(fb->len);
-                  if (captured_image_buffer == NULL) {
-                    Serial.println("[OP_WORKER] SCAN: ERROR - Failed to allocate memory for image copy!");
-                    esp_camera_fb_return(fb);
-                    deinit_camera();
-                    scan_send_terminal_status("ERROR", "Memory failed", job.mode);
-                    current_job.state = OP_DONE;
-                  } else {
-                    memcpy(captured_image_buffer, fb->buf, fb->len);
-                    captured_image_size = fb->len;
-                    Serial.printf("[OP_WORKER] SCAN: Copied %u bytes to buffer at %p\n", captured_image_size, captured_image_buffer);
-                    esp_camera_fb_return(fb);
-                    fb = nullptr;
-                    Serial.println("[OP_WORKER] SCAN: Powering down camera after capture...");
-                    deinit_camera();
-
-                    // State: UPLOAD - Upload to S3
-                    uart_send_ui_status_extended("SCAN", "UPLOADING", "Uploading image…", job.mode);
-                  }
+                  // State: UPLOAD - Upload to S3
+                  uart_send_ui_status_extended("SCAN", "UPLOADING", "Uploading image…", job.mode);
                 }
               }
             }
+          }
           }
         }
           
