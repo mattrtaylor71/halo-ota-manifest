@@ -830,6 +830,8 @@ static lv_obj_t *expiry_date_label = NULL;  // Label showing current date input 
 static lv_obj_t *expiry_keypad_buttons[10] = {NULL};  // Number buttons 0-9
 static lv_obj_t *expiry_check_button = NULL;  // Check button to submit
 static lv_obj_t *expiry_backspace_button = NULL;  // Backspace button
+static lv_obj_t *expiry_back_button = NULL;  // Back/cancel button
+static lv_obj_t *expiry_back_label = NULL;
 static char expiry_date_buffer[11] = "__-__-____";  // Date buffer (MM-DD-YYYY format for display)
 static int expiry_date_pos = 0;  // Current position in date (0-9, skipping dashes)
 static bool expiry_screen_visible = false;  // Track if expiration date screen is showing
@@ -2878,6 +2880,30 @@ static bool expiry_handle_touch(uint16_t check_x, uint16_t check_y) {
 
   bool button_pressed = false;
 
+  if (expiry_back_button != NULL) {
+    lv_area_t btn_area;
+    lv_obj_get_coords(expiry_back_button, &btn_area);
+    if (check_x >= btn_area.x1 && check_x <= btn_area.x2 &&
+        check_y >= btn_area.y1 && check_y <= btn_area.y2) {
+      Serial.println("[EXPIRY] Back button pressed - canceling");
+      ship_hide_expiry_screen();
+      expiry_date_pos = 0;
+      strcpy(expiry_date_buffer, "__-__-____");
+      if (expiry_date_label != NULL) {
+        lv_label_set_text(expiry_date_label, "MM-DD-YYYY");
+      }
+#if SHIP_MENU_UI
+      show_ship_main_menu();
+#else
+      if (list_container != NULL && g_active.count > 0) {
+        lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
+      }
+      lv_timer_handler();
+#endif
+      return true;
+    }
+  }
+
   // Check number buttons (0-9)
   for (int i = 0; i < 10; i++) {
     if (expiry_keypad_buttons[i] != NULL) {
@@ -3838,6 +3864,18 @@ static void create_custom_ui() {
   lv_obj_set_style_text_align(expiry_date_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_align(expiry_date_label, LV_ALIGN_TOP_MID, 0, 30);  // Top center, 30px from top
   
+  expiry_back_button = lv_btn_create(expiry_screen);
+  lv_obj_set_size(expiry_back_button, 70, 36);
+  lv_obj_align(expiry_back_button, LV_ALIGN_TOP_LEFT, 12, 10);
+  lv_obj_set_style_bg_color(expiry_back_button, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(expiry_back_button, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_radius(expiry_back_button, 8, LV_PART_MAIN);
+
+  expiry_back_label = lv_label_create(expiry_back_button);
+  lv_label_set_text(expiry_back_label, "Back");
+  lv_obj_set_style_text_color(expiry_back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_center(expiry_back_label);
+
   // Create keypad container (for all buttons: 1-9, backspace, 0, submit)
   lv_obj_t *keypad_container = lv_obj_create(expiry_screen);
   lv_obj_set_size(keypad_container, 340, 300);  // Larger size to extend to bottom
