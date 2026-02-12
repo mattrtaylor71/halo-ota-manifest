@@ -173,6 +173,7 @@ static void status_screen_use_text(const char* text);
 static void set_status_reset_visible(bool visible);
 static void ship_menu_send_menu_select(const char* menu_item, int menu_index, const char* label);
 static void show_ship_debug_screen();
+static void ui_show_result(bool is_error, const char* title, const char* mode);
 static void ui_apply_ship_ui_status();
 static void wifi_on_run_deferred_if_ready(const char* reason);
 
@@ -308,7 +309,6 @@ static const unsigned long SLEEP_HANDSHAKE_RETRY_DELAY_MS = 800;
 static const uint8_t SLEEP_HANDSHAKE_MAX_ATTEMPTS = 3;
 static const uint32_t SLEEP_DENY_RETRY_DEFAULT_MS = 5000;
 static const uint32_t SLEEP_FALLBACK_TIMER_SEC = 15;
-static const int SLEEP_WAIT_DIM_DUTY = 20;
 static volatile bool refresh_request_pending = false;
 static volatile unsigned long refresh_request_last_ms = 0;
 static volatile unsigned long refresh_request_start_ms = 0;
@@ -2268,6 +2268,42 @@ static void warn_wake_pin_active_at_boot(unsigned long window_ms) {
   }
 }
 
+static const char* lcd_backlight_state_label() {
+  if (g_sleep_transition) {
+    return "transition";
+  }
+  if (g_in_light_sleep) {
+    return "sleep";
+  }
+  if (!g_panel_enabled) {
+    return "panel_off";
+  }
+  if (g_lvgl_running) {
+    return "awake";
+  }
+  return "idle";
+}
+
+static void lcd_set_backlight_level(int level, const char* reason) {
+  int target = (level > 0) ? 255 : 0;
+  if (target > 0 && !g_backlight_initialized) {
+    lcd_bl_pwm_bsp_init(LCD_PWM_MODE_255);
+    g_backlight_initialized = true;
+  }
+  if (g_backlight_initialized) {
+    setUpdutySubdivide(target);
+  }
+  g_backlight_duty = target;
+  Serial.printf("[BL] set level=%d reason=%s state=%s\n",
+                target,
+                reason ? reason : "unknown",
+                lcd_backlight_state_label());
+}
+
+static void lcd_set_backlight_binary(bool on, const char* reason) {
+  lcd_set_backlight_level(on ? 255 : 0, reason);
+}
+
 static void ensure_awake_for_ui(const char* reason) {
   // Only call this on real user input (touch/scroll/pull-to-refresh).
   if (g_ota_mode_active) {
@@ -2285,9 +2321,7 @@ static void ensure_awake_for_ui(const char* reason) {
       g_in_light_sleep = false;
     }
     if (g_backlight_duty == 0) {
-      lcd_bl_pwm_bsp_init(LCD_PWM_MODE_255);
-      g_backlight_initialized = true;
-      g_backlight_duty = 255;
+      lcd_set_backlight_binary(true, reason ? reason : "wake_ui");
     }
     if (!g_panel_enabled) {
       lcd_panel_set_power(true);
@@ -2330,10 +2364,7 @@ static bool lcd_enter_ota_mode(uint32_t min_internal_free) {
     lcd_panel_deinit();
     g_lcd_initialized = false;
   }
-  if (g_backlight_initialized) {
-    setUpdutySubdivide(0);
-  }
-  g_backlight_duty = 0;
+  lcd_set_backlight_binary(true, "ota_mode");
   g_panel_enabled = false;
 
   const uint32_t internal_free =
@@ -4604,11 +4635,9 @@ static void enterLightSleep() {
   lcd_lvgl_wait_tx_done(200);
   Serial.println("[SLEEP] tx_idle");
 
-  // Turn off LCD backlight + panel before deep sleep
-  Serial.println("Turning off backlight for sleep...");
-  setUpdutySubdivide(0);
+  // Turn off LCD panel before deep sleep
+  Serial.println("Turning off panel for sleep...");
   lcd_panel_set_power(false);
-  g_backlight_duty = 0;
   g_panel_enabled = false;
   delay(50);
   
@@ -4662,6 +4691,7 @@ static void enterLightSleep() {
   Serial.println("[SLEEP] entering_deep_sleep");
   sleep_entry_time = millis();
 
+  lcd_set_backlight_binary(false, "deep_sleep");
   if (ui_task_handle != NULL) {
     vTaskDelete(ui_task_handle);
     ui_task_handle = NULL;
@@ -4773,9 +4803,7 @@ static void enterLightSleep() {
   
   // Turn backlight back on
   Serial.println("[WAKE] Turning backlight ON after wake");
-  lcd_bl_pwm_bsp_init(LCD_PWM_MODE_255);
-  g_backlight_initialized = true;
-  g_backlight_duty = 255;
+  lcd_set_backlight_binary(true, "wake");
   g_panel_enabled = true;
   vTaskDelay(pdMS_TO_TICKS(50));  // Use vTaskDelay to yield to other tasks
   
@@ -4844,13 +4872,8 @@ static uint32_t send_input_sleep_message() {
 }
 
 static void sleep_enter_wait_low_power(const char* reason) {
-  if (g_backlight_initialized && g_backlight_duty > SLEEP_WAIT_DIM_DUTY) {
-    setUpdutySubdivide(SLEEP_WAIT_DIM_DUTY);
-    g_backlight_duty = SLEEP_WAIT_DIM_DUTY;
-  }
-  if (g_lvgl_running) {
-    g_lvgl_running = false;
-  }
+  lcd_set_backlight_binary(true, reason ? reason : "sleep_deny");
+  g_lvgl_running = true;
   Serial.printf("[SLEEP] wait_low_power reason=%s backlight=%d lvgl_running=%d\n",
                 reason ? reason : "unknown",
                 g_backlight_duty,
@@ -6708,7 +6731,7 @@ static void init_ui_stack(int saved_count) {
   // Initialize backlight PWM (required before using setUpdutySubdivide)
   lcd_bl_pwm_bsp_init(LCD_PWM_MODE_255);
   g_backlight_initialized = true;
-  g_backlight_duty = 255;
+  lcd_set_backlight_binary(true, "init_ui");
   g_panel_enabled = true;
   
   // Rotate display 180 degrees
@@ -6773,13 +6796,9 @@ static void init_ui_stack(int saved_count) {
 
 static void enter_ship_ota_sleep() {
   g_sleep_transition = true;
-  if (g_backlight_initialized) {
-    setUpdutySubdivide(0);
-  }
   if (g_lcd_initialized) {
     lcd_panel_set_power(false);
   }
-  g_backlight_duty = 0;
   g_panel_enabled = false;
   delay(50);
   
@@ -6802,6 +6821,7 @@ static void enter_ship_ota_sleep() {
                 (int)LCD_WAKE_LEVEL);
   Serial.println("[SLEEP] entering_deep_sleep");
   sleep_entry_time = millis();
+  lcd_set_backlight_binary(false, "ship_ota_sleep");
   esp_deep_sleep_start();
 }
 
@@ -6982,7 +7002,6 @@ void setup() {
     Serial.println("[SHIP_OTA] wake_window_start");
     g_lvgl_running = false;
     g_panel_enabled = false;
-    g_backlight_duty = 0;
   }
   link_sync_pending = true;
   link_synced = false;
