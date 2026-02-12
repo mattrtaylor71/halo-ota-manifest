@@ -45,6 +45,8 @@ typedef struct app_event_t app_event_t;
 #include "../halomain_assets/ui_img_Frame_439_2_png.c"
 #include "../halomain_assets/ui_img_Frame_439_png.c"
 #include "../halomain_assets/ui_img_Frame_440_png.c"
+#include "../halomain_assets/ui_img_Frame_443_png.c"
+#include "../halomain_assets/ui_img_Frame_443_1_png.c"
 
 #ifdef HALO_LCD_PROD_WRAPPER
 void halo_lcd_prod_setup();
@@ -95,6 +97,9 @@ static const gpio_num_t PIN_EC1_B     = GPIO_NUM_7;   // EC1_B
 #ifndef HALO_SHIP_TEST_MODE
 #define HALO_SHIP_TEST_MODE 0
 #endif
+#ifndef SHIP_MENU_UI
+#define SHIP_MENU_UI 0
+#endif
 
 // ── Shopping List State ─────────────────────────────────────────────
 #define MAX_LIST_ITEMS 50
@@ -110,6 +115,37 @@ typedef enum {
   MENU_MODE_MAIN = 0,
   MENU_MODE_SETTINGS
 } menu_mode_t;
+
+typedef enum {
+  LCD_MODE_UI_ACTIVE = 0,
+  LCD_MODE_MAINTENANCE
+} lcd_mode_t;
+
+typedef enum {
+  SHIP_MENU_ACTION_CHECK_IN = 0,
+  SHIP_MENU_ACTION_CHECK_OUT,
+  SHIP_MENU_ACTION_LOG_DISH,
+  SHIP_MENU_ACTION_MORE,
+  SHIP_MENU_ACTION_HOME,
+  SHIP_MENU_ACTION_SETTINGS,
+  SHIP_MENU_ACTION_DEBUG,
+  SHIP_MENU_ACTION_RESET_WIFI,
+  SHIP_MENU_ACTION_BACK
+} ship_menu_action_t;
+
+typedef enum {
+  SHIP_MENU_SCREEN_MAIN = 0,
+  SHIP_MENU_SCREEN_SECOND,
+  SHIP_MENU_SCREEN_SETTINGS
+} ship_menu_screen_t;
+
+typedef enum {
+  SCREEN_HOME = 0,
+  SCREEN_SECOND,
+  SCREEN_SETTINGS,
+  SCREEN_RESULT,
+  SCREEN_DEBUG
+} ui_screen_t;
 
 // Forward declarations (needed when included as a wrapper)
 static void stop_glowing_animation(void);
@@ -129,6 +165,10 @@ static void enter_ship_ota_sleep();
 static bool wake_sense_for_request(const char* reason);
 static uint64_t buildWakeMaskForSleep();
 static bool sleep_blocked_for_ota();
+static void ship_menu_send_menu_select(const char* menu_item, int menu_index, const char* label);
+static void show_ship_debug_screen();
+static void ui_apply_ship_ui_status();
+static void wifi_on_run_deferred_if_ready(const char* reason);
 
 // ── Double-Buffered List State ──────────────────────────────────────
 // Active: UI reads this only (rendered on screen)
@@ -179,6 +219,11 @@ static bool g_touch_initialized = false;
 static bool g_ship_ota_wake_window = false;
 static bool g_ship_ota_user_input = false;
 static bool g_ship_ota_ota_started = false;
+static volatile lcd_mode_t lcd_mode = LCD_MODE_UI_ACTIVE;
+static bool wifi_on_reject_logged = false;
+static bool wifi_on_deferred = false;
+static bool wifi_on_deferred_logged = false;
+static unsigned long wifi_on_deferred_timeout_ms = 0;
 static int g_saved_list_count = 0;
 static unsigned long stay_awake_until_ms = 0;
 static bool link_synced = false;
@@ -548,6 +593,72 @@ static lv_obj_t *list_container = NULL;
 static lv_obj_t *list_labels[MAX_LIST_ITEMS] = {NULL};
 static lv_obj_t *empty_label = NULL;
 static lv_obj_t *loading_screen = NULL;
+// ── Ship Menu Screen ────────────────────────────────────────────────
+static lv_obj_t *ship_menu_screen = NULL;
+static lv_obj_t *ship_menu_label = NULL;
+static lv_obj_t *ship_menu_second_screen = NULL;
+static lv_obj_t *ship_menu_settings_screen = NULL;
+static lv_obj_t *ship_menu_settings_title = NULL;
+static lv_obj_t *ship_menu_settings_btn_debug = NULL;
+static lv_obj_t *ship_menu_settings_label_debug = NULL;
+static lv_obj_t *ship_menu_settings_btn_reset = NULL;
+static lv_obj_t *ship_menu_settings_label_reset = NULL;
+static lv_obj_t *ship_menu_settings_btn_back = NULL;
+static lv_obj_t *ship_menu_settings_label_back = NULL;
+static lv_obj_t *ship_menu_press_overlay = NULL;
+static unsigned long ship_menu_press_hide_at_ms = 0;
+static lv_obj_t *g_status_layer = NULL;
+static lv_obj_t *g_status_label = NULL;
+static lv_obj_t *g_status_spinner = NULL;
+static unsigned long g_status_hide_at_ms = 0;
+static ship_menu_screen_t ship_menu_screen_state = SHIP_MENU_SCREEN_MAIN;
+static volatile bool ui_busy = false;
+static volatile ui_screen_t ui_screen_state = SCREEN_HOME;
+
+typedef struct {
+  bool valid;
+  char menu_item[16];
+  int menu_index;
+} last_action_t;
+
+static last_action_t g_last_action = {false, "", -1};
+static unsigned long g_retry_disable_until_ms = 0;
+
+static lv_obj_t *result_root = NULL;
+static lv_obj_t *result_icon_label = NULL;
+static lv_obj_t *result_title_label = NULL;
+static lv_obj_t *result_subtitle_label = NULL;
+static lv_obj_t *result_btn_home = NULL;
+static lv_obj_t *result_btn_home_label = NULL;
+static lv_obj_t *result_btn_retry = NULL;
+static lv_obj_t *result_btn_retry_label = NULL;
+
+static lv_obj_t *debug_screen = NULL;
+static lv_obj_t *debug_title = NULL;
+static lv_obj_t *debug_label_status = NULL;
+static lv_obj_t *debug_label_status2 = NULL;
+static lv_obj_t *debug_label_sense = NULL;
+static lv_obj_t *debug_label_hb = NULL;
+static lv_obj_t *debug_label_wifi = NULL;
+static lv_obj_t *debug_label_ui = NULL;
+static lv_obj_t *debug_btn_back = NULL;
+static lv_obj_t *debug_btn_back_label = NULL;
+static unsigned long debug_last_update_ms = 0;
+static char debug_buf_status[96];
+static char debug_buf_status2[96];
+static char debug_buf_sense[64];
+static char debug_buf_hb[48];
+static char debug_buf_wifi[64];
+static char debug_buf_ui[32];
+
+static bool g_ship_ui_busy = false;
+static bool g_ship_ui_terminal = false;
+static bool g_ship_ui_error = false;
+static char g_ship_ui_op[16] = {0};
+static char g_ship_ui_phase[16] = {0};
+static char g_ship_ui_text[64] = {0};
+static char g_ship_ui_mode[16] = {0};
+static unsigned long g_ship_ui_last_ms = 0;
 
 // ── Meal Result Screen ──────────────────────────────────────────────
 static lv_obj_t *meal_result_screen = NULL;
@@ -603,6 +714,96 @@ static bool menu_screen_visible = false;  // Track if menu screen is showing
 static lv_obj_t *menu_screen = NULL;  // Full-screen menu overlay
 static lv_obj_t *menu_list_container = NULL;  // Container for menu items
 static lv_obj_t *menu_item_labels[MENU_MAX_ITEMS] = {NULL};  // Labels for each menu item
+
+// ── Ship Menu Hitboxes (tune coords here) ────────────────────────────
+#define SHIP_MENU_W EXAMPLE_LCD_H_RES
+#define SHIP_MENU_H EXAMPLE_LCD_V_RES
+#define SHIP_MENU_MID_X (SHIP_MENU_W / 2)
+#define SHIP_MENU_MID_Y (SHIP_MENU_H / 2)
+#define SHIP_MENU_PRESS_MS 150
+
+// Main Menu icon bounds
+#define SHIP_MENU_MAIN_ICON_W 120
+#define SHIP_MENU_MAIN_ICON_H 120
+#define SHIP_MENU_MAIN_PAD 10
+#define SHIP_MENU_MAIN_TOP_X (SHIP_MENU_MID_X - (SHIP_MENU_MAIN_ICON_W / 2))
+#define SHIP_MENU_MAIN_TOP_Y SHIP_MENU_MAIN_PAD
+#define SHIP_MENU_MAIN_LEFT_X SHIP_MENU_MAIN_PAD
+#define SHIP_MENU_MAIN_LEFT_Y (SHIP_MENU_MID_Y - (SHIP_MENU_MAIN_ICON_H / 2))
+#define SHIP_MENU_MAIN_RIGHT_X (SHIP_MENU_W - SHIP_MENU_MAIN_PAD - SHIP_MENU_MAIN_ICON_W)
+#define SHIP_MENU_MAIN_RIGHT_Y (SHIP_MENU_MID_Y - (SHIP_MENU_MAIN_ICON_H / 2))
+#define SHIP_MENU_MAIN_BOTTOM_X (SHIP_MENU_MID_X - (SHIP_MENU_MAIN_ICON_W / 2))
+#define SHIP_MENU_MAIN_BOTTOM_Y (SHIP_MENU_H - SHIP_MENU_MAIN_PAD - SHIP_MENU_MAIN_ICON_H)
+
+// Second Menu icon bounds (HOME center, SETTINGS bottom)
+#define SHIP_MENU_SECOND_HOME_W 130
+#define SHIP_MENU_SECOND_HOME_H 130
+#define SHIP_MENU_SECOND_HOME_X (SHIP_MENU_MID_X - (SHIP_MENU_SECOND_HOME_W / 2))
+#define SHIP_MENU_SECOND_HOME_Y (SHIP_MENU_MID_Y - (SHIP_MENU_SECOND_HOME_H / 2))
+#define SHIP_MENU_SECOND_SETTINGS_W SHIP_MENU_MAIN_ICON_W
+#define SHIP_MENU_SECOND_SETTINGS_H SHIP_MENU_MAIN_ICON_H
+#define SHIP_MENU_SECOND_SETTINGS_X SHIP_MENU_MAIN_BOTTOM_X
+#define SHIP_MENU_SECOND_SETTINGS_Y SHIP_MENU_MAIN_BOTTOM_Y
+
+// Settings screen button bounds
+#define SHIP_MENU_SETTINGS_BTN_W 260
+#define SHIP_MENU_SETTINGS_BTN_H 48
+#define SHIP_MENU_SETTINGS_BTN_X ((SHIP_MENU_W - SHIP_MENU_SETTINGS_BTN_W) / 2)
+#define SHIP_MENU_SETTINGS_DEBUG_Y 80
+#define SHIP_MENU_SETTINGS_RESET_Y 140
+#define SHIP_MENU_SETTINGS_BACK_Y 210
+
+#define MENU_INDEX_DISCARD 0
+#define MENU_INDEX_DISH 1
+#define MENU_INDEX_CHECK_IN 2
+#define MENU_INDEX_SETTINGS 5
+
+typedef struct {
+  ship_menu_action_t action;
+  const char* action_name;   // For log: [MENU] tap=<ACTION>
+  const char* menu_item;     // For INPUT_MENU_SELECT
+  int menu_index;            // For INPUT_MENU_SELECT
+  int x1;
+  int y1;
+  int x2;
+  int y2;
+} ship_menu_hitbox_t;
+
+static const ship_menu_hitbox_t ship_menu_hitboxes_main[] = {
+  {SHIP_MENU_ACTION_LOG_DISH,  "LOG_DISH",  "Dish",     MENU_INDEX_DISH,
+   SHIP_MENU_MAIN_TOP_X, SHIP_MENU_MAIN_TOP_Y,
+   SHIP_MENU_MAIN_TOP_X + SHIP_MENU_MAIN_ICON_W - 1, SHIP_MENU_MAIN_TOP_Y + SHIP_MENU_MAIN_ICON_H - 1},
+  {SHIP_MENU_ACTION_CHECK_IN,  "CHECK_IN",  "Check-in", MENU_INDEX_CHECK_IN,
+   SHIP_MENU_MAIN_LEFT_X, SHIP_MENU_MAIN_LEFT_Y,
+   SHIP_MENU_MAIN_LEFT_X + SHIP_MENU_MAIN_ICON_W - 1, SHIP_MENU_MAIN_LEFT_Y + SHIP_MENU_MAIN_ICON_H - 1},
+  {SHIP_MENU_ACTION_CHECK_OUT, "CHECK_OUT", "Discard",  MENU_INDEX_DISCARD,
+   SHIP_MENU_MAIN_RIGHT_X, SHIP_MENU_MAIN_RIGHT_Y,
+   SHIP_MENU_MAIN_RIGHT_X + SHIP_MENU_MAIN_ICON_W - 1, SHIP_MENU_MAIN_RIGHT_Y + SHIP_MENU_MAIN_ICON_H - 1},
+  {SHIP_MENU_ACTION_MORE,      "MORE",      NULL,       -1,
+   SHIP_MENU_MAIN_BOTTOM_X, SHIP_MENU_MAIN_BOTTOM_Y,
+   SHIP_MENU_MAIN_BOTTOM_X + SHIP_MENU_MAIN_ICON_W - 1, SHIP_MENU_MAIN_BOTTOM_Y + SHIP_MENU_MAIN_ICON_H - 1}
+};
+
+static const ship_menu_hitbox_t ship_menu_hitboxes_second[] = {
+  {SHIP_MENU_ACTION_HOME,     "HOME",     NULL, -1,
+   SHIP_MENU_SECOND_HOME_X, SHIP_MENU_SECOND_HOME_Y,
+   SHIP_MENU_SECOND_HOME_X + SHIP_MENU_SECOND_HOME_W - 1, SHIP_MENU_SECOND_HOME_Y + SHIP_MENU_SECOND_HOME_H - 1},
+  {SHIP_MENU_ACTION_SETTINGS, "SETTINGS", NULL, -1,
+   SHIP_MENU_SECOND_SETTINGS_X, SHIP_MENU_SECOND_SETTINGS_Y,
+   SHIP_MENU_SECOND_SETTINGS_X + SHIP_MENU_SECOND_SETTINGS_W - 1, SHIP_MENU_SECOND_SETTINGS_Y + SHIP_MENU_SECOND_SETTINGS_H - 1}
+};
+
+static const ship_menu_hitbox_t ship_menu_hitboxes_settings[] = {
+  {SHIP_MENU_ACTION_DEBUG, "DEBUG", NULL, -1,
+   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_DEBUG_Y,
+   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_DEBUG_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
+  {SHIP_MENU_ACTION_RESET_WIFI, "RESET_WIFI", NULL, -1,
+   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_RESET_Y,
+   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_RESET_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
+  {SHIP_MENU_ACTION_BACK, "BACK", NULL, -1,
+   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACK_Y,
+   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_BACK_Y + SHIP_MENU_SETTINGS_BTN_H - 1}
+};
 
 // ── Logged Screen (for Discard mode) ─────────────────────────────────
 static lv_obj_t *logged_screen = NULL;  // Screen shown after discard image capture
@@ -679,6 +880,7 @@ typedef enum {
   EVT_STOP_GLOWING,   // From UART: UI task calls stop_glowing_animation + lv_timer_handler
   EVT_START_GLOWING,  // From UART: UI task calls start_glowing_animation(reason)
   EVT_UI_STATUS_IDLE, // From UART: UI task calls set_status_reset_visible(false), stop_glowing if needed
+  EVT_SHIP_UI_STATUS, // From UART: Ship menu UI_STATUS -> update overlay/result
 } app_event_type_t;
 
 typedef struct app_event_t {
@@ -796,6 +998,68 @@ static void wifi_pending_start(int reason) {
   wifi_phase = WIFI_PHASE_CONNECTING;
   unsigned long cap = (budget_ms > WIFI_ATTEMPT_MAX_MS) ? WIFI_ATTEMPT_MAX_MS : budget_ms;
   wifi_attempt_deadline_ms = wifi_pending_start_ms + cap;
+}
+
+static bool wifi_on_ui_idle() {
+#if SHIP_MENU_UI
+  return (!ui_busy && ui_screen_state == SCREEN_HOME);
+#else
+  return (lcd_mode != LCD_MODE_UI_ACTIVE);
+#endif
+}
+
+static void wifi_on_execute(uint32_t timeout_ms, const char* source) {
+#ifdef HALO_LCD_PROD_WRAPPER
+  if (!halo_lcd_prod_wifi_retry_ready()) {
+    unsigned long next_ms = halo_lcd_prod_next_wifi_retry_ms();
+    long wait_ms = next_ms > 0 ? (long)(next_ms - millis()) : -1;
+    Serial.printf("[LCD_WIFI] backoff active (%ld ms) - skipping WIFI_ON (%s)\n",
+                  wait_ms,
+                  source ? source : "unknown");
+    if (status_screen != NULL && status_label != NULL) {
+      status_screen_use_text("Wi-Fi down");
+      lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
+      status_screen_shown_time = millis();
+      api_error_shown_time = status_screen_shown_time;
+      set_status_reset_visible(false);
+      lv_timer_handler();
+    }
+  } else {
+    halo_lcd_prod_on_wifi_on(timeout_ms);
+    int reason = WIFI_REASON_IDLE;
+    if (ota_check_requested || ota_check_pending) {
+      reason = WIFI_REASON_OTA;
+    } else if (refresh_request_pending || waiting_for_list_response ||
+               provision_refresh_pending || provisioning_active ||
+               user_activity_since_sleep) {
+      reason = WIFI_REASON_USER_ACTION;
+    }
+    wifi_pending_start(reason);
+    wifi_last_result = 0;
+  }
+#else
+  (void)timeout_ms;
+  (void)source;
+  Serial.println("[UART][WIFI_ON] ignored (no prod wrapper)");
+#endif
+}
+
+static void wifi_on_run_deferred_if_ready(const char* reason) {
+  if (!wifi_on_deferred) {
+    return;
+  }
+  if (!wifi_on_ui_idle() && !g_sleep_transition) {
+    if (!wifi_on_deferred_logged) {
+      Serial.println("[LCD_WIFI] deferred WIFI_ON waiting for idle");
+      wifi_on_deferred_logged = true;
+    }
+    return;
+  }
+  uint32_t timeout_ms = (uint32_t)wifi_on_deferred_timeout_ms;
+  wifi_on_deferred = false;
+  wifi_on_deferred_logged = false;
+  Serial.printf("[LCD_WIFI] running deferred WIFI_ON (%s)\n", reason ? reason : "idle");
+  wifi_on_execute(timeout_ms, reason);
 }
 
 // Called by halo_lcd_prod when backoff is scheduled. Transitions to BACKOFF and allows sleep.
@@ -941,6 +1205,8 @@ static bool validate_protocol_message(JsonDocument& doc) {
   return true;
 }
 
+static void ship_menu_handle_ui_status(const JsonDocument& doc);
+
 static void request_sense_wake(const char* reason);
 
 // UART send function - ONLY called from uart_task, NEVER from ISR
@@ -994,6 +1260,25 @@ static void uart_send_ack(const char* type) {
   serializeJson(doc, output);
   uart_send_json(output.c_str());
   Serial.printf("[PROTO] TX: type=%s\n", type);
+}
+
+static void uart_send_wifi_on_ack(const char* status, const char* reason) {
+  StaticJsonDocument<192> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = "WIFI_ON_ACK";
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  if (status && status[0]) {
+    doc["status"] = status;
+  }
+  if (reason && reason[0]) {
+    doc["reason"] = reason;
+  }
+  String output;
+  serializeJson(doc, output);
+  uart_send_json(output.c_str());
+  Serial.printf("[PROTO] TX: type=WIFI_ON_ACK status=%s reason=%s\n",
+                status ? status : "", reason ? reason : "");
 }
 
 static void uart_send_wifi_creds_ack(const char* status, int err_code) {
@@ -1105,6 +1390,7 @@ static void lcd_finish_maintenance(const char* result) {
   g_lcd_maintenance_active = false;
   g_lcd_maintenance_started = false;
   g_lcd_maintenance_aborted = false;
+  lcd_mode = LCD_MODE_UI_ACTIVE;
 }
 
 static void lcd_uart_reset_rx_state() {
@@ -2264,6 +2550,584 @@ static void hide_provisioning_screen() {
 }
 
 // ── UI Functions ────────────────────────────────────────────────────
+static void show_ship_main_menu() {
+  if (!ship_menu_screen) {
+    ship_menu_screen = lv_obj_create(NULL);
+    lv_obj_set_size(ship_menu_screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_clear_flag(ship_menu_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_img_src(ship_menu_screen, &ui_img_Frame_443_png, LV_PART_MAIN);
+    lv_obj_set_style_bg_img_opa(ship_menu_screen, LV_OPA_COVER, LV_PART_MAIN);
+  }
+  ship_menu_screen_state = SHIP_MENU_SCREEN_MAIN;
+  ui_screen_state = SCREEN_HOME;
+  lv_scr_load(ship_menu_screen);
+  Serial.println("[SHIP_MENU] showing MAIN_MENU");
+  lv_timer_handler();
+  wifi_on_run_deferred_if_ready("main_menu");
+}
+
+static void show_ship_second_menu() {
+  if (!ship_menu_second_screen) {
+    ship_menu_second_screen = lv_obj_create(NULL);
+    lv_obj_set_size(ship_menu_second_screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_clear_flag(ship_menu_second_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_img_src(ship_menu_second_screen, &ui_img_Frame_443_1_png, LV_PART_MAIN);
+    lv_obj_set_style_bg_img_opa(ship_menu_second_screen, LV_OPA_COVER, LV_PART_MAIN);
+  }
+  ship_menu_screen_state = SHIP_MENU_SCREEN_SECOND;
+  ui_screen_state = SCREEN_SECOND;
+  lv_scr_load(ship_menu_second_screen);
+  Serial.println("[MENU] screen=SECOND_MENU");
+  lv_timer_handler();
+}
+
+static void show_ship_settings_screen() {
+  if (!ship_menu_settings_screen) {
+    ship_menu_settings_screen = lv_obj_create(NULL);
+    lv_obj_set_size(ship_menu_settings_screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(ship_menu_settings_screen, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ship_menu_settings_screen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_clear_flag(ship_menu_settings_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    ship_menu_settings_title = lv_label_create(ship_menu_settings_screen);
+    lv_label_set_text(ship_menu_settings_title, "Settings");
+    lv_obj_set_style_text_color(ship_menu_settings_title, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_align(ship_menu_settings_title, LV_ALIGN_TOP_MID, 0, 24);
+
+    ship_menu_settings_btn_debug = lv_obj_create(ship_menu_settings_screen);
+    lv_obj_set_pos(ship_menu_settings_btn_debug, SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_DEBUG_Y);
+    lv_obj_set_size(ship_menu_settings_btn_debug, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
+    lv_obj_set_style_bg_color(ship_menu_settings_btn_debug, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ship_menu_settings_btn_debug, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ship_menu_settings_btn_debug, 0, LV_PART_MAIN);
+
+    ship_menu_settings_label_debug = lv_label_create(ship_menu_settings_btn_debug);
+    lv_label_set_text(ship_menu_settings_label_debug, "Debug");
+    lv_obj_set_style_text_color(ship_menu_settings_label_debug, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(ship_menu_settings_label_debug);
+
+    ship_menu_settings_btn_reset = lv_obj_create(ship_menu_settings_screen);
+    lv_obj_set_pos(ship_menu_settings_btn_reset, SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_RESET_Y);
+    lv_obj_set_size(ship_menu_settings_btn_reset, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
+    lv_obj_set_style_bg_color(ship_menu_settings_btn_reset, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ship_menu_settings_btn_reset, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ship_menu_settings_btn_reset, 0, LV_PART_MAIN);
+
+    ship_menu_settings_label_reset = lv_label_create(ship_menu_settings_btn_reset);
+    lv_label_set_text(ship_menu_settings_label_reset, "Reset Wi-Fi (Sense)");
+    lv_obj_set_style_text_color(ship_menu_settings_label_reset, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(ship_menu_settings_label_reset);
+
+    ship_menu_settings_btn_back = lv_obj_create(ship_menu_settings_screen);
+    lv_obj_set_pos(ship_menu_settings_btn_back, SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACK_Y);
+    lv_obj_set_size(ship_menu_settings_btn_back, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
+    lv_obj_set_style_bg_color(ship_menu_settings_btn_back, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ship_menu_settings_btn_back, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ship_menu_settings_btn_back, 0, LV_PART_MAIN);
+
+    ship_menu_settings_label_back = lv_label_create(ship_menu_settings_btn_back);
+    lv_label_set_text(ship_menu_settings_label_back, "Back");
+    lv_obj_set_style_text_color(ship_menu_settings_label_back, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(ship_menu_settings_label_back);
+
+    // Three-button settings screen (Debug + Reset Wi-Fi + Back)
+  }
+  ship_menu_screen_state = SHIP_MENU_SCREEN_SETTINGS;
+  ui_screen_state = SCREEN_SETTINGS;
+  lv_scr_load(ship_menu_settings_screen);
+  Serial.println("[MENU] screen=SETTINGS");
+  lv_timer_handler();
+}
+
+static void status_overlay_init() {
+  if (g_status_layer) return;
+  g_status_layer = lv_obj_create(lv_layer_top());
+  lv_obj_set_size(g_status_layer, LV_PCT(100), LV_PCT(100));
+  lv_obj_clear_flag(g_status_layer, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(g_status_layer, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(g_status_layer, LV_OPA_60, LV_PART_MAIN);
+  g_status_spinner = lv_spinner_create(g_status_layer, 1000, 60);
+  lv_obj_set_size(g_status_spinner, 60, 60);
+  lv_obj_set_style_arc_color(g_status_spinner, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(g_status_spinner, 4, LV_PART_INDICATOR);
+  lv_obj_align(g_status_spinner, LV_ALIGN_CENTER, 0, -30);
+  g_status_label = lv_label_create(g_status_layer);
+  lv_label_set_long_mode(g_status_label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_color(g_status_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_width(g_status_label, LV_PCT(90));
+  lv_obj_align(g_status_label, LV_ALIGN_CENTER, 0, 30);
+  lv_obj_add_flag(g_status_layer, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void status_overlay_show(const char* text) {
+  status_overlay_init();
+  lv_label_set_text(g_status_label, text ? text : "");
+  lv_obj_clear_flag(g_status_layer, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(g_status_layer);
+}
+
+static void status_overlay_hide() {
+  if (g_status_layer) {
+    lv_obj_add_flag(g_status_layer, LV_OBJ_FLAG_HIDDEN);
+  }
+  g_status_hide_at_ms = 0;
+}
+
+static void result_btn_home_event(lv_event_t * e);
+static void result_btn_retry_event(lv_event_t * e);
+
+static void result_screen_init() {
+  if (result_root) {
+    return;
+  }
+  result_root = lv_obj_create(NULL);
+  lv_obj_set_size(result_root, LV_PCT(100), LV_PCT(100));
+  lv_obj_clear_flag(result_root, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(result_root, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(result_root, LV_OPA_COVER, LV_PART_MAIN);
+
+  result_icon_label = lv_label_create(result_root);
+  lv_obj_set_style_text_font(result_icon_label, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_set_style_text_color(result_icon_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(result_icon_label, LV_ALIGN_TOP_MID, 0, 24);
+
+  result_title_label = lv_label_create(result_root);
+  lv_label_set_long_mode(result_title_label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(result_title_label, LV_PCT(90));
+  lv_obj_set_style_text_font(result_title_label, &lv_font_montserrat_24, LV_PART_MAIN);
+  lv_obj_set_style_text_color(result_title_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(result_title_label, LV_ALIGN_TOP_MID, 0, 100);
+
+  result_subtitle_label = lv_label_create(result_root);
+  lv_label_set_long_mode(result_subtitle_label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(result_subtitle_label, LV_PCT(90));
+  lv_obj_set_style_text_font(result_subtitle_label, &lv_font_montserrat_16, LV_PART_MAIN);
+  lv_obj_set_style_text_color(result_subtitle_label, lv_color_hex(0xA0A0A0), LV_PART_MAIN);
+  lv_obj_align(result_subtitle_label, LV_ALIGN_TOP_MID, 0, 140);
+
+  result_btn_home = lv_obj_create(result_root);
+  lv_obj_set_size(result_btn_home, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
+  lv_obj_align(result_btn_home, LV_ALIGN_BOTTOM_MID, 0, -72);
+  lv_obj_set_style_bg_color(result_btn_home, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(result_btn_home, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(result_btn_home, 0, LV_PART_MAIN);
+  lv_obj_add_event_cb(result_btn_home, result_btn_home_event, LV_EVENT_CLICKED, NULL);
+
+  result_btn_home_label = lv_label_create(result_btn_home);
+  lv_label_set_text(result_btn_home_label, "Back to Home");
+  lv_obj_set_style_text_color(result_btn_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_center(result_btn_home_label);
+
+  result_btn_retry = lv_obj_create(result_root);
+  lv_obj_set_size(result_btn_retry, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
+  lv_obj_align(result_btn_retry, LV_ALIGN_BOTTOM_MID, 0, -16);
+  lv_obj_set_style_bg_color(result_btn_retry, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(result_btn_retry, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(result_btn_retry, 0, LV_PART_MAIN);
+  lv_obj_add_event_cb(result_btn_retry, result_btn_retry_event, LV_EVENT_CLICKED, NULL);
+
+  result_btn_retry_label = lv_label_create(result_btn_retry);
+  lv_label_set_text(result_btn_retry_label, "Retry");
+  lv_obj_set_style_text_color(result_btn_retry_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_center(result_btn_retry_label);
+}
+
+static void ui_hide_result() {
+  if (!result_root) {
+    return;
+  }
+  lv_obj_add_flag(result_root, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void ui_show_result(bool is_error, const char* title, const char* mode) {
+  result_screen_init();
+  const char* safe_title = (title && title[0]) ? title : (is_error ? "Something went wrong" : "Done");
+  const char* safe_mode = (mode && mode[0]) ? mode : "—";
+  char subtitle[48];
+  snprintf(subtitle, sizeof(subtitle), "Mode: %s", safe_mode);
+
+  lv_label_set_text(result_icon_label, is_error ? "⚠" : "✓");
+  lv_label_set_text(result_title_label, safe_title);
+  lv_label_set_text(result_subtitle_label, subtitle);
+
+  if (is_error && g_last_action.valid) {
+    lv_obj_clear_flag(result_btn_retry, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(result_btn_retry, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (g_retry_disable_until_ms == 0) {
+    lv_obj_clear_state(result_btn_retry, LV_STATE_DISABLED);
+  }
+
+  stop_glowing_animation();
+  status_overlay_hide();
+  ui_busy = false;
+  ui_screen_state = SCREEN_RESULT;
+  lv_obj_clear_flag(result_root, LV_OBJ_FLAG_HIDDEN);
+  lv_scr_load(result_root);
+  lv_timer_handler();
+}
+
+static void result_retry_tick() {
+  if (!result_btn_retry) {
+    return;
+  }
+  if (g_retry_disable_until_ms && millis() >= g_retry_disable_until_ms) {
+    g_retry_disable_until_ms = 0;
+    lv_obj_clear_state(result_btn_retry, LV_STATE_DISABLED);
+  }
+}
+
+static void debug_screen_update();
+
+static void debug_btn_back_event(lv_event_t * e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+    return;
+  }
+  Serial.println("[DEBUG] back -> settings");
+  show_ship_settings_screen();
+  debug_last_update_ms = 0;
+}
+
+static void debug_screen_init() {
+  if (debug_screen) {
+    return;
+  }
+  debug_screen = lv_obj_create(NULL);
+  lv_obj_set_size(debug_screen, LV_PCT(100), LV_PCT(100));
+  lv_obj_clear_flag(debug_screen, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(debug_screen, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(debug_screen, LV_OPA_COVER, LV_PART_MAIN);
+
+  debug_title = lv_label_create(debug_screen);
+  lv_label_set_text(debug_title, "Debug");
+  lv_obj_set_style_text_color(debug_title, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(debug_title, LV_ALIGN_TOP_MID, 0, 16);
+
+  debug_label_status = lv_label_create(debug_screen);
+  lv_obj_set_style_text_color(debug_label_status, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(debug_label_status, LV_ALIGN_TOP_LEFT, 12, 52);
+
+  debug_label_status2 = lv_label_create(debug_screen);
+  lv_obj_set_style_text_color(debug_label_status2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(debug_label_status2, LV_ALIGN_TOP_LEFT, 12, 76);
+
+  debug_label_sense = lv_label_create(debug_screen);
+  lv_obj_set_style_text_color(debug_label_sense, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(debug_label_sense, LV_ALIGN_TOP_LEFT, 12, 108);
+
+  debug_label_hb = lv_label_create(debug_screen);
+  lv_obj_set_style_text_color(debug_label_hb, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(debug_label_hb, LV_ALIGN_TOP_LEFT, 12, 132);
+
+  debug_label_wifi = lv_label_create(debug_screen);
+  lv_obj_set_style_text_color(debug_label_wifi, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(debug_label_wifi, LV_ALIGN_TOP_LEFT, 12, 156);
+
+  debug_label_ui = lv_label_create(debug_screen);
+  lv_obj_set_style_text_color(debug_label_ui, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_align(debug_label_ui, LV_ALIGN_TOP_LEFT, 12, 180);
+
+  debug_btn_back = lv_obj_create(debug_screen);
+  lv_obj_set_size(debug_btn_back, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
+  lv_obj_align(debug_btn_back, LV_ALIGN_BOTTOM_MID, 0, -20);
+  lv_obj_set_style_bg_color(debug_btn_back, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(debug_btn_back, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(debug_btn_back, 0, LV_PART_MAIN);
+  lv_obj_add_event_cb(debug_btn_back, debug_btn_back_event, LV_EVENT_CLICKED, NULL);
+
+  debug_btn_back_label = lv_label_create(debug_btn_back);
+  lv_label_set_text(debug_btn_back_label, "Back");
+  lv_obj_set_style_text_color(debug_btn_back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_center(debug_btn_back_label);
+}
+
+static void show_ship_debug_screen() {
+  debug_screen_init();
+  ui_screen_state = SCREEN_DEBUG;
+  lv_scr_load(debug_screen);
+  debug_last_update_ms = 0;
+  debug_screen_update();
+  Serial.println("[MENU] screen=DEBUG");
+  lv_timer_handler();
+}
+
+static void debug_screen_update() {
+  if (!debug_screen || ui_screen_state != SCREEN_DEBUG) {
+    return;
+  }
+  unsigned long now = millis();
+  if (debug_last_update_ms && (now - debug_last_update_ms) < 1000) {
+    return;
+  }
+  debug_last_update_ms = now;
+
+  snprintf(debug_buf_status, sizeof(debug_buf_status), "UI_STATUS op=%s phase=%s",
+           g_ship_ui_op[0] ? g_ship_ui_op : "—",
+           g_ship_ui_phase[0] ? g_ship_ui_phase : "—");
+  snprintf(debug_buf_status2, sizeof(debug_buf_status2), "text=%.28s mode=%s",
+           g_ship_ui_text[0] ? g_ship_ui_text : "—",
+           g_ship_ui_mode[0] ? g_ship_ui_mode : "—");
+  snprintf(debug_buf_sense, sizeof(debug_buf_sense), "sense_state=%s",
+           sense_state_name(sense_state));
+  unsigned long hb_age = (last_sense_rx_ms > 0) ? (now - last_sense_rx_ms) : 0;
+  snprintf(debug_buf_hb, sizeof(debug_buf_hb), "link_hb_age_ms=%lu",
+           (unsigned long)hb_age);
+
+  char ssid[33] = {0};
+  char pass[65] = {0};
+  bool has_creds = lcd_load_wifi_creds(ssid, sizeof(ssid), pass, sizeof(pass));
+  uint32_t checksum = has_creds ? wifi_creds_checksum(ssid, pass) : 0;
+  snprintf(debug_buf_wifi, sizeof(debug_buf_wifi), "wifi_creds=%s crc=0x%08lX",
+           has_creds ? "yes" : "no",
+           (unsigned long)checksum);
+
+  snprintf(debug_buf_ui, sizeof(debug_buf_ui), "ui_busy=%d",
+           ui_busy ? 1 : 0);
+
+  lv_label_set_text_static(debug_label_status, debug_buf_status);
+  lv_label_set_text_static(debug_label_status2, debug_buf_status2);
+  lv_label_set_text_static(debug_label_sense, debug_buf_sense);
+  lv_label_set_text_static(debug_label_hb, debug_buf_hb);
+  lv_label_set_text_static(debug_label_wifi, debug_buf_wifi);
+  lv_label_set_text_static(debug_label_ui, debug_buf_ui);
+}
+
+static void result_btn_home_event(lv_event_t * e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+    return;
+  }
+  Serial.println("[RESULT] back -> home");
+  ui_hide_result();
+  ui_screen_state = SCREEN_HOME;
+  ui_busy = false;
+  status_overlay_hide();
+  stop_glowing_animation();
+  show_ship_main_menu();
+  wifi_on_run_deferred_if_ready("result_home");
+}
+
+static void result_btn_retry_event(lv_event_t * e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+    return;
+  }
+  if (!g_last_action.valid) {
+    Serial.println("[RESULT] retry ignored (no last action)");
+    return;
+  }
+  unsigned long now = millis();
+  if (g_retry_disable_until_ms && now < g_retry_disable_until_ms) {
+    Serial.println("[RESULT] retry ignored (debounce)");
+    return;
+  }
+  g_retry_disable_until_ms = now + 1000;
+  if (result_btn_retry) {
+    lv_obj_add_state(result_btn_retry, LV_STATE_DISABLED);
+  }
+  ui_busy = true;
+  status_overlay_show("Retrying...");
+  Serial.printf("[RESULT] retry menu_item=%s index=%d\n",
+                g_last_action.menu_item,
+                g_last_action.menu_index);
+  ship_menu_send_menu_select(g_last_action.menu_item, g_last_action.menu_index, "RETRY");
+}
+
+static void ui_apply_ship_ui_status() {
+  if (strcmp(g_ship_ui_op, "SCAN") != 0) {
+    debug_screen_update();
+    return;
+  }
+  const char* phase = g_ship_ui_phase;
+  const char* text = g_ship_ui_text[0] ? g_ship_ui_text : (phase && phase[0]) ? phase : "";
+  const char* mode = g_ship_ui_mode[0] ? g_ship_ui_mode : "—";
+
+  if (g_ship_ui_busy) {
+    ui_busy = true;
+    status_overlay_show(text);
+    return;
+  }
+
+  ui_busy = false;
+  status_overlay_hide();
+
+  if (g_ship_ui_terminal) {
+    const char* title = (g_ship_ui_text[0]) ? g_ship_ui_text :
+                        (g_ship_ui_error ? "Something went wrong" : "Done");
+    ui_show_result(g_ship_ui_error, title, mode);
+  } else if (strcmp(phase, "IDLE") == 0) {
+    if (ui_screen_state != SCREEN_RESULT) {
+      status_overlay_hide();
+    }
+  }
+
+  debug_screen_update();
+}
+
+static const ship_menu_hitbox_t* ship_menu_hit_test(int x, int y) {
+  const ship_menu_hitbox_t* hb = NULL;
+  if (ship_menu_screen_state == SHIP_MENU_SCREEN_MAIN) {
+    for (size_t i = 0; i < (sizeof(ship_menu_hitboxes_main) / sizeof(ship_menu_hitboxes_main[0])); i++) {
+      hb = &ship_menu_hitboxes_main[i];
+      if (x >= hb->x1 && x <= hb->x2 && y >= hb->y1 && y <= hb->y2) {
+        return hb;
+      }
+    }
+  } else if (ship_menu_screen_state == SHIP_MENU_SCREEN_SECOND) {
+    for (size_t i = 0; i < (sizeof(ship_menu_hitboxes_second) / sizeof(ship_menu_hitboxes_second[0])); i++) {
+      hb = &ship_menu_hitboxes_second[i];
+      if (x >= hb->x1 && x <= hb->x2 && y >= hb->y1 && y <= hb->y2) {
+        return hb;
+      }
+    }
+  } else if (ship_menu_screen_state == SHIP_MENU_SCREEN_SETTINGS) {
+    for (size_t i = 0; i < (sizeof(ship_menu_hitboxes_settings) / sizeof(ship_menu_hitboxes_settings[0])); i++) {
+      hb = &ship_menu_hitboxes_settings[i];
+      if (x >= hb->x1 && x <= hb->x2 && y >= hb->y1 && y <= hb->y2) {
+        return hb;
+      }
+    }
+  }
+  return NULL;
+}
+
+static void ship_menu_show_press_overlay(const ship_menu_hitbox_t* hb) {
+  if (!hb) {
+    return;
+  }
+  if (!ship_menu_press_overlay) {
+    ship_menu_press_overlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_style_bg_color(ship_menu_press_overlay, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ship_menu_press_overlay, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ship_menu_press_overlay, 0, LV_PART_MAIN);
+  }
+  lv_obj_set_pos(ship_menu_press_overlay, hb->x1, hb->y1);
+  lv_obj_set_size(ship_menu_press_overlay, (hb->x2 - hb->x1 + 1), (hb->y2 - hb->y1 + 1));
+  lv_obj_clear_flag(ship_menu_press_overlay, LV_OBJ_FLAG_HIDDEN);
+  ship_menu_press_hide_at_ms = millis() + SHIP_MENU_PRESS_MS;
+}
+
+static void ship_menu_record_last_action(const ship_menu_hitbox_t* hb) {
+  if (!hb || !hb->menu_item || hb->menu_item[0] == '\0') {
+    return;
+  }
+  g_last_action.valid = true;
+  strncpy(g_last_action.menu_item, hb->menu_item, sizeof(g_last_action.menu_item) - 1);
+  g_last_action.menu_item[sizeof(g_last_action.menu_item) - 1] = '\0';
+  g_last_action.menu_index = hb->menu_index;
+}
+
+static void ship_menu_send_menu_select(const char* menu_item, int menu_index, const char* label) {
+  if (!menu_item || menu_item[0] == '\0') {
+    Serial.println("[MENU] menu_select missing item");
+    return;
+  }
+  request_sense_wake("menu_select");
+  StaticJsonDocument<256> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = "INPUT_MENU_SELECT";
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  doc["menu_item"] = menu_item;
+  doc["menu_index"] = menu_index;
+  String output;
+  serializeJson(doc, output);
+  senseSerial.println(output);
+  if (label && label[0]) {
+    Serial.printf("[MENU] tap=%s\n", label);
+  } else {
+    Serial.printf("[MENU] menu_item=%s index=%d\n", menu_item, menu_index);
+  }
+}
+
+static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
+  if (!hb) {
+    return;
+  }
+  if (ui_busy || ui_screen_state == SCREEN_RESULT || ui_screen_state == SCREEN_DEBUG) {
+    Serial.println("[UI_BUSY] tap ignored");
+    return;
+  }
+  switch (hb->action) {
+    case SHIP_MENU_ACTION_MORE:
+      show_ship_second_menu();
+      break;
+    case SHIP_MENU_ACTION_HOME:
+      Serial.println("[MENU] tap=HOME");
+      show_ship_main_menu();
+      break;
+    case SHIP_MENU_ACTION_SETTINGS:
+      Serial.println("[MENU] tap=SETTINGS");
+      show_ship_settings_screen();
+      break;
+    case SHIP_MENU_ACTION_DEBUG:
+      Serial.println("[MENU] tap=DEBUG");
+      show_ship_debug_screen();
+      break;
+    case SHIP_MENU_ACTION_RESET_WIFI: {
+      request_sense_wake("reset_wifi");
+      StaticJsonDocument<128> doc;
+      doc["ver"] = PROTOCOL_VERSION;
+      doc["type"] = "INPUT_RESET_WIFI";
+      doc["msg_id"] = get_next_msg_id();
+      doc["ts"] = millis();
+      String output;
+      serializeJson(doc, output);
+      senseSerial.println(output);
+      break;
+    }
+    case SHIP_MENU_ACTION_BACK:
+      show_ship_second_menu();
+      break;
+    case SHIP_MENU_ACTION_CHECK_IN:
+    case SHIP_MENU_ACTION_CHECK_OUT:
+    case SHIP_MENU_ACTION_LOG_DISH:
+    default:
+      ship_menu_record_last_action(hb);
+      ship_menu_send_menu_select(hb->menu_item, hb->menu_index, hb->action_name);
+      break;
+  }
+}
+
+static void ship_menu_handle_ui_status(const JsonDocument& doc) {
+  const char* op    = doc["op"]    | "";
+  const char* phase = doc["phase"] | "";
+  const char* text  = doc["text"]  | "";
+  const char* mode  = doc["mode"]  | "";
+  Serial.printf("[SHIP_UI_STATUS] op=%s phase=%s mode=%s text=%s\n", op, phase, mode, text);
+  const char* text_raw = (text && text[0]) ? text : "";
+  strncpy(g_ship_ui_op, op ? op : "", sizeof(g_ship_ui_op) - 1);
+  g_ship_ui_op[sizeof(g_ship_ui_op) - 1] = '\0';
+  strncpy(g_ship_ui_phase, phase ? phase : "", sizeof(g_ship_ui_phase) - 1);
+  g_ship_ui_phase[sizeof(g_ship_ui_phase) - 1] = '\0';
+  strncpy(g_ship_ui_text, text_raw, sizeof(g_ship_ui_text) - 1);
+  g_ship_ui_text[sizeof(g_ship_ui_text) - 1] = '\0';
+  strncpy(g_ship_ui_mode, mode ? mode : "", sizeof(g_ship_ui_mode) - 1);
+  g_ship_ui_mode[sizeof(g_ship_ui_mode) - 1] = '\0';
+  g_ship_ui_last_ms = millis();
+
+  if (strcmp(op, "SCAN") == 0) {
+    bool is_busy = (strcmp(phase, "CAPTURING") == 0 ||
+                    strcmp(phase, "PREPARING") == 0 ||
+                    strcmp(phase, "PROCESSING") == 0 ||
+                    strcmp(phase, "WAITING") == 0);
+    bool is_terminal = (strcmp(phase, "ERROR") == 0 ||
+                        strcmp(phase, "DONE") == 0 ||
+                        strcmp(phase, "SUCCESS") == 0 ||
+                        strcmp(phase, "COMPLETE") == 0);
+    g_ship_ui_busy = is_busy;
+    g_ship_ui_terminal = is_terminal;
+    g_ship_ui_error = (strcmp(phase, "ERROR") == 0);
+  }
+
+  if (app_event_queue != NULL) {
+    app_event_t evt = {};
+    evt.type = EVT_SHIP_UI_STATUS;
+    if (xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20)) != pdTRUE) {
+      Serial.println("[SHIP_UI_STATUS] event queue full");
+    }
+  }
+}
+
 static void create_custom_ui() {
   // Get default screen
   lv_obj_t *scr = lv_scr_act();
@@ -3155,7 +4019,7 @@ static void knob_left_cb(void *arg, void *data) {
   }
   
   // Queue UART TX message (NOT sent here - uart_task will send it)
-  if (!refresh_request_pending) {
+  if (!refresh_request_pending && !ui_busy) {
     tx_msg_t tx_msg = {};
     strncpy(tx_msg.type, "INPUT_SCROLL", sizeof(tx_msg.type) - 1);
     tx_msg.delta = -1;
@@ -3196,7 +4060,7 @@ static void knob_right_cb(void *arg, void *data) {
   }
   
   // Queue UART TX message (NOT sent here - uart_task will send it)
-  if (!refresh_request_pending) {
+  if (!refresh_request_pending && !ui_busy) {
     tx_msg_t tx_msg = {};
     strncpy(tx_msg.type, "INPUT_SCROLL", sizeof(tx_msg.type) - 1);
     tx_msg.delta = 1;
@@ -3777,6 +4641,20 @@ static void uart_process_received_message(const char* json_str) {
   last_sense_any_rx_ms = millis();
   last_sense_msg_ms = last_sense_any_rx_ms;
   Serial.printf("[PROTO] RX: type=%s\n", type);
+#if SHIP_MENU_UI
+  if (strcmp(type, "UI_STATUS") == 0) {
+    ship_menu_handle_ui_status(doc);
+    return;
+  }
+  if (strcmp(type, "UI_LIST") == 0 ||
+      strcmp(type, "UI_MEAL_RESULT") == 0 ||
+      strcmp(type, "UI_VOICE_ITEMS") == 0 ||
+      strcmp(type, "PROVISION_QR") == 0 ||
+      strcmp(type, "PROVISION_STATUS") == 0) {
+    Serial.printf("[SHIP_MENU] ignore type=%s\n", type);
+    return;
+  }
+#endif
   if (waiting_for_sense_cmds) {
     waiting_for_sense_cmds = false;
     waiting_for_sense_logged = false;
@@ -3867,6 +4745,7 @@ static void uart_process_received_message(const char* json_str) {
     g_lcd_maintenance_active = true;
     g_lcd_maintenance_started = false;
     g_lcd_maintenance_aborted = false;
+    lcd_mode = LCD_MODE_MAINTENANCE;
     g_lcd_maintenance_deadline_ms = millis() + (unsigned long)remaining_s * 1000UL;
     Serial.printf("[UART] MAINT_WINDOW received remaining_s=%lu\n",
                   (unsigned long)remaining_s);
@@ -3926,36 +4805,27 @@ static void uart_process_received_message(const char* json_str) {
 
   if (strcmp(type, "WIFI_ON") == 0) {
     uint32_t timeout_ms = doc["timeout_ms"] | 0;
-#ifdef HALO_LCD_PROD_WRAPPER
-    if (!halo_lcd_prod_wifi_retry_ready()) {
-      unsigned long next_ms = halo_lcd_prod_next_wifi_retry_ms();
-      long wait_ms = next_ms > 0 ? (long)(next_ms - millis()) : -1;
-      Serial.printf("[LCD_WIFI] backoff active (%ld ms) - skipping WIFI_ON\n", wait_ms);
-      if (status_screen != NULL && status_label != NULL) {
-        status_screen_use_text("Wi-Fi down");
-        lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
-        status_screen_shown_time = millis();
-        api_error_shown_time = status_screen_shown_time;
-        set_status_reset_visible(false);
-        lv_timer_handler();
-      }
-    } else {
-      halo_lcd_prod_on_wifi_on(timeout_ms);
-      int reason = WIFI_REASON_IDLE;
-      if (ota_check_requested || ota_check_pending) {
-        reason = WIFI_REASON_OTA;
-      } else if (refresh_request_pending || waiting_for_list_response ||
-                 provision_refresh_pending || provisioning_active ||
-                 user_activity_since_sleep) {
-        reason = WIFI_REASON_USER_ACTION;
-      }
-      wifi_pending_start(reason);
-      wifi_last_result = 0;
-    }
-#else
-    Serial.println("[UART][WIFI_ON] ignored (no prod wrapper)");
+#if SHIP_MENU_UI
+    lcd_mode = LCD_MODE_UI_ACTIVE;
 #endif
-    uart_send_ack("WIFI_ON_ACK");
+    bool ui_active = (lcd_mode == LCD_MODE_UI_ACTIVE);
+#if SHIP_MENU_UI
+    ui_active = !wifi_on_ui_idle();
+#endif
+    if (ui_active) {
+      wifi_on_deferred = true;
+      wifi_on_deferred_timeout_ms = timeout_ms;
+      wifi_on_deferred_logged = false;
+      if (!wifi_on_reject_logged) {
+        Serial.println("[LCD_WIFI] DEFER WIFI_ON (UI_ACTIVE)");
+        wifi_on_reject_logged = true;
+      }
+      uart_send_wifi_on_ack("DEFERRED", "UI_ACTIVE");
+      return;
+    }
+    wifi_on_reject_logged = false;
+    wifi_on_execute(timeout_ms, "uart");
+    uart_send_wifi_on_ack("OK", ""); 
     return;
   }
   
@@ -4574,6 +5444,28 @@ static void ui_task(void *arg) {
                       soft_fault);
       }
     }
+
+#if SHIP_MENU_UI
+    if (app_event_queue != NULL) {
+      while (xQueueReceive(app_event_queue, &evt, 0) == pdTRUE) {
+        if (evt.type == EVT_SHIP_UI_STATUS) {
+          ui_apply_ship_ui_status();
+        } else if (evt.type == EVT_HAPTIC_TICK) {
+          haptic_pulse();
+        }
+      }
+    }
+    debug_screen_update();
+    result_retry_tick();
+    wifi_on_run_deferred_if_ready("ui_tick");
+    if (g_status_hide_at_ms && millis() >= g_status_hide_at_ms) {
+      status_overlay_hide();
+    }
+    ui_lvgl_tick();
+    example_lvgl_unlock();
+    vTaskDelay(pdMS_TO_TICKS(5));
+    continue;
+#endif
 
     /* Deferred scroll redraw: avoid flooding SPI when we throttled the last scroll */
     if (scroll_pending_redraw && (millis() - last_scroll_refresh_ms >= SCROLL_REFRESH_MIN_MS)) {
@@ -5430,6 +6322,11 @@ static void init_ui_stack(int saved_count) {
       Serial.printf("WARNING: Invalid g_active state (count=%d) - skipping render\n", g_active.count);
     }
   }
+
+#if SHIP_MENU_UI
+  show_ship_main_menu();
+  status_overlay_init();
+#endif
   
   // Initialize encoder (knob)
   init_knob_once();
@@ -5849,6 +6746,18 @@ void loop() {
     bool was_long_press = long_press_sent;
     touch_pressed = false;
     
+    #if SHIP_MENU_UI
+    if (!was_long_press && press_duration < LONG_PRESS_THRESHOLD_MS) {
+      uint16_t check_x = 359 - touch_press_x;
+      uint16_t check_y = 359 - touch_press_y;
+      const ship_menu_hitbox_t* hb = ship_menu_hit_test(check_x, check_y);
+      if (hb) {
+        ship_menu_send_action(hb);
+        ui_lvgl_tick();
+      }
+    }
+    resetActivityTimer();
+    #else
     if (!was_long_press && press_duration < LONG_PRESS_THRESHOLD_MS) {
       // Brief touch - check if menu is visible first
       if (menu_screen_visible) {
@@ -6164,7 +7073,10 @@ void loop() {
       long_press_sent = false;
     }
     resetActivityTimer();
-  } else if (touch_pressed && !long_press_sent) {
+    #endif
+  }
+  #if !SHIP_MENU_UI
+  else if (touch_pressed && !long_press_sent) {
     // Touch is still pressed - check for long press
     unsigned long press_duration = now - touch_press_time;
     
@@ -6189,6 +7101,7 @@ void loop() {
       resetActivityTimer();
     }
   }
+  #endif
   if (!g_in_light_sleep && sense_status_sync_requested) {
     lcd_maybe_pulse_sense_int("status_sync");
   }
@@ -6769,6 +7682,7 @@ void loop() {
     } else {
       Serial.println("[LOOP] Inactivity timeout - entering sleep...");
     }
+    wifi_on_run_deferred_if_ready("pre_sleep");
     enterLightSleep();
     resetActivityTimer();  // Reset after wake
   }
