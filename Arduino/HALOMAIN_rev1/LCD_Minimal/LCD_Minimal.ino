@@ -143,6 +143,10 @@ typedef enum {
   SCREEN_HOME = 0,
   SCREEN_SECOND,
   SCREEN_SETTINGS,
+  SCREEN_HOLD_STILL,
+  SCREEN_PROCESSING,
+  SCREEN_LOGGED,
+  SCREEN_EXPIRY,
   SCREEN_RESULT,
   SCREEN_DEBUG
 } ui_screen_t;
@@ -165,6 +169,8 @@ static void enter_ship_ota_sleep();
 static bool wake_sense_for_request(const char* reason);
 static uint64_t buildWakeMaskForSleep();
 static bool sleep_blocked_for_ota();
+static void status_screen_use_text(const char* text);
+static void set_status_reset_visible(bool visible);
 static void ship_menu_send_menu_select(const char* menu_item, int menu_index, const char* label);
 static void show_ship_debug_screen();
 static void ui_apply_ship_ui_status();
@@ -593,6 +599,7 @@ static lv_obj_t *list_container = NULL;
 static lv_obj_t *list_labels[MAX_LIST_ITEMS] = {NULL};
 static lv_obj_t *empty_label = NULL;
 static lv_obj_t *loading_screen = NULL;
+static lv_obj_t *g_base_screen = NULL;
 // ── Ship Menu Screen ────────────────────────────────────────────────
 static lv_obj_t *ship_menu_screen = NULL;
 static lv_obj_t *ship_menu_label = NULL;
@@ -605,6 +612,12 @@ static lv_obj_t *ship_menu_settings_btn_reset = NULL;
 static lv_obj_t *ship_menu_settings_label_reset = NULL;
 static lv_obj_t *ship_menu_settings_btn_back = NULL;
 static lv_obj_t *ship_menu_settings_label_back = NULL;
+static lv_obj_t *ship_hold_screen = NULL;
+static lv_obj_t *ship_processing_screen = NULL;
+static lv_obj_t *ship_processing_spinner = NULL;
+static lv_obj_t *ship_processing_label = NULL;
+static lv_obj_t *ship_logged_screen = NULL;
+static unsigned long ship_logged_hide_at_ms = 0;
 static lv_obj_t *ship_menu_press_overlay = NULL;
 static unsigned long ship_menu_press_hide_at_ms = 0;
 static lv_obj_t *g_status_layer = NULL;
@@ -2105,6 +2118,9 @@ static void start_glowing_animation(const char* op) {
 
 // Stop glowing animation for processing indicator
 static void stop_glowing_animation(void) {
+  if (!is_glowing_animation) {
+    return;
+  }
   if (processing_indicator != NULL) {
     // Stop animation
     if (processing_anim != NULL) {
@@ -2560,6 +2576,7 @@ static void show_ship_main_menu() {
   }
   ship_menu_screen_state = SHIP_MENU_SCREEN_MAIN;
   ui_screen_state = SCREEN_HOME;
+  ship_logged_hide_at_ms = 0;
   lv_scr_load(ship_menu_screen);
   Serial.println("[SHIP_MENU] showing MAIN_MENU");
   lv_timer_handler();
@@ -2671,6 +2688,384 @@ static void status_overlay_hide() {
     lv_obj_add_flag(g_status_layer, LV_OBJ_FLAG_HIDDEN);
   }
   g_status_hide_at_ms = 0;
+}
+
+static void ship_hide_expiry_screen() {
+  if (!expiry_screen) {
+    return;
+  }
+  lv_obj_add_flag(expiry_screen, LV_OBJ_FLAG_HIDDEN);
+  expiry_screen_visible = false;
+  expiry_screen_shown_time = 0;
+}
+
+static void ship_hide_default_ui() {
+  if (list_container) lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
+  if (menu_screen) lv_obj_add_flag(menu_screen, LV_OBJ_FLAG_HIDDEN);
+  if (meal_result_screen) lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
+  if (status_screen) lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
+  if (loading_screen) lv_obj_add_flag(loading_screen, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void ship_status_screens_init() {
+  if (!ship_hold_screen) {
+    ship_hold_screen = lv_obj_create(NULL);
+    lv_obj_set_size(ship_hold_screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_clear_flag(ship_hold_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_img_src(ship_hold_screen, &ui_img_Frame_439_png, LV_PART_MAIN);
+    lv_obj_set_style_bg_img_opa(ship_hold_screen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ship_hold_screen, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ship_hold_screen, LV_OPA_COVER, LV_PART_MAIN);
+  }
+  if (!ship_processing_screen) {
+    ship_processing_screen = lv_obj_create(NULL);
+    lv_obj_set_size(ship_processing_screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_clear_flag(ship_processing_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_img_src(ship_processing_screen, &ui_img_Frame_440_png, LV_PART_MAIN);
+    lv_obj_set_style_bg_img_opa(ship_processing_screen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ship_processing_screen, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ship_processing_screen, LV_OPA_COVER, LV_PART_MAIN);
+    ship_processing_spinner = lv_spinner_create(ship_processing_screen, 1000, 60);
+    lv_obj_set_size(ship_processing_spinner, 60, 60);
+    lv_obj_set_style_arc_color(ship_processing_spinner, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(ship_processing_spinner, 4, LV_PART_INDICATOR);
+    lv_obj_align(ship_processing_spinner, LV_ALIGN_CENTER, 0, 30);
+    ship_processing_label = lv_label_create(ship_processing_screen);
+    lv_label_set_long_mode(ship_processing_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(ship_processing_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_width(ship_processing_label, LV_PCT(90));
+    lv_obj_align(ship_processing_label, LV_ALIGN_CENTER, 0, -60);
+    lv_label_set_text(ship_processing_label, "");
+  }
+  if (!ship_logged_screen) {
+    ship_logged_screen = lv_obj_create(NULL);
+    lv_obj_set_size(ship_logged_screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_clear_flag(ship_logged_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_img_src(ship_logged_screen, &ui_img_Frame_439_1_png, LV_PART_MAIN);
+    lv_obj_set_style_bg_img_opa(ship_logged_screen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ship_logged_screen, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ship_logged_screen, LV_OPA_COVER, LV_PART_MAIN);
+  }
+}
+
+static void ship_show_hold_still() {
+  if (ui_screen_state == SCREEN_HOLD_STILL) {
+    return;
+  }
+  ship_status_screens_init();
+  ship_hide_expiry_screen();
+  status_overlay_hide();
+  if (is_glowing_animation) {
+    stop_glowing_animation();
+  }
+  ui_screen_state = SCREEN_HOLD_STILL;
+  ui_busy = true;
+  ship_logged_hide_at_ms = 0;
+  lv_scr_load(ship_hold_screen);
+  lv_timer_handler();
+}
+
+static void ship_set_processing_text(const char* text) {
+  if (!ship_processing_label) {
+    return;
+  }
+  if (text && text[0]) {
+    lv_label_set_text(ship_processing_label, text);
+  } else {
+    lv_label_set_text(ship_processing_label, "");
+  }
+}
+
+static void ship_show_processing() {
+  if (ui_screen_state == SCREEN_PROCESSING) {
+    return;
+  }
+  ship_status_screens_init();
+  ship_hide_expiry_screen();
+  status_overlay_hide();
+  ship_set_processing_text(NULL);
+  ui_screen_state = SCREEN_PROCESSING;
+  ui_busy = true;
+  ship_logged_hide_at_ms = 0;
+  lv_scr_load(ship_processing_screen);
+  lv_timer_handler();
+}
+
+static void ship_show_logged() {
+  ship_status_screens_init();
+  ship_hide_expiry_screen();
+  status_overlay_hide();
+  if (is_glowing_animation) {
+    stop_glowing_animation();
+  }
+  ui_screen_state = SCREEN_LOGGED;
+  ui_busy = false;
+  ship_logged_hide_at_ms = millis() + 1200;
+  lv_scr_load(ship_logged_screen);
+  lv_timer_handler();
+}
+
+static void ship_show_expiry_screen() {
+  if (!expiry_screen || !g_base_screen) {
+    return;
+  }
+  if (ui_screen_state == SCREEN_EXPIRY) {
+    return;
+  }
+  ship_hide_default_ui();
+  ship_hide_expiry_screen();
+  status_overlay_hide();
+  lv_scr_load(g_base_screen);
+  strcpy(expiry_date_buffer, "__-__-____");
+  expiry_date_pos = 0;
+  expiry_screen_visible = true;
+  expiry_screen_shown_time = millis();
+  if (expiry_date_label != NULL) {
+    lv_label_set_text(expiry_date_label, "MM-DD-YYYY");
+  }
+  lv_obj_clear_flag(expiry_screen, LV_OBJ_FLAG_HIDDEN);
+  ui_screen_state = SCREEN_EXPIRY;
+  ui_busy = true;
+  ship_logged_hide_at_ms = 0;
+  Serial.println("[STATUS] Showing expiration date entry screen (ship)");
+  lv_timer_handler();
+}
+
+static bool ship_text_contains_expiry(const char* text) {
+  if (!text || text[0] == '\0') return false;
+  return (strstr(text, "expiry") != NULL) || (strstr(text, "Expiry") != NULL);
+}
+
+static void ship_status_route(const char* op, const char* phase, const char* mode, const char* text) {
+  if (!op || strcmp(op, "SCAN") != 0) {
+    return;
+  }
+  const char* safe_phase = phase ? phase : "";
+  const char* safe_mode = mode ? mode : "";
+  const char* safe_text = text ? text : "";
+  bool wants_expiry = (strcmp(safe_mode, "check-in") == 0 && ship_text_contains_expiry(safe_text)) ||
+                      (strcmp(safe_phase, "PREPARING") == 0 && ship_text_contains_expiry(safe_text));
+
+  if (strcmp(safe_phase, "CAPTURING") == 0) {
+    ship_show_hold_still();
+  } else if (strcmp(safe_phase, "PREPARING") == 0 ||
+             strcmp(safe_phase, "PROCESSING") == 0 ||
+             strcmp(safe_phase, "UPLOADING") == 0 ||
+             strcmp(safe_phase, "WAITING") == 0) {
+    if (wants_expiry) {
+      ship_show_expiry_screen();
+    } else {
+      ship_show_processing();
+      if (safe_text[0]) {
+        ship_set_processing_text(safe_text);
+      }
+    }
+  } else if (strcmp(safe_phase, "DONE") == 0 ||
+             strcmp(safe_phase, "SUCCESS") == 0 ||
+             strcmp(safe_phase, "COMPLETE") == 0) {
+    ship_show_logged();
+  } else if (strcmp(safe_phase, "ERROR") == 0) {
+    ui_show_result(true, safe_text, safe_mode);
+  }
+}
+
+static bool expiry_handle_touch(uint16_t check_x, uint16_t check_y) {
+  if (!expiry_screen_visible || expiry_screen == NULL || lv_obj_has_flag(expiry_screen, LV_OBJ_FLAG_HIDDEN)) {
+    return false;
+  }
+  Serial.printf("[EXPIRY] Checking buttons with stored coordinates (%d, %d) -> flipped to (%d, %d)\n", 
+               touch_press_x, touch_press_y, check_x, check_y);
+
+  bool button_pressed = false;
+
+  // Check number buttons (0-9)
+  for (int i = 0; i < 10; i++) {
+    if (expiry_keypad_buttons[i] != NULL) {
+      lv_area_t btn_area;
+      lv_obj_get_coords(expiry_keypad_buttons[i], &btn_area);
+      if (check_x >= btn_area.x1 && check_x <= btn_area.x2 &&
+          check_y >= btn_area.y1 && check_y <= btn_area.y2) {
+        int digit = (int)(intptr_t)lv_obj_get_user_data(expiry_keypad_buttons[i]);
+        Serial.printf("[EXPIRY] Number button %d pressed\n", digit);
+        if (expiry_date_pos < 8) {  // Max 8 digits (MM-DD-YYYY)
+          int pos_in_buffer = 0;
+          if (expiry_date_pos < 2) {
+            // Month digits: positions 0-1
+            pos_in_buffer = expiry_date_pos;
+          } else if (expiry_date_pos < 4) {
+            // Day digits: positions 3-4 (skip dash at 2)
+            pos_in_buffer = expiry_date_pos + 1;
+          } else {
+            // Year digits: positions 6-9 (skip dashes at 2 and 5)
+            pos_in_buffer = expiry_date_pos + 2;
+          }
+          
+          // Update buffer with digit
+          expiry_date_buffer[pos_in_buffer] = (char)('0' + digit);
+          expiry_date_buffer[10] = '\0';
+          expiry_date_pos++;
+          
+          // Update display
+          if (expiry_date_label != NULL) {
+            lv_label_set_text(expiry_date_label, expiry_date_buffer);
+            lv_timer_handler();
+            Serial.printf("[EXPIRY] Label text set to: %s\n", expiry_date_buffer);
+          }
+          
+          Serial.printf("[EXPIRY] Date updated: %s (pos: %d, buffer pos: %d)\n", 
+                       expiry_date_buffer, expiry_date_pos, pos_in_buffer);
+        }
+        button_pressed = true;
+        break;
+      }
+    }
+  }
+  
+  // Check backspace button
+  if (!button_pressed && expiry_backspace_button != NULL) {
+    lv_area_t btn_area;
+    lv_obj_get_coords(expiry_backspace_button, &btn_area);
+    if (check_x >= btn_area.x1 && check_x <= btn_area.x2 &&
+        check_y >= btn_area.y1 && check_y <= btn_area.y2) {
+      Serial.println("[EXPIRY] Backspace button pressed");
+      if (expiry_date_pos > 0) {
+        // Remove the last digit
+        expiry_date_pos--;
+        int pos_in_buffer = 0;
+        if (expiry_date_pos < 2) {
+          // Month digits: positions 0-1
+          pos_in_buffer = expiry_date_pos;
+        } else if (expiry_date_pos < 4) {
+          // Day digits: positions 3-4 (skip dash at 2)
+          pos_in_buffer = expiry_date_pos + 1;
+        } else {
+          // Year digits: positions 6-9 (skip dashes at 2 and 5)
+          pos_in_buffer = expiry_date_pos + 2;
+        }
+        
+        // Restore underscore at that position
+        expiry_date_buffer[pos_in_buffer] = '_';
+        expiry_date_buffer[10] = '\0';
+        
+        // Update display
+        if (expiry_date_label != NULL) {
+          lv_label_set_text(expiry_date_label, expiry_date_buffer);
+          lv_timer_handler();
+        }
+        
+        Serial.printf("[EXPIRY] Backspace - Date now: %s (pos: %d)\n", expiry_date_buffer, expiry_date_pos);
+      }
+      button_pressed = true;
+    }
+  }
+  
+  // Check check button
+  if (!button_pressed && expiry_check_button != NULL) {
+    lv_area_t btn_area;
+    lv_obj_get_coords(expiry_check_button, &btn_area);
+    Serial.printf("[EXPIRY] Check button area: x1=%d, y1=%d, x2=%d, y2=%d, touch=(%d, %d)\n", 
+                 btn_area.x1, btn_area.y1, btn_area.x2, btn_area.y2, check_x, check_y);
+    if (check_x >= btn_area.x1 && check_x <= btn_area.x2 &&
+        check_y >= btn_area.y1 && check_y <= btn_area.y2) {
+      // Check button pressed - submit expiration date
+      Serial.printf("[EXPIRY] Check button pressed - submitting date: %s (pos: %d)\n", expiry_date_buffer, expiry_date_pos);
+      
+      // If user presses OK with no digits, treat as "no expiration"
+      if (expiry_date_pos == 0) {
+        StaticJsonDocument<256> doc;
+        doc["ver"] = PROTOCOL_VERSION;
+        doc["type"] = "INPUT_EXPIRY_DATE";
+        doc["msg_id"] = lcd_msg_id_counter++;
+        doc["ts"] = millis();
+        doc["expiry_date"] = "";  // Empty string indicates no expiry date
+        
+        String output;
+        serializeJson(doc, output);
+        request_sense_wake("expiry_submit_empty");
+        uart_send_json(output.c_str());
+        Serial.printf("[EXPIRY] Sent empty expiration date to Sense (OK with no date)\n");
+        
+        // Hide expiration date screen
+        ship_hide_expiry_screen();
+        expiry_date_pos = 0;
+        strcpy(expiry_date_buffer, "__-__-____");
+        if (expiry_date_label != NULL) {
+          lv_label_set_text(expiry_date_label, "MM-DD-YYYY");
+        }
+#if SHIP_MENU_UI
+        ship_show_processing();
+        ship_set_processing_text("Saving date...");
+#else
+        // Show list again
+        if (list_container != NULL && g_active.count > 0) {
+          lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_timer_handler();
+        resetActivityTimer();
+#endif
+      // Validate date is complete (all 8 digits entered: 2 for month, 2 for day, 4 for year)
+      // Date format: MM-DD-YYYY (8 digits total, excluding dashes)
+      } else if (expiry_date_pos == 8) {
+        // Verify the buffer doesn't have any underscores (all digits filled)
+        bool has_underscores = false;
+        for (int i = 0; i < 10; i++) {
+          if (expiry_date_buffer[i] == '_') {
+            has_underscores = true;
+            break;
+          }
+        }
+        
+        if (!has_underscores) {
+          // Convert MM-DD-YYYY to YYYY-MM-DD format for sending to Sense board
+          char converted_date[11];
+          convert_date_mmddyyyy_to_yyyymmdd(expiry_date_buffer, converted_date, sizeof(converted_date));
+          
+          // Send expiration date to Sense board
+          StaticJsonDocument<256> doc;
+          doc["ver"] = PROTOCOL_VERSION;
+          doc["type"] = "INPUT_EXPIRY_DATE";
+          doc["msg_id"] = lcd_msg_id_counter++;
+          doc["ts"] = millis();
+          doc["expiry_date"] = converted_date;  // Format: YYYY-MM-DD (converted from MM-DD-YYYY)
+          
+          String output;
+          serializeJson(doc, output);
+          request_sense_wake("expiry_submit");
+          uart_send_json(output.c_str());
+          Serial.printf("[EXPIRY] Sent expiration date to Sense: %s (converted from %s)\n", converted_date, expiry_date_buffer);
+          
+          // Hide expiration date screen
+          ship_hide_expiry_screen();
+          expiry_date_pos = 0;
+          strcpy(expiry_date_buffer, "__-__-____");
+          if (expiry_date_label != NULL) {
+            lv_label_set_text(expiry_date_label, "MM-DD-YYYY");
+          }
+#if SHIP_MENU_UI
+          ship_show_processing();
+          ship_set_processing_text("Saving date...");
+#else
+          // Show list again
+          if (list_container != NULL && g_active.count > 0) {
+            lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
+          }
+          lv_timer_handler();
+          resetActivityTimer();
+#endif
+        } else {
+          Serial.printf("[EXPIRY] Date buffer still contains underscores - cannot submit\n");
+        }
+      } else {
+        Serial.printf("[EXPIRY] Date incomplete (%d/8 digits) - cannot submit\n", expiry_date_pos);
+      }
+      button_pressed = true;
+    }
+  }
+  
+  if (!button_pressed) {
+    Serial.printf("[EXPIRY] Touch detected but not on any button (%d, %d)\n", check_x, check_y);
+  }
+  return true;
 }
 
 static void result_btn_home_event(lv_event_t * e);
@@ -2925,7 +3320,7 @@ static void result_btn_retry_event(lv_event_t * e) {
     lv_obj_add_state(result_btn_retry, LV_STATE_DISABLED);
   }
   ui_busy = true;
-  status_overlay_show("Retrying...");
+  ship_show_processing();
   Serial.printf("[RESULT] retry menu_item=%s index=%d\n",
                 g_last_action.menu_item,
                 g_last_action.menu_index);
@@ -2933,33 +3328,9 @@ static void result_btn_retry_event(lv_event_t * e) {
 }
 
 static void ui_apply_ship_ui_status() {
-  if (strcmp(g_ship_ui_op, "SCAN") != 0) {
-    debug_screen_update();
-    return;
-  }
   const char* phase = g_ship_ui_phase;
-  const char* text = g_ship_ui_text[0] ? g_ship_ui_text : (phase && phase[0]) ? phase : "";
-  const char* mode = g_ship_ui_mode[0] ? g_ship_ui_mode : "—";
-
-  if (g_ship_ui_busy) {
-    ui_busy = true;
-    status_overlay_show(text);
-    return;
-  }
-
-  ui_busy = false;
-  status_overlay_hide();
-
-  if (g_ship_ui_terminal) {
-    const char* title = (g_ship_ui_text[0]) ? g_ship_ui_text :
-                        (g_ship_ui_error ? "Something went wrong" : "Done");
-    ui_show_result(g_ship_ui_error, title, mode);
-  } else if (strcmp(phase, "IDLE") == 0) {
-    if (ui_screen_state != SCREEN_RESULT) {
-      status_overlay_hide();
-    }
-  }
-
+  const char* text = g_ship_ui_text;
+  ship_status_route(g_ship_ui_op, phase, g_ship_ui_mode, text);
   debug_screen_update();
 }
 
@@ -3041,6 +3412,12 @@ static void ship_menu_send_menu_select(const char* menu_item, int menu_index, co
 
 static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
   if (!hb) {
+    return;
+  }
+  if (ui_screen_state != SCREEN_HOME &&
+      ui_screen_state != SCREEN_SECOND &&
+      ui_screen_state != SCREEN_SETTINGS) {
+    Serial.println("[UI_BUSY] tap ignored (screen)");
     return;
   }
   if (ui_busy || ui_screen_state == SCREEN_RESULT || ui_screen_state == SCREEN_DEBUG) {
@@ -3131,6 +3508,7 @@ static void ship_menu_handle_ui_status(const JsonDocument& doc) {
 static void create_custom_ui() {
   // Get default screen
   lv_obj_t *scr = lv_scr_act();
+  g_base_screen = scr;
   lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
   
@@ -5457,6 +5835,10 @@ static void ui_task(void *arg) {
     }
     debug_screen_update();
     result_retry_tick();
+    if (ship_logged_hide_at_ms && millis() >= ship_logged_hide_at_ms) {
+      ship_logged_hide_at_ms = 0;
+      show_ship_main_menu();
+    }
     wifi_on_run_deferred_if_ready("ui_tick");
     if (g_status_hide_at_ms && millis() >= g_status_hide_at_ms) {
       status_overlay_hide();
@@ -6750,15 +7132,23 @@ void loop() {
     if (!was_long_press && press_duration < LONG_PRESS_THRESHOLD_MS) {
       uint16_t check_x = 359 - touch_press_x;
       uint16_t check_y = 359 - touch_press_y;
-      const ship_menu_hitbox_t* hb = ship_menu_hit_test(check_x, check_y);
-      if (hb) {
-        ship_menu_send_action(hb);
+      if (expiry_handle_touch(check_x, check_y)) {
         ui_lvgl_tick();
+      } else if (ui_screen_state == SCREEN_HOME ||
+                 ui_screen_state == SCREEN_SECOND ||
+                 ui_screen_state == SCREEN_SETTINGS) {
+        const ship_menu_hitbox_t* hb = ship_menu_hit_test(check_x, check_y);
+        if (hb) {
+          ship_menu_send_action(hb);
+          ui_lvgl_tick();
+        }
       }
     }
     resetActivityTimer();
     #else
     if (!was_long_press && press_duration < LONG_PRESS_THRESHOLD_MS) {
+      uint16_t check_x = 359 - touch_press_x;
+      uint16_t check_y = 359 - touch_press_y;
       // Brief touch - check if menu is visible first
       if (menu_screen_visible) {
         // Menu is visible - check cooldown to prevent selection from the touch that opened the menu
@@ -6780,8 +7170,6 @@ void loop() {
         }
       } else if (status_screen != NULL && status_reset_visible && status_reset_button != NULL &&
                  !lv_obj_has_flag(status_screen, LV_OBJ_FLAG_HIDDEN)) {
-        uint16_t check_x = 359 - touch_press_x;
-        uint16_t check_y = 359 - touch_press_y;
         lv_area_t btn_area;
         lv_obj_get_coords(status_reset_button, &btn_area);
         if (check_x >= btn_area.x1 && check_x <= btn_area.x2 &&
@@ -6798,6 +7186,8 @@ void loop() {
             xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
           }
         }
+      } else if (expiry_handle_touch(check_x, check_y)) {
+        // handled by expiry keypad
       } else if (expiry_screen_visible && expiry_screen != NULL && !lv_obj_has_flag(expiry_screen, LV_OBJ_FLAG_HIDDEN)) {
         // Expiration date entry screen is visible - handle keypad touches
         // Use stored touch coordinates from when touch was pressed
@@ -7201,21 +7591,23 @@ void loop() {
     uart_send_json(output.c_str());
     Serial.printf("[EXPIRY] Sent empty expiration date to Sense (timeout)\n");
     
-    // Hide expiry screen and show list
-    lv_obj_add_flag(expiry_screen, LV_OBJ_FLAG_HIDDEN);
-    expiry_screen_visible = false;
-    expiry_screen_shown_time = 0;
+    // Hide expiry screen
+    ship_hide_expiry_screen();
     expiry_date_pos = 0;
     strcpy(expiry_date_buffer, "__-__-____");
     if (expiry_date_label != NULL) {
       lv_label_set_text(expiry_date_label, "MM-DD-YYYY");
     }
-    
+#if SHIP_MENU_UI
+    ship_show_processing();
+    ship_set_processing_text("Saving date...");
+#else
     // Show list again
     if (list_container != NULL && g_active.count > 0) {
       lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
     }
     lv_timer_handler();
+#endif
   }
 
   // Probe Sense when needed (avoid continuous UART spam)
