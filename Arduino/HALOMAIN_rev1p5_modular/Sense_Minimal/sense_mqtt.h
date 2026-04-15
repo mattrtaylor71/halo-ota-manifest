@@ -27,6 +27,8 @@
 
 // Forward declarations for .ino functions called by on_mqtt_message
 static void uart_send_ui_toast(const char* message);
+static void uart_send_ui_meal_result(int kcal, const char* meal_summary, int health_score, const char* recommendation, const char* mode, float protein_g, float carbs_g, float fat_g, float confidence, uint32_t job_id);
+static void clear_active_dish_job(uint32_t job_id, const char* reason);
 
 // ── MQTT topic construction ─────────────────────────────────────────
 

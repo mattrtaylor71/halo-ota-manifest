@@ -434,37 +434,12 @@ static esp_reset_reason_t g_boot_reset_reason = ESP_RST_UNKNOWN;
 
 enum SenseSleepKind { SENSE_SLEEP_DEEP_IDLE = 0, SENSE_SLEEP_DEEP_MAINT = 1 };
 
-// Forward declarations
-static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, uint32_t voice_job_id);
-static void voice_audio_callback(const int16_t *samples, size_t num_samples);
-static void voice_request_finalize(const char* reason);
-static bool voice_ensure_wifi_connected();
-static void voice_begin_wifi_preconnect();
-static void voice_session_reset(const char* reason);
-static const char* voice_session_get_or_create();
-static void voice_session_note_response(const String& response_json);
+// Forward declarations — functions still defined in this .ino
 static void service_boot_wifi_connect(unsigned long now_ms);
-static bool enqueue_op_job(const OpJob& job, bool prioritize_front, const char* source);
-static bool foreground_priority_active(unsigned long now_ms, const char** reason_out);
-static bool requeue_upload_job(const UploadJob& job, bool prioritize_front, const char* reason);
-static bool park_upload_job_if_foreground_active(const UploadJob& job, const char* stage);
-static bool upload_wait_for_foreground_clear_in_place(const UploadJob& job,
-                                                      const char* stage,
-                                                      uint32_t deadline_ms,
-                                                      bool* budget_exhausted);
 static bool sleep_reason_is_background_deferable(const char* reason);
 static void sleep_background_force_reset();
 static bool sleep_background_force_ready(unsigned long now_ms, const char* reason, const char* where);
-static void sleep_defer_queued_background_uploads();
-// http_queue_lock, http_queue_unlock → sense_upload.h
-// camera_profile_name, init_camera, deinit_camera, capture_fill_led_set,
-// camera_pwdn_gpio_init, camera_power_*, camera_stop_xclk, camera_set_pins_high_z,
-// tune_sensor_*, apply_sensor_profile_*, apply_camera_profile,
-// capture_camera_meta_snapshot, append_camera_meta_json, log_camera_meta_for_presign,
-// compute_scene_brightness_preflight, is_frame_quality_ok, camera_settle_discard,
-// warmup_and_capture, camera_timeline_complete → sense_camera.h
 static void uart_send_ui_status(const char* text);
-// SCAN operation forward declarations
 struct PresignReply {
   String job_id;
   String put_url;
@@ -475,43 +450,11 @@ struct PresignReply {
 
   PresignReply() : ttl_s(0) {}  // Constructor to initialize ttl_s
 };
-static void clear_active_dish_job(uint32_t job_id, const char* reason);
-static bool do_presign_request_simple(const char* url,
-                                      const char* type,
-                                      PresignReply& out,
-                                      int& http_code,
-                                      String& resp_body,
-                                      uint32_t deadline_ms = 0);
-static bool do_presign_request(const char* base_url,
-                               const char* endpoint,
-                               const char* type,
-                               const char* action,
-                               const char* owner,
-                               const char* expiry_date,
-                               bool add_to_shopping_list,
-                               const UploadJob::CameraUploadMeta* camera_meta,
-                               PresignReply& out,
-                               int& http_code,
-                               String& resp_body,
-                               uint32_t deadline_ms = 0);
-static bool get_presign(PresignReply& out,
-                        const char* mode,
-                        const char* expiry_date,
-                        bool add_to_shopping_list,
-                        const UploadJob::CameraUploadMeta* camera_meta = nullptr,
-                        uint32_t deadline_ms = 0);
-static bool get_presign_checkin(PresignReply& out, const char* expiry_date = NULL, uint16_t quantity = 1, const UploadJob::CameraUploadMeta* camera_meta = nullptr, uint32_t deadline_ms = 0);
-// net_ready_for_tls(char*,size_t) → sense_upload.h
 static bool net_ready_for_tls(const char* reason, uint32_t timeout_ms, const char* mode, uint32_t job_id, const char* ui_policy = NULL);
-static uint32_t upload_queue_count();
-static bool upload_queue_is_full();
 static bool sense_can_sleep_now(const char** reason);
-static void scan_terminal_reset();
-static void scan_send_terminal_status(const char* phase, const char* text, const char* mode, bool immediate_error = false);
-// presign_set_error_text, presign_error_text → sense_upload.h
-// clamp_timeout_ms → sense_http.h
-// ensure_time_valid, ensure_wifi_ready, wifi_hard_reset_and_reconnect,
-// wifi_recover_if_needed → sense_wifi.h
+static const char* sense_device_state_name();
+// Forward declarations — sense_upload_queue.h (late include)
+static void sleep_defer_queued_background_uploads();
 static uint8_t* allocate_upload_buffer(size_t len, bool* used_psram);
 static bool queue_upload_job(uint32_t job_id,
                              const char* mode,
@@ -530,7 +473,8 @@ static bool queue_voice_upload_job(uint32_t job_id,
                                    uint8_t retries = 0,
                                    bool from_persisted = false,
                                    uint32_t created_epoch = 0);
-// http_post_json_with_retries, http_get_with_retries → sense_upload.h
+// Forward declarations — sense_upload_exec.h (late include)
+static bool get_presign_checkin(PresignReply& out, const char* expiry_date = NULL, uint16_t quantity = 1, const UploadJob::CameraUploadMeta* camera_meta = nullptr, uint32_t deadline_ms = 0);
 static String build_dish_result_url(const char* user_id, const char* device_id, const char* job_id);
 static uint32_t dish_result_poll_delay_ms(const JsonDocument& doc, uint32_t fallback_ms);
 static bool wait_for_dish_result_http(const UploadJob& job,
@@ -545,14 +489,8 @@ static bool put_to_presigned_url(const String& url,
                                  bool* aborted_for_dish = NULL,
                                  uint32_t deadline_ms = 0,
                                  bool* aborted_for_budget = NULL);
-// connect_to_mqtt, mqtt_ensure_connected, on_mqtt_message,
-// build_result_topic, mqtt_clear_result_subscription,
-// mqtt_subscribe_result_topic_if_needed, mqtt_reset_connection → sense_mqtt.h
 static void uart_send_ui_meal_result(int kcal, const char* meal_summary, int health_score, const char* recommendation, const char* mode = NULL, float protein_g = 0.0, float carbs_g = 0.0, float fat_g = 0.0, float confidence = 0.0, uint32_t job_id = 0);
-static const char* sense_user_state_name();
-static const char* sense_device_state_name();
-// Definitions in sense_sleep.h (late include) — forward declarations
-// needed for callers above the include point.
+// Forward declarations — sense_sleep.h (late include)
 static void sleep_send_deny_and_clear(const char* reason, unsigned long now_ms);
 static bool wake_pin_is_active_level(int level);
 static void wake_pin_configure_rtc_input_inactive_pull();
