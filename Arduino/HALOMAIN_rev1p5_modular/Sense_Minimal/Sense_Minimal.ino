@@ -4602,6 +4602,7 @@ void setup() {
       reset_reason == ESP_RST_INT_WDT) {
     Serial.printf("[BOOT_DIAG] WARNING reset_reason=%d (brownout/wdt)\n", (int)reset_reason);
   }
+#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
   if (reset_reason == ESP_RST_PANIC ||
       reset_reason == ESP_RST_TASK_WDT ||
       reset_reason == ESP_RST_INT_WDT ||
@@ -4611,6 +4612,7 @@ void setup() {
                   g_upload_persist_replay_not_before_ms,
                   reset_reason_label(reset_reason));
   }
+#endif
   if (cause == ESP_SLEEP_WAKEUP_EXT0) {
     Serial.println("[SENSE] Booted from deep sleep (EXT0 GPIO wake)");
     // Re-initialize UARTs after wake
@@ -5231,9 +5233,7 @@ void loop() {
     }
   }
 
-#ifdef HALO_SENSE_PROD_WRAPPER
 loop_end:
-#endif
 
   // Periodic UART link heartbeat (suppressed during sleep handshake)
   if (link_synced && !sleep_requested && sleep_sm_state == SLEEP_SM_IDLE) {
