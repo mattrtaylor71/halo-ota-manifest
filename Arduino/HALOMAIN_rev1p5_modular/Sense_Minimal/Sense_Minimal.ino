@@ -456,8 +456,7 @@ static bool sleep_reason_is_background_deferable(const char* reason);
 static void sleep_background_force_reset();
 static bool sleep_background_force_ready(unsigned long now_ms, const char* reason, const char* where);
 static void sleep_defer_queued_background_uploads();
-static void http_queue_lock(const char* label, uint32_t job_id);
-static void http_queue_unlock(const char* label, uint32_t job_id);
+// http_queue_lock, http_queue_unlock → sense_upload.h
 static const char* camera_profile_name(CameraProfile profile);
 static void uart_send_ui_status(const char* text);
 // Camera and SCAN operation forward declarations
@@ -520,15 +519,14 @@ static bool get_presign(PresignReply& out,
                         const UploadJob::CameraUploadMeta* camera_meta = nullptr,
                         uint32_t deadline_ms = 0);
 static bool get_presign_checkin(PresignReply& out, const char* expiry_date = NULL, uint16_t quantity = 1, const UploadJob::CameraUploadMeta* camera_meta = nullptr, uint32_t deadline_ms = 0);
-static bool net_ready_for_tls(char* why, size_t why_len);
+// net_ready_for_tls(char*,size_t) → sense_upload.h
 static bool net_ready_for_tls(const char* reason, uint32_t timeout_ms, const char* mode, uint32_t job_id, const char* ui_policy = NULL);
 static uint32_t upload_queue_count();
 static bool upload_queue_is_full();
 static bool sense_can_sleep_now(const char** reason);
 static void scan_terminal_reset();
 static void scan_send_terminal_status(const char* phase, const char* text, const char* mode, bool immediate_error = false);
-static void presign_set_error_text(const char* text);
-static const char* presign_error_text();
+// presign_set_error_text, presign_error_text → sense_upload.h
 // clamp_timeout_ms → sense_http.h
 // ensure_time_valid, ensure_wifi_ready, wifi_hard_reset_and_reconnect,
 // wifi_recover_if_needed → sense_wifi.h
@@ -550,23 +548,7 @@ static bool queue_voice_upload_job(uint32_t job_id,
                                    uint8_t retries = 0,
                                    bool from_persisted = false,
                                    uint32_t created_epoch = 0);
-static bool http_post_json_with_retries(const char* url,
-                                        const String& body,
-                                        int& http_code,
-                                        String& resp_body,
-                                        const char* label,
-                                        const char* api_key,
-                                        const char* bearer,
-                                        uint32_t job_id = 0,
-                                        uint32_t deadline_ms = 0);
-static bool http_get_with_retries(const char* url,
-                                  int& http_code,
-                                  String& resp_body,
-                                  const char* label,
-                                  const char* api_key,
-                                  const char* bearer,
-                                  uint32_t job_id = 0,
-                                  uint32_t deadline_ms = 0);
+// http_post_json_with_retries, http_get_with_retries → sense_upload.h
 static String build_dish_result_url(const char* user_id, const char* device_id, const char* job_id);
 static uint32_t dish_result_poll_delay_ms(const JsonDocument& doc, uint32_t fallback_ms);
 static bool wait_for_dish_result_http(const UploadJob& job,
@@ -744,6 +726,7 @@ static char last_uart_rx_type[24] = "";
 #include "sense_uart.h"
 #include "sense_http.h"
 #include "sense_wifi.h"
+#include "sense_upload.h"
 static unsigned long last_lcd_diag_ms = 0;
 static char lcd_diag_wake[16] = "";
 static char lcd_diag_screen[16] = "";
@@ -3724,32 +3707,7 @@ static bool get_presign(PresignReply& out,
   return false;
 }
 
-static bool net_ready_for_tls(char* why, size_t why_len) {
-  if (why && why_len > 0) {
-    why[0] = '\0';
-  }
-  if (WiFi.status() != WL_CONNECTED) {
-    if (why && why_len > 0) {
-      snprintf(why, why_len, "wifi_disconnected");
-    }
-    return false;
-  }
-  IPAddress ip = WiFi.localIP();
-  if ((uint32_t)ip == 0) {
-    if (why && why_len > 0) {
-      snprintf(why, why_len, "no_ip");
-    }
-    return false;
-  }
-  time_t now = time(nullptr);
-  if (now < 1700000000) {
-    if (why && why_len > 0) {
-      snprintf(why, why_len, "time_unsynced");
-    }
-    return false;
-  }
-      return true;
-    }
+// net_ready_for_tls(char*, size_t) → sense_upload.h
 
 static void scan_terminal_reset() {
   scan_terminal_sent = false;
@@ -4971,20 +4929,7 @@ static void upload_worker_task(void *arg) {
   }
 }
 
-static void presign_set_error_text(const char* text) {
-  if (!text || !text[0]) {
-    presign_last_error_text[0] = '\0';
-    return;
-  }
-  strncpy(presign_last_error_text, text, sizeof(presign_last_error_text) - 1);
-  presign_last_error_text[sizeof(presign_last_error_text) - 1] = '\0';
-}
-
-static const char* presign_error_text() {
-  return presign_last_error_text[0] ? presign_last_error_text : "Network error. Tap to retry.";
-}
-
-// ensure_time_valid, ensure_wifi_ready → sense_wifi.h
+// presign_set_error_text, presign_error_text → sense_upload.h
 
 static bool net_ready_for_tls(const char* reason, uint32_t timeout_ms, const char* mode, uint32_t job_id, const char* ui_policy) {
   (void)ui_policy;
@@ -5004,46 +4949,15 @@ static bool net_ready_for_tls(const char* reason, uint32_t timeout_ms, const cha
 }
 
 // wifi_hard_reset_and_reconnect, wifi_recover_if_needed → sense_wifi.h
+// http_queue_lock, http_queue_unlock, http_post_json_with_retries,
+// http_get_with_retries, presign_set_error_text, presign_error_text,
+// net_ready_for_tls(char*,size_t) → sense_upload.h
 
-static void http_queue_lock(const char* label, uint32_t job_id) {
-  Serial.printf("[HTTP_QUEUE] enqueue label=%s job=%lu\n",
-                label ? label : "http",
-                (unsigned long)job_id);
-  if (http_mutex) {
-    xSemaphoreTake(http_mutex, portMAX_DELAY);
-  }
-  http_inflight = true;
-  Serial.printf("[HTTP_QUEUE] start label=%s job=%lu\n",
-                label ? label : "http",
-                (unsigned long)job_id);
-  uart_send_sense_diag("http", "start", label, (int32_t)job_id, "queue_lock");
-}
+// http_queue_lock, http_queue_unlock → sense_upload.h
 
-static void http_queue_unlock(const char* label, uint32_t job_id) {
-  http_inflight = false;
-  Serial.printf("[HTTP_QUEUE] done label=%s job=%lu\n",
-                label ? label : "http",
-                (unsigned long)job_id);
-  uart_send_sense_diag("http", "done", label, (int32_t)job_id, "queue_unlock");
-  if (http_mutex) {
-    xSemaphoreGive(http_mutex);
-  }
-  if (wifi_recover_requested) {
-    wifi_recover_requested = false;
-    wifi_hard_reset_and_reconnect("deferred_recover", 15000);
-  }
-}
-
-static bool http_post_json_with_retries(const char* url,
-                                        const String& body,
-                                        int& http_code,
-                                        String& resp_body,
-                                        const char* label,
-                                        const char* api_key,
-                                        const char* bearer,
-                                        uint32_t job_id,
-                                        uint32_t deadline_ms) {
-  static const unsigned long backoff_ms[] = {500, 1500, 3500};
+// http_post_json_with_retries, http_get_with_retries → sense_upload.h
+#if 0 // REMOVED_HTTP_BLOCK
+  static const unsigned long backoff_ms_DEAD[] = {500, 1500, 3500};
   const int max_attempts = 3;
   presign_set_error_text("");
   uint32_t effective_job = job_id;
@@ -5240,6 +5154,7 @@ static bool http_get_with_retries(const char* url,
   http_queue_unlock(label, effective_job);
   return false;
 }
+#endif // REMOVED_HTTP_POST (http_post_json_with_retries + http_get_with_retries)
 
 static String build_dish_result_url(const char* user_id, const char* device_id, const char* job_id) {
   if (!user_id || user_id[0] == '\0' ||
