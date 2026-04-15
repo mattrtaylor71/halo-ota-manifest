@@ -525,71 +525,10 @@ static TaskHandle_t op_worker_task_handle = NULL;  // Handle to suspend/resume t
 static bool scan_terminal_sent = false;
 static char presign_last_error_text[64] = "";
 static bool sntp_started = false;
-static const time_t TIME_VALID_MIN_EPOCH = 1700000000;
-static const char* TIME_CACHE_NS = "time_cache";
 static CameraProfile g_camera_profile = CAM_PROFILE_LOW_LIGHT;
 static bool g_camera_preflight_force = false;
 static int g_last_scene_luma = -1;
 static int g_last_scene_green_ratio = -1;
-static const char* TIME_CACHE_EPOCH_KEY = "epoch";
-RTC_DATA_ATTR static uint32_t g_time_cache_epoch = 0;
-static bool g_time_cache_loaded = false;
-
-static uint32_t time_cache_load() {
-  if (g_time_cache_epoch >= (uint32_t)TIME_VALID_MIN_EPOCH) {
-    return g_time_cache_epoch;
-  }
-  if (g_time_cache_loaded) {
-    return g_time_cache_epoch;
-  }
-  g_time_cache_loaded = true;
-  Preferences prefs;
-  if (prefs.begin(TIME_CACHE_NS, true)) {
-    uint32_t epoch = prefs.getUInt(TIME_CACHE_EPOCH_KEY, 0);
-    prefs.end();
-    if (epoch >= (uint32_t)TIME_VALID_MIN_EPOCH) {
-      g_time_cache_epoch = epoch;
-    }
-  }
-  return g_time_cache_epoch;
-}
-
-static void time_cache_store(time_t now) {
-  if (now < TIME_VALID_MIN_EPOCH) {
-    return;
-  }
-  uint32_t epoch = (uint32_t)now;
-  if (g_time_cache_epoch >= (uint32_t)TIME_VALID_MIN_EPOCH &&
-      epoch < g_time_cache_epoch + 3600) {
-    return;
-  }
-  g_time_cache_epoch = epoch;
-  g_time_cache_loaded = true;
-  Preferences prefs;
-  if (prefs.begin(TIME_CACHE_NS, false)) {
-    prefs.putUInt(TIME_CACHE_EPOCH_KEY, g_time_cache_epoch);
-    prefs.end();
-  }
-}
-
-static bool time_cache_bootstrap(const char* reason) {
-  time_t now = time(nullptr);
-  if (now >= TIME_VALID_MIN_EPOCH) {
-    return true;
-  }
-  uint32_t cached = time_cache_load();
-  if (cached < (uint32_t)TIME_VALID_MIN_EPOCH) {
-    return false;
-  }
-  timeval tv = {};
-  tv.tv_sec = (time_t)cached;
-  tv.tv_usec = 0;
-  settimeofday(&tv, nullptr);
-  Serial.printf("[TLS_GUARD] time_bootstrap epoch=%lu reason=%s\n",
-                (unsigned long)cached,
-                reason ? reason : "unknown");
-  return true;
-}
 
 #ifndef HALO_SENSE_PROD_WRAPPER
 static volatile bool g_lcd_ota_done = false;
@@ -639,6 +578,7 @@ static int g_list_count = 0;
 static int g_selected_index = -1;
 static SemaphoreHandle_t g_list_mutex = NULL;
 
+#include "sense_time.h"
 #include "sense_diag.h"
 #include "sense_uart.h"
 #include "sense_uart_msg.h"
