@@ -193,30 +193,4 @@ static bool upload_wait_for_foreground_clear_in_place(const UploadJob& job,
   return true;
 }
 
-static bool requeue_upload_job(const UploadJob& job, bool prioritize_front, const char* reason) {
-  QueueHandle_t target_queue = scan_mode_is_dish(job.mode) ? upload_queue_dish : upload_queue;
-  if (job.is_voice) {
-    target_queue = upload_queue;
-  }
-  if (target_queue == NULL) {
-    Serial.printf("[UPLOAD_QUEUE] requeue_missing_queue mode=%s voice=%d reason=%s\n",
-                  job.mode,
-                  job.is_voice ? 1 : 0,
-                  reason ? reason : "unknown");
-    return false;
-  }
-  BaseType_t queued = prioritize_front
-                          ? xQueueSendToFront(target_queue, &job, pdMS_TO_TICKS(10))
-                          : xQueueSend(target_queue, &job, pdMS_TO_TICKS(10));
-  Serial.printf("[UPLOAD_QUEUE] %s mode=%s job_id=%lu voice=%d front=%d reason=%s q=%lu\n",
-                queued == pdTRUE ? "requeued" : "requeue_failed",
-                job.mode,
-                (unsigned long)job.job_id,
-                job.is_voice ? 1 : 0,
-                prioritize_front ? 1 : 0,
-                reason ? reason : "unknown",
-                (unsigned long)upload_queue_count());
-  return queued == pdTRUE;
-}
-
 #endif // SENSE_OP_QUEUE_H

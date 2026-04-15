@@ -435,10 +435,6 @@ static esp_reset_reason_t g_boot_reset_reason = ESP_RST_UNKNOWN;
 enum SenseSleepKind { SENSE_SLEEP_DEEP_IDLE = 0, SENSE_SLEEP_DEEP_MAINT = 1 };
 
 // Forward declarations — functions still defined in this .ino
-static void service_boot_wifi_connect(unsigned long now_ms);
-static bool sleep_reason_is_background_deferable(const char* reason);
-static void sleep_background_force_reset();
-static bool sleep_background_force_ready(unsigned long now_ms, const char* reason, const char* where);
 static void uart_send_ui_status(const char* text);
 struct PresignReply {
   String job_id;
@@ -451,7 +447,6 @@ struct PresignReply {
   PresignReply() : ttl_s(0) {}  // Constructor to initialize ttl_s
 };
 static bool net_ready_for_tls(const char* reason, uint32_t timeout_ms, const char* mode, uint32_t job_id, const char* ui_policy = NULL);
-static bool sense_can_sleep_now(const char** reason);
 static const char* sense_device_state_name();
 // Forward declarations — sense_upload_queue.h (late include)
 static void sleep_defer_queued_background_uploads();
@@ -475,11 +470,6 @@ static bool queue_voice_upload_job(uint32_t job_id,
                                    uint32_t created_epoch = 0);
 // Forward declarations — sense_upload_exec.h (late include)
 static bool get_presign_checkin(PresignReply& out, const char* expiry_date = NULL, uint16_t quantity = 1, const UploadJob::CameraUploadMeta* camera_meta = nullptr, uint32_t deadline_ms = 0);
-static String build_dish_result_url(const char* user_id, const char* device_id, const char* job_id);
-static uint32_t dish_result_poll_delay_ms(const JsonDocument& doc, uint32_t fallback_ms);
-static bool wait_for_dish_result_http(const UploadJob& job,
-                                      const PresignReply& presign,
-                                      uint32_t job_deadline_ms);
 static bool put_to_presigned_url(const String& url,
                                  const uint8_t* buf,
                                  size_t len,
@@ -495,11 +485,6 @@ static void sleep_send_deny_and_clear(const char* reason, unsigned long now_ms);
 static bool wake_pin_is_active_level(int level);
 static void wake_pin_configure_rtc_input_inactive_pull();
 static uint32_t sleep_deny_retry_ms(const char* reason, unsigned long now_ms);
-static void sense_enter_deep_sleep(SenseSleepKind kind);
-static void print_wake_cause(esp_sleep_wakeup_cause_t cause);
-static void sense_enter_sleep(SenseSleepKind kind);
-static void apply_public_dns_for_api(const char* reason);
-static bool ensure_dns_ready(const char* host);
 
 enum UiEvtType { UI_EVT_STATUS, UI_EVT_LIST_UPDATE, UI_EVT_MEAL_RESULT, UI_EVT_VOICE_ITEMS, UI_EVT_ERROR };
 
