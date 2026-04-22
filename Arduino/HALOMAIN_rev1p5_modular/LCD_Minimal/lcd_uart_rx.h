@@ -546,6 +546,12 @@ static void uart_process_received_message(const char* json_str) {
       g_lcd_maintenance_boot_grace_until_ms = 0;
       Serial.println("[LCD_MAINT] boot_grace_clear (ota_lock)");
     }
+    // Extend maintenance deadline while Sense downloads first
+    if (g_lcd_maintenance_active) {
+      g_lcd_maintenance_deadline_ms = millis() + OTA_LOCK_TIMEOUT_MS;
+      Serial.printf("[LCD_MAINT] deadline extended %lu ms (ota_lock during maintenance)\n",
+                    (unsigned long)OTA_LOCK_TIMEOUT_MS);
+    }
     Serial.println("[OTA] lock received - blocking LCD OTA");
     return;
   } else if (strcmp(type, "OTA_UNLOCK") == 0) {

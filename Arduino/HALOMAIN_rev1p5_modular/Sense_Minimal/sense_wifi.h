@@ -51,7 +51,7 @@ static unsigned long wifi_last_scan_dump_ms = 0;
 
 // ── WiFi constants ──────────────────────────────────────────────────
 
-static const unsigned long WIFI_BEGIN_COOLDOWN_MS = 4000;
+static const unsigned long WIFI_BEGIN_COOLDOWN_MS = 2000;
 static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 25000;
 static const unsigned long WIFI_POLL_INTERVAL_MS = 150;
 static const unsigned long WIFI_FAIL_COOLDOWN_MS = 0UL;  /* no cooldown: retry every pre_sleep so bad wifi can recover */
@@ -436,13 +436,10 @@ static bool ensure_wifi_connected(const char* reason, uint32_t timeout_ms) {
       if (allow_retry) {
         unsigned long now_ms = millis();
         if (now_ms >= next_retry_ms) {
-          WiFi.disconnect(true, true);
-          delay(50);
-          WiFi.mode(WIFI_STA);
+          hardResetSta();
           WiFi.setAutoReconnect(true);
           WiFi.setSleep(false);
           esp_wifi_set_ps(WIFI_PS_NONE);
-          delay(50);
           WiFi.begin(ssid, pass);
           wifi_connect_inflight = true;
           wifi_inflight_start_ms = millis();
@@ -510,6 +507,128 @@ static bool wifi_connect() {
                 (int)wifi_state);
   Serial.println("\nWi-Fi connection failed!");
   return false;
+}
+
+// ── WiFi background maintenance ────────────────────────────────────
+
+static unsigned long wifi_maint_last_attempt_ms = 0;
+static unsigned long wifi_maint_last_log_ms = 0;
+static uint8_t wifi_maint_consecutive_fails = 0;
+static const uint8_t WIFI_MAINT_MAX_FAILS_BEFORE_RESET = 3;
+static const unsigned long WIFI_MAINT_LOG_INTERVAL_MS = 5000;
+
+static void service_wifi_maintenance(unsigned long now_ms) {
+  // Already connected — nothing to do
+  if (WiFi.status() == WL_CONNECTED) {
+    wifi_maint_consecutive_fails = 0;
+    return;
+  }
+
+  // Connection attempt in flight — monitor for timeout
+  if (wifi_connect_inflight) {
+    if (wifi_inflight_start_ms > 0 &&
+        (now_ms - wifi_inflight_start_ms) > WIFI_CONNECT_TIMEOUT_MS) {
+      // Timed out — hard reset and retry
+      Serial.printf("[WIFI_MAINT] connect_timeout elapsed_ms=%lu fails=%u -> hard_reset\n",
+                    (unsigned long)(now_ms - wifi_inflight_start_ms),
+                    (unsigned)wifi_maint_consecutive_fails);
+      wifi_maint_consecutive_fails++;
+      wifi_guard_set_inflight(false);
+      wifi_guard_set_state(WIFI_STATE_FAILED_TIMEOUT, "maint_timeout", WiFi.status());
+      wifi_guard_note_fail("maint_timeout");
+      // Immediately retry with hard reset if under fail limit
+      if (wifi_maint_consecutive_fails <= WIFI_MAINT_MAX_FAILS_BEFORE_RESET) {
+        hardResetSta();
+        delay(50);
+        const char* ssid = WIFI_SSID;
+        const char* pass = WIFI_PASS;
+#ifdef HALO_SENSE_PROD_WRAPPER
+        char provision_ssid[64];
+        char provision_pass[64];
+        if (halo_get_provisioned_wifi(provision_ssid, sizeof(provision_ssid),
+                                      provision_pass, sizeof(provision_pass))) {
+          ssid = provision_ssid;
+          pass = provision_pass;
+        }
+#endif
+        if (ssid && ssid[0]) {
+          WiFi.mode(WIFI_STA);
+          WiFi.setAutoReconnect(true);
+          WiFi.setSleep(false);
+          esp_wifi_set_ps(WIFI_PS_NONE);
+          WiFi.begin(ssid, pass);
+          wifi_connect_inflight = true;
+          wifi_inflight_start_ms = now_ms;
+          wifi_last_begin_ms = now_ms;
+          wifi_maint_last_attempt_ms = now_ms;
+          wifi_guard_set_state(WIFI_STATE_CONNECTING, "maint_hard_reset_retry", WiFi.status());
+          Serial.printf("[WIFI_MAINT] hard_reset_retry fails=%u\n",
+                        (unsigned)wifi_maint_consecutive_fails);
+        }
+      }
+    }
+    return;
+  }
+
+  // Not connected, not inflight — respect cooldown then start a new attempt
+  unsigned long cooldown_ms = WIFI_BEGIN_COOLDOWN_MS;
+  // Back off after consecutive failures: 2s, 4s, 8s (capped)
+  if (wifi_maint_consecutive_fails > 0) {
+    cooldown_ms = WIFI_BEGIN_COOLDOWN_MS << (wifi_maint_consecutive_fails < 3 ? wifi_maint_consecutive_fails : 3);
+    if (cooldown_ms > 16000) cooldown_ms = 16000;
+  }
+  if (wifi_maint_last_attempt_ms > 0 &&
+      (now_ms - wifi_maint_last_attempt_ms) < cooldown_ms) {
+    // Log periodically while waiting
+    if (wifi_maint_last_log_ms == 0 ||
+        (now_ms - wifi_maint_last_log_ms) >= WIFI_MAINT_LOG_INTERVAL_MS) {
+      Serial.printf("[WIFI_MAINT] waiting cooldown_ms=%lu fails=%u next_ms=%lu\n",
+                    cooldown_ms,
+                    (unsigned)wifi_maint_consecutive_fails,
+                    (unsigned long)(wifi_maint_last_attempt_ms + cooldown_ms));
+      wifi_maint_last_log_ms = now_ms;
+    }
+    return;
+  }
+
+  // Start a non-blocking connection attempt
+  const char* ssid = WIFI_SSID;
+  const char* pass = WIFI_PASS;
+#ifdef HALO_SENSE_PROD_WRAPPER
+  char provision_ssid[64];
+  char provision_pass[64];
+  if (halo_get_provisioned_wifi(provision_ssid, sizeof(provision_ssid),
+                                provision_pass, sizeof(provision_pass))) {
+    ssid = provision_ssid;
+    pass = provision_pass;
+  }
+#endif
+  if (!ssid || !ssid[0]) {
+    return;  // No SSID configured
+  }
+
+#ifdef HALO_SENSE_PROD_WRAPPER
+  if (halo_provisioning_active()) {
+    return;  // Don't interfere with provisioning
+  }
+#endif
+
+  if (!wifi_guard_try_claim_connect("wifi_maint")) {
+    return;  // Someone else owns the connection attempt
+  }
+
+  wifi_maint_last_attempt_ms = now_ms;
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleep(false);
+  esp_wifi_set_ps(WIFI_PS_NONE);
+  delay(20);
+  WiFi.begin(ssid, pass);
+  wifi_guard_set_state(WIFI_STATE_CONNECTING, "maint_begin", WiFi.status());
+  Serial.printf("[WIFI_MAINT] begin_connect fails=%u cooldown=%lu ssid=%s\n",
+                (unsigned)wifi_maint_consecutive_fails,
+                cooldown_ms,
+                ssid);
 }
 
 // ── Time synchronization ────────────────────────────────────────────
@@ -587,10 +706,10 @@ static bool ensure_wifi_ready(const char* reason, uint32_t timeout_ms) {
 
 static bool wifi_hard_reset_and_reconnect(const char* reason, uint32_t timeout_ms) {
   if (wifi_connect_inflight) {
-    Serial.printf("[WIFI_RECOVER] join_existing reason=%s owner=%s\n",
+    Serial.printf("[WIFI_RECOVER] force_reset reason=%s owner=%s (was inflight)\n",
                   reason ? reason : "unknown",
                   wifi_guard_connect_owner());
-    return ensure_wifi_connected(reason ? reason : "wifi_recover_join", timeout_ms);
+    wifi_guard_set_inflight(false);
   }
 
   const char* ssid = WIFI_SSID;

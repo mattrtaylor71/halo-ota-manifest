@@ -39,6 +39,8 @@ static const char* camera_profile_name(CameraProfile profile) {
       return "low_light";
     case CAM_PROFILE_FLASH:
       return "flash";
+    case CAM_PROFILE_LABEL:
+      return "label";
     case CAM_PROFILE_NORMAL:
     default:
       return "normal";
@@ -326,9 +328,30 @@ static void apply_sensor_profile_flash(sensor_t* s) {
   s->set_lenc(s, 0);
 }
 
+static void apply_sensor_profile_label(sensor_t* s) {
+  if (!s) return;
+  s->set_exposure_ctrl(s, 1);   // AEC on
+  s->set_aec2(s, 0);            // No long exposures (keep text sharp)
+  s->set_gain_ctrl(s, 1);       // AGC on
+  s->set_ae_level(s, 1);        // Slightly brighter
+  s->set_gainceiling(s, GAINCEILING_32X);
+  s->set_brightness(s, 1);
+  s->set_contrast(s, 1);        // Enhanced contrast for label text
+  s->set_saturation(s, 0);
+  if (s->set_whitebal) s->set_whitebal(s, 1);
+  if (s->set_awb_gain) s->set_awb_gain(s, 1);
+  if (s->set_wb_mode) s->set_wb_mode(s, 0);  // Auto WB (adapts to food packaging lighting)
+  if (s->set_denoise) s->set_denoise(s, 0);
+  if (s->set_sharpness) s->set_sharpness(s, 3);  // Maximum sharpness for text
+  if (s->set_raw_gma) s->set_raw_gma(s, 1);
+  s->set_lenc(s, 1);            // Lens correction ON (improves edge sharpness)
+}
+
 static void apply_camera_profile(sensor_t* s, CameraProfile profile) {
   if (!s) return;
-  if (profile == CAM_PROFILE_FLASH) {
+  if (profile == CAM_PROFILE_LABEL) {
+    apply_sensor_profile_label(s);
+  } else if (profile == CAM_PROFILE_FLASH) {
     apply_sensor_profile_flash(s);
   } else if (profile == CAM_PROFILE_LOW_LIGHT) {
     apply_sensor_profile_low_light(s);
@@ -651,7 +674,7 @@ static bool init_camera() {
     s->reset(s);
   }
   bool do_preflight = false;
-  g_camera_profile = (FILL_LED_PIN >= 0) ? CAM_PROFILE_FLASH : CAM_PROFILE_LOW_LIGHT;
+  g_camera_profile = CAM_PROFILE_LABEL;
   if (CAMERA_PREFLIGHT_MODE == CAMERA_PREFLIGHT_ALWAYS) {
     do_preflight = true;
   } else if (CAMERA_PREFLIGHT_MODE == CAMERA_PREFLIGHT_ON_FAIL && g_camera_preflight_force) {
@@ -805,7 +828,7 @@ static bool warmup_and_capture(camera_fb_t*& fb, bool fast_profile) {
   };
 
   if (fast_profile) {
-    if (capture_with_warmup(fb, 1, 1, 1, true, CAMERA_WARMUP_DELAY_FAST_MS)) {
+    if (capture_with_warmup(fb, 3, 1, 1, true, CAMERA_WARMUP_DELAY_FAST_MS)) {
       camera_timeline_complete(true, fb, "capture_ok");
       return true;
     }
@@ -831,7 +854,7 @@ static bool warmup_and_capture(camera_fb_t*& fb, bool fast_profile) {
   camera_timeline_event("retry_same", 0);
   camera_settle_discard(1, CAMERA_RETRY_SETTLE_MS);
   if (fast_profile) {
-    if (capture_with_warmup(fb, 1, 1, 1, true, CAMERA_WARMUP_DELAY_FAST_MS)) {
+    if (capture_with_warmup(fb, 3, 1, 1, true, CAMERA_WARMUP_DELAY_FAST_MS)) {
       camera_timeline_complete(true, fb, "capture_ok");
       return true;
     }

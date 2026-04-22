@@ -693,6 +693,8 @@ static unsigned long sleep_deny_retry_ms = 0;
 static unsigned long sleep_deny_received_ms = 0;
 static char sleep_deny_reason[24] = "";
 static bool sleep_deny_active = false;
+static uint8_t sleep_deny_count = 0;
+static const uint8_t SLEEP_DENY_MAX_COUNT = 10;
 static bool sleep_wait_for_sense_idle = false;
 static bool sleep_cancelled_by_user_input = false;
 static uint32_t sleep_fallback_timer_sec = 0;
@@ -957,7 +959,7 @@ static void haptic_pulse_scroll() {
 // ── OTA Lock (Sense-coordinated) ───────────────────────────────────────
 static volatile bool ota_locked = false;
 static unsigned long ota_lock_at_ms = 0;
-static const unsigned long OTA_LOCK_TIMEOUT_MS = 600000;  // 10 min auto-unlock safety
+static const unsigned long OTA_LOCK_TIMEOUT_MS = 1800000; // 30 min auto-unlock (covers sense OTA + reboot)
 static const unsigned long OTA_UNLOCK_GRACE_MS = 45000;   // keep LCD awake after unlock
 static volatile bool ota_check_requested = false;
 static volatile bool ota_check_pending = false;

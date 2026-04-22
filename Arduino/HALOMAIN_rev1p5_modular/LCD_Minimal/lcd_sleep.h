@@ -97,21 +97,33 @@ static void enterLightSleep() {
     return;
   }
   sleep_cancelled_by_user_input = false;
+
+  bool force_sleep = false;
+  if (sleep_deny_count >= SLEEP_DENY_MAX_COUNT) {
+    Serial.printf("[SLEEP] deny_max_exceeded count=%u - forcing sleep\n", sleep_deny_count);
+    sleep_deny_count = 0;
+    sleep_deny_active = false;
+    force_sleep = true;
+  }
+
   Serial.println("========================================");
   Serial.println("Preparing for DEEP SLEEP...");
   Serial.println("========================================");
   uint16_t dummy_x = 0, dummy_y = 0;
-  if (!notify_sense_sleep()) {
+  if (!force_sleep && !notify_sense_sleep()) {
     if (sleep_cancelled_by_user_input) {
       Serial.println("[SLEEP] user_input cancelled pre_sleep");
       resetActivityTimer();
       return;
     }
     if (sleep_deny_active) {
+      sleep_deny_count++;
       if (millis() - last_sleep_retry_log_ms > 1000) {
-        Serial.printf("[SLEEP] deny_wait reason=%s retry_ms=%lu\n",
+        Serial.printf("[SLEEP] deny_wait reason=%s retry_ms=%lu count=%u/%u\n",
                       sleep_deny_reason[0] ? sleep_deny_reason : "unknown",
-                      sleep_deny_retry_ms > 0 ? sleep_deny_retry_ms : (unsigned long)SLEEP_DENY_RETRY_DEFAULT_MS);
+                      sleep_deny_retry_ms > 0 ? sleep_deny_retry_ms : (unsigned long)SLEEP_DENY_RETRY_DEFAULT_MS,
+                      sleep_deny_count,
+                      SLEEP_DENY_MAX_COUNT);
         last_sleep_retry_log_ms = millis();
       }
       return;
@@ -143,6 +155,7 @@ static void enterLightSleep() {
   }
 
   sleep_handshake_fail_count = 0;
+  sleep_deny_count = 0;
   sleep_retry_requires_user = false;
   sleep_retry_allowed_ms = 0;
   sleep_wait_for_sense_idle = false;

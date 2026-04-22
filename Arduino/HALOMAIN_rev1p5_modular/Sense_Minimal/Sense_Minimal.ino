@@ -219,7 +219,7 @@ const char* DISCARD_PRESIGN_ENDPOINT = "/presign/discard";  // Legacy fallback f
 // Note: CAMERA_MODEL_XIAO_ESP32S3 is defined above before camera_pins.h include
 static const gpio_num_t CAM_PWDN_GPIO = GPIO_NUM_1;
 static framesize_t CAPTURE_SIZE = FRAMESIZE_SXGA;  // 1280x1024 (low-light preset)
-static int JPEG_QUALITY = 10;  // Reliability-first production baseline
+static int JPEG_QUALITY = 8;  // Label-optimized: less compression for better text readability
 static int CAMERA_XCLK_HZ = 10000000;  // 10 MHz (low-light preset)
 static const int FILL_LED_PIN = GPIO_NUM_4;  // D3 flash LED switch
 static const uint32_t CAMERA_PWDN_WAKE_DELAY_MS = 15;
@@ -244,7 +244,7 @@ static const uint32_t CAMERA_INIT_WARMUP_DELAY_MS = 80;
 static const size_t CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES = 24 * 1024;
 static const uint32_t CAMERA_NETWORK_QUIESCE_DELAY_MS = 250;
 static const uint32_t CAMERA_CAPTURE_SETTLE_MS = 40;
-static const uint32_t CAMERA_WARMUP_DELAY_FAST_MS = 30;
+static const uint32_t CAMERA_WARMUP_DELAY_FAST_MS = 50;
 static const uint32_t CAMERA_WARMUP_DELAY_SLOW_MS = 50;
 static const uint32_t CAMERA_CAPTURE_RETRY_DELAY_MS = 60;
 static const uint32_t CAMERA_RETRY_SETTLE_MS = 80;
@@ -256,7 +256,7 @@ static const CameraPreflightMode CAMERA_PREFLIGHT_MODE = CAMERA_PREFLIGHT_OFF;
 static const uint32_t CAMERA_CAPTURE_TARGET_MS = 3000;
 static const uint32_t CAMERA_CAPTURE_BUDGET_FAST_MS = 4000;
 static const uint32_t CAMERA_CAPTURE_BUDGET_SLOW_MS = 8000;
-enum CameraProfile { CAM_PROFILE_NORMAL = 0, CAM_PROFILE_LOW_LIGHT = 1, CAM_PROFILE_FLASH = 2 };
+enum CameraProfile { CAM_PROFILE_NORMAL = 0, CAM_PROFILE_LOW_LIGHT = 1, CAM_PROFILE_FLASH = 2, CAM_PROFILE_LABEL = 3 };
 
 // ── MQTT Configuration ────────────────────────────────────────
 const char* awsEndpoint = "arq86ma48kw9j-ats.iot.us-east-1.amazonaws.com";
@@ -517,15 +517,11 @@ static volatile bool upload_inflight = false;
 static SemaphoreHandle_t http_mutex = NULL;
 static volatile bool http_inflight = false;
 static bool wifi_recover_requested = false;
-static bool boot_wifi_connect_pending = false;
-static unsigned long boot_wifi_connect_earliest_ms = 0;
-static unsigned long boot_wifi_connect_last_attempt_ms = 0;
-static unsigned long boot_wifi_last_defer_log_ms = 0;
 static TaskHandle_t op_worker_task_handle = NULL;  // Handle to suspend/resume task
 static bool scan_terminal_sent = false;
 static char presign_last_error_text[64] = "";
 static bool sntp_started = false;
-static CameraProfile g_camera_profile = CAM_PROFILE_LOW_LIGHT;
+static CameraProfile g_camera_profile = CAM_PROFILE_LABEL;
 static bool g_camera_preflight_force = false;
 static int g_last_scene_luma = -1;
 static int g_last_scene_green_ratio = -1;
@@ -805,6 +801,16 @@ static bool sense_can_sleep_now(const char** reason) {
   if (guardian_force_sleep) {
     return true;
   }
+#ifdef HALO_SENSE_PROD_WRAPPER
+  if (g_lcd_ota_request_active) {
+    if (reason) *reason = "lcd_ota_pending";
+    return false;
+  }
+  if (g_ota_pending_verify_active) {
+    if (reason) *reason = "ota_pending_verify";
+    return false;
+  }
+#endif
   if (http_inflight) {
     if (background_sleep_bypass_active) {
       return true;
@@ -1164,82 +1170,7 @@ static bool sense_idle_mode_active() {
 
 
 static void service_boot_wifi_connect(unsigned long now_ms) {
-  if (!boot_wifi_connect_pending) {
-    return;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    boot_wifi_connect_pending = false;
-    boot_wifi_connect_last_attempt_ms = 0;
-    Serial.printf("[BOOT_WIFI] connect_skip already_connected t=%lu\n", now_ms);
-    return;
-  }
-
-  if (wifi_connect_inflight) {
-    return;
-  }
-
-  if (upload_inflight || upload_queue_count() > 0) {
-    static unsigned long last_upload_owner_log_ms = 0;
-    if (last_upload_owner_log_ms == 0 ||
-        (now_ms - last_upload_owner_log_ms) >= 1500UL) {
-      Serial.printf("[BOOT_WIFI] defer reason=background_upload_owner t=%lu upload=%d q=%lu\n",
-                    now_ms,
-                    upload_inflight ? 1 : 0,
-                    (unsigned long)upload_queue_count());
-      last_upload_owner_log_ms = now_ms;
-    }
-    boot_wifi_connect_earliest_ms = now_ms + 1500UL;
-    return;
-  }
-
-  if (now_ms < boot_wifi_connect_earliest_ms) {
-    return;
-  }
-
-  const char* defer_reason = NULL;
-  if (foreground_priority_active(now_ms, &defer_reason)) {
-    boot_wifi_connect_earliest_ms = now_ms + 750;
-    if (boot_wifi_last_defer_log_ms == 0 ||
-        (now_ms - boot_wifi_last_defer_log_ms) >= 1000UL) {
-      Serial.printf("[BOOT_WIFI] defer reason=%s t=%lu next_t=%lu\n",
-                    defer_reason ? defer_reason : "foreground",
-                    now_ms,
-                    boot_wifi_connect_earliest_ms);
-      boot_wifi_last_defer_log_ms = now_ms;
-    }
-    return;
-  }
-
-  unsigned long idle_since_lcd_ms = now_ms - last_lcd_communication;
-  if (idle_since_lcd_ms < 2000) {
-    return;
-  }
-
-  if (boot_wifi_connect_last_attempt_ms > 0 &&
-      (now_ms - boot_wifi_connect_last_attempt_ms) < WIFI_BEGIN_COOLDOWN_MS) {
-    return;
-  }
-
-  boot_wifi_connect_last_attempt_ms = now_ms;
-  Serial.printf("[BOOT_WIFI] connect_begin t=%lu idle_since_lcd_ms=%lu queue=%lu\n",
-                now_ms,
-                idle_since_lcd_ms,
-                (unsigned long)(op_queue ? uxQueueMessagesWaiting(op_queue) : 0));
-  (void)ensure_wifi_connected("wifi_connect", 0);
-  if (wifi_connect_inflight) {
-    boot_wifi_connect_earliest_ms = now_ms + WIFI_BEGIN_COOLDOWN_MS;
-    Serial.printf("[BOOT_WIFI] connect_started t=%lu next_retry_t=%lu\n",
-                  now_ms,
-                  boot_wifi_connect_earliest_ms);
-  } else {
-    boot_wifi_connect_earliest_ms = now_ms + WIFI_BEGIN_COOLDOWN_MS;
-    Serial.printf("[BOOT_WIFI] connect_deferred_no_begin t=%lu next_retry_t=%lu status=%d state=%d\n",
-                  now_ms,
-                  boot_wifi_connect_earliest_ms,
-                  (int)WiFi.status(),
-                  (int)wifi_state);
-  }
+  service_wifi_maintenance(now_ms);
 }
 
 // (voice functions removed — see sense_voice.h)
@@ -1807,11 +1738,15 @@ static bool parse_input_message(const char* json_str) {
     return true;
   }
 #ifdef HALO_SENSE_PROD_WRAPPER
-  if (strncmp(type, "INPUT_", 6) == 0) {
+  if (strncmp(type, "INPUT_", 6) == 0 &&
+      strcmp(type, "INPUT_SLEEP") != 0 &&
+      strcmp(type, "INPUT_PING") != 0) {
     last_user_activity_ms = millis();
   }
 #else
-  if (strncmp(type, "INPUT_", 6) == 0) {
+  if (strncmp(type, "INPUT_", 6) == 0 &&
+      strcmp(type, "INPUT_SLEEP") != 0 &&
+      strcmp(type, "INPUT_PING") != 0) {
     last_user_activity_ms = millis();
   }
 #endif
@@ -2983,17 +2918,39 @@ void setup() {
   WiFi.onEvent(handle_wifi_event);
   Serial.printf("[BOOT_FLOW] stage=wifi_event_register_done t=%lu\n", millis());
   
-  // Defer boot-time Wi-Fi connect so UART/user actions can be serviced first.
-  boot_wifi_connect_pending = true;
-  boot_wifi_connect_earliest_ms = millis() + 1500;
-  Serial.printf("[BOOT_FLOW] stage=wifi_connect_deferred t=%lu earliest_t=%lu status=%d inflight=%d state=%d heap=%u min_heap=%u\n",
-                millis(),
-                boot_wifi_connect_earliest_ms,
-                (int)WiFi.status(),
-                wifi_connect_inflight ? 1 : 0,
-                (int)wifi_state,
-                (unsigned)ESP.getFreeHeap(),
-                (unsigned)ESP.getMinFreeHeap());
+  // Start Wi-Fi immediately (non-blocking). The ESP32 WiFi stack runs on
+  // core 0 in a FreeRTOS task — calling WiFi.begin() doesn't block the
+  // main loop or interfere with camera capture on core 1.
+  {
+    const char* ssid = WIFI_SSID;
+    const char* pass = WIFI_PASS;
+#ifdef HALO_SENSE_PROD_WRAPPER
+    char provision_ssid[64];
+    char provision_pass[64];
+    if (halo_get_provisioned_wifi(provision_ssid, sizeof(provision_ssid),
+                                  provision_pass, sizeof(provision_pass))) {
+      ssid = provision_ssid;
+      pass = provision_pass;
+    }
+#endif
+    if (ssid && ssid[0]) {
+      WiFi.mode(WIFI_STA);
+      WiFi.setAutoReconnect(true);
+      WiFi.setSleep(false);
+      esp_wifi_set_ps(WIFI_PS_NONE);
+      if (wifi_guard_try_claim_connect("boot_setup")) {
+        WiFi.begin(ssid, pass);
+        wifi_guard_set_state(WIFI_STATE_CONNECTING, "boot_begin", WiFi.status());
+        Serial.printf("[BOOT_FLOW] stage=wifi_begin_immediate t=%lu ssid=%s status=%d heap=%u\n",
+                      millis(),
+                      ssid,
+                      (int)WiFi.status(),
+                      (unsigned)ESP.getFreeHeap());
+      }
+    } else {
+      Serial.printf("[BOOT_FLOW] stage=wifi_skip_no_ssid t=%lu\n", millis());
+    }
+  }
   
   // Initialize MQTT (will connect when needed)
   Serial.println("[SETUP] MQTT system initialized (will connect on demand)");
