@@ -125,13 +125,9 @@ static void uart_process_received_message(const char* json_str) {
                   label,
                   (long)code,
                   detail);
-    if (strcmp(area, "wifi") == 0) {
-      diag_record_wifi_event(event, label, code, detail);
-    }
     return;
   }
   if (strcmp(type, "WIFI_DIAG_SUMMARY") == 0) {
-    // Re-serialize the incoming doc to store as-is
     String summary;
     serializeJson(doc, summary);
     Serial.printf("[WIFI_DIAG_SUMMARY] %s\n", summary.c_str());

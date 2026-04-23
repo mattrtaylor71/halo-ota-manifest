@@ -157,12 +157,6 @@ static void uart_task(void *arg) {
                     deferred_awake_tx_valid ? 1 : 0);
       uart_rx_last_summary_ms = now_ms;
     }
-    
-    // ── USB Serial diagnostic commands ──
-    while (Serial.available()) {
-      uint8_t b = Serial.read();
-      diag_process_serial_byte(b);
-    }
 
     vTaskDelay(pdMS_TO_TICKS(yielded_early ? 1 : 5));
   }

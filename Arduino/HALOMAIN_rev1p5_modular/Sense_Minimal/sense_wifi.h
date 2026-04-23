@@ -74,6 +74,18 @@ static void wifi_diag_reset() {
     wifi_diag.rssi_min = 0;  // 0 means "not set"
     wifi_diag.rssi_max = -128;
     wifi_diag.disconnected_since_ms = millis(); // start disconnected
+
+    // If WiFi is already connected (carried over from previous cycle),
+    // seed the accumulator so the pre-sleep summary reflects the truth.
+    if (WiFi.status() == WL_CONNECTED) {
+        int8_t rssi = (int8_t)WiFi.RSSI();
+        wifi_diag.connected_since_ms   = millis();
+        wifi_diag.disconnected_since_ms = 0;
+        wifi_diag.rssi_last = rssi;
+        wifi_diag.rssi_min  = rssi;
+        wifi_diag.rssi_max  = rssi;
+        wifi_diag.connect_successes = 1;
+    }
 }
 
 static void wifi_diag_note_attempt() {
