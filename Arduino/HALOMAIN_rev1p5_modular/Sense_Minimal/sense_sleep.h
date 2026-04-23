@@ -254,6 +254,38 @@ static void sleep_notify_late_block(const char* reason) {
   sleep_coord_pending_for_ready = false;
 }
 
+// ── WiFi diagnostic summary (pre-sleep) ────────────────────────────
+
+static void uart_send_wifi_diag_summary() {
+#if HALO_SENSE_LCD_DIAG_BRIDGE
+  wifi_diag_finalize();
+  StaticJsonDocument<384> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = "WIFI_DIAG_SUMMARY";
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  doc["attempts"] = wifi_diag.connect_attempts;
+  doc["successes"] = wifi_diag.connect_successes;
+  doc["fails"] = wifi_diag.connect_fails;
+  doc["disconnects"] = wifi_diag.disconnections;
+  doc["hard_resets"] = wifi_diag.hard_resets;
+  doc["rssi_min"] = (int)wifi_diag.rssi_min;
+  doc["rssi_max"] = (int)wifi_diag.rssi_max;
+  doc["rssi_last"] = (int)wifi_diag.rssi_last;
+  doc["connected_ms"] = wifi_diag.total_connected_ms;
+  doc["disconnected_ms"] = wifi_diag.total_disconnected_ms;
+  if (wifi_diag.last_fail_reason[0]) {
+    doc["fail_reason"] = wifi_diag.last_fail_reason;
+  }
+  doc["fail_status"] = wifi_diag.last_fail_status;
+  doc["uptime_ms"] = millis();
+  String output;
+  serializeJson(doc, output);
+  Serial.printf("[WIFI_DIAG] sending summary: %s\n", output.c_str());
+  uart_send_json(output.c_str());
+#endif
+}
+
 // ── Deep sleep entry ────────────────────────────────────────────────
 
 static void sense_enter_deep_sleep(SenseSleepKind kind) {
@@ -387,11 +419,13 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   }
 
   // 1. Disconnect MQTT if connected (active connections can prevent sleep)
+#ifndef HALO_SENSE_PROD_WRAPPER
   if (mqttClient.connected()) {
     Serial.println("[SENSE] Disconnecting MQTT before sleep...");
     mqttClient.disconnect();
     delay(100);  // Give MQTT time to clean up
   }
+#endif
 
   // 2. Shut down Wi-Fi + BT before deep sleep
   if (!sleep_allowed_now("pre_wifi_off", NULL)) {
@@ -474,6 +508,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
                   sleep_ready_reason ? sleep_ready_reason : "unknown");
     Serial.printf("[SLEEP_PROTO] tx SLEEP_READY reason=%s\n",
                   sleep_ready_reason ? sleep_ready_reason : "unknown");
+    uart_send_wifi_diag_summary();
     uart_send_sleep_ready();
     sleep_ready_sent_for_cycle = true;
     sleep_sm_transition(SLEEP_SM_READY_SENT, "READY_SENT", sleep_sm_msg_id);

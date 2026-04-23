@@ -49,6 +49,89 @@ static char last_wifi_fail_reason[24] = "";
 static char wifi_connect_owner[24] = "";
 static unsigned long wifi_last_scan_dump_ms = 0;
 
+// ── WiFi Diagnostic Accumulator (per wake cycle) ──────────────────
+struct WifiDiagAccum {
+    uint16_t connect_attempts;
+    uint16_t connect_successes;
+    uint16_t connect_fails;
+    uint16_t disconnections;
+    uint16_t hard_resets;
+    int8_t   rssi_min;
+    int8_t   rssi_max;
+    int8_t   rssi_last;
+    uint32_t total_connected_ms;
+    uint32_t total_disconnected_ms;
+    char     last_fail_reason[24];
+    uint8_t  last_fail_status;
+    uint32_t connected_since_ms;   // internal: millis() when last connected
+    uint32_t disconnected_since_ms; // internal: millis() when last disconnected
+};
+
+static WifiDiagAccum wifi_diag = {};
+
+static void wifi_diag_reset() {
+    memset(&wifi_diag, 0, sizeof(wifi_diag));
+    wifi_diag.rssi_min = 0;  // 0 means "not set"
+    wifi_diag.rssi_max = -128;
+    wifi_diag.disconnected_since_ms = millis(); // start disconnected
+}
+
+static void wifi_diag_note_attempt() {
+    wifi_diag.connect_attempts++;
+}
+
+static void wifi_diag_note_success(int rssi) {
+    wifi_diag.connect_successes++;
+    wifi_diag.rssi_last = (int8_t)rssi;
+    if (wifi_diag.rssi_min == 0 || rssi < wifi_diag.rssi_min) {
+        wifi_diag.rssi_min = (int8_t)rssi;
+    }
+    if (rssi > wifi_diag.rssi_max) {
+        wifi_diag.rssi_max = (int8_t)rssi;
+    }
+    // Track connected time
+    if (wifi_diag.disconnected_since_ms > 0) {
+        wifi_diag.total_disconnected_ms += millis() - wifi_diag.disconnected_since_ms;
+        wifi_diag.disconnected_since_ms = 0;
+    }
+    wifi_diag.connected_since_ms = millis();
+}
+
+static void wifi_diag_note_fail(uint8_t status, const char* reason) {
+    wifi_diag.connect_fails++;
+    wifi_diag.last_fail_status = status;
+    if (reason) {
+        strncpy(wifi_diag.last_fail_reason, reason, sizeof(wifi_diag.last_fail_reason) - 1);
+        wifi_diag.last_fail_reason[sizeof(wifi_diag.last_fail_reason) - 1] = '\0';
+    }
+}
+
+static void wifi_diag_note_disconnect() {
+    wifi_diag.disconnections++;
+    // Track disconnected time
+    if (wifi_diag.connected_since_ms > 0) {
+        wifi_diag.total_connected_ms += millis() - wifi_diag.connected_since_ms;
+        wifi_diag.connected_since_ms = 0;
+    }
+    wifi_diag.disconnected_since_ms = millis();
+}
+
+static void wifi_diag_note_hard_reset() {
+    wifi_diag.hard_resets++;
+}
+
+// Finalize timing before sending summary
+static void wifi_diag_finalize() {
+    if (wifi_diag.connected_since_ms > 0) {
+        wifi_diag.total_connected_ms += millis() - wifi_diag.connected_since_ms;
+        wifi_diag.connected_since_ms = 0;
+    }
+    if (wifi_diag.disconnected_since_ms > 0) {
+        wifi_diag.total_disconnected_ms += millis() - wifi_diag.disconnected_since_ms;
+        wifi_diag.disconnected_since_ms = 0;
+    }
+}
+
 // ── WiFi constants ──────────────────────────────────────────────────
 
 static const unsigned long WIFI_BEGIN_COOLDOWN_MS = 2000;
@@ -206,6 +289,7 @@ static void wifi_guard_mark_failed(wl_status_t status, const char* reason) {
   wifi_guard_set_inflight(false);
   wifi_guard_set_state(WIFI_STATE_FAILED, reason, status);
   wifi_guard_note_fail(reason);
+  wifi_diag_note_fail((uint8_t)status, reason);
   if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL || status == WL_DISCONNECTED) {
     wifi_dump_scan(reason);
   }
@@ -271,11 +355,13 @@ static void handle_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
     Serial.printf("[WIFI_GUARD] connect_ok ip=%s rssi=%d\n",
                   WiFi.localIP().toString().c_str(),
                   WiFi.RSSI());
+    wifi_diag_note_success(WiFi.RSSI());
     String ip = WiFi.localIP().toString();
     uart_send_sense_diag("wifi", "got_ip", "event_got_ip", (int32_t)WiFi.RSSI(), ip.c_str());
     apply_public_dns_for_api("wifi_got_ip");
   } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
     wl_status_t status = WiFi.status();
+    wifi_diag_note_disconnect();
     if (wifi_connect_inflight) {
       wifi_guard_mark_failed(status, "event_disconnect");
     } else if (wifi_state == WIFI_STATE_FAILED || wifi_state == WIFI_STATE_FAILED_TIMEOUT) {
@@ -294,11 +380,13 @@ static void handle_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
     Serial.printf("[WIFI_GUARD] connect_ok ip=%s rssi=%d\n",
                   WiFi.localIP().toString().c_str(),
                   WiFi.RSSI());
+    wifi_diag_note_success(WiFi.RSSI());
     String ip = WiFi.localIP().toString();
     uart_send_sense_diag("wifi", "got_ip", "event_got_ip", (int32_t)WiFi.RSSI(), ip.c_str());
     apply_public_dns_for_api("wifi_got_ip");
   } else if (event == SYSTEM_EVENT_STA_DISCONNECTED) {
     wl_status_t status = WiFi.status();
+    wifi_diag_note_disconnect();
     if (wifi_connect_inflight) {
       wifi_guard_mark_failed(status, "event_disconnect");
     } else if (wifi_state == WIFI_STATE_FAILED || wifi_state == WIFI_STATE_FAILED_TIMEOUT) {
@@ -408,6 +496,7 @@ static bool ensure_wifi_connected(const char* reason, uint32_t timeout_ms) {
                 reason ? reason : "unknown",
                 wifi_guard_connect_owner(),
                 ssid);
+  wifi_diag_note_attempt();
   uart_send_sense_diag("wifi", "begin", reason, (int32_t)WiFi.status(), wifi_guard_connect_owner());
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -518,6 +607,12 @@ static const uint8_t WIFI_MAINT_MAX_FAILS_BEFORE_RESET = 3;
 static const unsigned long WIFI_MAINT_LOG_INTERVAL_MS = 5000;
 
 static void service_wifi_maintenance(unsigned long now_ms) {
+#ifdef HALO_SENSE_PROD_WRAPPER
+  // Don't interfere with provisioning — it owns WiFi mode (AP_STA)
+  if (halo_provisioning_active()) {
+    return;
+  }
+#endif
   // Already connected — nothing to do
   if (WiFi.status() == WL_CONNECTED) {
     wifi_maint_consecutive_fails = 0;
@@ -730,6 +825,7 @@ static bool wifi_hard_reset_and_reconnect(const char* reason, uint32_t timeout_m
   Serial.printf("[WIFI_RECOVER] hard_reset reason=%s ssid=%s\n",
                 reason ? reason : "unknown",
                 ssid);
+  wifi_diag_note_hard_reset();
   uart_send_sense_diag("wifi", "hard_reset_begin", reason, (int32_t)WiFi.status(), "wifi_recover");
   if (!wifi_guard_try_claim_connect(reason ? reason : "wifi_recover")) {
     Serial.printf("[WIFI_RECOVER] claim_busy reason=%s owner=%s\n",

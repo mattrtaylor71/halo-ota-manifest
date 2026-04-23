@@ -573,6 +573,7 @@ static bool init_camera() {
   };
   auto quiesce_network_for_camera = [&](const char* reason) {
     bool changed = false;
+#ifndef HALO_SENSE_PROD_WRAPPER
     if (!waiting_for_mqtt_result) {
       mqtt_clear_result_subscription();
     }
@@ -583,6 +584,7 @@ static bool init_camera() {
       changed = true;
     }
     wifiClient.stop();
+#endif
     if (changed || reason != nullptr) {
       delay(CAMERA_NETWORK_QUIESCE_DELAY_MS);
     }
@@ -591,11 +593,19 @@ static bool init_camera() {
 
   log_camera_init_memory("pre_init");
   size_t dma_largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  if (dma_largest < CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES || mqttClient.connected()) {
+  if (dma_largest < CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES
+#ifndef HALO_SENSE_PROD_WRAPPER
+      || mqttClient.connected()
+#endif
+  ) {
     Serial.printf("[CAMERA] Pre-init guard dma_largest=%u threshold=%u mqtt=%d\n",
                   (unsigned)dma_largest,
                   (unsigned)CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES,
+#ifndef HALO_SENSE_PROD_WRAPPER
                   mqttClient.connected() ? 1 : 0);
+#else
+                  0);
+#endif
     quiesce_network_for_camera("pre_init_guard");
   }
 

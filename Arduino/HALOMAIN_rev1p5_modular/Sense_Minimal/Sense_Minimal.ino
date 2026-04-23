@@ -64,7 +64,9 @@ void dump_system_truth(const char* reason);
 #define CAMERA_MODEL_XIAO_ESP32S3
 #include "esp_camera.h"  // Camera support
 #include "camera_pins.h"  // Camera pin definitions
-#include <PubSubClient.h>  // MQTT support
+#ifndef HALO_SENSE_PROD_WRAPPER
+#include <PubSubClient.h>  // MQTT support (dev builds only; production uses MqttClient.cpp)
+#endif
 
 #ifdef HALO_SENSE_PROD_WRAPPER
 // Provisioning integration (Sense prod wrapper)
@@ -258,18 +260,33 @@ static const uint32_t CAMERA_CAPTURE_BUDGET_FAST_MS = 4000;
 static const uint32_t CAMERA_CAPTURE_BUDGET_SLOW_MS = 8000;
 enum CameraProfile { CAM_PROFILE_NORMAL = 0, CAM_PROFILE_LOW_LIGHT = 1, CAM_PROFILE_FLASH = 2, CAM_PROFILE_LABEL = 3 };
 
-// ── MQTT Configuration ────────────────────────────────────────
+#ifndef HALO_SENSE_PROD_WRAPPER
+// ── MQTT Configuration (PubSubClient — dev builds only) ────────────────────
 const char* awsEndpoint = "arq86ma48kw9j-ats.iot.us-east-1.amazonaws.com";
 const char* RESULT_TOPIC_TEMPLATE = "trepo/%s/%s/jobs/%s/result";
 static unsigned long mqtt_wait_deadline = 0;
 static bool mqtt_subscribed = false;
-static String current_scan_job_id = "";  // Track SCAN job ID for MQTT matching
+static String current_scan_job_id = "";
 static String current_result_topic = "";
 static String subscribed_result_topic = "";
 static volatile bool waiting_for_mqtt_result = false;
 static uint32_t active_dish_job_id = 0;
 static uint32_t current_result_local_job_id = 0;
 static char current_result_mode[16] = "";
+#else
+// Production stubs — PubSubClient MQTT removed to save ~30KB internal SRAM.
+// These variables are referenced by upload cleanup paths but always no-op.
+// awsEndpoint still needed for DNS pre-resolution in sense_http.h.
+const char* awsEndpoint = "arq86ma48kw9j-ats.iot.us-east-1.amazonaws.com";
+static unsigned long mqtt_wait_deadline = 0;
+static volatile bool waiting_for_mqtt_result = false;
+static uint32_t active_dish_job_id = 0;
+static uint32_t current_result_local_job_id = 0;
+static char current_result_mode[16] = "";
+static String current_scan_job_id = "";
+static inline void mqtt_clear_result_subscription() {}
+static inline void mqtt_subscribe_result_topic_if_needed() {}
+#endif
 struct DishTimingTrace {
   uint32_t sense_job_id;
   uint32_t ui_wait_start_ms;
@@ -292,7 +309,17 @@ static void load_owner_id_or_default(char* out, size_t out_len) {
   out[0] = '\0';
   char owner_code[32] = {0};
   if (ProvisioningState::loadOwnerCode(owner_code, sizeof(owner_code))) {
-    // Owner code pending -> block stale owner_id usage until claim completes.
+    // Owner code exists -- check if owner_id was already set via /user-id fallback.
+    char tmp_id[64] = {0};
+    if (ProvisioningState::loadOwnerId(tmp_id, sizeof(tmp_id)) && tmp_id[0] != '\0') {
+      // Both exist: claim effectively complete. Clear stale owner_code.
+      ProvisioningState::clearOwnerCode();
+      Serial.printf("[OWNER] owner_code stale, owner_id already set -> cleared owner_code, using owner_id=%s\n", tmp_id);
+      strncpy(out, tmp_id, out_len - 1);
+      out[out_len - 1] = '\0';
+      return;
+    }
+    // owner_code pending, no owner_id yet -> genuine pending claim, suppress.
     Serial.println("[OWNER] owner_code pending -> suppress owner_id");
     out[0] = '\0';
     return;
@@ -323,7 +350,8 @@ static String build_runtime_ota_topic() {
   return String("trepo/halo/") + device_id + "/ota";
 }
 
-// AWS IoT Certificates
+#ifndef HALO_SENSE_PROD_WRAPPER
+// AWS IoT Certificates (PubSubClient — dev builds only)
 const char* rootCA = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
@@ -402,6 +430,7 @@ XoIKKh5tJj0rxpbpDZXgiTSQ0isFwzPrkTPGuRdSyx7n/0q98u/d
 
 WiFiClientSecure wifiClient;
 PubSubClient mqttClient(wifiClient);
+#endif
 
 #include "sense_ops.h"
 
@@ -581,7 +610,9 @@ static SemaphoreHandle_t g_list_mutex = NULL;
 #include "sense_http.h"
 #include "sense_wifi.h"
 #include "sense_upload.h"
+#ifndef HALO_SENSE_PROD_WRAPPER
 #include "sense_mqtt.h"
+#endif
 #include "sense_voice.h"
 #include "sense_list.h"
 #include "sense_camera.h"
@@ -2916,39 +2947,60 @@ void setup() {
   // Register Wi-Fi event handler for connect guard state
   Serial.printf("[BOOT_FLOW] stage=wifi_event_register_begin t=%lu\n", millis());
   WiFi.onEvent(handle_wifi_event);
+  wifi_diag_reset();
   Serial.printf("[BOOT_FLOW] stage=wifi_event_register_done t=%lu\n", millis());
   
   // Start Wi-Fi immediately (non-blocking). The ESP32 WiFi stack runs on
   // core 0 in a FreeRTOS task — calling WiFi.begin() doesn't block the
   // main loop or interfere with camera capture on core 1.
+  // IMPORTANT: Skip if device needs provisioning — the ProvisioningManager
+  // owns WiFi mode (AP_STA) during setup and we must not force STA-only.
   {
-    const char* ssid = WIFI_SSID;
-    const char* pass = WIFI_PASS;
+    bool skip_boot_wifi = false;
 #ifdef HALO_SENSE_PROD_WRAPPER
-    char provision_ssid[64];
-    char provision_pass[64];
-    if (halo_get_provisioned_wifi(provision_ssid, sizeof(provision_ssid),
-                                  provision_pass, sizeof(provision_pass))) {
-      ssid = provision_ssid;
-      pass = provision_pass;
+    if (!ProvisioningState::isProvisioned()) {
+      skip_boot_wifi = true;
+      Serial.printf("[BOOT_FLOW] stage=wifi_skip_needs_provisioning t=%lu\n", millis());
+    } else {
+      // Provisioned but check if home WiFi creds actually exist
+      char check_ssid[64];
+      char check_pass[64];
+      if (!ProvisioningState::loadHomeWifiCreds(check_ssid, sizeof(check_ssid),
+                                                 check_pass, sizeof(check_pass))) {
+        skip_boot_wifi = true;
+        Serial.printf("[BOOT_FLOW] stage=wifi_skip_no_home_creds t=%lu\n", millis());
+      }
     }
 #endif
-    if (ssid && ssid[0]) {
-      WiFi.mode(WIFI_STA);
-      WiFi.setAutoReconnect(true);
-      WiFi.setSleep(false);
-      esp_wifi_set_ps(WIFI_PS_NONE);
-      if (wifi_guard_try_claim_connect("boot_setup")) {
-        WiFi.begin(ssid, pass);
-        wifi_guard_set_state(WIFI_STATE_CONNECTING, "boot_begin", WiFi.status());
-        Serial.printf("[BOOT_FLOW] stage=wifi_begin_immediate t=%lu ssid=%s status=%d heap=%u\n",
-                      millis(),
-                      ssid,
-                      (int)WiFi.status(),
-                      (unsigned)ESP.getFreeHeap());
+    if (!skip_boot_wifi) {
+      const char* ssid = WIFI_SSID;
+      const char* pass = WIFI_PASS;
+#ifdef HALO_SENSE_PROD_WRAPPER
+      char provision_ssid[64];
+      char provision_pass[64];
+      if (halo_get_provisioned_wifi(provision_ssid, sizeof(provision_ssid),
+                                    provision_pass, sizeof(provision_pass))) {
+        ssid = provision_ssid;
+        pass = provision_pass;
       }
-    } else {
-      Serial.printf("[BOOT_FLOW] stage=wifi_skip_no_ssid t=%lu\n", millis());
+#endif
+      if (ssid && ssid[0]) {
+        WiFi.mode(WIFI_STA);
+        WiFi.setAutoReconnect(true);
+        WiFi.setSleep(false);
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        if (wifi_guard_try_claim_connect("boot_setup")) {
+          WiFi.begin(ssid, pass);
+          wifi_guard_set_state(WIFI_STATE_CONNECTING, "boot_begin", WiFi.status());
+          Serial.printf("[BOOT_FLOW] stage=wifi_begin_immediate t=%lu ssid=%s status=%d heap=%u\n",
+                        millis(),
+                        ssid,
+                        (int)WiFi.status(),
+                        (unsigned)ESP.getFreeHeap());
+        }
+      } else {
+        Serial.printf("[BOOT_FLOW] stage=wifi_skip_no_ssid t=%lu\n", millis());
+      }
     }
   }
   
@@ -3073,10 +3125,12 @@ void loop() {
     }
   }
   
-  // Process MQTT messages (needed for SCAN operation results)
+#ifndef HALO_SENSE_PROD_WRAPPER
+  // Process MQTT messages (needed for SCAN operation results — dev builds only)
   if (mqttClient.connected()) {
     mqttClient.loop();
   }
+#endif
   
   // Poll wake GPIO to detect wake pulses (even when already awake)
   // This allows LCD to wake Sense board even if Sense is already awake
@@ -3304,11 +3358,13 @@ void loop() {
         if (elapsed_ms >= PRE_SLEEP_BLOCK_MAX_MS) {
           Serial.printf("[SLEEP] pre_sleep_cap_hit forcing_sleep elapsed_ms=%lu\n",
                         elapsed_ms);
+#ifndef HALO_SENSE_PROD_WRAPPER
           if (mqttClient.connected()) {
             Serial.println("[SLEEP] forcing MQTT disconnect (pre_sleep_cap)");
             mqttClient.disconnect();
             delay(100);
           }
+#endif
           OtaIntent::clearDesired();
           pre_sleep_block_start_ms = 0;
         } else {

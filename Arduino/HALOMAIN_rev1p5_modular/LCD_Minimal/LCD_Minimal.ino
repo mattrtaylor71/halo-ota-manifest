@@ -3115,6 +3115,7 @@ static unsigned long wake_retry_interval_for_attempt(uint8_t attempt) {
 
 #include "lcd_sleep.h"
 
+#include "lcd_diag.h"
 
 #include "lcd_uart_rx.h"
 
