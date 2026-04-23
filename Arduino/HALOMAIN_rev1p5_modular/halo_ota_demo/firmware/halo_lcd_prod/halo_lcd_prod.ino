@@ -402,16 +402,34 @@ static bool ensure_wifi_connected_for_ota(uint32_t timeout_ms) {
   }
   tryConnectWifi();
   unsigned long start = millis();
+  int retry_count = 0;
+  const int MAX_RETRIES = 5;
   while ((millis() - start) < timeout_ms) {
     wifi_manager.update();
     if (wifi_ok()) {
+      Serial.printf("[LCD_OTA_WIFI] connected elapsed=%lums retries=%d\n",
+                    millis() - start, retry_count);
       return true;
     }
     if (wifi_manager.getStatus() == WifiManager::STATUS_FAILED) {
-      return false;
+      retry_count++;
+      if (retry_count > MAX_RETRIES) {
+        Serial.printf("[LCD_OTA_WIFI] giving up after %d retries\n", retry_count);
+        return false;
+      }
+      unsigned long elapsed = millis() - start;
+      Serial.printf("[LCD_OTA_WIFI] failed, retry #%d (elapsed=%lums)\n", retry_count, elapsed);
+      // Reset WiFi and try again
+      WiFi.disconnect(true);
+      delay(500);
+      WiFi.mode(WIFI_STA);
+      delay(100);
+      tryConnectWifi();
     }
     delay(100);
   }
+  Serial.printf("[LCD_OTA_WIFI] timeout after %lums retries=%d\n",
+                millis() - start, retry_count);
   return wifi_ok();
 }
 

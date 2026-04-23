@@ -19,7 +19,11 @@
 
 static void uart_task(void *arg) {
   Serial.println("[UART] UART task started");
-  
+
+  static bool diag_mode = false;
+  static unsigned long diag_mode_end_ms = 0;
+  static unsigned long diag_last_ping_ms = 0;
+
   for (;;) {
     const int UART_TX_MAX_PER_LOOP = 16;
     const int UART_RX_MAX_BYTES_PER_LOOP = 512;
@@ -156,6 +160,146 @@ static void uart_task(void *arg) {
                     proof_age_ms,
                     deferred_awake_tx_valid ? 1 : 0);
       uart_rx_last_summary_ms = now_ms;
+    }
+
+    // 3) USB Serial input handler — read JSON commands or text shortcuts,
+    //    forward recognized types to Sense via UART.
+    {
+      static char usb_buf[256];
+      static int  usb_pos = 0;
+      int usb_read = 0;
+      while (Serial.available() > 0 && usb_read < 64) {
+        char c = Serial.read();
+        usb_read++;
+        if (c == '\n' || c == '\r') {
+          if (usb_pos > 0) {
+            usb_buf[usb_pos] = '\0';
+
+            // --- Plain-text shortcut commands ---
+            if (strcmp(usb_buf, "ota") == 0) {
+              Serial.println("[USB_CMD] shortcut 'ota' -> INPUT_OTA_CHECK");
+              uart_send_input_message("INPUT_OTA_CHECK");
+            } else if (strcmp(usb_buf, "wake") == 0) {
+              Serial.println("[USB_CMD] shortcut 'wake' -> INPUT_WAKE");
+              uart_send_input_message("INPUT_WAKE");
+            } else if (strcmp(usb_buf, "sleep") == 0) {
+              Serial.println("[USB_CMD] shortcut 'sleep' -> INPUT_SLEEP");
+              uart_send_input_message("INPUT_SLEEP");
+            } else if (strcmp(usb_buf, "ping") == 0) {
+              Serial.println("[USB_CMD] shortcut 'ping' -> INPUT_PING");
+              uart_send_input_message("INPUT_PING");
+            } else if (strcmp(usb_buf, "wifi") == 0) {
+              Serial.println("[USB_CMD] shortcut 'wifi' -> dumping wifi summaries");
+              diag_dump_wifi_summaries(Serial);
+            } else if (strcmp(usb_buf, "scan") == 0) {
+              Serial.println("[USB_CMD] shortcut 'scan' -> INPUT_WIFI_SCAN");
+              uart_send_input_message("INPUT_WIFI_SCAN");
+            } else if (strcmp(usb_buf, "wifitest") == 0) {
+              Serial.println("[USB_CMD] shortcut 'wifitest' -> INPUT_WIFI_TEST");
+              uart_send_input_message("INPUT_WIFI_TEST");
+            } else if (strcmp(usb_buf, "diag") == 0) {
+              diag_mode = true;
+              diag_mode_end_ms = millis() + 300000;  // 5 minutes
+              diag_last_ping_ms = 0;
+              Serial.println("[USB_CMD] DIAG MODE ON (5 min) - sleep disabled, continuous monitoring");
+              uart_send_input_message("INPUT_WAKE");
+            } else if (strcmp(usb_buf, "diagoff") == 0) {
+              diag_mode = false;
+              diag_mode_end_ms = 0;
+              Serial.println("[USB_CMD] DIAG MODE OFF");
+            } else if (strcmp(usb_buf, "help") == 0) {
+              Serial.println("[USB_CMD] Available commands:");
+              Serial.println("  ota   - trigger OTA check");
+              Serial.println("  wake  - send INPUT_WAKE");
+              Serial.println("  sleep - send INPUT_SLEEP");
+              Serial.println("  ping  - send INPUT_PING");
+              Serial.println("  wifi     - dump WiFi summaries");
+              Serial.println("  scan     - WiFi network scan (via Sense)");
+              Serial.println("  wifitest - WiFi cold-start test (disconnect+scan+reconnect)");
+              Serial.println("  diag     - enable diagnostic mode (5 min, no sleep)");
+              Serial.println("  diagoff  - disable diagnostic mode");
+              Serial.println("  help     - show this help");
+              Serial.println("  {\"type\":\"INPUT_*\",...} - send JSON command");
+
+            // --- JSON commands ---
+            } else if (usb_buf[0] == '{') {
+              StaticJsonDocument<512> cmd_doc;
+              DeserializationError err = deserializeJson(cmd_doc, usb_buf);
+              if (err) {
+                Serial.printf("[USB_CMD] JSON parse error: %s\n", err.c_str());
+              } else {
+                const char* cmd_type = cmd_doc["type"] | (const char*)nullptr;
+                if (!cmd_type) {
+                  Serial.println("[USB_CMD] WARNING: JSON missing 'type' field");
+                } else if (strcmp(cmd_type, "INPUT_MENU_SELECT") == 0) {
+                  // INPUT_MENU_SELECT needs full JSON with menu_item, menu_index
+                  StaticJsonDocument<512> fwd_doc;
+                  fwd_doc["type"]       = "INPUT_MENU_SELECT";
+                  fwd_doc["ver"]        = PROTOCOL_VERSION;
+                  fwd_doc["msg_id"]     = get_next_msg_id();
+                  fwd_doc["ts"]         = millis();
+                  if (cmd_doc.containsKey("menu_item"))
+                    fwd_doc["menu_item"]  = cmd_doc["menu_item"];
+                  if (cmd_doc.containsKey("menu_index"))
+                    fwd_doc["menu_index"] = cmd_doc["menu_index"];
+                  char fwd_buf[512];
+                  serializeJson(fwd_doc, fwd_buf, sizeof(fwd_buf));
+                  Serial.printf("[USB_CMD] forwarding INPUT_MENU_SELECT via uart_send_json: %s\n", fwd_buf);
+                  uart_send_json(fwd_buf);
+                } else if (strncmp(cmd_type, "INPUT_", 6) == 0) {
+                  // All other INPUT_* types — simple forward
+                  Serial.printf("[USB_CMD] forwarding %s via uart_send_input_message\n", cmd_type);
+                  uart_send_input_message(cmd_type);
+                } else if (strcmp(cmd_type, "OTA_CHECK") == 0) {
+                  // Non-INPUT type that needs full JSON forwarding
+                  StaticJsonDocument<512> fwd_doc;
+                  fwd_doc["type"]   = "OTA_CHECK";
+                  fwd_doc["ver"]    = PROTOCOL_VERSION;
+                  fwd_doc["msg_id"] = get_next_msg_id();
+                  fwd_doc["ts"]     = millis();
+                  if (cmd_doc.containsKey("reason"))
+                    fwd_doc["reason"] = cmd_doc["reason"];
+                  if (cmd_doc.containsKey("allow_reboot"))
+                    fwd_doc["allow_reboot"] = cmd_doc["allow_reboot"];
+                  char fwd_buf[512];
+                  serializeJson(fwd_doc, fwd_buf, sizeof(fwd_buf));
+                  Serial.printf("[USB_CMD] forwarding OTA_CHECK via uart_send_json: %s\n", fwd_buf);
+                  uart_send_json(fwd_buf);
+                } else {
+                  Serial.printf("[USB_CMD] WARNING: unrecognized type '%s'\n", cmd_type);
+                }
+              }
+
+            // --- Unrecognized plain text ---
+            } else {
+              Serial.printf("[USB_CMD] WARNING: unrecognized command '%s' (try 'help')\n", usb_buf);
+            }
+
+            usb_pos = 0;
+          }
+        } else if (usb_pos < (int)(sizeof(usb_buf) - 1)) {
+          usb_buf[usb_pos++] = c;
+        } else {
+          // Buffer overflow — discard
+          Serial.println("[USB_CMD] WARNING: input too long, discarding");
+          usb_pos = 0;
+        }
+      }
+    }
+
+    // 4) Diagnostic mode service — keep awake and ping Sense every 2s
+    if (diag_mode) {
+      unsigned long now_dm = millis();
+      if (now_dm >= diag_mode_end_ms) {
+        diag_mode = false;
+        Serial.println("[DIAG] mode expired (5 min)");
+      } else if ((now_dm - diag_last_ping_ms) >= 2000) {
+        diag_last_ping_ms = now_dm;
+        // Reset LCD idle timer to prevent sleep
+        last_user_activity_ms = now_dm;
+        // Ping Sense to keep it awake and get PONG response
+        uart_send_input_message("INPUT_PING");
+      }
     }
 
     vTaskDelay(pdMS_TO_TICKS(yielded_early ? 1 : 5));

@@ -1987,6 +1987,112 @@ static bool parse_input_message(const char* json_str) {
 #else
     Serial.println("[UART] INPUT_OTA_CHECK ignored (no prod wrapper)");
 #endif
+  } else if (strcmp(type, "INPUT_WIFI_SCAN") == 0) {
+    // WiFi network scan — reports all visible APs with RSSI via SENSE_DIAG
+    Serial.println("[UART] INPUT_WIFI_SCAN received");
+    uart_send_sense_diag("wifi", "scan_start", "scanning", 0, "starting_scan");
+
+    // Disconnect temporarily if connected to get clean scan
+    bool was_connected = wifi_is_connected();
+    int8_t pre_rssi = was_connected ? (int8_t)WiFi.RSSI() : 0;
+
+    int n = WiFi.scanNetworks(false, true);  // sync scan, show hidden
+    char detail_buf[64];
+    snprintf(detail_buf, sizeof(detail_buf), "found=%d was_connected=%d pre_rssi=%d", n, was_connected ? 1 : 0, pre_rssi);
+    uart_send_sense_diag("wifi", "scan_result", "count", n, detail_buf);
+
+    for (int i = 0; i < n && i < 20; i++) {
+      int32_t rssi = WiFi.RSSI(i);
+      char ap_detail[96];
+      snprintf(ap_detail, sizeof(ap_detail), "ssid=%s rssi=%ld ch=%d enc=%d",
+               WiFi.SSID(i).c_str(), (long)rssi, WiFi.channel(i), (int)WiFi.encryptionType(i));
+      char label_buf[33];
+      strncpy(label_buf, WiFi.SSID(i).c_str(), 32);
+      label_buf[32] = '\0';
+      uart_send_sense_diag("wifi", "scan_ap", label_buf, rssi, ap_detail);
+    }
+    WiFi.scanDelete();
+    uart_send_sense_diag("wifi", "scan_done", "complete", n, "scan_complete");
+
+  } else if (strcmp(type, "INPUT_WIFI_TEST") == 0) {
+    // WiFi cold-start test — disconnect, scan, reconnect with detailed timing
+    Serial.println("[UART] INPUT_WIFI_TEST received");
+    uart_send_sense_diag("wifi", "test_start", "starting", 0, "cold_start_test");
+
+    // Step 1: Record current state
+    bool was_connected = wifi_is_connected();
+    int8_t pre_rssi = was_connected ? (int8_t)WiFi.RSSI() : 0;
+    char state_detail[48];
+    snprintf(state_detail, sizeof(state_detail), "connected=%d rssi=%d status=%d",
+             was_connected ? 1 : 0, pre_rssi, (int)WiFi.status());
+    uart_send_sense_diag("wifi", "test_pre_state", "initial", pre_rssi, state_detail);
+
+    // Step 2: Disconnect
+    unsigned long t0 = millis();
+    WiFi.disconnect(true);  // disconnect and turn off radio
+    delay(500);
+    uart_send_sense_diag("wifi", "test_disconnected", "radio_off", 0, "wifi_off");
+
+    // Step 3: Scan (with radio back on)
+    WiFi.mode(WIFI_STA);
+    int n = WiFi.scanNetworks(false, true);
+    unsigned long t_scan = millis() - t0;
+    char scan_detail[64];
+    snprintf(scan_detail, sizeof(scan_detail), "found=%d scan_ms=%lu", n, t_scan);
+    uart_send_sense_diag("wifi", "test_scan", "scan_done", n, scan_detail);
+
+    // Report target AP RSSI
+    for (int i = 0; i < n; i++) {
+      int32_t rssi = WiFi.RSSI(i);
+      char ap_detail[96];
+      snprintf(ap_detail, sizeof(ap_detail), "ssid=%s rssi=%ld ch=%d",
+               WiFi.SSID(i).c_str(), (long)rssi, WiFi.channel(i));
+      char label_buf[33];
+      strncpy(label_buf, WiFi.SSID(i).c_str(), 32);
+      label_buf[32] = '\0';
+      uart_send_sense_diag("wifi", "test_scan_ap", label_buf, rssi, ap_detail);
+    }
+    WiFi.scanDelete();
+
+    // Step 4: Reconnect with timing
+    unsigned long t_begin = millis();
+    uart_send_sense_diag("wifi", "test_connecting", "begin", 0, "calling_wifi_begin");
+    WiFi.begin();  // Uses stored credentials
+
+    // Poll for connection with 30s timeout, report progress every 2s
+    bool connected = false;
+    for (int attempt = 0; attempt < 60; attempt++) {  // 30s max (500ms * 60)
+      delay(500);
+      wl_status_t st = WiFi.status();
+      unsigned long elapsed = millis() - t_begin;
+
+      if (st == WL_CONNECTED) {
+        connected = true;
+        int8_t rssi = (int8_t)WiFi.RSSI();
+        char conn_detail[80];
+        snprintf(conn_detail, sizeof(conn_detail), "rssi=%d ip=%s connect_ms=%lu total_ms=%lu",
+                 rssi, WiFi.localIP().toString().c_str(), elapsed, millis() - t0);
+        uart_send_sense_diag("wifi", "test_connected", "success", rssi, conn_detail);
+        break;
+      }
+
+      // Report progress every 2s
+      if (attempt % 4 == 3) {
+        char prog_detail[48];
+        snprintf(prog_detail, sizeof(prog_detail), "status=%d elapsed_ms=%lu", (int)st, elapsed);
+        uart_send_sense_diag("wifi", "test_progress", "waiting", (int)st, prog_detail);
+      }
+    }
+
+    if (!connected) {
+      unsigned long total_ms = millis() - t0;
+      char fail_detail[48];
+      snprintf(fail_detail, sizeof(fail_detail), "status=%d total_ms=%lu", (int)WiFi.status(), total_ms);
+      uart_send_sense_diag("wifi", "test_failed", "timeout", (int)WiFi.status(), fail_detail);
+    }
+
+    uart_send_sense_diag("wifi", "test_done", connected ? "pass" : "fail", connected ? 1 : 0, "test_complete");
+
   } else if (strcmp(type, "INPUT_MENU_SELECT") == 0) {
     // Menu item selected on LCD
     const char* menu_item = doc["menu_item"] | "";
@@ -2998,6 +3104,56 @@ void setup() {
                         (int)WiFi.status(),
                         (unsigned)ESP.getFreeHeap());
         }
+
+        // --- Boot WiFi: patient wait with retry (up to 45s) ---
+        // Cold-start in casing can take longer than typical. Wait patiently
+        // with auto-retry on failure, before starting heavy init.
+        {
+          unsigned long wifi_wait_start = millis();
+          const unsigned long BOOT_WIFI_TIMEOUT_MS = 45000;
+          unsigned long last_progress_ms = 0;
+          int retry_count = 0;
+
+          Serial.printf("[BOOT_FLOW] stage=wifi_wait_begin t=%lu\n", millis());
+
+          while (WiFi.status() != WL_CONNECTED &&
+                 (millis() - wifi_wait_start) < BOOT_WIFI_TIMEOUT_MS) {
+            unsigned long elapsed = millis() - wifi_wait_start;
+
+            // Log progress every 2s
+            if ((elapsed - last_progress_ms) >= 2000) {
+              last_progress_ms = elapsed;
+              Serial.printf("[BOOT_WIFI] waiting elapsed=%lums status=%d retries=%d heap=%u\n",
+                            elapsed, (int)WiFi.status(), retry_count, (unsigned)ESP.getFreeHeap());
+            }
+
+            // Auto-retry on hard failure statuses
+            wl_status_t st = WiFi.status();
+            if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL ||
+                st == WL_CONNECTION_LOST) {
+              retry_count++;
+              Serial.printf("[BOOT_WIFI] fail status=%d, retry #%d\n", (int)st, retry_count);
+              WiFi.disconnect();
+              delay(500);
+              WiFi.begin(ssid, pass);
+            }
+
+            delay(100);
+          }
+
+          if (WiFi.status() == WL_CONNECTED) {
+            unsigned long elapsed = millis() - wifi_wait_start;
+            wifi_guard_set_inflight(false);
+            wifi_connected_ms = millis();
+            wifi_guard_set_state(WIFI_STATE_CONNECTED, "boot_wait_ok", WL_CONNECTED);
+            Serial.printf("[BOOT_FLOW] stage=wifi_wait_connected t=%lu elapsed=%lums rssi=%d ip=%s retries=%d\n",
+                          millis(), elapsed, (int)WiFi.RSSI(),
+                          WiFi.localIP().toString().c_str(), retry_count);
+          } else {
+            Serial.printf("[BOOT_FLOW] stage=wifi_wait_timeout t=%lu status=%d retries=%d\n",
+                          millis(), (int)WiFi.status(), retry_count);
+          }
+        }
       } else {
         Serial.printf("[BOOT_FLOW] stage=wifi_skip_no_ssid t=%lu\n", millis());
       }
@@ -3070,6 +3226,27 @@ void loop() {
     wifi_guard_set_inflight(false);
     wifi_guard_set_state(WIFI_STATE_CONNECTED, "loop_status_connected", WL_CONNECTED);
   }
+
+  // Periodic WiFi RSSI reporter — sends status over UART every 2s for monitoring via LCD
+  {
+    static unsigned long last_wifi_report_ms = 0;
+    unsigned long now = millis();
+    if ((now - last_wifi_report_ms) >= 2000) {
+      last_wifi_report_ms = now;
+      wl_status_t st = WiFi.status();
+      if (st == WL_CONNECTED) {
+        int8_t rssi = (int8_t)WiFi.RSSI();
+        char detail[48];
+        snprintf(detail, sizeof(detail), "rssi=%d ip=%s", rssi, WiFi.localIP().toString().c_str());
+        uart_send_sense_diag("wifi", "rssi_report", "connected", rssi, detail);
+      } else {
+        char detail[32];
+        snprintf(detail, sizeof(detail), "status=%d", (int)st);
+        uart_send_sense_diag("wifi", "rssi_report", "disconnected", (int)st, detail);
+      }
+    }
+  }
+
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
   upload_persist_maybe_replay();
 #endif
