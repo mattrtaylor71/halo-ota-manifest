@@ -1490,6 +1490,13 @@ static void upload_worker_task(void *arg) {
         }
       }
 
+      // Gate: park before PUT if user action is active (presign URL has 300s TTL)
+      if (park_upload_job_if_foreground_active(job, "pre_put")) {
+        upload_inflight = false;
+        vTaskDelay(pdMS_TO_TICKS(40));
+        continue;
+      }
+
       uint32_t put_deadline_ms = is_dish ? job_deadline_ms : (millis() + BACKGROUND_UPLOAD_PUT_BUDGET_MS);
       bool upload_success = false;
       for (uint8_t attempt = 0; attempt < max_retries; ++attempt) {
@@ -2487,6 +2494,7 @@ static void op_worker_task(void *arg) {
             } else {
               memcpy(voice_job_buf, voice_audio_buffer, voice_audio_size);
               if (queue_voice_upload_job(current_job.job_id, voice_job_buf, voice_audio_size)) {
+                last_user_activity_ms = millis();  // Extend foreground parking window for voice upload
                 Serial.printf("[OP_WORKER] VOICE: upload queued in background bytes=%u psram=%d\n",
                               (unsigned)voice_audio_size,
                               used_psram ? 1 : 0);
@@ -3105,55 +3113,11 @@ void setup() {
                         (unsigned)ESP.getFreeHeap());
         }
 
-        // --- Boot WiFi: patient wait with retry (up to 45s) ---
-        // Cold-start in casing can take longer than typical. Wait patiently
-        // with auto-retry on failure, before starting heavy init.
-        {
-          unsigned long wifi_wait_start = millis();
-          const unsigned long BOOT_WIFI_TIMEOUT_MS = 45000;
-          unsigned long last_progress_ms = 0;
-          int retry_count = 0;
-
-          Serial.printf("[BOOT_FLOW] stage=wifi_wait_begin t=%lu\n", millis());
-
-          while (WiFi.status() != WL_CONNECTED &&
-                 (millis() - wifi_wait_start) < BOOT_WIFI_TIMEOUT_MS) {
-            unsigned long elapsed = millis() - wifi_wait_start;
-
-            // Log progress every 2s
-            if ((elapsed - last_progress_ms) >= 2000) {
-              last_progress_ms = elapsed;
-              Serial.printf("[BOOT_WIFI] waiting elapsed=%lums status=%d retries=%d heap=%u\n",
-                            elapsed, (int)WiFi.status(), retry_count, (unsigned)ESP.getFreeHeap());
-            }
-
-            // Auto-retry on hard failure statuses
-            wl_status_t st = WiFi.status();
-            if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL ||
-                st == WL_CONNECTION_LOST) {
-              retry_count++;
-              Serial.printf("[BOOT_WIFI] fail status=%d, retry #%d\n", (int)st, retry_count);
-              WiFi.disconnect();
-              delay(500);
-              WiFi.begin(ssid, pass);
-            }
-
-            delay(100);
-          }
-
-          if (WiFi.status() == WL_CONNECTED) {
-            unsigned long elapsed = millis() - wifi_wait_start;
-            wifi_guard_set_inflight(false);
-            wifi_connected_ms = millis();
-            wifi_guard_set_state(WIFI_STATE_CONNECTED, "boot_wait_ok", WL_CONNECTED);
-            Serial.printf("[BOOT_FLOW] stage=wifi_wait_connected t=%lu elapsed=%lums rssi=%d ip=%s retries=%d\n",
-                          millis(), elapsed, (int)WiFi.RSSI(),
-                          WiFi.localIP().toString().c_str(), retry_count);
-          } else {
-            Serial.printf("[BOOT_FLOW] stage=wifi_wait_timeout t=%lu status=%d retries=%d\n",
-                          millis(), (int)WiFi.status(), retry_count);
-          }
-        }
+        // WiFi.begin() fired above — connection proceeds in background.
+        // service_wifi_maintenance() in loop() handles retries.
+        // Capture/voice work without WiFi; uploads wait for connectivity.
+        Serial.printf("[BOOT_FLOW] stage=wifi_deferred t=%lu status=%d (connecting in background)\n",
+                      millis(), (int)WiFi.status());
       } else {
         Serial.printf("[BOOT_FLOW] stage=wifi_skip_no_ssid t=%lu\n", millis());
       }

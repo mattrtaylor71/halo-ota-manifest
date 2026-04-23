@@ -418,6 +418,47 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     }
   }
 
+  // --- Upload flush window: drain pending uploads before sleep ---
+  // User may have done captures during this wake cycle. The upload_worker_task
+  // runs on Core 1 and processes the queue independently. Give it time to
+  // finish before we tear down WiFi.
+  {
+    const unsigned long UPLOAD_FLUSH_TIMEOUT_MS = 30000;  // 30s max
+    const unsigned long UPLOAD_FLUSH_LOG_INTERVAL_MS = 2000;
+    unsigned long flush_start = millis();
+    unsigned long last_log = 0;
+    uint32_t initial_count = upload_queue_count();
+    bool had_pending = (initial_count > 0 || upload_inflight);
+
+    if (had_pending) {
+      Serial.printf("[SLEEP_UPLOAD_FLUSH] start pending=%lu inflight=%d\n",
+                    (unsigned long)initial_count, upload_inflight ? 1 : 0);
+    }
+
+    while (had_pending &&
+           (upload_queue_count() > 0 || upload_inflight) &&
+           (millis() - flush_start) < UPLOAD_FLUSH_TIMEOUT_MS) {
+      // Log progress periodically
+      if ((millis() - last_log) >= UPLOAD_FLUSH_LOG_INTERVAL_MS) {
+        last_log = millis();
+        Serial.printf("[SLEEP_UPLOAD_FLUSH] waiting queue=%lu inflight=%d elapsed=%lums\n",
+                      (unsigned long)upload_queue_count(),
+                      upload_inflight ? 1 : 0,
+                      millis() - flush_start);
+      }
+      delay(100);  // Yield to upload_worker_task on Core 1
+    }
+
+    if (had_pending) {
+      uint32_t remaining = upload_queue_count();
+      Serial.printf("[SLEEP_UPLOAD_FLUSH] done remaining=%lu inflight=%d elapsed=%lums %s\n",
+                    (unsigned long)remaining,
+                    upload_inflight ? 1 : 0,
+                    millis() - flush_start,
+                    (remaining == 0 && !upload_inflight) ? "DRAINED" : "TIMEOUT");
+    }
+  }
+
   // 1. Disconnect MQTT if connected (active connections can prevent sleep)
 #ifndef HALO_SENSE_PROD_WRAPPER
   if (mqttClient.connected()) {

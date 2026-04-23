@@ -60,6 +60,8 @@ static bool foreground_priority_active(unsigned long now_ms, const char** reason
     reason = "foreground_active";
   } else if (scan_ui_inflight || dish_scan_inflight) {
     reason = "scan_ui_inflight";
+  } else if (voice_recording_active) {
+    reason = "voice_recording";
   } else if (op_queue != NULL && uxQueueMessagesWaiting(op_queue) > 0) {
     OpJob queued_job = {};
     if (xQueuePeek(op_queue, &queued_job, 0) == pdTRUE && queued_job.pri == PRI_USER) {

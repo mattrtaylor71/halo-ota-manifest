@@ -561,6 +561,24 @@ static bool init_camera() {
   Serial.println("[CAMERA] Initializing camera...");
   camera_timeline_event("init_begin", 0);
 
+  // Wait for any in-flight HTTP to complete — TLS buffers consume ~40KB of DMA RAM
+  // that camera needs for its frame buffers.
+  if (http_inflight) {
+    Serial.println("[CAMERA] Waiting for HTTP to complete before camera init...");
+    unsigned long http_wait_start = millis();
+    const unsigned long HTTP_DRAIN_TIMEOUT_MS = 15000;
+    while (http_inflight && (millis() - http_wait_start) < HTTP_DRAIN_TIMEOUT_MS) {
+      vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (http_inflight) {
+      Serial.printf("[CAMERA] HTTP still inflight after %lums, proceeding anyway\n",
+                    millis() - http_wait_start);
+    } else {
+      Serial.printf("[CAMERA] HTTP drained in %lums\n", millis() - http_wait_start);
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));  // Let TLS buffers fully free
+  }
+
   auto log_camera_init_memory = [](const char* stage) {
     size_t dma_largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     Serial.printf("[CAMERA] Memory %s heap=%u max=%u dma_largest=%u psram=%u/%u\n",

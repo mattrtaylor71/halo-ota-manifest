@@ -47,7 +47,7 @@ cached_data = {"owners": [], "logs": [], "last_refresh": None}
 # Per-owner image cache: { owner_id: { "images": [...], "fetched_at": float } }
 owner_image_cache = {}
 owner_image_lock = threading.Lock()
-OWNER_CACHE_TTL = 30  # seconds
+OWNER_CACHE_TTL = 5  # seconds
 
 
 def discover_owners():
@@ -161,7 +161,7 @@ def refresh_cache():
             print(f"[REFRESH] {len(owners)} owners, {len(log_events)} log events")
         except Exception as e:
             print(f"[ERROR] Refresh failed: {e}")
-        time.sleep(30)
+        time.sleep(5)
 
 
 def get_owner_images_cached(owner_id):
@@ -245,7 +245,7 @@ header .status span{color:#3fb950}
   <h1>HALO Device Monitor</h1>
   <div class="status">
     Last refresh: <span id="refreshTime">--</span>
-    <span class="auto-badge" id="autoLabel">AUTO 30s</span>
+    <span class="auto-badge" id="autoLabel">AUTO 5s</span>
   </div>
 </header>
 
@@ -446,7 +446,7 @@ function refreshMeta() {
 
 // INITIAL_DATA_PLACEHOLDER
 refreshMeta();
-setInterval(refreshMeta, 30000);
+setInterval(refreshMeta, 5000);
 </script>
 </body>
 </html>"""
