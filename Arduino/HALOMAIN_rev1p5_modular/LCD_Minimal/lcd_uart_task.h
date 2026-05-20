@@ -83,6 +83,20 @@ static void uart_task(void *arg) {
       }
     }
     
+    // OTA binary mode — delegate all RX to lcd_ota_receive_loop
+    if (g_lcd_ota_binary_mode) {
+      static bool s_binary_announced = false;
+      if (!s_binary_announced) {
+        Serial.printf("[LCD_UART_TASK] entering binary mode avail=%d\n",
+                      senseSerial.available());
+        s_binary_announced = true;
+      }
+      lcd_ota_receive_loop();
+      vTaskDelay(pdMS_TO_TICKS(1));
+      if (!g_lcd_ota_binary_mode) s_binary_announced = false;
+      continue;
+    }
+
     // 2) RX read and parse lines
     int rx_bytes = 0;
     while (senseSerial.available() > 0) {
@@ -207,6 +221,118 @@ static void uart_task(void *arg) {
               diag_mode = false;
               diag_mode_end_ms = 0;
               Serial.println("[USB_CMD] DIAG MODE OFF");
+            } else if (strcmp(usb_buf, "errors") == 0) {
+              Serial.println("[USB_CMD] shortcut 'errors' -> dumping error log");
+              errlog_dump(Serial);
+            } else if (strcmp(usb_buf, "clearerrors") == 0) {
+              errlog_clear();
+              Serial.println("[USB_CMD] error log cleared");
+            } else if (strcmp(usb_buf, "testerrors") == 0) {
+              Serial.println("[USB_CMD] injecting test errors into error log...");
+              // LCD-side test errors (stored directly)
+              lcd_errlog_store_with_context("lcd", "boot", "ABNORMAL_RESET", 3, "test: task watchdog reset");
+              lcd_errlog_store_with_context("lcd", "sense_wake", "MISSED_PONGS", 3, "test: sense unresponsive");
+              lcd_errlog_store_with_context("lcd", "ota", "OTA_ABORT", -1, "test: sha mismatch");
+              Serial.println("[USB_CMD] 3 LCD test errors stored");
+              // Tell Sense to inject its test errors via UART
+              uart_send_input_message("INPUT_TEST_ERRORS");
+              Serial.println("[USB_CMD] sent INPUT_TEST_ERRORS to Sense (expect 4 errors back via UART)");
+              Serial.println("[USB_CMD] total: 7 test errors. Type 'errors' to see them, 'clearerrors' to wipe.");
+            } else if (strcmp(usb_buf, "testmode") == 0) {
+              {
+                Preferences prefs;
+                if (prefs.begin("test_cfg", false)) {
+                  prefs.putBool("test_mode", true);
+                  prefs.end();
+                }
+              }
+              g_test_mode_active = true;
+              g_test_mode_expire_ms = millis() + 3600000; // 1 hour
+              resetActivityTimer();
+              Serial.println("[TEST_MODE] enabled (1 hour, NVS persisted)");
+            } else if (strcmp(usb_buf, "testmodeoff") == 0) {
+              {
+                Preferences prefs;
+                if (prefs.begin("test_cfg", false)) {
+                  prefs.remove("test_mode");
+                  prefs.end();
+                }
+              }
+              g_test_mode_active = false;
+              g_test_mode_expire_ms = 0;
+              Serial.println("[TEST_MODE] disabled");
+            } else if (strcmp(usb_buf, "factoryreset") == 0) {
+              Serial.println("[FACTORY_RESET] Clearing all provisioning and test data...");
+              // Clear provisioning data (WiFi SSID/pass, owner, provisioned flag)
+              {
+                nvs_handle_t h;
+                if (nvs_open("provisioning", NVS_READWRITE, &h) == ESP_OK) {
+                  nvs_erase_all(h);
+                  nvs_commit(h);
+                  nvs_close(h);
+                }
+                Serial.println("[FACTORY_RESET] Provisioning data cleared");
+              }
+              // Clear test mode
+              {
+                Preferences prefs;
+                if (prefs.begin("test_cfg", false)) {
+                  prefs.clear();
+                  prefs.end();
+                }
+                g_test_mode_active = false;
+                g_test_mode_expire_ms = 0;
+                Serial.println("[FACTORY_RESET] Test mode cleared");
+              }
+              // Clear error log
+              errlog_clear();
+              Serial.println("[FACTORY_RESET] Error log cleared");
+              // Clear OTA state
+              {
+                Preferences prefs;
+                if (prefs.begin("lcd_ota", false)) {
+                  prefs.clear();
+                  prefs.end();
+                }
+                Serial.println("[FACTORY_RESET] OTA state cleared");
+              }
+              // Clear WiFi creds stored on LCD side
+              {
+                Preferences prefs;
+                if (prefs.begin("wifi_cfg", false)) {
+                  prefs.clear();
+                  prefs.end();
+                }
+                Serial.println("[FACTORY_RESET] WiFi config cleared");
+              }
+              // Clear persistent list/menu data
+              {
+                Preferences prefs;
+                if (prefs.begin("halo_list", false)) {
+                  prefs.clear();
+                  prefs.end();
+                }
+                Serial.println("[FACTORY_RESET] List data cleared");
+              }
+              Serial.println("[FACTORY_RESET] Complete. Device is ready for customer provisioning.");
+              Serial.println("[FACTORY_RESET] Power cycle or let device sleep to finalize.");
+            } else if (strcmp(usb_buf, "wake") == 0) {
+              Serial.println("[USB_CMD] Force-waking Sense...");
+              request_sense_wake("usb_force_wake");
+              resetActivityTimer();
+              Serial.printf("[WAKE] Pulse sent, sense_state=%d awake_confirmed=%d\n",
+                            (int)sense_state, sense_awake_confirmed ? 1 : 0);
+            } else if (strcmp(usb_buf, "ui") == 0) {
+              Serial.printf("[UI_STATE] screen=%d ota_screen=%d ota_locked=%d lvgl_running=%d "
+                            "sleep_transition=%d idle_dark=%d backlight=%d "
+                            "ui_task=%s test_mode=%d manual_ota=%d\n",
+                            (int)ui_screen_state, g_ota_screen_active ? 1 : 0,
+                            ota_locked ? 1 : 0, g_lvgl_running ? 1 : 0,
+                            g_sleep_transition ? 1 : 0, g_idle_screen_dark ? 1 : 0,
+                            g_backlight_duty,
+                            ui_task_handle ? "alive" : "dead",
+                            g_test_mode_active ? 1 : 0,
+                            g_manual_ota_override ? 1 : 0);
             } else if (strcmp(usb_buf, "help") == 0) {
               Serial.println("[USB_CMD] Available commands:");
               Serial.println("  ota   - trigger OTA check");
@@ -218,6 +344,12 @@ static void uart_task(void *arg) {
               Serial.println("  wifitest - WiFi cold-start test (disconnect+scan+reconnect)");
               Serial.println("  diag     - enable diagnostic mode (5 min, no sleep)");
               Serial.println("  diagoff  - disable diagnostic mode");
+              Serial.println("  errors      - dump error log");
+              Serial.println("  clearerrors - clear error log");
+              Serial.println("  testerrors  - inject test errors (7 entries, tests full pipeline)");
+              Serial.println("  testmode    - disable sleep for 1 hour (NVS persisted, survives OTA)");
+              Serial.println("  testmodeoff - disable test mode, clear NVS flag");
+              Serial.println("  ui         - dump UI state (screen, OTA flags, panel, task)");
               Serial.println("  help     - show this help");
               Serial.println("  {\"type\":\"INPUT_*\",...} - send JSON command");
 
@@ -245,6 +377,26 @@ static void uart_task(void *arg) {
                   char fwd_buf[512];
                   serializeJson(fwd_doc, fwd_buf, sizeof(fwd_buf));
                   Serial.printf("[USB_CMD] forwarding INPUT_MENU_SELECT via uart_send_json: %s\n", fwd_buf);
+                  uart_send_json(fwd_buf);
+                } else if (strcmp(cmd_type, "INPUT_DISCARD_OPTIONS") == 0 ||
+                           strcmp(cmd_type, "INPUT_EXPIRY_DATE") == 0) {
+                  // These need full JSON with payload fields
+                  StaticJsonDocument<512> fwd_doc;
+                  fwd_doc["type"]    = cmd_type;
+                  fwd_doc["ver"]     = PROTOCOL_VERSION;
+                  fwd_doc["msg_id"]  = get_next_msg_id();
+                  fwd_doc["ts"]      = millis();
+                  // Copy all payload fields
+                  for (JsonPair kv : cmd_doc.as<JsonObject>()) {
+                    const char* k = kv.key().c_str();
+                    if (strcmp(k, "type") != 0 && strcmp(k, "ver") != 0 &&
+                        strcmp(k, "msg_id") != 0 && strcmp(k, "ts") != 0) {
+                      fwd_doc[k] = kv.value();
+                    }
+                  }
+                  char fwd_buf[512];
+                  serializeJson(fwd_doc, fwd_buf, sizeof(fwd_buf));
+                  Serial.printf("[USB_CMD] forwarding %s via uart_send_json: %s\n", cmd_type, fwd_buf);
                   uart_send_json(fwd_buf);
                 } else if (strncmp(cmd_type, "INPUT_", 6) == 0) {
                   // All other INPUT_* types — simple forward

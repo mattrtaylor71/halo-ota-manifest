@@ -28,6 +28,10 @@
 // Forward declarations for .ino functions called by UART helpers
 static void request_sense_wake(const char* reason);
 
+// When true, suppress all JSON TX on senseSerial to avoid corrupting
+// binary COBS frames during LCD OTA.  Set by lcd_ota_uart.h.
+static bool g_suppress_uart_json_tx = false;
+
 // ── UART TX Queue ────────────────────────────────────────────────────
 typedef struct {
   char type[24];
@@ -45,6 +49,7 @@ static unsigned long deferred_awake_tx_last_ping_ms = 0;
 // ── UART init ────────────────────────────────────────────────────────
 static void init_uart() {
   Serial.println("Initializing UART to Sense board...");
+  senseSerial.setRxBufferSize(1024);  // OTA COBS frames can be ~521 bytes
   senseSerial.begin(UART_BAUD_RATE, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   Serial.printf("UART initialized: TX=GPIO%d, RX=GPIO%d, Baud=%d\n",
                 UART_TX_PIN, UART_RX_PIN, UART_BAUD_RATE);
@@ -147,6 +152,7 @@ static void uart_send_json(const char* json_str) {
   if (json_str == NULL || strlen(json_str) == 0) {
     return;
   }
+  if (g_suppress_uart_json_tx) return;
   uart_tx_count++;
   uart_note_tx_type(json_str);
   senseSerial.print(json_str);
@@ -157,6 +163,16 @@ static void uart_send_json(const char* json_str) {
 
 // ── UART send functions ──────────────────────────────────────────────
 static void uart_send_input_message(const char* type, int delta = 0, const char* id = NULL) {
+  if (g_suppress_uart_json_tx) return;
+  // Suppress non-essential input messages during OTA to prevent UART buffer
+  // flooding on Sense side. Scroll/ping messages serve no purpose during OTA
+  // and can overwhelm the 2KB ring buffer, causing OTA responses to be lost.
+  if (ota_locked && type) {
+    if (strcmp(type, "INPUT_SCROLL") == 0 ||
+        strcmp(type, "INPUT_PING") == 0) {
+      return;
+    }
+  }
   auto input_requires_sense = [](const char* msg_type) -> bool {
     if (!msg_type) return false;
     return strcmp(msg_type, "INPUT_WAKE") == 0 ||
@@ -170,6 +186,14 @@ static void uart_send_input_message(const char* type, int delta = 0, const char*
   };
   if (input_requires_sense(type)) {
     request_sense_wake(type);
+  }
+  // Serial-injected voice: set fire-and-forget so LCD doesn't show
+  // Processing screen and wait for MQTT response that may never come.
+  // Matches the behavior of touch-driven long press (LCD_Minimal.ino:3838).
+  if (type && strcmp(type, "INPUT_LONG_PRESS_END") == 0) {
+    g_voice_fire_and_forget_ignore_ui = true;
+    waiting_for_voice_response = false;
+    voice_response_deadline_ms = 0;
   }
   uart_note_input_type(type);
   StaticJsonDocument<256> doc;
@@ -306,6 +330,7 @@ static void tx_msg_send_now(const tx_msg_t* tx_msg) {
   if (!tx_msg || !tx_msg->type[0]) {
     return;
   }
+  if (g_suppress_uart_json_tx) return;
   if (strcmp(tx_msg->type, "INPUT_MENU_SELECT") == 0) {
     request_sense_wake("menu_select");
     StaticJsonDocument<256> doc;

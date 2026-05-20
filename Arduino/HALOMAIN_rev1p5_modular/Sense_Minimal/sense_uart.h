@@ -25,6 +25,10 @@
 // Forward declaration - parse_input_message stays in .ino (dispatch layer)
 static bool parse_input_message(const char* json_str);
 
+// LCD OTA proxy UART ownership flag — when true, suppress JSON TX
+// (binary COBS framing is in progress on lcdSerial)
+static volatile bool g_lcd_ota_proxy_owns_uart = false;
+
 // ── UART ring buffer & protocol state ────────────────────────────────
 static uint32_t sense_msg_id_counter = 1;
 static char uart_rx_ring[UART_RX_RING_SIZE];
@@ -287,6 +291,10 @@ static bool validate_protocol_message(JsonDocument& doc) {
 // ── Core TX ──────────────────────────────────────────────────────────
 
 static void uart_send_json(const char* json_str) {
+  // Block JSON TX while LCD OTA proxy owns the UART for binary COBS framing
+  if (g_lcd_ota_proxy_owns_uart) {
+    return;
+  }
   size_t len = strlen(json_str);
   last_uart_tx_ms = millis();
   uart_tx_count++;
@@ -341,6 +349,41 @@ static void uart_send_sense_diag(const char* area,
   doc["area"] = area ? area : "";
   doc["event"] = event ? event : "";
   doc["code"] = code;
+  if (label && label[0]) {
+    doc["label"] = label;
+  }
+  if (detail && detail[0]) {
+    doc["detail"] = detail;
+  }
+  String output;
+  serializeJson(doc, output);
+  uart_send_json(output.c_str());
+#else
+  (void)area;
+  (void)event;
+  (void)label;
+  (void)code;
+  (void)detail;
+#endif
+}
+
+// ── Persistent diagnostic sender (forwarded to LCD for NVS storage) ──
+
+static void uart_send_sense_diag_persist(const char* area,
+                                         const char* event,
+                                         const char* label,
+                                         int32_t code,
+                                         const char* detail) {
+#if HALO_SENSE_LCD_DIAG_BRIDGE
+  StaticJsonDocument<256> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = "SENSE_DIAG";
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  doc["area"] = area ? area : "";
+  doc["event"] = event ? event : "";
+  doc["code"] = code;
+  doc["persist"] = true;
   if (label && label[0]) {
     doc["label"] = label;
   }

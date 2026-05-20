@@ -28,6 +28,26 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
   if (reason_out) {
     *reason_out = NULL;
   }
+  // Test mode: block all sleep for automated testing
+  if (g_test_mode_active) {
+    if (millis() < g_test_mode_expire_ms) {
+      if (reason_out) *reason_out = "test_mode";
+      return false;
+    } else {
+      // Auto-expire
+      g_test_mode_active = false;
+      Preferences prefs;
+      if (prefs.begin("test_cfg", false)) {
+        prefs.remove("test_mode");
+        prefs.end();
+      }
+      Serial.println("[TEST_MODE] auto-expired (1 hour elapsed)");
+    }
+  }
+  if (wake_timer_wait_mode) {
+    if (reason_out) *reason_out = "timer_wait";
+    return false;
+  }
   if (sleep_blocked_for_ota()) {
     if (reason_out) *reason_out = "ota_pending";
     return false;
@@ -53,8 +73,18 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
     return false;
   }
   if (now_ms < ota_stay_awake_until_ms) {
-    if (reason_out) *reason_out = "ota_stay_awake";
-    return false;
+    // If Sense went to sleep without sending OTA_LOCK, the OTA request was missed
+    // (race: LCD sent INPUT_OTA_CHECK after Sense already started sleep sequence).
+    // Clear the stay_awake timer so LCD can sleep too.
+    if (sense_state == SENSE_ASLEEP && !ota_locked) {
+      Serial.println("[OTA] stay_awake cancelled (sense asleep, no ota_lock)");
+      ota_stay_awake_until_ms = 0;
+      ota_check_requested = false;
+      // fall through — allow sleep
+    } else {
+      if (reason_out) *reason_out = "ota_stay_awake";
+      return false;
+    }
   }
   if (now_ms < stay_awake_until_ms) {
     if (reason_out) *reason_out = "stay_awake";
@@ -140,6 +170,9 @@ static const char* ui_screen_state_name(ui_screen_t state) {
     case SCREEN_EXPIRY: return "EXPIRY";
     case SCREEN_RESULT: return "RESULT";
     case SCREEN_DEBUG: return "DEBUG";
+    case SCREEN_ERRLOG: return "ERRLOG";
+    case SCREEN_ERRLOG_DETAIL: return "ERRLOG_DETAIL";
+    case SCREEN_SHOPPING_LIST: return "SHOPPING_LIST";
     default: return "UNKNOWN";
   }
 }
@@ -502,14 +535,29 @@ static void enter_ship_ota_sleep() {
     delay(250);
     return;
   }
+  // Configure RTC pull-up on wake GPIO so the pin doesn't float during deep sleep
+  rtc_gpio_init((gpio_num_t)LCD_WAKE_GPIO);
+  rtc_gpio_set_direction((gpio_num_t)LCD_WAKE_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
+  rtc_gpio_pullup_en((gpio_num_t)LCD_WAKE_GPIO);
+  rtc_gpio_pulldown_dis((gpio_num_t)LCD_WAKE_GPIO);
+  Serial.printf("[SLEEP_GPIO] gpio=%d rtc_pullup=1 pulldown=0 level_now=%d\n",
+                (int)LCD_WAKE_GPIO, digitalRead(LCD_WAKE_GPIO));
+
   configure_sleep_sources(true, LCD_OTA_WAKE_INTERVAL_SEC);
-  
+
   Serial.printf("[SLEEP_STATE] entering_deep_sleep now_ms=%lu ext0_gpio=%d ext0_level=%d\n",
                 (unsigned long)millis(),
                 (int)LCD_WAKE_GPIO,
                 (int)LCD_WAKE_LEVEL);
   Serial.println("[SLEEP] entering_deep_sleep");
   sleep_entry_time = millis();
+
+  // Put touch IC into standby mode so it generates INT on touch during deep sleep
+  if (g_touch_initialized) {
+    Touch_Standby();
+    Serial.println("[TOUCH] standby mode set for deep sleep wake");
+  }
+
   lcd_set_backlight_binary(false, "ship_ota_sleep");
   Serial.printf("[LCD_SLEEP] wake_sources=%s timer_s=%lu\n",
                 LCD_OTA_WAKE_INTERVAL_SEC > 0 ? "EXT0_TIMER" : "EXT0_ONLY",
@@ -556,6 +604,14 @@ static void enter_maintenance_sleep() {
                 (unsigned long)g_lcd_maintenance_wake_in_s,
                 (unsigned long)g_lcd_maintenance_remaining_s,
                 (unsigned long)g_lcd_maintenance_deadline_ms);
+  // Configure RTC pull-up on wake GPIO so the pin doesn't float during deep sleep
+  rtc_gpio_init((gpio_num_t)LCD_WAKE_GPIO);
+  rtc_gpio_set_direction((gpio_num_t)LCD_WAKE_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
+  rtc_gpio_pullup_en((gpio_num_t)LCD_WAKE_GPIO);
+  rtc_gpio_pulldown_dis((gpio_num_t)LCD_WAKE_GPIO);
+  Serial.printf("[SLEEP_GPIO] gpio=%d rtc_pullup=1 pulldown=0 level_now=%d\n",
+                (int)LCD_WAKE_GPIO, digitalRead(LCD_WAKE_GPIO));
+
   configure_sleep_sources(true, timer_s);
 
   Serial.printf("[SLEEP_STATE] entering_deep_sleep now_ms=%lu ext0_gpio=%d ext0_level=%d\n",
@@ -564,6 +620,13 @@ static void enter_maintenance_sleep() {
                 (int)LCD_WAKE_LEVEL);
   Serial.println("[SLEEP] entering_deep_sleep");
   sleep_entry_time = millis();
+
+  // Put touch IC into standby mode so it generates INT on touch during deep sleep
+  if (g_touch_initialized) {
+    Touch_Standby();
+    Serial.println("[TOUCH] standby mode set for deep sleep wake");
+  }
+
   lcd_set_backlight_binary(false, "maintenance_sleep");
   Serial.printf("[LCD_SLEEP] wake_sources=%s timer_s=%lu\n",
                 timer_s > 0 ? "EXT0_TIMER" : "EXT0_ONLY",

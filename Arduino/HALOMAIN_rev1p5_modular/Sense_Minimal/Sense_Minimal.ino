@@ -95,6 +95,7 @@ void halo_prod_on_lcd_maint_ack(uint32_t remaining_s,
                                 uint32_t grace_after_sec);
 bool halo_prod_should_defer_sleep_ack(bool* ota_busy, bool* mqtt_busy, bool* time_invalid, bool* ota_check_busy);
 void halo_prod_request_manual_ota(const char* reason);
+void halo_prod_request_maint_test(uint32_t duration_sec);
 #endif
 
 #ifdef HALO_SENSE_PROD_WRAPPER
@@ -160,6 +161,7 @@ RTC_DATA_ATTR static int32_t g_rtc_last_crash_stage_code = 0;
 RTC_DATA_ATTR static uint32_t g_rtc_last_crash_stage_uptime_ms = 0;
 static const unsigned long WAKE_PIN_MITIGATION_MS = 20;
 static const uint32_t WAKE_PIN_FAILSAFE_TIMER_S = 15;
+static const uint32_t SENSE_MAX_SLEEP_TIMER_S = 0;  // Disabled — GPIO39 is now clean
 static const unsigned long WAKE_PIN_BOOT_WARN_MS = 200;
 static const unsigned long WAKE_LINE_STUCK_WARN_MS = 3000;
 static const uint32_t SLEEP_DENY_RETRY_DEFAULT_MS = 5000;
@@ -170,7 +172,7 @@ static unsigned long last_wake_ms = 0;  // Track last wake time for sleep guard
 static const unsigned long GUARDIAN_FORCE_SLEEP_MS = 5UL * 60UL * 1000UL;
 static unsigned long guardian_awake_start_ms = 0;
 static bool guardian_force_sleep = false;
-static const unsigned long MIN_AWAKE_BEFORE_SLEEP_MS = 10000;  // Give MQTT time to connect
+static const unsigned long MIN_AWAKE_BEFORE_SLEEP_MS = 2000;  // Brief grace period (MQTT disabled)
 static const uint32_t ACTION_AWAKE_BUDGET_MS = 60000;
 static const uint32_t ACTION_MIN_REMAINING_MS = 1000;
 static const uint32_t BACKGROUND_UPLOAD_PRESIGN_BUDGET_MS = 30000;
@@ -221,8 +223,8 @@ const char* DISCARD_PRESIGN_ENDPOINT = "/presign/discard";  // Legacy fallback f
 // Note: CAMERA_MODEL_XIAO_ESP32S3 is defined above before camera_pins.h include
 static const gpio_num_t CAM_PWDN_GPIO = GPIO_NUM_1;
 static framesize_t CAPTURE_SIZE = FRAMESIZE_SXGA;  // 1280x1024 (low-light preset)
-static int JPEG_QUALITY = 8;  // Label-optimized: less compression for better text readability
-static int CAMERA_XCLK_HZ = 10000000;  // 10 MHz (low-light preset)
+static int JPEG_QUALITY = 5;  // Max text detail: minimal compression for label readability
+static int CAMERA_XCLK_HZ = 20000000;  // 20 MHz (max OV2640 clock)
 static const int FILL_LED_PIN = GPIO_NUM_4;  // D3 flash LED switch
 static const uint32_t CAMERA_PWDN_WAKE_DELAY_MS = 15;
 static const uint32_t CAMERA_PWDN_DISABLE_DELAY_MS = 2;
@@ -235,19 +237,21 @@ static const int CAMERA_PREFLIGHT_LUMA_LOW = 60;
 static const int CAMERA_PREFLIGHT_LUMA_HIGH = 220;
 static const int CAMERA_PREFLIGHT_GREEN_RATIO_PCT = 140;  // G > 1.4x avg(R,B)
 static int32_t g_camera_last_init_err = 0;
+static uint8_t* g_camera_dma_reserve = nullptr;
 static const uint32_t CAMERA_UI_CAPTURE_DELAY_MS = 0;
 static const uint32_t CAMERA_PREFLIGHT_SETTLE_MS = 40;
 static const uint8_t CAMERA_PREFLIGHT_WARMUP_FRAMES = 2;
 static const uint32_t CAMERA_PREFLIGHT_WARMUP_DELAY_MS = 80;
 static const uint32_t CAMERA_PREFLIGHT_BUDGET_MS = 1000;
-static const uint32_t CAMERA_INIT_SETTLE_DELAY_MS = 150;
-static const uint8_t CAMERA_INIT_WARMUP_FRAMES = 1;
-static const uint32_t CAMERA_INIT_WARMUP_DELAY_MS = 80;
+static const uint32_t CAMERA_INIT_SETTLE_DELAY_MS = 50;
+static const uint8_t CAMERA_INIT_WARMUP_FRAMES = 3;
+static const uint32_t CAMERA_INIT_WARMUP_DELAY_MS = 30;
 static const size_t CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES = 24 * 1024;
-static const uint32_t CAMERA_NETWORK_QUIESCE_DELAY_MS = 250;
-static const uint32_t CAMERA_CAPTURE_SETTLE_MS = 40;
-static const uint32_t CAMERA_WARMUP_DELAY_FAST_MS = 50;
-static const uint32_t CAMERA_WARMUP_DELAY_SLOW_MS = 50;
+static const size_t CAMERA_DMA_RESERVE_BYTES = 16384;  // Camera's largest single DMA allocation
+static const uint32_t CAMERA_NETWORK_QUIESCE_DELAY_MS = 50;
+static const uint32_t CAMERA_CAPTURE_SETTLE_MS = 30;
+static const uint32_t CAMERA_WARMUP_DELAY_FAST_MS = 30;
+static const uint32_t CAMERA_WARMUP_DELAY_SLOW_MS = 30;
 static const uint32_t CAMERA_CAPTURE_RETRY_DELAY_MS = 60;
 static const uint32_t CAMERA_RETRY_SETTLE_MS = 80;
 static const uint32_t CAMERA_PROFILE_SWITCH_SETTLE_MS = 100;
@@ -444,11 +448,11 @@ static bool discard_choice_response_received = false;
 static OpJob* active_discard_job = NULL;
 
 // ── VOICE Operation State ──────────────────────────────────────────
-#define AUDIO_BUFFER_SIZE (512 * 1024)  // 512KB buffer (~6 seconds at 24kHz, 16-bit mono)
+#define AUDIO_BUFFER_SIZE (512 * 1024)  // 512KB buffer (~16 seconds at 16kHz, 16-bit mono)
 static uint8_t* voice_audio_buffer = NULL;
-static size_t voice_audio_pos = 0;
-static size_t voice_audio_size = 0;
-static bool voice_recording_active = false;
+static volatile size_t voice_audio_pos = 0;
+static volatile size_t voice_audio_size = 0;
+static volatile bool voice_recording_active = false;
 static volatile bool voice_finalize_requested = false;
 static uint16_t voice_peak_abs = 0;
 static uint64_t voice_sum_abs = 0;
@@ -555,10 +559,18 @@ static bool g_camera_preflight_force = false;
 static int g_last_scene_luma = -1;
 static int g_last_scene_green_ratio = -1;
 
+// Camera module auto-detection (HD3FM-811 vs DCX-OV2640-v2)
+// Detected by timing first warmup frame readout at 20MHz SXGA
+enum CameraModule { CAM_MODULE_UNKNOWN = 0, CAM_MODULE_HD3FM = 1, CAM_MODULE_DCX = 2 };
+static CameraModule g_camera_module = CAM_MODULE_UNKNOWN;
+static uint32_t g_camera_first_frame_ms = 0;
+static const uint32_t CAMERA_MODULE_DETECT_THRESHOLD_MS = 350;  // HD3FM < 350ms, DCX > 350ms
+
 #ifndef HALO_SENSE_PROD_WRAPPER
 static volatile bool g_lcd_ota_done = false;
 static char g_lcd_ota_result[32] = "unknown";
 static char g_lcd_ota_version[32] = "";
+static volatile bool g_lcd_ota_task_running = false;
 #endif
 
 // ── Work State ─────────────────────────────────────────────────────
@@ -606,7 +618,56 @@ static SemaphoreHandle_t g_list_mutex = NULL;
 #include "sense_time.h"
 #include "sense_diag.h"
 #include "sense_uart.h"
+
+// Record error locally AND forward to LCD for NVS persistence.
+// Defined here (not in sense_diag.h) because it depends on both
+// sense_diag.h and sense_uart.h, and the former is included first.
+
+// Forward declaration — defined in sense_upload_queue.h (included later).
+static uint32_t upload_queue_count();
+
+// Build compact device-state context string for error enrichment.
+static int diag_snapshot_context(char* buf, size_t buf_size) {
+    int32_t rssi = WiFi.isConnected() ? WiFi.RSSI() : 0;
+    uint32_t heap_kb = esp_get_free_heap_size() / 1024;
+
+    const char* op_str = "idle";
+    const char* op_mode = "";
+    if (current_job.active) {
+        switch (current_job.type) {
+            case OP_SCAN:  op_str = "scan"; op_mode = current_job.mode; break;
+            case OP_VOICE: op_str = "voice"; break;
+            case OP_LIST_REFRESH: op_str = "list"; break;
+            default: op_str = "op"; break;
+        }
+    }
+
+    return snprintf(buf, buf_size,
+        "heap=%luK rssi=%ld op=%s%s%s fg=%d http=%d upl_q=%d boot=%lu",
+        (unsigned long)heap_kb,
+        (long)rssi,
+        op_str,
+        op_mode[0] ? "/" : "",
+        op_mode,
+        (int)foreground_active,
+        (int)http_inflight,
+        upload_queue_count(),
+        (unsigned long)g_sense_boot_count);
+}
+
+static void diag_record_error_persistent(const char* stage, int32_t code, const char* text) {
+  diag_record_error(stage, code, text);
+  char enriched[192];
+  char ctx[128];
+  diag_snapshot_context(ctx, sizeof(ctx));
+  snprintf(enriched, sizeof(enriched), "%s | %s", text ? text : "", ctx);
+  uart_send_sense_diag_persist(stage, "ERROR", stage, code, enriched);
+}
+
 #include "sense_uart_msg.h"
+#ifdef HALO_SENSE_PROD_WRAPPER
+#include "sense_ota_lcd.h"
+#endif
 #include "sense_http.h"
 #include "sense_wifi.h"
 #include "sense_upload.h"
@@ -636,7 +697,7 @@ static unsigned long last_sleep_coord_status_log_ms = 0;
 static unsigned long last_uart_diag_ms = 0;
 static unsigned long last_wake_pin_log_ms = 0;
 static unsigned long sleep_holdoff_until_ms = 0;
-static const unsigned long SLEEP_HOLDOFF_MS = 10000;
+static const unsigned long SLEEP_HOLDOFF_MS = 2000;
 static bool lcd_wifi_has_creds = false;
 static uint32_t lcd_wifi_checksum = 0;
 static uint32_t last_sent_wifi_checksum = 0;
@@ -658,12 +719,36 @@ static void wake_net_stabilize(const char* reason) {
 }
 
 static void request_list_refresh(const char* reason, bool send_status) {
-  (void)send_status;
   if (reason && reason[0]) {
     strncpy(g_last_refresh_reason, reason, sizeof(g_last_refresh_reason) - 1);
     g_last_refresh_reason[sizeof(g_last_refresh_reason) - 1] = '\0';
   }
-  Serial.printf("[LIST_REFRESH] request ignored reason=%s (shopping list disabled)\n",
+  if (list_refresh_inflight) {
+    Serial.printf("[LIST_REFRESH] already inflight, skipping reason=%s\n",
+                  reason ? reason : "unknown");
+    return;
+  }
+  unsigned long now = millis();
+  if (now < list_refresh_cooldown_until_ms) {
+    Serial.printf("[LIST_REFRESH] cooldown active, skipping reason=%s\n",
+                  reason ? reason : "unknown");
+    return;
+  }
+  list_refresh_inflight = true;
+  list_refresh_start_ms = now;
+  OpJob job = {OP_LIST_REFRESH, PRI_BG, get_next_msg_id(), now, OP_IDLE, false, "", ""};
+  job.quantity = 0;
+  job.add_to_shopping_list = false;
+  if (!enqueue_op_job(job, false, "list_refresh")) {
+    Serial.printf("[LIST_REFRESH] failed to enqueue reason=%s\n",
+                  reason ? reason : "unknown");
+    list_refresh_inflight = false;
+    return;
+  }
+  if (send_status) {
+    uart_send_ui_status("Refreshing...");
+  }
+  Serial.printf("[LIST_REFRESH] request accepted reason=%s\n",
                 reason ? reason : "unknown");
 }
 
@@ -1810,7 +1895,8 @@ static bool parse_input_message(const char* json_str) {
       return true;
     }
     Serial.println("[INPUT_WAKE] accepted");
-    Serial.println("[UART] LCD wake-up detected - list refresh disabled");
+    Serial.println("[UART] LCD wake-up detected - requesting list refresh");
+    request_list_refresh("input_wake", false);
     last_wake_ms = now_ms;
   } else if (strcmp(type, "MAINT_WINDOW_ACK") == 0) {
     uint32_t remaining_s = doc["remaining_s"] | 0;
@@ -1894,6 +1980,11 @@ static bool parse_input_message(const char* json_str) {
       }
     }
   } else if (strcmp(type, "INPUT_SLEEP") == 0) {
+#ifdef STRESS_TEST_NO_SLEEP
+    Serial.println("[SLEEP] STRESS_TEST_NO_SLEEP — ignoring INPUT_SLEEP");
+    uart_send_sleep_deny("stress_test", 60000);
+    return true;
+#endif
     // LCD is going to sleep - Sense should also sleep
     sleep_intent_pending = false;
     uint32_t msg_id = doc["msg_id"] | 0;
@@ -1993,6 +2084,14 @@ static bool parse_input_message(const char* json_str) {
     halo_prod_request_manual_ota(reason);
 #else
     Serial.println("[UART] INPUT_OTA_CHECK ignored (no prod wrapper)");
+#endif
+  } else if (strcmp(type, "INPUT_MAINT_TEST") == 0) {
+    uint32_t duration = doc["duration_sec"] | 600;
+    Serial.printf("[UART] INPUT_MAINT_TEST received duration_sec=%lu\n", (unsigned long)duration);
+#ifdef HALO_SENSE_PROD_WRAPPER
+    halo_prod_request_maint_test(duration);
+#else
+    Serial.println("[UART] INPUT_MAINT_TEST ignored (no prod wrapper)");
 #endif
   } else if (strcmp(type, "INPUT_WIFI_SCAN") == 0) {
     // WiFi network scan — reports all visible APs with RSSI via SENSE_DIAG
@@ -2345,6 +2444,52 @@ static bool parse_input_message(const char* json_str) {
                   g_lcd_ota_version);
   } else if (strcmp(type, "INPUT_RETRY") == 0) {
     Serial.println("[UART] INPUT_RETRY ignored (queue-based upload in use)");
+  } else if (strcmp(type, "INPUT_TEST_ERRORS") == 0) {
+    Serial.println("[TEST] Injecting test errors via diag_record_error_persistent...");
+    diag_record_error_persistent("camera", -1, "test: init failed after 2 attempts");
+    delay(50);  // small delay between UART sends to avoid buffer overflow
+    diag_record_error_persistent("wifi", -3, "test: connect timeout after 30s");
+    delay(50);
+    diag_record_error_persistent("upload", 403, "test: PUT rejected by server");
+    delay(50);
+    diag_record_error_persistent("voice", -2, "test: i2s recording failed");
+    Serial.println("[TEST] 4 Sense test errors sent to LCD via UART");
+  // ── LCD OTA proxy mailbox handlers ─────────────────────────────────
+  // These messages are responses from the LCD board during OTA proxy
+  // sessions. The proxy task polls the mailbox flags instead of reading
+  // lcdSerial directly, avoiding UART contention with this main loop.
+  } else if (strcmp(type, "LCD_OTA_QUERY_RESP") == 0) {
+    const char* fw = doc["lcd_fw"] | "";
+    uint32_t part_size = doc["ota_part_size"] | (uint32_t)0;
+    strncpy(g_lcd_ota_query_resp_fw, fw, sizeof(g_lcd_ota_query_resp_fw) - 1);
+    g_lcd_ota_query_resp_fw[sizeof(g_lcd_ota_query_resp_fw) - 1] = '\0';
+    g_lcd_ota_query_resp_part_size = part_size;
+    g_lcd_ota_query_resp_ready = true;
+    Serial.printf("[UART] LCD_OTA_QUERY_RESP fw=%s part_size=%lu\n",
+                  fw, (unsigned long)part_size);
+  } else if (strcmp(type, "LCD_OTA_BEGIN_ACK") == 0) {
+    bool accepted = doc["accepted"] | false;
+    const char* reason = doc["reason"] | "unknown";
+    uint32_t resume_offset = doc["resume_offset"] | (uint32_t)0;
+    g_lcd_ota_begin_ack_accepted = accepted;
+    strncpy(g_lcd_ota_begin_ack_reason, reason, sizeof(g_lcd_ota_begin_ack_reason) - 1);
+    g_lcd_ota_begin_ack_reason[sizeof(g_lcd_ota_begin_ack_reason) - 1] = '\0';
+    g_lcd_ota_begin_ack_resume_offset = resume_offset;
+    g_lcd_ota_begin_ack_ready = true;
+    Serial.printf("[UART] LCD_OTA_BEGIN_ACK accepted=%d reason=%s resume=%lu\n",
+                  accepted ? 1 : 0, reason, (unsigned long)resume_offset);
+  } else if (strcmp(type, "LCD_OTA_END_ACK") == 0) {
+    bool sha_match = doc["sha_match"] | false;
+    g_lcd_ota_end_ack_sha_match = sha_match;
+    g_lcd_ota_end_ack_ready = true;
+    Serial.printf("[UART] LCD_OTA_END_ACK sha_match=%d\n", sha_match ? 1 : 0);
+  } else if (strcmp(type, "LCD_OTA_STATUS") == 0) {
+    uint8_t pct = doc["progress"] | (uint8_t)0;
+    const char* phase = doc["phase"] | "";
+    Serial.printf("[UART] LCD_OTA_STATUS phase=%s progress=%u%%\n", phase, pct);
+  } else if (strcmp(type, "LCD_OTA_ABORT") == 0) {
+    const char* reason = doc["reason"] | "unknown";
+    Serial.printf("[UART] LCD_OTA_ABORT reason=%s\n", reason);
   } else {
     Serial.printf("[PROTO] Unknown type: %s\n", type);
   }
@@ -2419,18 +2564,18 @@ static void op_worker_task(void *arg) {
         // Send status: RECORDING
         uart_send_ui_status_extended("VOICE", "RECORDING", "Listening…");
         
-        // Start I2S audio recording (max 30 seconds, but will stop on INPUT_LONG_PRESS_END)
+        // Start I2S audio recording (max duration, but will stop on INPUT_LONG_PRESS_END)
         Serial.println("[OP_WORKER] VOICE: Starting I2S audio recording...");
-        audio_start_recording_ms(30000);
+        const uint32_t MAX_RECORD_MS = 10000;
+        audio_start_recording_ms(MAX_RECORD_MS);
         voice_begin_wifi_preconnect();
         if (voice_finalize_requested) {
           current_job.state = OP_FINALIZE;
         }
-        
+
         // Wait for recording to complete (will be signaled by INPUT_LONG_PRESS_END)
         // For now, record for max 10 seconds or until signaled
         uint32_t record_start = millis();
-        const uint32_t MAX_RECORD_MS = 10000;
         
         while (current_job.state == OP_RECORDING && (millis() - record_start) < MAX_RECORD_MS) {
           vTaskDelay(pdMS_TO_TICKS(20));
@@ -2455,8 +2600,8 @@ static void op_worker_task(void *arg) {
         voice_recording_active = false;
         audio_stop_recording();
         
-        // Wait a bit for any remaining samples to be written by callback
-        delay(200);
+        // Brief yield to let any in-flight callback invocation complete
+        vTaskDelay(pdMS_TO_TICKS(10));
         
         if (voice_audio_size == 0) {
           Serial.println("[OP_WORKER] VOICE: No audio recorded, aborting");
@@ -2479,6 +2624,13 @@ static void op_worker_task(void *arg) {
                         (unsigned)voice_peak_abs,
                         avg_abs,
                         nonzero_pct);
+          { // Bridge voice recording diagnostics to LCD
+            char vdetail[128];
+            snprintf(vdetail, sizeof(vdetail), "ms=%lu bytes=%u peak=%u avg=%lu nz=%lu%%",
+                     record_ms, (unsigned)voice_audio_size,
+                     (unsigned)voice_peak_abs, avg_abs, nonzero_pct);
+            uart_send_sense_diag("voice", "record_done", "recording", (int32_t)voice_audio_size, vdetail);
+          }
           
           // Transition to UPLOAD
           current_job.state = OP_UPLOAD;
@@ -2578,7 +2730,7 @@ static void op_worker_task(void *arg) {
             Serial.println("[OP_WORKER] SCAN: Camera initialization FAILED");
             deinit_camera();
             camera_timeline_complete(false, nullptr, "init_fail");
-            diag_record_error("camera_init", -1, "init_failed");
+            diag_record_error_persistent("camera_init", -1, "init_failed");
             uart_send_sense_diag("camera", "scan_init_fail", job.mode, -1, "op_worker");
             diag_record_action_event("scan", job.mode, "err", "camera_init", -1);
             scan_send_terminal_status("ERROR", "Camera init failed", job.mode, true);
@@ -2588,7 +2740,7 @@ static void op_worker_task(void *arg) {
             if (!warmup_and_capture(fb, true)) {
               Serial.println("[OP_WORKER] SCAN: Camera capture FAILED");
               deinit_camera();
-              diag_record_error("camera_capture", -1, "capture_failed");
+              diag_record_error_persistent("camera_capture", -1, "capture_failed");
               uart_send_sense_diag("camera", "scan_capture_fail", job.mode, -1, "op_worker");
               diag_record_action_event("scan", job.mode, "err", "camera_capture", -1);
               scan_send_terminal_status("ERROR", "Camera failed", job.mode, true);
@@ -2710,7 +2862,7 @@ static void op_worker_task(void *arg) {
             Serial.println("[OP_WORKER] SCAN: Camera initialization FAILED");
             deinit_camera();
             camera_timeline_complete(false, nullptr, "init_fail");
-            diag_record_error("camera_init", -1, "init_failed");
+            diag_record_error_persistent("camera_init", -1, "init_failed");
             uart_send_sense_diag("camera", "scan_init_fail", job.mode, -1, "op_worker");
             diag_record_action_event("scan", job.mode, "err", "camera_init", -1);
             scan_send_terminal_status("ERROR", "Camera init failed", job.mode, true);
@@ -2720,7 +2872,7 @@ static void op_worker_task(void *arg) {
             if (!warmup_and_capture(fb, true)) {
               Serial.println("[OP_WORKER] SCAN: Camera capture FAILED");
               deinit_camera();
-              diag_record_error("camera_capture", -1, "capture_failed");
+              diag_record_error_persistent("camera_capture", -1, "capture_failed");
               uart_send_sense_diag("camera", "scan_capture_fail", job.mode, -1, "op_worker");
               diag_record_action_event("scan", job.mode, "err", "camera_capture", -1);
               scan_send_terminal_status("ERROR", "Camera failed", job.mode, true);
@@ -2845,8 +2997,10 @@ scan_exit:
         // Sense_Minimal/Sense_Minimal.ino: op_worker_task (SCAN exit)
         Serial.println("[OP_WORKER] SCAN operation complete");
       } else if (job.type == OP_LIST_REFRESH) {
-        Serial.println("[OP_WORKER] LIST_REFRESH ignored (shopping list disabled)");
-        list_refresh_mark_complete("disabled");
+        Serial.println("[OP_WORKER] LIST_REFRESH starting");
+        fetch_shopping_list_from_api();
+        uart_send_ui_list();
+        list_refresh_mark_complete("done");
       }
       
       // Job complete
@@ -2914,6 +3068,14 @@ void setup() {
       reset_reason == ESP_RST_INT_WDT) {
     Serial.printf("[BOOT_DIAG] WARNING reset_reason=%d (brownout/wdt)\n", (int)reset_reason);
   }
+  if (reset_reason == ESP_RST_BROWNOUT ||
+      reset_reason == ESP_RST_INT_WDT ||
+      reset_reason == ESP_RST_TASK_WDT ||
+      reset_reason == ESP_RST_PANIC) {
+    char detail[64];
+    snprintf(detail, sizeof(detail), "reset=%d stage=%s", (int)reset_reason, g_rtc_last_stage);
+    diag_record_error_persistent("boot", (int32_t)reset_reason, detail);
+  }
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
   if (reset_reason == ESP_RST_PANIC ||
       reset_reason == ESP_RST_TASK_WDT ||
@@ -2941,6 +3103,21 @@ void setup() {
       Serial.printf("[BOOT_DIAG] timer_wake_override cause=%d armed=%u\n",
                     (int)cause, (unsigned)g_timer_wake_armed);
     }
+    // Init UART and announce to LCD — LCD may be waiting for us
+    initUarts();
+    uart_send_ui_status("IDLE");
+    last_lcd_communication = millis();
+    // Check if LCD is actively trying to talk to us
+    unsigned long lcd_check_start = millis();
+    bool lcd_active = false;
+    while (millis() - lcd_check_start < 2000) {
+      if (lcdSerial.available()) {
+        lcd_active = true;
+        Serial.println("[TIMER_WAKE] LCD active — staying awake");
+        break;
+      }
+      delay(50);
+    }
     ota_on_timer_wake();
   } else {
     Serial.println("[SENSE] Cold boot");
@@ -2951,6 +3128,7 @@ void setup() {
   gpio_set_direction(WAKE_GPIO, GPIO_MODE_INPUT);
   gpio_pullup_en(WAKE_GPIO);
   gpio_pulldown_dis(WAKE_GPIO);
+  delay(200);  // Grace period: let LCD GPIO39 stabilize after boot/restart
   last_wake_pin_state = gpio_get_level(WAKE_GPIO);
   last_wake_pin_check = millis();
   log_wake_pin_boot_state("boot");
@@ -3063,7 +3241,21 @@ void setup() {
   WiFi.onEvent(handle_wifi_event);
   wifi_diag_reset();
   Serial.printf("[BOOT_FLOW] stage=wifi_event_register_done t=%lu\n", millis());
-  
+
+  // Reserve a contiguous DMA block for camera before WiFi fragments the heap.
+  // WiFi.begin() allocates ~30-50KB in internal DMA SRAM; those allocations can
+  // split the heap so no contiguous 16KB block remains for esp_camera_init().
+  // By reserving first, WiFi allocates *around* this block, not *through* it.
+  // Released in init_camera(), re-reserved in deinit_camera().
+  g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+      CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+  if (g_camera_dma_reserve) {
+    Serial.printf("[SETUP] Camera DMA reserved %u bytes at %p\n",
+                  (unsigned)CAMERA_DMA_RESERVE_BYTES, g_camera_dma_reserve);
+  } else {
+    Serial.println("[SETUP] WARNING: Camera DMA reservation failed");
+  }
+
   // Start Wi-Fi immediately (non-blocking). The ESP32 WiFi stack runs on
   // core 0 in a FreeRTOS task — calling WiFi.begin() doesn't block the
   // main loop or interfere with camera capture on core 1.
@@ -3099,6 +3291,16 @@ void setup() {
       }
 #endif
       if (ssid && ssid[0]) {
+        WiFi.persistent(false);  // Don't cache WiFi config in NVS — we manage creds ourselves
+
+        // After deep sleep, the WiFi driver has stale state from the pre-sleep
+        // teardown (WiFi.disconnect + WiFi.mode(OFF) + esp_wifi_stop).
+        // A hard reset clears the driver completely, matching cold-boot behavior.
+        if (deep_sleep_reset) {
+          Serial.println("[BOOT_WIFI] deep sleep wake - hard reset WiFi driver");
+          hardResetSta();  // disconnect(true,true) + mode OFF + delay + mode STA
+        }
+
         WiFi.mode(WIFI_STA);
         WiFi.setAutoReconnect(true);
         WiFi.setSleep(false);
@@ -3125,7 +3327,15 @@ void setup() {
   }
   
   // Initialize MQTT (will connect when needed)
+  // MQTT DISABLED: using HTTPS for OTA scheduling, presign, uploads.
+  // MQTT was only used for remote cmd/desired-version push.
+  // Keeping it off prevents esp-aes TLS failures that block deep sleep.
+  #define HALO_MQTT_DISABLED 1
+  #if HALO_MQTT_DISABLED
+  Serial.println("[SETUP] MQTT DISABLED (HALO_MQTT_DISABLED=1)");
+  #else
   Serial.println("[SETUP] MQTT system initialized (will connect on demand)");
+  #endif
   
   Serial.println("\nReady. Sense board initialized.");
   Serial.println("UART communication with LCD board active.");
@@ -3138,23 +3348,27 @@ void setup() {
 }
 
 void loop() {
-  // Process incoming UART messages (line-based JSON protocol) - non-blocking
-  while (lcdSerial.available() > 0) {
-    char c = lcdSerial.read();
-    if (UART_RX_DEBUG) {
-      Serial.printf("[UART_RAW] rx_byte=0x%02X\n", (uint8_t)c);
+  // Process incoming UART messages (line-based JSON protocol) - non-blocking.
+  // Skip when the LCD OTA proxy task owns the serial port for binary
+  // COBS framing — the proxy reads lcdSerial directly during that phase.
+  if (!g_lcd_ota_proxy_owns_uart) {
+    while (lcdSerial.available() > 0) {
+      char c = lcdSerial.read();
+      if (UART_RX_DEBUG) {
+        Serial.printf("[UART_RAW] rx_byte=0x%02X\n", (uint8_t)c);
+      }
+      if (c == '\n') {
+        uart_ring_push('\n');
+      } else if (c == '\r') {
+        continue;
+      } else if (uart_rx_is_printable(c)) {
+        uart_ring_push(c);
+      } else {
+        uart_rx_dropped_since_frame++;
+      }
     }
-    if (c == '\n') {
-      uart_ring_push('\n');
-    } else if (c == '\r') {
-      continue;
-    } else if (uart_rx_is_printable(c)) {
-      uart_ring_push(c);
-    } else {
-      uart_rx_dropped_since_frame++;
-    }
+    uart_process_rx_ring();
   }
-  uart_process_rx_ring();
 
   // DEBUG: USB serial command injection — allows injecting UART JSON messages
   // via USB CDC (/dev/cu.usbmodem*) so they are processed as if sent by the LCD.
@@ -3446,7 +3660,9 @@ void loop() {
       unsigned long hb_age_ms = 0;
       bool link_recent = sense_link_recent(now_ms, &rx_age_ms, &hb_age_ms);
       const char* sleep_block_reason = "eligible";
-      if (link_recent) {
+      if (g_lcd_ota_task_running) {
+        sleep_block_reason = "lcd_ota_proxy";
+      } else if (link_recent) {
         sleep_block_reason = "link_recent";
       } else if (idle_age_ms < lcd_timeout) {
         sleep_block_reason = "idle_age";
@@ -3519,7 +3735,10 @@ void loop() {
       bool can_sleep = true;
       const char* block_reason = NULL;
       const char* block_op = "none";
-      if (list_refresh_inflight) {
+      if (g_lcd_ota_task_running) {
+        block_reason = "lcd_ota_proxy";
+        block_op = "lcd_ota";
+      } else if (list_refresh_inflight) {
         block_reason = "list_refresh_inflight";
         block_op = "list_refresh";
       } else if (now_ms < sleep_grace_until_ms) {

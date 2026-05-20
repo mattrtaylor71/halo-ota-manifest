@@ -273,9 +273,10 @@ static void voice_audio_callback(const int16_t *samples, size_t num_samples) {
     voice_audio_pos += bytes_to_write;
     voice_audio_size = voice_audio_pos;
   } else {
-    // Buffer overflow - stop recording
-    Serial.println("[VOICE] Audio buffer overflow - stopping recording");
+    // Buffer full - stop recording, keep what we have
+    Serial.println("[VOICE] Audio buffer full - stopping recording");
     voice_recording_active = false;
+    voice_finalize_requested = true;  // Signal op_worker to proceed with what we have
   }
 }
 
@@ -287,8 +288,25 @@ static void voice_audio_callback(const int16_t *samples, size_t num_samples) {
 static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, uint32_t voice_job_id) {
   if (audio_buf == NULL || audio_size == 0) {
     Serial.println("[VOICE] No audio data to upload");
+    uart_send_sense_diag("voice", "no_audio", "VOICE_POST", 0, "empty_buffer");
     return false;
   }
+
+  // Release camera DMA reservation to defragment internal SRAM for TLS.
+  bool dma_was_reserved_voice = (g_camera_dma_reserve != nullptr);
+  if (dma_was_reserved_voice) {
+    heap_caps_free(g_camera_dma_reserve);
+    g_camera_dma_reserve = nullptr;
+  }
+  struct DmaGuardVoice {
+    bool should_reacquire;
+    ~DmaGuardVoice() {
+      if (should_reacquire && !g_camera_dma_reserve) {
+        g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+            CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+      }
+    }
+  } dma_guard_voice{dma_was_reserved_voice};
 
   Serial.printf("[VOICE] Uploading %d bytes (raw PCM) to quick-ack API\n", audio_size);
   Serial.printf("[VOICE] Sending original PCM size=%u sample_rate=16000 format=s16le mono wav=0\n",
@@ -300,6 +318,11 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
   char device_id[32] = {0};
   load_owner_id_or_default(owner_id, sizeof(owner_id));
   load_runtime_device_id(device_id, sizeof(device_id));
+  if (owner_id[0] == '\0') {
+    Serial.println("[VOICE] ERROR: owner_id empty — device not fully provisioned");
+    uart_send_sense_diag("voice", "error", "voice", -1, "owner_id_empty");
+    return false;
+  }
   const char* session_id = voice_session_get_or_create();
   g_voice_session_last_turn_ms = millis();
 
@@ -354,6 +377,7 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
 
     if (httpResponseCode >= 200 && httpResponseCode < 300) {
       Serial.printf("[VOICE] Async accept success: %d\n", httpResponseCode);
+      uart_send_sense_diag("voice", "upload_ok", "VOICE_POST", (int32_t)httpResponseCode, "accepted");
       http.end();
       client.stop();
       http_queue_unlock("VOICE_POST", voice_http_job);
@@ -365,6 +389,10 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
     Serial.printf("[VOICE] Upload failed: %d attempt=%u\n",
                   httpResponseCode,
                   (unsigned)attempt);
+    { char vfail[64];
+      snprintf(vfail, sizeof(vfail), "attempt=%u/%u", (unsigned)attempt, (unsigned)max_attempts);
+      uart_send_sense_diag("voice", "upload_fail", "VOICE_POST", (int32_t)httpResponseCode, vfail);
+    }
     log_http_failure_details("VOICE_QUICK_ACK_POST", quick_ack_url.c_str(), httpResponseCode, &client);
     if (httpResponseCode > 0) {
       String error_response = http.getString();
@@ -379,14 +407,11 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
     }
 
     if (httpResponseCode < 0 && attempt < max_attempts) {
+      Serial.println("[VOICE] TLS transport failure, hard WiFi reset before retry");
+      wifi_hard_reset_and_reconnect("voice_tls_retry", 15000);
       if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[VOICE] transport failure with Wi-Fi down, reconnecting before retry");
-        if (!voice_ensure_wifi_connected()) {
-          Serial.println("[VOICE] reconnect before retry failed");
-          break;
-        }
-      } else {
-        Serial.println("[VOICE] transient transport failure, retrying once");
+        Serial.println("[VOICE] WiFi reconnect failed after hard reset");
+        break;
       }
       delay(250);
       continue;
@@ -396,6 +421,8 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
 
   if (!accepted) {
     Serial.println("[VOICE] Upload failed or backend did not accept request");
+    diag_record_error_persistent("voice_upload", -1, "all_attempts_failed");
+    uart_send_sense_diag("voice", "upload_rejected", "VOICE_POST", -1, "all_attempts_failed");
   }
 
   return accepted;

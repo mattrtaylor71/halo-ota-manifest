@@ -294,6 +294,7 @@ static void wifi_guard_handle_timeout(unsigned long elapsed_ms) {
   wifi_guard_set_state(WIFI_STATE_FAILED_TIMEOUT, "timeout", WiFi.status());
   wifi_guard_note_fail("timeout");
   Serial.printf("[WIFI_GUARD] connect_timeout elapsed_ms=%lu\n", elapsed_ms);
+  diag_record_error_persistent("wifi", (int32_t)WiFi.status(), "connect_timeout");
   uart_send_sense_diag("wifi", "timeout", "timeout", (int32_t)WiFi.status(), "connect_timeout");
 }
 
@@ -308,6 +309,7 @@ static void wifi_guard_mark_failed(wl_status_t status, const char* reason) {
   Serial.printf("[WIFI_GUARD] connect_fail status=%d reason=%s\n",
                 (int)status,
                 reason ? reason : "unknown");
+  diag_record_error_persistent("wifi", (int32_t)status, reason ? reason : "unknown");
   uart_send_sense_diag("wifi", "fail", reason, (int32_t)status, wifi_state_to_string(wifi_state));
 }
 

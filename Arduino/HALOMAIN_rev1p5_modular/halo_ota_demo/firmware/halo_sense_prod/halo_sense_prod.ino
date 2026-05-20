@@ -51,6 +51,7 @@ static const uint32_t PRE_SLEEP_WIFI_RECOVERY_MS = 30000;
 static const uint32_t PRE_SLEEP_WIFI_RETRY_INTERVAL_MS = 2000;
 static const uint32_t PRE_SLEEP_WIFI_HARD_RESET_MS = 6000;
 static bool g_ota_pending_verify_active = false;
+static volatile bool g_lcd_ota_task_running = false;
 
 #include "../../../Sense_Minimal/Sense_Minimal.ino"
 
@@ -187,7 +188,7 @@ static uint32_t g_boot_count = 0;
 static unsigned long g_boot_time_ms = 0;
 static bool g_reboot_loop_detected = false;
 
-static ManifestClient g_manifest_client;
+ManifestClient g_manifest_client;
 static SenseOtaApplier g_ota_applier;
 static HealthGate g_health_gate;
 static ProvisioningManager g_provisioning_manager;
@@ -286,6 +287,15 @@ static void ota_http_schedule_note(const char* status, int http_code, const char
   } else {
     g_http_sched_last_request_id[0] = '\0';
   }
+  // Forward schedule status to LCD for in-enclosure debugging
+  char dev_id[32] = {0};
+  load_runtime_device_id(dev_id, sizeof(dev_id));
+  char detail[160];
+  snprintf(detail, sizeof(detail), "status=%s http=%d req=%s dev=%s",
+           status ? status : "?", http_code,
+           (request_id && request_id[0]) ? request_id : "-",
+           dev_id[0] ? dev_id : "?");
+  uart_send_sense_diag("ota_sched", "note", "OTA_SCHED", http_code, detail);
 }
 
 static void sched_event_note(const char* event, const char* request_id) {
@@ -874,7 +884,7 @@ static const char* OTA_SCHED_NEXT_KEY = "next_epoch";
 static const char* OTA_SCHED_SYNC_KEY = "last_sync";
 
 #ifndef OTA_SCHED_ENABLED
-#define OTA_SCHED_ENABLED 0
+#define OTA_SCHED_ENABLED 1
 #endif
 #ifndef OTA_SCHED_TEST_OFFSET_SEC
 #define OTA_SCHED_TEST_OFFSET_SEC 0
@@ -1348,6 +1358,12 @@ static bool ota_sched_http_fetch_window(uint32_t timeout_ms) {
 
   String url = ota_sched_http_build_url();
   LOG_INFO("[OTA_HTTP_SCHED] fetch url=%s timeout_ms=%lu", url.c_str(), (unsigned long)timeout_ms);
+  // Forward URL to LCD for in-enclosure debugging (truncate if needed)
+  {
+    char url_detail[200];
+    snprintf(url_detail, sizeof(url_detail), "url=%s", url.c_str());
+    uart_send_sense_diag("ota_sched", "fetch_url", "OTA_SCHED", 0, url_detail);
+  }
 
   HTTPClient http;
   WiFiClient plain_client;
@@ -2038,8 +2054,58 @@ void halo_prod_request_manual_ota(const char* reason) {
   }
   // Queue the LCD OTA request behind an explicit lock so the LCD defers
   // its own apply until Sense finishes and later sends OTA_UNLOCK.
+  // LCD OTA is now proxy-driven: Sense will fetch the manifest and stream
+  // the binary to LCD during the maintenance window via maybe_trigger_lcd_ota_check().
   send_ota_uart_message("OTA_LOCK");
-  (void)send_lcd_ota_check_request("manual", true);
+  g_lcd_ota_done = false;
+  strncpy(g_lcd_ota_result, "pending", sizeof(g_lcd_ota_result) - 1);
+  g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+  g_lcd_ota_attempted_this_window = false;
+  LOG_INFO("[LCD_OTA_ORCH] manual lcd ota queued (proxy mode)");
+}
+
+void halo_prod_request_maint_test(uint32_t duration_sec) {
+  if (!is_time_valid()) {
+    Serial.println("[MAINT_TEST] ERROR: time not valid, cannot create window");
+    return;
+  }
+  if (g_maintenance_mode) {
+    Serial.println("[MAINT_TEST] ERROR: maintenance already active");
+    return;
+  }
+
+  // Create a maintenance window starting NOW
+  time_t now = time(nullptr);
+  uint64_t now_epoch = (uint64_t)now;
+
+  MaintenanceWindow mw;
+  mw.scheduled = true;
+  mw.start_epoch = now_epoch;
+  mw.duration_sec = duration_sec;
+  snprintf(mw.request_id, sizeof(mw.request_id), "test_%llu", (unsigned long long)now_epoch);
+  mw.grace_before_sec = 60;
+  mw.grace_after_sec = 600;
+  mw.saveToNvs();
+
+  // Clear any consumed state for this test
+  maintenance_window_consumed_clear("maint_test");
+  maintenance_followup_retry_clear("maint_test");
+
+  Serial.printf("[MAINT_TEST] window created start=%llu dur=%lu request_id=%s\n",
+                (unsigned long long)mw.start_epoch,
+                (unsigned long)mw.duration_sec,
+                mw.request_id);
+
+  // Sync to LCD
+  uint32_t remaining_s = mw.duration_sec + mw.grace_after_sec;
+  set_maintenance_schedule_pending_sync_to_lcd(true);
+
+  // Arm maintenance mode — next loop() iteration runs run_maintenance_if_needed()
+  g_maintenance_mode = true;
+  g_maintenance_handled = false;
+  g_maintenance_in_window = false;
+
+  Serial.println("[MAINT_TEST] maintenance mode armed — will run on next loop()");
 }
 
 static void send_maint_window(const MaintenanceWindow* mw,
@@ -2265,34 +2331,143 @@ static void maintenance_resync_on_time_jump(const char* reason) {
   g_last_time_valid_epoch = now_epoch;
 }
 
+static void lcd_ota_proxy_task(void* param) {
+  LOG_INFO("[LCD_OTA_PROXY_TASK] started stack=%u",
+           (unsigned)uxTaskGetStackHighWaterMark(NULL));
+
+  // Release camera DMA reservation to free 16KB of internal SRAM for TLS.
+  // Camera is not used during OTA. Device reboots after LCD OTA, re-reserving in setup().
+  if (g_camera_dma_reserve) {
+    heap_caps_free(g_camera_dma_reserve);
+    g_camera_dma_reserve = nullptr;
+    LOG_INFO("[LCD_OTA_PROXY] Camera DMA reservation released for TLS headroom");
+  }
+
+  // Step 1: Query LCD for its current firmware version
+  char lcd_fw[32] = {0};
+  uint32_t lcd_part_size = 0;
+  if (!sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), &lcd_part_size)) {
+    LOG_INFO("[LCD_OTA_ORCH] lcd_query_fail (proxy)");
+    strncpy(g_lcd_ota_result, "lcd_query_fail", sizeof(g_lcd_ota_result) - 1);
+    g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+    g_lcd_ota_done = true;
+    send_ota_uart_message("OTA_UNLOCK");
+    LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (lcd_query_fail)");
+    g_lcd_ota_task_running = false;
+    vTaskDelete(NULL);
+    return;
+  }
+
+  // Step 2: Fetch LCD manifest from S3
+  // (MQTT + manifest client already released before task creation)
+  const OtaUrlConfig* cfg = ota_get_config();
+  OtaManifest lcd_manifest;
+  if (!sense_lcd_ota_fetch_manifest(cfg->base_dir, cfg->channel, lcd_manifest)) {
+    LOG_INFO("[LCD_OTA_ORCH] manifest_fetch_fail (proxy)");
+    strncpy(g_lcd_ota_result, "manifest_fetch_fail", sizeof(g_lcd_ota_result) - 1);
+    g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+    g_lcd_ota_done = true;
+    send_ota_uart_message("OTA_UNLOCK");
+    LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (manifest_fetch_fail)");
+    mqtt_force_connect();
+    g_lcd_ota_task_running = false;
+    vTaskDelete(NULL);
+    return;
+  }
+
+  // Step 4: Proxy the update (downloads binary, streams to LCD via UART)
+  const char* proxy_result = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
+  LOG_INFO("[LCD_OTA_ORCH] proxy_result=%s", proxy_result);
+
+  // Map proxy result to g_lcd_ota_result
+  if (strcmp(proxy_result, "success") == 0) {
+    strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
+    strncpy(g_lcd_ota_version, lcd_manifest.version, sizeof(g_lcd_ota_version) - 1);
+    g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
+  } else if (strcmp(proxy_result, "up_to_date") == 0) {
+    strncpy(g_lcd_ota_result, "noop", sizeof(g_lcd_ota_result) - 1);
+  } else {
+    strncpy(g_lcd_ota_result, proxy_result, sizeof(g_lcd_ota_result) - 1);
+  }
+  g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+  g_lcd_ota_done = true;
+
+  // Unlock LCD so it can sleep (success case: LCD reboots, but unlock is harmless)
+  send_ota_uart_message("OTA_UNLOCK");
+  LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (proxy_result=%s)", proxy_result);
+
+  // Restore MQTT connection
+  mqtt_force_connect();
+
+  LOG_INFO("[LCD_OTA_PROXY_TASK] done stack_remaining=%u",
+           (unsigned)uxTaskGetStackHighWaterMark(NULL));
+  g_lcd_ota_task_running = false;
+  vTaskDelete(NULL);
+}
+
 static void maybe_trigger_lcd_ota_check() {
+  // Don't spawn a second proxy task
+  if (g_lcd_ota_task_running) {
+    return;
+  }
+  // Allow when: maintenance window is active OR a manual request is pending
+  bool manual_pending = !g_lcd_ota_done && strcmp(g_lcd_ota_result, "pending") == 0;
   bool maintenance_allowed = g_maintenance_in_window;
-  if (!maintenance_allowed) {
+  if (!maintenance_allowed && !manual_pending) {
     return;
   }
-  if (maintenance_schedule_pending_sync_to_lcd()) {
-    LOG_INFO("[LCD_OTA_ORCH] defer (maint_sync_pending)");
-    return;
-  }
-  if (!g_lcd_maint_ack_received) {
-    bool link_recent = halo_uart_link_recent(LCD_MAINT_LINK_RECENT_MS);
-    bool allow_without_ack = link_recent || g_maint_sync_send_count >= MAINT_SYNC_MAX_SENDS;
-    if (!allow_without_ack) {
-      LOG_INFO("[LCD_OTA_ORCH] defer (maint_ack_missing)");
+  // Skip maintenance-sync gates for manual requests
+  if (maintenance_allowed && !manual_pending) {
+    if (maintenance_schedule_pending_sync_to_lcd()) {
+      LOG_INFO("[LCD_OTA_ORCH] defer (maint_sync_pending)");
       return;
     }
-    LOG_INFO("[LCD_OTA_ORCH] override (maint_ack_missing) sends=%u link_recent=%d",
-             (unsigned)g_maint_sync_send_count,
-             link_recent ? 1 : 0);
+    if (!g_lcd_maint_ack_received) {
+      bool link_recent = halo_uart_link_recent(LCD_MAINT_LINK_RECENT_MS);
+      bool allow_without_ack = link_recent || g_maint_sync_send_count >= MAINT_SYNC_MAX_SENDS;
+      if (!allow_without_ack) {
+        LOG_INFO("[LCD_OTA_ORCH] defer (maint_ack_missing)");
+        return;
+      }
+      LOG_INFO("[LCD_OTA_ORCH] override (maint_ack_missing) sends=%u link_recent=%d",
+               (unsigned)g_maint_sync_send_count,
+               link_recent ? 1 : 0);
+    }
   }
   if (g_lcd_ota_attempted_this_window) {
     return;
   }
   ProvisioningState::State prov_state = ProvisioningState::getState();
   maybe_send_lcd_wifi_creds(prov_state);
-  MaintenanceWindow mw;
-  const char* reason = maintenance_window_load(&mw) ? "scheduled_http" : "maintenance";
-  send_lcd_ota_check_request(reason, true);
+
+  // ── LCD OTA proxy: run on dedicated task (TLS needs ~12KB stack) ──
+  g_lcd_ota_attempted_this_window = true;
+  g_lcd_ota_task_running = true;
+
+  // Free internal RAM before task creation — the 12KB stack needs contiguous
+  // internal memory, and MQTT + manifest client can hold ~2-4KB.
+  g_manifest_client.releaseConnection();
+  mqtt_stop_for_ota();
+  vTaskDelay(pdMS_TO_TICKS(300));  // Let memory coalesce
+
+  LOG_INFO("[LCD_OTA_ORCH] heap before task: free=%u largest=%u psram_free=%u",
+           (unsigned)esp_get_free_heap_size(),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  BaseType_t rc = xTaskCreatePinnedToCore(
+    lcd_ota_proxy_task, "lcd_ota_proxy", 12288, NULL, 3, NULL, tskNO_AFFINITY);
+  if (rc != pdPASS) {
+    LOG_ERROR("[LCD_OTA_ORCH] task create FAILED rc=%d", (int)rc);
+    g_lcd_ota_task_running = false;
+    send_ota_uart_message("OTA_UNLOCK");
+    LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (task create failed)");
+    strncpy(g_lcd_ota_result, "task_create_fail", sizeof(g_lcd_ota_result) - 1);
+    g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+    g_lcd_ota_done = true;
+    mqtt_force_connect();
+  } else {
+    LOG_INFO("[LCD_OTA_ORCH] proxy task spawned");
+  }
 }
 
 static void send_provision_status(const char* state) {
@@ -2739,6 +2914,10 @@ static void ota_sched_configure_timer_wakeup() {
     LOG_INFO("[OTA_SCHED] no_schedule sched_compile=%d sched_enabled=%d maint_scheduled=0 retry_pending=0",
              sched_compile_enabled ? 1 : 0,
              g_ota_sched.enabled ? 1 : 0);
+    // Forward to LCD
+    char detail_ns[48];
+    snprintf(detail_ns, sizeof(detail_ns), "compile=%d enabled=%d", sched_compile_enabled ? 1 : 0, g_ota_sched.enabled ? 1 : 0);
+    uart_send_sense_diag("ota_sched", "no_schedule", "OTA_SCHED", 0, detail_ns);
     return;
   }
   if (!is_time_valid()) {
@@ -2837,6 +3016,10 @@ static void ota_sched_configure_timer_wakeup() {
            (unsigned long)maint_remaining_s,
            sched_compile_enabled ? 1 : 0,
            g_ota_sched.enabled ? 1 : 0);
+  // Forward timer arm to LCD
+  char detail[64];
+  snprintf(detail, sizeof(detail), "delta_s=%lu enabled=%d", (unsigned long)delta_s, g_ota_sched.enabled ? 1 : 0);
+  uart_send_sense_diag("ota_sched", "timer_arm", "OTA_SCHED", (int32_t)delta_s, detail);
 }
 
 static void ota_sched_reschedule_after_failure(time_t now, bool time_valid) {
@@ -3080,96 +3263,73 @@ static void run_lcd_maintenance_ota_attempt(const char* maintenance_reason,
     maintenance_idle_diag_note(0, false, false, false, "lcd_no_activity");
   }
 
-  if (!g_lcd_ota_done && !g_lcd_ota_request_active) {
-    if (!send_lcd_ota_check_request(maintenance_reason, true)) {
-      strncpy(g_lcd_ota_result, "skipped_no_request", sizeof(g_lcd_ota_result) - 1);
+  // ── LCD OTA proxy: spawn task (TLS needs >8KB stack) ──
+  if (!g_lcd_ota_done && !g_lcd_ota_task_running) {
+    g_lcd_ota_task_running = true;
+    g_manifest_client.releaseConnection();
+    mqtt_stop_for_ota();
+    vTaskDelay(pdMS_TO_TICKS(300));
+    LOG_INFO("[LCD_OTA_ORCH] maint heap: free=%u largest=%u psram=%u",
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    BaseType_t rc2 = xTaskCreatePinnedToCore(
+      lcd_ota_proxy_task, "lcd_ota_proxy", 12288, NULL, 3, NULL, tskNO_AFFINITY);
+    if (rc2 != pdPASS) {
+      LOG_ERROR("[LCD_OTA_ORCH] maint task create FAILED rc=%d", (int)rc2);
+      g_lcd_ota_task_running = false;
+      send_ota_uart_message("OTA_UNLOCK");
+      LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (maint task create failed)");
+      strncpy(g_lcd_ota_result, "task_create_fail", sizeof(g_lcd_ota_result) - 1);
       g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
       g_lcd_ota_done = true;
-      return;
+      mqtt_force_connect();
+    } else {
+      LOG_INFO("[LCD_OTA_ORCH] proxy maint task spawned");
     }
   }
 
-  if (g_lcd_ota_request_active && !g_lcd_ota_ack_received) {
-    MaintenanceWindow mw;
-    bool has_window = maintenance_window_load(&mw);
-    unsigned long last_retry_ms = 0;
-    unsigned long last_maint_ms = 0;
-    while (!g_lcd_ota_ack_received) {
-      pump_uart_rx_once();
-      if (g_lcd_ota_ack_received) {
-        break;
+  // Wait for proxy task to complete regardless of whether we just spawned it
+  // or it was already running from a previous attempt. This blocks the
+  // orchestrator so it cannot send MAINT_WINDOW JSON on the UART during
+  // binary COBS transfer.
+  //
+  // CRITICAL: pump UART when the proxy is in JSON mode so that mailbox
+  // flags (QUERY_RESP, BEGIN_ACK, END_ACK) get set. Without this, the
+  // proxy task deadlocks — it waits for flags that only parse_input_message()
+  // can set, but parse_input_message() is called from pump_uart_rx_once()
+  // which only runs from this loop during maintenance.
+  if (g_lcd_ota_task_running && !g_lcd_ota_done) {
+    unsigned long wait_start = millis();
+    unsigned long last_log_ms = 0;
+    const unsigned long LCD_OTA_PROXY_TIMEOUT_MS = 600000UL; // 10 min max
+    while (!g_lcd_ota_done && (millis() - wait_start) < LCD_OTA_PROXY_TIMEOUT_MS) {
+      // Pump UART when proxy is NOT in binary COBS mode — safe because
+      // reads and the proxy's writes don't conflict (full duplex), and
+      // during binary mode the proxy reads lcdSerial directly.
+      if (!g_lcd_ota_proxy_owns_uart) {
+        pump_uart_rx_once();
       }
-      if (!maintenance_window_active_for_retry(window_end_epoch, &remaining_s)) {
-        break;
+      vTaskDelay(pdMS_TO_TICKS(10));  // 10ms for responsive UART polling
+      // Log progress every 30s
+      unsigned long elapsed = millis() - wait_start;
+      if (elapsed - last_log_ms >= 30000) {
+        last_log_ms = elapsed;
+        LOG_INFO("[LCD_OTA_ORCH] waiting for proxy task elapsed=%lus result=%s",
+                 (unsigned long)(elapsed / 1000),
+                 g_lcd_ota_result);
       }
-      if (remaining_s_io) {
-        *remaining_s_io = remaining_s;
-      }
-      g_lcd_ota_window_remaining_s = remaining_s;
-      unsigned long now_ms = millis();
-      if (g_lcd_ota_request_active &&
-          g_lcd_ota_request_start_ms > 0 &&
-          (now_ms - g_lcd_ota_request_start_ms) > LCD_OTA_ACK_TIMEOUT_MS) {
-        LOG_INFO("[LCD_OTA_ORCH] ack_timeout retrying");
-        g_lcd_ota_request_active = false;
-      }
-      if ((now_ms - last_maint_ms) >= LCD_MAINT_RESEND_INTERVAL_MS) {
-        send_maint_window(has_window ? &mw : nullptr, remaining_s, 0, false);
-        last_maint_ms = now_ms;
-      }
-      if (!g_lcd_ota_request_active &&
-          (now_ms - last_retry_ms) >= LCD_OTA_RETRY_INTERVAL_MS) {
-        if (send_lcd_ota_check_request(maintenance_reason, true)) {
-          last_retry_ms = now_ms;
-        }
-      }
-      delay(50);
-    }
-    if (!g_lcd_ota_ack_received) {
-      unsigned long age_ms = g_lcd_ota_request_start_ms > 0
-                                 ? (millis() - g_lcd_ota_request_start_ms)
-                                 : 0;
-      bool link_recent = halo_uart_link_recent(LCD_MAINT_LINK_RECENT_MS);
-      LOG_INFO("[LCD_OTA_ORCH] no_ack window_end req_id=%lu age_ms=%lu link_recent=%d",
-               (unsigned long)g_lcd_ota_request_id,
-               age_ms,
-               link_recent ? 1 : 0);
-      strncpy(g_lcd_ota_result, "no_ack", sizeof(g_lcd_ota_result) - 1);
-      g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-      g_lcd_ota_done = true;
-      g_lcd_ota_request_active = false;
-      return;
-    }
-  }
-
-  if (g_lcd_ota_request_active && !g_lcd_ota_done) {
-    unsigned long wait_start_ms = millis();
-    unsigned long last_maint_ms = 0;
-    unsigned long wait_ms = remaining_s * 1000UL;
-    if (wait_ms > LCD_OTA_RESULT_TIMEOUT_MS) {
-      wait_ms = LCD_OTA_RESULT_TIMEOUT_MS;
-    }
-    while (!g_lcd_ota_done && (millis() - wait_start_ms) < wait_ms) {
-      pump_uart_rx_once();
-      if (g_lcd_ota_done) {
-        break;
-      }
-      if (!maintenance_window_active_for_retry(window_end_epoch, &remaining_s)) {
-        break;
-      }
-      if (remaining_s_io) {
-        *remaining_s_io = remaining_s;
-      }
-      g_lcd_ota_window_remaining_s = remaining_s;
-      unsigned long now_ms = millis();
-      if ((now_ms - last_maint_ms) >= LCD_MAINT_KEEPALIVE_MS) {
-        keep_lcd_awake_for_maintenance(remaining_s, "maintenance_wait_result");
-        last_maint_ms = now_ms;
-      }
-      delay(200);
     }
     if (!g_lcd_ota_done) {
-      mark_lcd_ota_still_pending("wait_result_expired");
+      LOG_ERROR("[LCD_OTA_ORCH] proxy task timeout after %lus",
+                (unsigned long)((millis() - wait_start) / 1000));
+      strncpy(g_lcd_ota_result, "proxy_timeout", sizeof(g_lcd_ota_result) - 1);
+      g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+      g_lcd_ota_done = true;
+    } else {
+      LOG_INFO("[LCD_OTA_ORCH] proxy task completed in %lus result=%s",
+               (unsigned long)((millis() - wait_start) / 1000),
+               g_lcd_ota_result);
     }
   }
 }
@@ -3192,6 +3352,27 @@ static void run_maintenance_if_needed() {
   g_lcd_ota_request_id = 0;
   g_lcd_ota_request_start_ms = 0;
   g_lcd_ota_attempted_this_window = false;
+
+  // lcd_ota_due_nvs is set before a Sense self-OTA reboot — it means
+  // the LCD OTA is owed immediately after reboot, regardless of whether
+  // a maintenance window is active. Check this FIRST, before window logic.
+  if (get_lcd_ota_due_nvs()) {
+    LOG_INFO("[MAINT_RUN] lcd_ota_due from NVS — bypassing window check");
+    if (!ensure_maintenance_wifi_connected()) {
+      LOG_INFO("[MAINT_RUN] lcd_ota_due wifi_fail -> sleep");
+      set_lcd_ota_due_nvs(false);
+      send_ota_uart_message("OTA_UNLOCK");
+      g_maintenance_mode = false;
+      sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
+      return;
+    }
+    run_lcd_maintenance_ota_attempt("lcd_ota_due", 0, nullptr);
+    set_lcd_ota_due_nvs(false);
+    LOG_INFO("[MAINT_RUN] lcd_ota_due completed result=%s", g_lcd_ota_result);
+    g_maintenance_mode = false;
+    sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
+    return;
+  }
 
   MaintenanceWindow mw;
   bool has_mw = maintenance_window_load(&mw);
@@ -3357,6 +3538,10 @@ static void run_maintenance_if_needed() {
   send_ota_uart_message("OTA_LOCK");
   LOG_INFO("[MAINT_RUN] OTA_LOCK sent (sequencing: sense downloads first)");
 
+  // Reset OTA check gate — a previous check in this boot cycle may have set
+  // g_ota_check_done=true, which would cause maybeRunOtaCheck() to skip entirely.
+  g_ota_check_done = false;
+  g_ota_skip_logged = false;
   maybeRunOtaCheck(maintenance_reason, true);
   if (sense_maintenance_result_retryable(g_last_ota_result)) {
     for (uint8_t attempt = 1; attempt < SENSE_MAINT_OTA_MAX_ATTEMPTS; ++attempt) {
@@ -3469,6 +3654,11 @@ void halo_prod_pre_sleep() {
     LOG_INFO("[PRE_SLEEP] skip (no work)");
     return;
   }
+  // Abort pre-sleep if LCD is pulsing the wake pin (user action pending)
+  if (wake_pin_check_pulsing(250)) {
+    LOG_INFO("[PRE_SLEEP] abort (lcd_pulsing)");
+    return;
+  }
   // Keep the sleep path quiet; maintenance scheduling is HTTP-based now.
   mqtt_set_allowed(false);
   bool need_http = ota_needed || schedule_fetch_needed || report_needed;
@@ -3517,6 +3707,11 @@ void halo_prod_pre_sleep() {
     }
   }
   maintenance_resync_on_time_jump("pre_sleep");
+  // Abort pre-sleep if LCD is pulsing the wake pin (user action pending)
+  if (wake_pin_check_pulsing(250)) {
+    LOG_INFO("[PRE_SLEEP] abort (lcd_pulsing before sched_fetch)");
+    return;
+  }
   {
     uint32_t remaining_ms = (uint32_t)remaining_budget_ms();
     if (remaining_ms >= 1000 && schedule_fetch_needed) {
@@ -3554,7 +3749,20 @@ void halo_prod_pre_sleep() {
     LOG_INFO("[MAINT_SYNC] retry_before_sleep wait_ms=%lu attempt=%u",
              retry_wait_ms,
              (unsigned)(g_maint_sync_send_count + 1));
-    delay(retry_wait_ms);
+    // Poll UART during wait so we can receive LCD's ACK instead of
+    // letting it pile up in the hardware buffer during a blocking delay
+    {
+      unsigned long wait_start = millis();
+      while ((millis() - wait_start) < retry_wait_ms) {
+        pump_uart_rx_once();
+        if (g_lcd_maint_ack_received) {
+          LOG_INFO("[MAINT_SYNC] ack_received_during_wait elapsed=%lums",
+                   millis() - wait_start);
+          break;
+        }
+        delay(50);
+      }
+    }
     sync_pending_maintenance_to_lcd("pre_sleep_retry");
   }
   if (maintenance_schedule_pending_sync_to_lcd() && !g_lcd_maint_ack_received) {
@@ -3569,6 +3777,11 @@ void halo_prod_pre_sleep() {
   }
 
   dump_system_truth("pre_sleep");
+  // Abort pre-sleep if LCD is pulsing the wake pin (user action pending)
+  if (wake_pin_check_pulsing(250)) {
+    LOG_INFO("[PRE_SLEEP] abort (lcd_pulsing before report)");
+    return;
+  }
   {
     uint32_t report_timeout_ms = (uint32_t)remaining_budget_ms();
     if (report_timeout_ms > OTA_REPORT_HTTP_TIMEOUT_MS) {
@@ -3580,6 +3793,16 @@ void halo_prod_pre_sleep() {
       LOG_INFO("[OTA_REPORT] skip pre_sleep (budget_exhausted)");
     }
   }
+  // Drain UART before OTA policy check — INPUT_OTA_CHECK from LCD
+  // may have arrived while we were doing HTTP work
+  pump_uart_rx_once();
+  // The first drain may have sent SYNC_ACK/FW_INFO to LCD, triggering
+  // LCD to resend INPUT_OTA_CHECK. Wait briefly for that round-trip.
+  if (!halo_ota_manual_override_active()) {
+    delay(150);
+    pump_uart_rx_once();
+  }
+
   bool ota_allowed = SenseOtaPolicy::allowOtaWorkNow("pre_sleep");
   if (ota_allowed && OtaIntent::shouldUpdateNow()) {
     g_ota_check_done = false;
@@ -3695,9 +3918,13 @@ static void handle_pending_ota_expectation() {
     return;
   }
 
-  // OTA succeeded; release LCD OTA lock after reboot.
-  Serial.println("[OTA_EXPECT] version match -> send OTA_UNLOCK to LCD");
-  send_ota_uart_message("OTA_UNLOCK");
+  // OTA succeeded; release LCD OTA lock — unless LCD OTA is still pending
+  if (get_lcd_ota_due_nvs()) {
+    Serial.println("[OTA_EXPECT] version match — keep OTA_LOCK (lcd_ota_due pending)");
+  } else {
+    Serial.println("[OTA_EXPECT] version match -> send OTA_UNLOCK to LCD");
+    send_ota_uart_message("OTA_UNLOCK");
+  }
   // Clear expectation after a successful version match to avoid repeated OTA_UNLOCK.
   OtaExpect::setLastSuccessTs((uint32_t)(millis() / 1000));
   OtaExpect::clearPending();
@@ -3827,6 +4054,13 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   ota_set_last_result("check_begin");
   g_ota_check_in_progress = true;
   g_ota_check_done = true;
+  // Release camera DMA reservation to free 16KB of internal SRAM for TLS.
+  // Camera is not used during OTA. Device reboots after OTA, re-reserving in setup().
+  if (g_camera_dma_reserve) {
+    heap_caps_free(g_camera_dma_reserve);
+    g_camera_dma_reserve = nullptr;
+    LOG_INFO("[OTA] Camera DMA reservation released for TLS headroom");
+  }
   OtaIntent::recordOtaAttempt("begin");
   dump_system_truth("ota_check_begin");
   auto clear_intent_once = []() {
@@ -3860,6 +4094,13 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     return;
   }
 
+  // Free MQTT TLS buffers (~16KB internal SRAM) before manifest fetch.
+  // MQTT will be reconnected if no OTA update is needed.
+  Serial.printf("[OTA] Disconnecting MQTT before manifest fetch (free=%lu)\n", (unsigned long)ESP.getFreeHeap());
+  mqtt_stop_for_ota();
+  delay(100);
+  Serial.printf("[OTA] Post-MQTT-disconnect heap free=%lu\n", (unsigned long)ESP.getFreeHeap());
+
   LOG_INFO("[MANIFEST] Fetching manifest: %s", manifest_url);
   OtaManifest manifest;
   if (!g_manifest_client.fetchManifest(manifest_url, manifest, 10000)) {
@@ -3868,6 +4109,8 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     ota_set_last_result("manifest_fetch_fail");
     release_waiting_lcd_ota("manifest_fetch_fail");
     g_ota_check_in_progress = false;
+    mqtt_set_allowed(true);
+    mqtt_force_connect();
     clear_intent_once();
     return;
   }
@@ -3881,6 +4124,8 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     ota_set_last_result("board_mismatch");
     release_waiting_lcd_ota("board_mismatch");
     g_ota_check_in_progress = false;
+    mqtt_set_allowed(true);
+    mqtt_force_connect();
     clear_intent_once();
     return;
   }
@@ -3890,6 +4135,8 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     ota_set_last_result("bin_url_disallowed");
     release_waiting_lcd_ota("bin_url_disallowed");
     g_ota_check_in_progress = false;
+    mqtt_set_allowed(true);
+    mqtt_force_connect();
     clear_intent_once();
     return;
   }
@@ -3905,6 +4152,10 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("up_to_date");
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    if (!g_lcd_ota_task_running) {
+      mqtt_set_allowed(true);
+      mqtt_force_connect();
+    }
     clear_intent_once();
     return;
   }
@@ -3919,6 +4170,10 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("downgrade_blocked");
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    if (!g_lcd_ota_task_running) {
+      mqtt_set_allowed(true);
+      mqtt_force_connect();
+    }
     clear_intent_once();
     return;
   }
@@ -3944,6 +4199,10 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("rollout_min_version");
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    if (!g_lcd_ota_task_running) {
+      mqtt_set_allowed(true);
+      mqtt_force_connect();
+    }
     clear_intent_once();
     return;
   }
@@ -3963,6 +4222,10 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       release_waiting_lcd_ota("rollout_skip");
       maybe_trigger_lcd_ota_check();
       g_ota_check_in_progress = false;
+      if (!g_lcd_ota_task_running) {
+        mqtt_set_allowed(true);
+        mqtt_force_connect();
+      }
       clear_intent_once();
       return;
     }
@@ -3980,6 +4243,10 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota(result);
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    if (!g_lcd_ota_task_running) {
+      mqtt_set_allowed(true);
+      mqtt_force_connect();
+    }
     clear_intent_once();
     return;
   }
@@ -3991,12 +4258,6 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   LOG_INFO("[OTA] lcd_ota_due=1 (sense reboot imminent, lcd will OTA on next boot)");
   send_ota_uart_message("OTA_LOCK");
   g_ota_apply_in_progress = true;
-
-  // Free MQTT TLS buffers (~16KB internal SRAM) to make room for OTA download
-  Serial.printf("[OTA] Disconnecting MQTT to free heap (free=%lu)\n", (unsigned long)ESP.getFreeHeap());
-  mqtt_stop_for_ota();
-  delay(100);  // Allow cleanup
-  Serial.printf("[OTA] Post-MQTT-disconnect heap free=%lu\n", (unsigned long)ESP.getFreeHeap());
 
   SenseOtaApplier::Result res = g_ota_applier.applyToOtaPartition(
       manifest.url, manifest.sha256, manifest.size, 1200000, true, manifest.version);
@@ -4105,6 +4366,7 @@ void halo_prod_loop() {
     run_maintenance_if_needed();
     return;
   }
+
 
   // Claim-before-MQTT: hold MQTT during SoftAP grace period and post-AP claim retry.
   // MQTT's TLS connection needs ~40KB internal SRAM — keep it off while SoftAP or
@@ -4241,6 +4503,11 @@ void halo_prod_loop() {
     g_ota_check_done = false;
     g_ota_skip_logged = false;
     maybeRunOtaCheck("mqtt_cmd", true);
+    // If maybeRunOtaCheck() hit a transient guard (e.g. time not valid yet),
+    // restore the request so it retries on the next loop iteration.
+    if (!g_ota_check_in_progress && !g_ota_check_done) {
+      g_ota_check_requested = true;
+    }
   }
 }
 

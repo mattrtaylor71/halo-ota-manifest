@@ -119,12 +119,21 @@ static void uart_process_received_message(const char* json_str) {
     const char* label = doc["label"] | "";
     const char* detail = doc["detail"] | "";
     int32_t code = doc["code"] | 0;
+    bool persist = doc["persist"] | false;
     Serial.printf("[SENSE_DIAG][%s] event=%s label=%s code=%ld detail=%s\n",
-                  area,
-                  event,
-                  label,
-                  (long)code,
-                  detail);
+                  area, event, label, (long)code, detail);
+    if (persist) {
+        StaticJsonDocument<256> entry;
+        entry["board"] = "sense";
+        entry["area"] = area;
+        entry["event"] = event;
+        entry["code"] = code;
+        if (detail[0]) entry["detail"] = detail;
+        entry["uptime_ms"] = doc["ts"] | 0;
+        String json;
+        serializeJson(entry, json);
+        errlog_store(json.c_str());
+    }
     return;
   }
   if (strcmp(type, "WIFI_DIAG_SUMMARY") == 0) {
@@ -177,6 +186,7 @@ static void uart_process_received_message(const char* json_str) {
     Serial.printf("[SLEEP] sense_awake_estimate -> 1 reason=PONG age_ms=%lu\n",
                   age_ms);
     sense_awake_confirmed = true;
+    wake_timer_wait_mode = false;
     sense_wake_explicit_request = false;
     wake_retry_until_ms = 0;
     note_sense_proof_of_life("PONG");
@@ -234,6 +244,28 @@ static void uart_process_received_message(const char* json_str) {
     sense_wake_explicit_request = false;
     sense_status_sync_requested = false;
     wake_retry_until_ms = 0;
+
+    // If LCD has a pending manual OTA request that Sense missed (race condition:
+    // LCD sent INPUT_OTA_CHECK after Sense already started its sleep sequence),
+    // re-wake Sense so it can process the request on the next boot cycle.
+    if (g_manual_ota_override && millis() < ota_stay_awake_until_ms && !ota_locked) {
+      Serial.println("[OTA_MANUAL] sense slept before seeing INPUT_OTA_CHECK — re-waking");
+      delay(500);  // let Sense fully enter deep sleep before pulling wake pin
+      request_sense_wake("manual_ota_retry");
+      // Resend INPUT_OTA_CHECK so it's in UART buffer when Sense boots
+      StaticJsonDocument<128> retryDoc;
+      retryDoc["ver"] = PROTOCOL_VERSION;
+      retryDoc["type"] = "INPUT_OTA_CHECK";
+      retryDoc["msg_id"] = get_next_msg_id();
+      retryDoc["ts"] = millis();
+      retryDoc["reason"] = "manual_retry";
+      String retryOut;
+      serializeJson(retryDoc, retryOut);
+      senseSerial.println(retryOut);
+      Serial.printf("[OTA_MANUAL] resent INPUT_OTA_CHECK msg_id=%d\n",
+                    (int)retryDoc["msg_id"]);
+    }
+
     return;
   }
 
@@ -255,6 +287,10 @@ static void uart_process_received_message(const char* json_str) {
   }
 
   if (strcmp(type, "SENSE_OTA_ACTIVE") == 0) {
+    if (!ota_locked) {
+      Serial.println("[OTA] sense_ota_active ignored (not locked)");
+      return;
+    }
     sense_ota_active = true;
     Serial.println("[OTA] sense_ota_active=1");
     return;
@@ -285,12 +321,26 @@ static void uart_process_received_message(const char* json_str) {
                   age_ms,
                   sense_awake_confirmed ? 1 : 0,
                   link_synced ? 1 : 0);
+    // Re-send INPUT_OTA_CHECK if LCD manual override is still active
+    // (original send was lost because Sense was in deep sleep)
+    if (lcd_manual_ota_override_active()) {
+      StaticJsonDocument<160> doc2;
+      doc2["ver"] = PROTOCOL_VERSION;
+      doc2["type"] = "INPUT_OTA_CHECK";
+      doc2["msg_id"] = get_next_msg_id();
+      doc2["ts"] = millis();
+      doc2["reason"] = "resend_on_wake";
+      String output;
+      serializeJson(doc2, output);
+      senseSerial.println(output);
+      Serial.println("[OTA_MANUAL] resend INPUT_OTA_CHECK reason=sense_woke");
+    }
     return;
   }
 
   if (strcmp(type, "RELEASE_WAKE") == 0) {
-    Serial.println("[SLEEP_PROTO] rx RELEASE_WAKE");
-    release_wake_line("release_wake");
+    Serial.println("[UART_RX] RELEASE_WAKE received -> releasing wake line");
+    release_wake_line("sense_request");
     return;
   }
 
@@ -334,6 +384,12 @@ static void uart_process_received_message(const char* json_str) {
       g_lcd_maintenance_grace_before_sec = 0;
       g_lcd_maintenance_grace_after_sec = 0;
       lcd_clear_persisted_maintenance_state("maint_window_clear");
+      // Exit OTA mode so UI task restarts, panel powers on, and sleep unblocks.
+      // lcd_enter_maintenance_headless() called lcd_enter_ota_mode() which killed the
+      // UI task and set g_ota_mode_active=true; we must undo that on clear.
+      if (g_ota_mode_active) {
+        lcd_exit_ota_mode("maint_window_clear");
+      }
       Serial.println("[UART] MAINT_WINDOW clear");
       Serial.printf("[LCD_MAINT] state active=%d timer_armed=%d wake_in_s=%lu remaining_s=%lu deadline_ms=%lu\n",
                     g_lcd_maintenance_active ? 1 : 0,
@@ -365,67 +421,73 @@ static void uart_process_received_message(const char* json_str) {
     g_lcd_maintenance_duration_sec = duration_sec;
     g_lcd_maintenance_grace_before_sec = grace_before_sec;
     g_lcd_maintenance_grace_after_sec = grace_after_sec;
+    // ALWAYS arm wake timer when we have a valid window — this must
+    // survive even if headless mode is exited by touch
+    if (remaining_s > 0) {
+      g_lcd_maintenance_timer_armed = 1;
+      g_lcd_maintenance_wake_in_s = (wake_in_s > 0) ? wake_in_s : remaining_s;
+      g_lcd_maintenance_remaining_s = remaining_s;
+      g_lcd_maintenance_deadline_ms = millis() + (unsigned long)remaining_s * 1000UL;
+    }
     if (wake_in_s > 0) {
       g_lcd_maintenance_timer_armed = 1;
       g_lcd_maintenance_wake_in_s = wake_in_s;
     }
+    // Persist to NVS BEFORE headless entry so timer survives touch exit
+    lcd_persist_maintenance_state("maint_window_store");
+    lcd_log_rtc_timer_state("maint_window_store");
+    // Conditional headless entry — only if not already completed this cycle
+    const char* ack_status = "stored";
     if (remaining_s > 0 && wake_in_s == 0) {
       if (!g_lcd_maintenance_active && g_lcd_maintenance_completed_ms > 0) {
-        Serial.println("[UART] MAINT_WINDOW ignored (maintenance already completed)");
-        uart_send_maint_window_ack(remaining_s,
-                                   wake_in_s,
-                                   false,
-                                   request_id,
-                                   "ignored_completed",
-                                   false,
-                                   start_epoch,
-                                   duration_sec,
-                                   grace_before_sec,
-                                   grace_after_sec);
-        return;
-      }
-    g_lcd_maintenance_active = true;
-    g_lcd_maintenance_started = false;
-    g_lcd_maintenance_aborted = false;
-    lcd_mode = LCD_MODE_MAINTENANCE;
-    g_lcd_maintenance_deadline_ms = millis() + (unsigned long)remaining_s * 1000UL;
-      // If we're already inside the window, arm a wake timer for the remaining window
-      // so deep sleep doesn't fall back to periodic.
-      g_lcd_maintenance_timer_armed = (remaining_s > 0) ? 1 : 0;
-      g_lcd_maintenance_wake_in_s = remaining_s;
-      if (g_sleep_transition) {
-        g_sleep_transition = false;
-        Serial.println("[LCD_MAINT] abort sleep transition (maint_window)");
-      }
-      if (g_in_light_sleep) {
-        g_in_light_sleep = false;
-      }
-      resetActivityTimer();
-      unsigned long until = millis() + (unsigned long)remaining_s * 1000UL;
-      if (until > ota_stay_awake_until_ms) {
-        ota_stay_awake_until_ms = until;
-      }
+        // Timer is armed above, just don't re-enter headless mode
+        Serial.println("[UART] MAINT_WINDOW timer_armed (headless already completed this cycle)");
+        ack_status = "timer_armed";
+      } else {
+        // Full activation + headless entry
+        g_lcd_maintenance_active = true;
+        g_lcd_maintenance_started = false;
+        g_lcd_maintenance_aborted = false;
+        lcd_mode = LCD_MODE_MAINTENANCE;
+        // g_lcd_maintenance_deadline_ms already set above
+        // g_lcd_maintenance_timer_armed already set above
+        // g_lcd_maintenance_wake_in_s already set above
+        if (g_sleep_transition) {
+          g_sleep_transition = false;
+          Serial.println("[LCD_MAINT] abort sleep transition (maint_window)");
+        }
+        if (g_in_light_sleep) {
+          g_in_light_sleep = false;
+        }
+        resetActivityTimer();
+        unsigned long until = millis() + (unsigned long)remaining_s * 1000UL;
+        if (until > ota_stay_awake_until_ms) {
+          ota_stay_awake_until_ms = until;
+        }
 #if HALO_OTA_POLICY_MAINTENANCE_ONLY
-      if (!ota_check_requested && !ota_check_pending) {
-        ota_check_requested = true;
-        Serial.println("[OTA] maintenance_active -> self OTA check");
-      }
+        if (!ota_check_requested && !ota_check_pending) {
+          ota_check_requested = true;
+          Serial.println("[OTA] maintenance_active -> self OTA check");
+        }
 #endif
 #if HALO_OTA_POLICY_MAINTENANCE_ONLY
-      if (ota_check_pending && !ota_locked) {
-        ota_check_pending = false;
-        ota_check_requested = true;
-        Serial.println("[OTA] maintenance_active -> run deferred OTA check");
-      }
+        if (ota_check_pending && !ota_locked) {
+          ota_check_pending = false;
+          ota_check_requested = true;
+          Serial.println("[OTA] maintenance_active -> run deferred OTA check");
+        }
 #endif
-      sleep_deny_received = true;
-      sleep_deny_retry_ms = SLEEP_DENY_RETRY_DEFAULT_MS;
-      strncpy(sleep_deny_reason, "maintenance", sizeof(sleep_deny_reason) - 1);
-      sleep_deny_reason[sizeof(sleep_deny_reason) - 1] = '\0';
-      sleep_deny_received_ms = millis();
+        sleep_deny_received = true;
+        sleep_deny_retry_ms = SLEEP_DENY_RETRY_DEFAULT_MS;
+        strncpy(sleep_deny_reason, "maintenance", sizeof(sleep_deny_reason) - 1);
+        sleep_deny_reason[sizeof(sleep_deny_reason) - 1] = '\0';
+        sleep_deny_received_ms = millis();
 #ifdef HALO_LCD_PROD_WRAPPER
-      lcd_enter_maintenance_headless("maint_window");
+        lcd_enter_maintenance_headless("maint_window");
+        touch_ignore_until = millis() + 2000;  // Grace period for TAP actuator retraction
 #endif
+        ack_status = "active";
+      }
     }
     Serial.printf("[UART] MAINT_WINDOW received remaining_s=%lu wake_in_s=%lu\n",
                   (unsigned long)remaining_s,
@@ -436,13 +498,11 @@ static void uart_process_received_message(const char* json_str) {
                   (unsigned long)g_lcd_maintenance_wake_in_s,
                   (unsigned long)g_lcd_maintenance_remaining_s,
                   (unsigned long)g_lcd_maintenance_deadline_ms);
-    lcd_persist_maintenance_state("maint_window_store");
-    lcd_log_rtc_timer_state("maint_window_store");
     uart_send_maint_window_ack(remaining_s,
                                wake_in_s,
                                clear,
                                request_id,
-                               (g_lcd_maintenance_active && remaining_s > 0) ? "active" : "stored",
+                               ack_status,
                                true,
                                start_epoch,
                                duration_sec,
@@ -450,7 +510,7 @@ static void uart_process_received_message(const char* json_str) {
                                grace_after_sec);
 #ifdef HALO_LCD_PROD_WRAPPER
     if (g_lcd_maintenance_active && remaining_s > 0) {
-    halo_lcd_prod_on_wifi_on(remaining_s * 1000UL);
+      halo_lcd_prod_on_wifi_on(remaining_s * 1000UL);
     }
 #endif
     return;
@@ -469,6 +529,7 @@ static void uart_process_received_message(const char* json_str) {
   if (strcmp(type, "SYNC_ACK") == 0) {
     link_synced = true;
     sense_awake_confirmed = true;
+    wake_timer_wait_mode = false;
     Serial.println("[LNK] synced=1");
     note_sense_proof_of_life("SYNC_ACK");
     refresh_sm_on_awake_proof("SYNC_ACK");
@@ -559,26 +620,31 @@ static void uart_process_received_message(const char* json_str) {
       Serial.printf("[LCD_MAINT] deadline extended %lu ms (ota_lock during maintenance)\n",
                     (unsigned long)OTA_LOCK_TIMEOUT_MS);
     }
+    // Wake display from idle-dark if needed
+    if (g_idle_screen_dark) {
+      lcd_set_idle_screen_dark(false, "ota_lock");
+    }
     Serial.println("[OTA] lock received - blocking LCD OTA");
+    // Do NOT touch LVGL here — this runs on Core 0 (UART task).
+    // Calling lv_obj_clean/lv_label_create corrupts LVGL state and
+    // prevents show_ship_main_menu() from working after OTA.
+    // The current screen stays visible during OTA. After OTA,
+    // restore_ui sets provision_return_home_pending which the UI task
+    // picks up and shows HOME safely on Core 1.
+    g_ota_screen_active = true;
     return;
   } else if (strcmp(type, "OTA_UNLOCK") == 0) {
     ota_locked = false;
-    Serial.println("[OTA] unlock received - LCD OTA may proceed");
-    if (ota_check_pending) {
-      ota_check_pending = false;
-      ota_check_requested = true;
-      unsigned long until = millis() + OTA_STAY_AWAKE_MS;
-      if (until > ota_stay_awake_until_ms) {
-        ota_stay_awake_until_ms = until;
-      }
-      Serial.println("[OTA] unlock -> queued deferred OTA check");
-    }
-    unsigned long until = millis() + OTA_UNLOCK_GRACE_MS;
-    if (until > ota_stay_awake_until_ms) {
-      ota_stay_awake_until_ms = until;
-    }
-    Serial.printf("[OTA] unlock -> stay_awake %lu ms (unlock_grace)\n",
-                  (unsigned long)OTA_UNLOCK_GRACE_MS);
+    ota_check_pending = false;
+    ota_check_requested = false;
+    sense_ota_active = false;
+    sense_ota_apply_required = false;
+    ota_stay_awake_until_ms = 0;
+    g_ota_screen_active = false;
+    g_lcd_maintenance_active = false;
+    g_lcd_maintenance_deadline_ms = 0;
+    g_ota_mode_active = false;
+    Serial.println("[OTA] unlock received - all OTA flags cleared");
     return;
   } else if (strcmp(type, "OTA_CHECK") == 0) {
     uint32_t request_id = (uint32_t)(doc["request_id"] | 0);
@@ -733,6 +799,9 @@ static void uart_process_received_message(const char* json_str) {
   }
 
   if (strcmp(type, "UI_LIST") == 0) {
+    // List feature disabled — ignore list updates to prevent activity timer resets
+    Serial.println("[UART] UI_LIST ignored (list feature disabled)");
+    return;
     unsigned long now_ms = millis();
     if (!lcd_refresh_inflight &&
         lcd_last_ui_list_complete_ms > 0 &&
@@ -904,6 +973,7 @@ static void uart_process_received_message(const char* json_str) {
     refresh_note_ui_proof("UI_STATUS");
     // Any UI_STATUS means Sense is awake and responding.
     sense_awake_confirmed = true;
+    wake_timer_wait_mode = false;
     sense_wake_explicit_request = false;
     wake_retry_until_ms = 0;
     if (g_voice_fire_and_forget_ignore_ui && strcmp(op, "VOICE") == 0) {
@@ -913,10 +983,16 @@ static void uart_process_received_message(const char* json_str) {
         voice_response_deadline_ms = 0;
         g_ship_voice_json_pending = false;
         Serial.printf("[VOICE_FAF] backend_complete_raw phase=%s\n", phase);
+        if (strcmp(phase, "ERROR") == 0) {
+          // Let ERROR fall through to normal UI_STATUS handler so user sees it
+          Serial.println("[VOICE_FAF] allowing ERROR to display");
+        } else {
+          return;
+        }
       } else {
         Serial.printf("[VOICE_FAF] ignore raw UI_STATUS phase=%s\n", phase);
+        return;
       }
-      return;
     }
     
     // If this is a generic status (no op), treat it as list/API wait
@@ -1050,7 +1126,7 @@ static void uart_process_received_message(const char* json_str) {
               }
             } else {
               // For dish mode (or if mode not specified), show Frame_439_1
-              status_screen_use_image(&ui_img_Frame_439_1_png);
+              status_screen_use_text("");
               Serial.println("[STATUS] Showing Frame_439_1 for dish scan");
               ui_lvgl_tick();  // Force immediate render
             }
@@ -1067,6 +1143,9 @@ static void uart_process_received_message(const char* json_str) {
     // TODO: Display status banner on LCD (e.g., "Listening...", "Transcribing...", "Capturing...")
     // Post event to UI task to show status overlay
   } else if (strcmp(type, "UI_VOICE_ITEMS") == 0) {
+    // List feature disabled
+    Serial.println("[UART] UI_VOICE_ITEMS ignored (list feature disabled)");
+    return;
     if (g_voice_fire_and_forget_ignore_ui) {
       Serial.println("[VOICE_FAF] ignoring UI_VOICE_ITEMS");
       return;
@@ -1134,6 +1213,21 @@ static void uart_process_received_message(const char* json_str) {
     }
   } else if (strcmp(type, "UI_MEAL_RESULT") == 0) {
     ui_apply_ship_meal_result(doc);
+    return;
+  } else if (strcmp(type, "LCD_OTA_QUERY") == 0) {
+    lcd_ota_handle_query();
+    return;
+  } else if (strcmp(type, "LCD_OTA_BEGIN") == 0) {
+    JsonObject obj = doc.as<JsonObject>();
+    lcd_ota_handle_begin(obj);
+    return;
+  } else if (strcmp(type, "LCD_OTA_END") == 0) {
+    JsonObject obj = doc.as<JsonObject>();
+    lcd_ota_handle_end(obj);
+    return;
+  } else if (strcmp(type, "LCD_OTA_ABORT") == 0) {
+    JsonObject obj = doc.as<JsonObject>();
+    lcd_ota_handle_abort(obj);
     return;
   } else {
     Serial.printf("[PROTO] Unknown type: %s\n", type);

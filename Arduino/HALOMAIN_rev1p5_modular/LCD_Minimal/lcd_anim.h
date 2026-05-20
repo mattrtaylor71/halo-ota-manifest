@@ -17,6 +17,8 @@
 #ifndef LCD_ANIM_H
 #define LCD_ANIM_H
 
+extern "C" void lcd_stop_lvgl_tick_timer(void);
+
 // Animation callback for glowing/pulsing halo (fades opacity in and out).
 // Only touches the halo object (processing_indicator) so LVGL invalidates minimal area, not whole screen.
 static void processing_glow_anim_cb(void * var, int32_t value) {
@@ -362,14 +364,28 @@ static bool lcd_enter_ota_mode(uint32_t min_internal_free) {
   g_sleep_transition = true;
   g_lvgl_running = false;
   stop_glowing_animation();
+  // Request the UI task to exit cleanly (before we deinit LVGL).
+  // The task checks g_ui_task_exit_requested before acquiring the LVGL lock,
+  // so it will exit without holding any locks.
   if (ui_task_handle != NULL) {
-    vTaskSuspend(ui_task_handle);
+    g_ui_task_exit_requested = true;
+    unsigned long wait_start = millis();
+    while (ui_task_handle != NULL && (millis() - wait_start) < 500) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (ui_task_handle != NULL) {
+      Serial.println("[LCD_OTA] WARN: UI task did not exit cleanly, force deleting");
+      vTaskDelete(ui_task_handle);
+      ui_task_handle = NULL;
+    }
+    g_ui_task_exit_requested = false;
   }
   lcd_lvgl_wait_tx_done(200);
   if (lv_is_initialized()) {
     lv_obj_clean(lv_scr_act());
     lv_deinit();
   }
+  lcd_stop_lvgl_tick_timer();
   ui_reset_lvgl_objects();
   if (g_lcd_initialized) {
     lcd_panel_set_power(false);
@@ -423,15 +439,42 @@ static void lcd_exit_ota_mode(const char* reason) {
   g_ota_mode_active = false;
   g_sleep_transition = false;
   if (ui_task_handle != NULL) {
-    vTaskDelete(ui_task_handle);
-    ui_task_handle = NULL;
+    g_ui_task_exit_requested = true;
+    unsigned long wait_start = millis();
+    while (ui_task_handle != NULL && (millis() - wait_start) < 500) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (ui_task_handle != NULL) {
+      Serial.println("[LCD_EXIT_OTA] WARN: UI task did not exit cleanly, force deleting");
+      vTaskDelete(ui_task_handle);
+      ui_task_handle = NULL;
+    }
+    g_ui_task_exit_requested = false;
   }
   g_ui_initialized = false;
   g_lvgl_running = false;
   g_panel_enabled = false;
   lcd_set_backlight_binary(true, reason ? reason : "ota_exit");
   ui_reset_lvgl_objects();
+  Serial.printf("[LCD_EXIT_OTA] pre_init_ui_stack internal_free=%u largest=%u\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  // Check if there's enough contiguous DMA memory for normal LVGL flush
+  // Normal flush size: 360 x 36 x 2 = 25,920 bytes + overhead
+  {
+    size_t dma_largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
+    size_t normal_flush = EXAMPLE_LCD_H_RES * EXAMPLE_LVGL_BUF_HEIGHT * sizeof(lv_color_t);
+    Serial.printf("[LCD_EXIT_OTA] dma_largest=%u normal_flush=%u\n",
+                  (unsigned)dma_largest, (unsigned)normal_flush);
+    if (dma_largest < normal_flush) {
+      g_post_ota_recovery = true;
+      Serial.println("[LCD_EXIT_OTA] recovery_mode=1 (reduced LVGL buffers)");
+    }
+  }
   init_ui_stack(g_saved_list_count);
+  Serial.printf("[LCD_EXIT_OTA] post_init_ui_stack internal_free=%u largest=%u\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
 static bool processing_ops_active() {
@@ -500,12 +543,7 @@ typedef struct {
 } ui_asset_entry_t;
 
 static const ui_asset_entry_t k_ui_assets[] = {
-  {"ui_img_Frame_439_png", &ui_img_Frame_439_png},
-  {"ui_img_Frame_439_1_png", &ui_img_Frame_439_1_png},
-  {"ui_img_Frame_439_2_png", &ui_img_Frame_439_2_png},
-  {"ui_img_Frame_443_png", &ui_img_Frame_443_png},
-  {"ui_img_Frame_443_1_png", &ui_img_Frame_443_1_png},
-  {"ui_img_Frame_493_png", &ui_img_Frame_493_png},
+  {NULL, NULL},  // All PNG frames removed — using programmatic rendering
 };
 
 static void ui_log_asset_list_once() {
@@ -560,7 +598,7 @@ static void status_screen_use_text(const char* text) {
   }
   status_screen_auto_hide_at_ms = 0;
   lv_obj_set_style_bg_img_src(status_screen, NULL, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(status_screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(status_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(status_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_label_set_text(status_label, text ? text : "");
   lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);

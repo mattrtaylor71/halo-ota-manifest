@@ -106,8 +106,34 @@ static void create_provision_intro_screen_if_needed() {
   provision_intro_screen = lv_obj_create(lv_scr_act());
   lv_obj_set_size(provision_intro_screen, LV_HOR_RES, LV_VER_RES);
   lv_obj_clear_flag(provision_intro_screen, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_bg_img_src(provision_intro_screen, &ui_img_Frame_493_png, LV_PART_MAIN | LV_STATE_DEFAULT);
-  lv_obj_set_style_bg_img_opa(provision_intro_screen, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_color(provision_intro_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_opa(provision_intro_screen, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_border_width(provision_intro_screen, 0, LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(provision_intro_screen, 40, LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_shadow_color(provision_intro_screen, lv_color_hex(0xD4C4AE), LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_shadow_spread(provision_intro_screen, -20, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+  // WiFi icon
+  lv_obj_t* wifi_icon = lv_label_create(provision_intro_screen);
+  lv_label_set_text(wifi_icon, LV_SYMBOL_WIFI);
+  lv_obj_set_style_text_font(wifi_icon, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_set_style_text_color(wifi_icon, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+  lv_obj_align(wifi_icon, LV_ALIGN_CENTER, 0, -40);
+
+  // Title
+  lv_obj_t* title = lv_label_create(provision_intro_screen);
+  lv_label_set_text(title, "Wi-Fi Setup");
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_24, LV_PART_MAIN);
+  lv_obj_set_style_text_color(title, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+  lv_obj_align(title, LV_ALIGN_CENTER, 0, 20);
+
+  // Tap prompt
+  lv_obj_t* prompt = lv_label_create(provision_intro_screen);
+  lv_label_set_text(prompt, "Tap to Start");
+  lv_obj_set_style_text_font(prompt, &lv_font_montserrat_16, LV_PART_MAIN);
+  lv_obj_set_style_text_color(prompt, lv_color_hex(0x8A7A6A), LV_PART_MAIN);
+  lv_obj_align(prompt, LV_ALIGN_CENTER, 0, 55);
+
   lv_obj_add_flag(provision_intro_screen, LV_OBJ_FLAG_HIDDEN);
 }
 

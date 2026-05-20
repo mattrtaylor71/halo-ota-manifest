@@ -419,6 +419,30 @@ static bool put_to_presigned_url(const String& url,
                                  uint32_t deadline_ms,
                                  bool* aborted_for_budget) {
   Serial.printf("[UPLOAD] Starting PUT to S3, size: %u bytes\n", len);
+
+  // Release camera DMA reservation to defragment internal SRAM for TLS.
+  // The 16KB block sits mid-heap and prevents esp-aes from finding a
+  // contiguous DMA region during TLS handshake. Camera is not used during
+  // uploads; re-acquire at function exit via RAII guard.
+  bool dma_was_reserved = (g_camera_dma_reserve != nullptr);
+  if (dma_was_reserved) {
+    heap_caps_free(g_camera_dma_reserve);
+    g_camera_dma_reserve = nullptr;
+    Serial.println("[UPLOAD] Camera DMA reservation released for TLS headroom");
+  }
+  // RAII guard: re-acquire DMA reservation on any return path
+  struct DmaGuard {
+    bool should_reacquire;
+    ~DmaGuard() {
+      if (should_reacquire && !g_camera_dma_reserve) {
+        g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+            CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (g_camera_dma_reserve) {
+          Serial.printf("[UPLOAD] Camera DMA reservation re-acquired at %p\n", g_camera_dma_reserve);
+        }
+      }
+    }
+  } dma_guard{dma_was_reserved};
   if (aborted_for_dish) {
     *aborted_for_dish = false;
   }
@@ -452,7 +476,7 @@ static bool put_to_presigned_url(const String& url,
   uint16_t port = 0;
   if (!parse_url_parts(url, https, host, port, path)) {
     Serial.println("[UPLOAD] URL parse failed for PUT");
-    diag_record_error("upload_put", -1, "bad_url");
+    diag_record_error_persistent("upload_put", -1, "bad_url");
     uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "bad_url");
     http_queue_unlock("UPLOAD_PUT", effective_job);
     return false;
@@ -468,94 +492,126 @@ static bool put_to_presigned_url(const String& url,
     http_queue_unlock("UPLOAD_PUT", effective_job);
     return false;
   }
+  const int put_max_attempts = 2;
+  bool write_ok = false;
+  int put_attempt;
   WiFiClientSecure tls;
-  tls.setInsecure();
-  uint32_t tls_timeout = clamp_timeout_ms(60000, deadline_ms);
-  if (tls_timeout < ACTION_MIN_REMAINING_MS) {
-    if (aborted_for_budget) {
-      *aborted_for_budget = true;
-    }
-    presign_set_error_text("Upload timeout");
-    diag_record_error("upload_put", -1, "timeout");
-    uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "timeout");
-    http_queue_unlock("UPLOAD_PUT", effective_job);
-    return false;
-  }
-  tls.setTimeout(tls_timeout);
-
-  if (!tls.connect(host.c_str(), port)) {
-    Serial.println("[UPLOAD] TLS connect failed for PUT");
-    diag_record_error("upload_put", -1, "tls_connect");
-    uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "tls_connect");
-    http_queue_unlock("UPLOAD_PUT", effective_job);
-    return false;
-  }
-
-  const char* resolved_ct = (contentType && *contentType && strcmp(contentType, "null") != 0)
-                              ? contentType
-                              : "image/jpeg";
-  Serial.printf("[UPLOAD] Using Content-Type: %s\n", resolved_ct);
-
-  tls.printf("PUT %s HTTP/1.1\r\n", path.c_str());
-  tls.printf("Host: %s\r\n", host.c_str());
-  tls.printf("Content-Type: %s\r\n", resolved_ct);
-  tls.printf("Content-Length: %u\r\n", (unsigned)len);
-  tls.print("Connection: close\r\n\r\n");
-
-  Serial.println("[UPLOAD] Sending PUT request...");
-  unsigned long upload_start = millis();
-
-  size_t offset = 0;
-  const size_t chunk_size = 2048;
-  bool write_ok = true;
-  while (offset < len) {
-    if (deadline_expired(deadline_ms)) {
+  for (put_attempt = 1; put_attempt <= put_max_attempts; put_attempt++) {
+    tls.stop();
+    tls.setInsecure();
+    uint32_t tls_timeout = clamp_timeout_ms(60000, deadline_ms);
+    if (tls_timeout < ACTION_MIN_REMAINING_MS) {
       if (aborted_for_budget) {
         *aborted_for_budget = true;
       }
       presign_set_error_text("Upload timeout");
-      Serial.println("[UPLOAD] abort during PUT (budget)");
       diag_record_error("upload_put", -1, "timeout");
       uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "timeout");
-      tls.stop();
       http_queue_unlock("UPLOAD_PUT", effective_job);
       return false;
     }
-    if (allow_abort && dish_upload_pending()) {
-      if (aborted_for_dish) {
-        *aborted_for_dish = true;
+    tls.setTimeout(tls_timeout);
+
+    if (!tls.connect(host.c_str(), port)) {
+      Serial.printf("[UPLOAD] TLS connect failed for PUT (attempt %d/%d)\n", put_attempt, put_max_attempts);
+      tls.stop();
+      if (put_attempt < put_max_attempts) {
+        Serial.println("[UPLOAD] Hard WiFi reset before PUT retry");
+        http_queue_unlock("UPLOAD_PUT", effective_job);
+        wifi_hard_reset_and_reconnect("put_tls_connect", 15000);
+        http_queue_lock("UPLOAD_PUT", effective_job);
+        continue;
       }
-      Serial.println("[UPLOAD] abort during PUT (dish preempt)");
-      diag_record_error("upload_put", -1, "dish_preempt");
-      uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "dish_preempt");
-      tls.stop();
+      diag_record_error_persistent("upload_put", -1, "tls_connect");
+      uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "tls_connect");
       http_queue_unlock("UPLOAD_PUT", effective_job);
       return false;
     }
-    size_t to_write = len - offset;
-    if (to_write > chunk_size) {
-      to_write = chunk_size;
-    }
-    int written = tls.write(buf + offset, to_write);
-    if (written <= 0) {
-      write_ok = false;
-      break;
-    }
-    offset += (size_t)written;
-  }
 
-  unsigned long upload_duration = millis() - upload_start;
-  Serial.printf("[UPLOAD] PUT completed in %lu ms\n", upload_duration);
+    const char* resolved_ct = (contentType && *contentType && strcmp(contentType, "null") != 0)
+                                ? contentType
+                                : "image/jpeg";
+    Serial.printf("[UPLOAD] Using Content-Type: %s\n", resolved_ct);
 
-  if (!write_ok) {
-    Serial.println("[UPLOAD] PUT write failed");
-    diag_record_error("upload_put", -1, "write_failed");
-    uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "write_failed");
-    tls.stop();
-    http_queue_unlock("UPLOAD_PUT", effective_job);
-    Serial.println("[UPLOAD] ✗ Upload failed");
-    return false;
-  }
+    tls.printf("PUT %s HTTP/1.1\r\n", path.c_str());
+    tls.printf("Host: %s\r\n", host.c_str());
+    tls.printf("Content-Type: %s\r\n", resolved_ct);
+    tls.printf("Content-Length: %u\r\n", (unsigned)len);
+    tls.print("Connection: close\r\n\r\n");
+
+    Serial.printf("[UPLOAD] Sending PUT request (attempt %d/%d)...\n", put_attempt, put_max_attempts);
+    unsigned long upload_start = millis();
+
+    size_t offset = 0;
+    const size_t chunk_size = 2048;
+    write_ok = true;
+    while (offset < len) {
+      if (deadline_expired(deadline_ms)) {
+        if (aborted_for_budget) {
+          *aborted_for_budget = true;
+        }
+        presign_set_error_text("Upload timeout");
+        Serial.println("[UPLOAD] abort during PUT (budget)");
+        diag_record_error("upload_put", -1, "timeout");
+        uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "timeout");
+        tls.stop();
+        http_queue_unlock("UPLOAD_PUT", effective_job);
+        return false;
+      }
+      if (foreground_active) {
+        Serial.println("[UPLOAD] abort during PUT (foreground user action)");
+        diag_record_error("upload_put", -1, "foreground_preempt");
+        uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "foreground_preempt");
+        tls.stop();
+        http_queue_unlock("UPLOAD_PUT", effective_job);
+        return false;
+      }
+      if (allow_abort && dish_upload_pending()) {
+        if (aborted_for_dish) {
+          *aborted_for_dish = true;
+        }
+        Serial.println("[UPLOAD] abort during PUT (dish preempt)");
+        diag_record_error("upload_put", -1, "dish_preempt");
+        uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "dish_preempt");
+        tls.stop();
+        http_queue_unlock("UPLOAD_PUT", effective_job);
+        return false;
+      }
+      size_t to_write = len - offset;
+      if (to_write > chunk_size) {
+        to_write = chunk_size;
+      }
+      int written = tls.write(buf + offset, to_write);
+      if (written <= 0) {
+        write_ok = false;
+        break;
+      }
+      offset += (size_t)written;
+    }
+
+    unsigned long upload_duration = millis() - upload_start;
+    Serial.printf("[UPLOAD] PUT completed in %lu ms\n", upload_duration);
+
+    if (!write_ok) {
+      Serial.printf("[UPLOAD] PUT write failed (attempt %d/%d)\n", put_attempt, put_max_attempts);
+      tls.stop();
+      if (put_attempt < put_max_attempts) {
+        Serial.println("[UPLOAD] Hard WiFi reset before PUT retry");
+        http_queue_unlock("UPLOAD_PUT", effective_job);
+        wifi_hard_reset_and_reconnect("put_write_fail", 15000);
+        http_queue_lock("UPLOAD_PUT", effective_job);
+        continue;
+      }
+      diag_record_error_persistent("upload_put", -1, "write_failed");
+      uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "write_failed");
+      http_queue_unlock("UPLOAD_PUT", effective_job);
+      Serial.println("[UPLOAD] ✗ Upload failed");
+      return false;
+    }
+
+    // Write succeeded, break out of retry loop
+    break;
+  }  // end retry loop
 
   String status_line = tls.readStringUntil('\n');
   status_line.trim();
@@ -595,7 +651,7 @@ static bool put_to_presigned_url(const String& url,
     uart_send_sense_diag("http", "success", "UPLOAD_PUT", (int32_t)code, "put");
   } else {
     Serial.println("[UPLOAD] ✗ Upload failed");
-    diag_record_error("upload_put", code, "http_status");
+    diag_record_error_persistent("upload_put", code, "http_status");
     char detail[32];
     snprintf(detail, sizeof(detail), "http_status=%d", code);
     uart_send_sense_diag("http", "fail", "UPLOAD_PUT", (int32_t)code, detail);

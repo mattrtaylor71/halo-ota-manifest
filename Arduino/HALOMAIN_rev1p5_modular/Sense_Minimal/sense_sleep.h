@@ -132,6 +132,21 @@ static void wake_pin_apply_mitigation(const char* reason) {
   wake_pin_configure_rtc_input_inactive_pull();
 }
 
+static void uart_send_release_wake_request() {
+  Serial.println("[SLEEP] requesting LCD release wake line via UART");
+  StaticJsonDocument<96> doc;
+  doc["ver"] = 1;
+  doc["type"] = "RELEASE_WAKE";
+  doc["msg_id"] = 0;
+  doc["ts"] = millis();
+  String out;
+  serializeJson(doc, out);
+  uart_send_json(out.c_str());
+  // Flush TX and wait for LCD to process
+  Serial.flush();
+  delay(250);
+}
+
 // ── Sleep deny / retry ──────────────────────────────────────────────
 
 static uint32_t sleep_deny_retry_ms(const char* reason, unsigned long now_ms) {
@@ -190,16 +205,56 @@ static void sense_config_deep_sleep_wakeup(bool enable_ext0, uint32_t fallback_t
   }
 }
 
+// ── Wake pin quick-check for LCD pulsing ────────────────────────────
+
+static bool wake_pin_check_pulsing(unsigned long window_ms) {
+  int toggles = 0;
+  int prev = -1;
+  unsigned long start = millis();
+  while ((millis() - start) < window_ms) {
+    int level = gpio_get_level(WAKE_GPIO);
+    int active = wake_pin_is_active_level(level) ? 1 : 0;
+    if (prev >= 0 && active != prev) {
+      toggles++;
+      // Any single transition means LCD is actively driving the pin.
+      // The pullup holds the line inactive — noise can't cause a
+      // transition visible at 10ms polling intervals.
+      Serial.printf("[WAKE_PIN_CHECK] pulsing_detected toggles=%d window_ms=%lu elapsed=%lu\n",
+                    toggles, window_ms, millis() - start);
+      return true;
+    }
+    prev = active;
+    delay(10);
+  }
+  return false;
+}
+
 // ── Wake pin deassert wait ──────────────────────────────────────────
+
+static uint16_t sleep_sanity_toggle_count = 0;
 
 static bool sleep_wait_wake_pin_deassert(unsigned long wait_ms) {
   unsigned long start_ms = millis();
   unsigned long next_log_ms = start_ms;
   unsigned long stable_start_ms = 0;
+  int prev_active = -1;  // -1 = unknown
+  sleep_sanity_toggle_count = 0;
   while ((millis() - start_ms) < wait_ms) {
     unsigned long now_ms = millis();
     int level = rtc_gpio_get_level(WAKE_GPIO);
-    if (wake_pin_is_active_level(level)) {
+    int is_active = wake_pin_is_active_level(level) ? 1 : 0;
+    // Count transitions — early exit if LCD is clearly pulsing
+    if (prev_active >= 0 && is_active != prev_active) {
+      sleep_sanity_toggle_count++;
+      if (sleep_sanity_toggle_count >= 3) {
+        Serial.printf("[SLEEP_SANITY] early_exit toggles=%u elapsed_ms=%lu\n",
+                      (unsigned)sleep_sanity_toggle_count,
+                      millis() - start_ms);
+        return false;
+      }
+    }
+    prev_active = is_active;
+    if (is_active) {
       stable_start_ms = 0;
     } else {
       if (stable_start_ms == 0) {
@@ -211,11 +266,12 @@ static bool sleep_wait_wake_pin_deassert(unsigned long wait_ms) {
     }
     if (now_ms >= next_log_ms) {
       unsigned long stable_ms = stable_start_ms ? (now_ms - stable_start_ms) : 0;
-      Serial.printf("[SLEEP_SANITY] wake_pin_level=%d wake_active=%d wait_left_ms=%lu stable_ms=%lu\n",
+      Serial.printf("[SLEEP_SANITY] wake_pin_level=%d wake_active=%d wait_left_ms=%lu stable_ms=%lu toggles=%u\n",
                     level,
                     WAKE_ACTIVE_LEVEL,
                     (unsigned long)(wait_ms - (now_ms - start_ms)),
-                    stable_ms);
+                    stable_ms,
+                    (unsigned)sleep_sanity_toggle_count);
       next_log_ms = now_ms + 100;
     }
     delay(50);
@@ -324,6 +380,13 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   Serial.printf("[SLEEP_TS] pre_sleep_end now_ms=%lu\n", (unsigned long)millis());
 #endif
 
+  // If LCD is pulsing the wake pin, abort sleep — user action pending
+  if (wake_pin_check_pulsing(200)) {
+    Serial.println("[SLEEP] abort (lcd_pulsing after pre_sleep)");
+    sleep_notify_late_block("lcd_pulsing");
+    return;
+  }
+
   // Ensure wake pin is RTC input with inactive pull before sleep checks.
   wake_pin_configure_rtc_input_inactive_pull();
   int wake_pin_level = rtc_gpio_get_level(WAKE_GPIO);
@@ -356,8 +419,21 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
                   (unsigned long)WAKE_PIN_DEASSERT_WAIT_MS,
                   sleep_retry_deassert_count);
     if (!sleep_wait_wake_pin_deassert(WAKE_PIN_DEASSERT_WAIT_MS)) {
+      // If pin toggled multiple times, LCD is actively pulsing — abort sleep
+      // entirely so Sense stays awake to handle the user's request.
+      if (sleep_sanity_toggle_count >= 3) {
+        Serial.printf("[SLEEP_SANITY] lcd_pulsing_detected toggles=%u -> abort_sleep\n",
+                      (unsigned)sleep_sanity_toggle_count);
+        sleep_notify_late_block("lcd_pulsing");
+        return;
+      }
       wake_pin_apply_mitigation("pre_sleep");
       wake_pin_level = rtc_gpio_get_level(WAKE_GPIO);
+      // Last resort: ask LCD to release wake line
+      if (wake_pin_is_active_level(wake_pin_level)) {
+        uart_send_release_wake_request();
+        wake_pin_level = rtc_gpio_get_level(WAKE_GPIO);
+      }
       if (wake_pin_is_active_level(wake_pin_level)) {
         wake_pin_abort_count_total++;
         wake_pin_abort_count_this_boot++;
@@ -378,18 +454,31 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     }
   } else {
     if (!sleep_wait_wake_pin_deassert(WAKE_PIN_STABLE_WAIT_MS)) {
+      if (sleep_sanity_toggle_count >= 3) {
+        Serial.printf("[SLEEP_SANITY] lcd_pulsing_detected toggles=%u -> abort_sleep\n",
+                      (unsigned)sleep_sanity_toggle_count);
+        sleep_notify_late_block("lcd_pulsing");
+        return;
+      }
       wake_pin_level = rtc_gpio_get_level(WAKE_GPIO);
-      wake_pin_abort_count_total++;
-      wake_pin_abort_count_this_boot++;
-      wake_pin_stuck_last_level = wake_pin_level;
-      strncpy(last_sleep_abort_reason, "wake_pin_unstable", sizeof(last_sleep_abort_reason) - 1);
-      last_sleep_abort_reason[sizeof(last_sleep_abort_reason) - 1] = '\0';
-      Serial.printf("[SLEEP_FAILSAFE_TIMER] reason=wake_pin_unstable level=%d total=%lu boot=%lu\n",
-                    wake_pin_level,
-                    wake_pin_abort_count_total,
-                    wake_pin_abort_count_this_boot);
-      ext0_allowed = false;
-      wake_pin_stuck = true;
+      // Last resort: ask LCD to release wake line
+      if (wake_pin_is_active_level(wake_pin_level)) {
+        uart_send_release_wake_request();
+        wake_pin_level = rtc_gpio_get_level(WAKE_GPIO);
+      }
+      if (wake_pin_is_active_level(wake_pin_level)) {
+        wake_pin_abort_count_total++;
+        wake_pin_abort_count_this_boot++;
+        wake_pin_stuck_last_level = wake_pin_level;
+        strncpy(last_sleep_abort_reason, "wake_pin_unstable", sizeof(last_sleep_abort_reason) - 1);
+        last_sleep_abort_reason[sizeof(last_sleep_abort_reason) - 1] = '\0';
+        Serial.printf("[SLEEP_FAILSAFE_TIMER] reason=wake_pin_unstable level=%d total=%lu boot=%lu\n",
+                      wake_pin_level,
+                      wake_pin_abort_count_total,
+                      wake_pin_abort_count_this_boot);
+        ext0_allowed = false;
+        wake_pin_stuck = true;
+      }
     }
   }
 
@@ -399,8 +488,19 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
       Serial.println("[SLEEP_SANITY] wake_pin_active_after_ready");
     }
     if (!sleep_wait_wake_pin_deassert(500)) {
+      if (sleep_sanity_toggle_count >= 3) {
+        Serial.printf("[SLEEP_SANITY] lcd_pulsing_detected toggles=%u -> abort_sleep\n",
+                      (unsigned)sleep_sanity_toggle_count);
+        sleep_notify_late_block("lcd_pulsing");
+        return;
+      }
       wake_pin_apply_mitigation("post_ready");
       wake_pin_level = rtc_gpio_get_level(WAKE_GPIO);
+      // Last resort: ask LCD to release wake line
+      if (wake_pin_is_active_level(wake_pin_level)) {
+        uart_send_release_wake_request();
+        wake_pin_level = rtc_gpio_get_level(WAKE_GPIO);
+      }
       if (wake_pin_is_active_level(wake_pin_level)) {
         wake_pin_abort_count_total++;
         wake_pin_abort_count_this_boot++;
@@ -428,25 +528,57 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     unsigned long flush_start = millis();
     unsigned long last_log = 0;
     uint32_t initial_count = upload_queue_count();
-    bool had_pending = (initial_count > 0 || upload_inflight);
+    bool has_parked = upload_worker_has_parked_job;
+    bool had_pending = (initial_count > 0 || upload_inflight || has_parked);
 
     if (had_pending) {
-      Serial.printf("[SLEEP_UPLOAD_FLUSH] start pending=%lu inflight=%d\n",
-                    (unsigned long)initial_count, upload_inflight ? 1 : 0);
+      Serial.printf("[SLEEP_UPLOAD_FLUSH] start pending=%lu inflight=%d parked=%d\n",
+                    (unsigned long)initial_count, upload_inflight ? 1 : 0, has_parked ? 1 : 0);
     }
 
     while (had_pending &&
-           (upload_queue_count() > 0 || upload_inflight) &&
+           (upload_queue_count() > 0 || upload_inflight || upload_worker_has_parked_job) &&
            (millis() - flush_start) < UPLOAD_FLUSH_TIMEOUT_MS) {
       // Log progress periodically
       if ((millis() - last_log) >= UPLOAD_FLUSH_LOG_INTERVAL_MS) {
         last_log = millis();
-        Serial.printf("[SLEEP_UPLOAD_FLUSH] waiting queue=%lu inflight=%d elapsed=%lums\n",
+        Serial.printf("[SLEEP_UPLOAD_FLUSH] waiting queue=%lu inflight=%d parked=%d elapsed=%lums\n",
                       (unsigned long)upload_queue_count(),
                       upload_inflight ? 1 : 0,
+                      upload_worker_has_parked_job ? 1 : 0,
                       millis() - flush_start);
       }
       delay(100);  // Yield to upload_worker_task on Core 1
+    }
+
+    // If parked job still exists after timeout, persist it before sleeping
+    if (upload_worker_has_parked_job) {
+      Serial.printf("[SLEEP_UPLOAD_FLUSH] parked job exists: job_id=%lu mode=%s len=%u\n",
+                    (unsigned long)upload_worker_parked_job.job_id,
+                    upload_worker_parked_job.mode,
+                    (unsigned)upload_worker_parked_job.image_len);
+      bool parked_saved = false;
+#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
+      if (upload_worker_parked_job.image_buf && upload_worker_parked_job.image_len > 0) {
+        uint8_t retries = (upload_worker_parked_job.retries < 0xFF)
+                          ? (uint8_t)(upload_worker_parked_job.retries + 1) : 0xFF;
+        parked_saved = upload_persist_save(upload_worker_parked_job, retries);
+        if (parked_saved) {
+          Serial.println("[SLEEP_UPLOAD_FLUSH] parked job SAVED to NVS");
+          upload_persist_note_event("sleep_parked", upload_worker_parked_job.mode, 1, retries);
+        }
+      }
+#endif
+      if (!parked_saved) {
+        Serial.println("[SLEEP_UPLOAD_FLUSH] WARNING: parked job could NOT be persisted");
+        uart_send_sense_diag("upload", "sleep_parked_drop", upload_worker_parked_job.mode,
+                             (int32_t)upload_worker_parked_job.job_id, "persist_failed");
+      }
+      if (upload_worker_parked_job.image_buf) {
+        free(upload_worker_parked_job.image_buf);
+        upload_worker_parked_job.image_buf = nullptr;
+      }
+      upload_worker_has_parked_job = false;
     }
 
     if (had_pending) {

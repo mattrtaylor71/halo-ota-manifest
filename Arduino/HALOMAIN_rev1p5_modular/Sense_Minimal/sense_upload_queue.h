@@ -44,7 +44,8 @@ static bool upload_queue_is_full() {
 // ── Sleep defer: drain queues before sleep ────────────────────────
 
 static void sleep_defer_queued_background_uploads() {
-  bool saved_one = false;
+  uint8_t saved_count = 0;
+  uint8_t dropped_count = 0;
   auto drain_queue = [&](QueueHandle_t queue, const char* label) {
     if (!queue) {
       return;
@@ -53,28 +54,34 @@ static void sleep_defer_queued_background_uploads() {
     while (xQueueReceive(queue, &queued, 0) == pdTRUE) {
       bool saved = false;
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
-      if (!saved_one && queued.image_buf && queued.image_len > 0) {
+      // Try to persist each upload — persist_save overwrites previous slot,
+      // so last one wins. This is better than only saving the first one,
+      // because the most recent capture is typically the most important.
+      if (queued.image_buf && queued.image_len > 0) {
         uint8_t next_retries = (queued.retries < 0xFF) ? (uint8_t)(queued.retries + 1) : 0xFF;
         saved = upload_persist_save(queued, next_retries);
         if (saved) {
-          saved_one = true;
-          uint8_t cached_count = upload_persist_has_pending() ? 1 : 0;
+          saved_count++;
           g_upload_persist_attempted_this_boot = true;
-          upload_persist_note_event("sleep_deferred", queued.mode, cached_count, next_retries);
-          Serial.printf("[SLEEP] deferred_upload_saved label=%s job_id=%lu mode=%s retries=%u\n",
+          upload_persist_note_event("sleep_deferred", queued.mode, saved_count, next_retries);
+          Serial.printf("[SLEEP] deferred_upload_saved label=%s job_id=%lu mode=%s retries=%u saved_total=%u\n",
                         label ? label : "upload",
                         (unsigned long)queued.job_id,
                         queued.mode,
-                        (unsigned)next_retries);
+                        (unsigned)next_retries,
+                        (unsigned)saved_count);
         }
       }
 #endif
       if (!saved) {
+        dropped_count++;
         Serial.printf("[SLEEP] deferred_upload_dropped label=%s job_id=%lu mode=%s voice=%d\n",
                       label ? label : "upload",
                       (unsigned long)queued.job_id,
                       queued.mode,
                       queued.is_voice ? 1 : 0);
+        uart_send_sense_diag("upload", "sleep_drop", queued.mode,
+                             (int32_t)queued.job_id, "queue_not_persisted");
       }
       if (scan_mode_is_dish(queued.mode)) {
         clear_active_dish_job(queued.job_id, saved ? "sleep_deferred" : "sleep_dropped");
@@ -88,6 +95,11 @@ static void sleep_defer_queued_background_uploads() {
 
   drain_queue(upload_queue_dish, "dish");
   drain_queue(upload_queue, "normal");
+
+  if (saved_count > 0 || dropped_count > 0) {
+    Serial.printf("[SLEEP] upload_defer_summary saved=%u dropped=%u\n",
+                  (unsigned)saved_count, (unsigned)dropped_count);
+  }
 }
 
 // ── Upload buffer allocation ──────────────────────────────────────

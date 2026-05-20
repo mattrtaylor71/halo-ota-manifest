@@ -75,7 +75,12 @@ static void camera_timeline_complete(bool ok, const camera_fb_t* fb, const char*
     camera_timeline_event(reason, 0);
   }
   g_camera_timeline_last_ms = millis();
-  Serial.printf("[CAMERA_TIMING] %s\n", camera_timeline_build());
+  const char* timeline_str = camera_timeline_build();
+  Serial.printf("[CAMERA_TIMING] %s\n", timeline_str);
+  // Send full timeline over UART so LCD serial can see it
+  uart_send_sense_diag("camera", "timeline", camera_diag_label(),
+                       ok ? (int32_t)g_camera_timeline_total_ms : -1,
+                       timeline_str);
   char detail[64];
   snprintf(detail, sizeof(detail), "reason=%s ok=%d len=%u",
            reason ? reason : "",
@@ -274,39 +279,40 @@ static void tune_sensor_for_food() {
 static void apply_sensor_profile_normal(sensor_t* s) {
   if (!s) return;
   s->set_exposure_ctrl(s, 1);   // AEC on
-  s->set_aec2(s, 0);            // AEC2 off for stability in normal light
+  s->set_aec2(s, 0);            // Hardware AEC only (fast)
   s->set_gain_ctrl(s, 1);       // AGC on
-  s->set_ae_level(s, 1);        // Slightly brighter
-  s->set_gainceiling(s, GAINCEILING_32X);
-  s->set_brightness(s, 1);
-  s->set_contrast(s, 0);
-  s->set_saturation(s, 0);
+  s->set_ae_level(s, 2);        // Brighter exposure for labels
+  // DCX module needs 64X gain to avoid long-exposure frame slowdown
+  s->set_gainceiling(s, (g_camera_module == CAM_MODULE_DCX) ? GAINCEILING_64X : GAINCEILING_32X);
+  s->set_brightness(s, 2);
+  s->set_contrast(s, 2);        // High contrast for label text
+  s->set_saturation(s, 1);      // Slight saturation for colored labels
   if (s->set_whitebal) s->set_whitebal(s, 1);
   if (s->set_awb_gain) s->set_awb_gain(s, 1);
-  if (s->set_wb_mode) s->set_wb_mode(s, 2);  // Cloudy
-  if (s->set_denoise) s->set_denoise(s, 0);
-  if (s->set_sharpness) s->set_sharpness(s, 1);
+  if (s->set_wb_mode) s->set_wb_mode(s, 3);  // Office WB (counteracts green tint)
+  if (s->set_denoise) s->set_denoise(s, 0);   // OFF — preserve text
+  if (s->set_sharpness) s->set_sharpness(s, 3); // Max sharpness for labels
   if (s->set_raw_gma) s->set_raw_gma(s, 1);
-  s->set_lenc(s, 0);
+  s->set_lenc(s, 1);            // Lens correction for edge text
 }
 
 static void apply_sensor_profile_low_light(sensor_t* s) {
   if (!s) return;
   s->set_exposure_ctrl(s, 1);   // AEC on
-  s->set_aec2(s, 1);            // Allow longer exposure
+  s->set_aec2(s, 0);            // Hardware AEC only (keep capture fast)
   s->set_gain_ctrl(s, 1);       // AGC on
-  s->set_ae_level(s, 2);        // Brighter
-  s->set_gainceiling(s, GAINCEILING_64X);
+  s->set_ae_level(s, 3);        // Max brightness boost
+  s->set_gainceiling(s, GAINCEILING_64X);  // 2x more gain than normal
   s->set_brightness(s, 2);
-  s->set_contrast(s, -2);
+  s->set_contrast(s, 2);        // High contrast for label text in dim light
   s->set_saturation(s, 1);
   if (s->set_whitebal) s->set_whitebal(s, 1);
   if (s->set_awb_gain) s->set_awb_gain(s, 1);
-  if (s->set_wb_mode) s->set_wb_mode(s, 2);  // Cloudy
-  if (s->set_denoise) s->set_denoise(s, 1);
-  if (s->set_sharpness) s->set_sharpness(s, 1);
+  if (s->set_wb_mode) s->set_wb_mode(s, 3);  // Office WB (consistent with label profile)
+  if (s->set_denoise) s->set_denoise(s, 0);   // OFF — preserve text sharpness
+  if (s->set_sharpness) s->set_sharpness(s, 3); // Max sharpness for labels
   if (s->set_raw_gma) s->set_raw_gma(s, 1);
-  s->set_lenc(s, 0);
+  s->set_lenc(s, 1);            // Lens correction for edge text
 }
 
 static void apply_sensor_profile_flash(sensor_t* s) {
@@ -331,16 +337,16 @@ static void apply_sensor_profile_flash(sensor_t* s) {
 static void apply_sensor_profile_label(sensor_t* s) {
   if (!s) return;
   s->set_exposure_ctrl(s, 1);   // AEC on
-  s->set_aec2(s, 0);            // No long exposures (keep text sharp)
+  s->set_aec2(s, 0);            // Hardware AEC only (fast convergence)
   s->set_gain_ctrl(s, 1);       // AGC on
-  s->set_ae_level(s, 1);        // Slightly brighter
-  s->set_gainceiling(s, GAINCEILING_32X);
-  s->set_brightness(s, 1);
-  s->set_contrast(s, 1);        // Enhanced contrast for label text
-  s->set_saturation(s, 0);
+  s->set_ae_level(s, 2);        // Brighter exposure for labels
+  s->set_gainceiling(s, GAINCEILING_64X);  // Higher gain for dark kitchens
+  s->set_brightness(s, 2);      // Boost brightness for label visibility
+  s->set_contrast(s, 2);        // High contrast for text on labels
+  s->set_saturation(s, 1);      // Slight saturation for colored label elements
   if (s->set_whitebal) s->set_whitebal(s, 1);
   if (s->set_awb_gain) s->set_awb_gain(s, 1);
-  if (s->set_wb_mode) s->set_wb_mode(s, 0);  // Auto WB (adapts to food packaging lighting)
+  if (s->set_wb_mode) s->set_wb_mode(s, 3);  // Office/Fluorescent WB (counteracts green tint)
   if (s->set_denoise) s->set_denoise(s, 0);
   if (s->set_sharpness) s->set_sharpness(s, 3);  // Maximum sharpness for text
   if (s->set_raw_gma) s->set_raw_gma(s, 1);
@@ -547,12 +553,32 @@ static void deinit_camera() {
   esp_log_level_set("gdma", ESP_LOG_NONE);
   esp_camera_deinit();
   esp_log_level_set("gdma", ESP_LOG_ERROR);
+  // Re-reserve the DMA block now that camera has freed its buffers.
+  // This protects the contiguous region from WiFi/TLS fragmentation
+  // before the next camera init.
+  g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+      CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+  if (g_camera_dma_reserve) {
+    Serial.printf("[CAMERA] DMA reservation re-acquired at %p\n", g_camera_dma_reserve);
+  } else {
+    Serial.println("[CAMERA] WARNING: DMA re-reservation failed");
+  }
   Serial.println("[CAM_PWR] esp_camera_deinit complete");
   camera_stop_xclk();
   camera_set_pins_high_z();
   camera_power_disable();
   Serial.printf("[CAMERA] Free heap after camera deinit: %d bytes\n", ESP.getFreeHeap());
   Serial.println("[CAMERA] Camera de-initialized successfully");
+
+  // Kick off WiFi reconnection (non-blocking) after camera freed the radio.
+  // Camera init kills WiFi (WiFi.disconnect + WIFI_OFF) to free DMA.
+  // Without this, uploads discover WiFi is down 5-15s later and must
+  // hard-reset. Calling service_wifi_maintenance() starts a background
+  // WiFi.begin() so it reconnects while the upload is being queued.
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[CAMERA] WiFi down after deinit — kick background reconnect");
+    service_wifi_maintenance(millis());
+  }
 }
 
 // ── Camera init ─────────────────────────────────────────────────────
@@ -561,22 +587,34 @@ static bool init_camera() {
   Serial.println("[CAMERA] Initializing camera...");
   camera_timeline_event("init_begin", 0);
 
-  // Wait for any in-flight HTTP to complete — TLS buffers consume ~40KB of DMA RAM
-  // that camera needs for its frame buffers.
+  // --- HTTP drain: user capture takes absolute priority over background uploads.
+  // foreground_active flag causes upload worker to abort PUT immediately.
+  // Just kill WiFi to free DMA — don't wait for upload to finish.
   if (http_inflight) {
-    Serial.println("[CAMERA] Waiting for HTTP to complete before camera init...");
-    unsigned long http_wait_start = millis();
-    const unsigned long HTTP_DRAIN_TIMEOUT_MS = 15000;
-    while (http_inflight && (millis() - http_wait_start) < HTTP_DRAIN_TIMEOUT_MS) {
-      vTaskDelay(pdMS_TO_TICKS(100));
-    }
-    if (http_inflight) {
-      Serial.printf("[CAMERA] HTTP still inflight after %lums, proceeding anyway\n",
-                    millis() - http_wait_start);
+    Serial.println("[CAMERA] HTTP inflight — killing WiFi for DMA (no wait)");
+    WiFi.disconnect(true);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    WiFi.mode(WIFI_OFF);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    WiFi.mode(WIFI_STA);
+    Serial.printf("[CAMERA] WiFi killed, http_inflight=%d\n", http_inflight ? 1 : 0);
+  } else {
+    // No HTTP inflight — only kill WiFi if DMA is too fragmented.
+    // Check DMA first; skip WiFi kill if we have enough space already.
+    size_t dma_check = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (dma_check < CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES) {
+      Serial.printf("[CAMERA] DMA low (%u < %u) — killing WiFi\n",
+                    (unsigned)dma_check, (unsigned)CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES);
+      if (WiFi.getMode() != WIFI_OFF) {
+        WiFi.disconnect(true);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        WiFi.mode(WIFI_OFF);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        WiFi.mode(WIFI_STA);
+      }
     } else {
-      Serial.printf("[CAMERA] HTTP drained in %lums\n", millis() - http_wait_start);
+      Serial.printf("[CAMERA] DMA OK (%u) — WiFi stays up\n", (unsigned)dma_check);
     }
-    vTaskDelay(pdMS_TO_TICKS(50));  // Let TLS buffers fully free
   }
 
   auto log_camera_init_memory = [](const char* stage) {
@@ -602,6 +640,20 @@ static bool init_camera() {
       changed = true;
     }
     wifiClient.stop();
+#else
+    // Only use WiFi APIs here — mqtt_stop_for_ota() is NOT thread-safe
+    // from op_worker and races with MQTT event handler causing heap corruption.
+    Serial.printf("[CAMERA] quiesce_network reason=%s wifi_mode=%d\n",
+                  reason ? reason : "unknown", (int)WiFi.getMode());
+    if (WiFi.getMode() != WIFI_OFF) {
+      Serial.println("[CAMERA] WiFi off to free DMA buffers");
+      WiFi.disconnect(true);
+      delay(50);
+      WiFi.mode(WIFI_OFF);
+      delay(100);
+      WiFi.mode(WIFI_STA);
+      changed = true;
+    }
 #endif
     if (changed || reason != nullptr) {
       delay(CAMERA_NETWORK_QUIESCE_DELAY_MS);
@@ -625,6 +677,14 @@ static bool init_camera() {
                   0);
 #endif
     quiesce_network_for_camera("pre_init_guard");
+  }
+
+  // Release the DMA reservation so esp_camera_init() can allocate from it.
+  if (g_camera_dma_reserve) {
+    heap_caps_free(g_camera_dma_reserve);
+    g_camera_dma_reserve = nullptr;
+    Serial.printf("[CAMERA] DMA reservation released (%u bytes freed)\n",
+                  (unsigned)CAMERA_DMA_RESERVE_BYTES);
   }
 
   if (FILL_LED_PIN >= 0) {
@@ -686,7 +746,7 @@ static bool init_camera() {
       continue;
     }
 
-    diag_record_error("camera_init", (int32_t)err, esp_err_to_name(err));
+    diag_record_error_persistent("camera_init", (int32_t)err, esp_err_to_name(err));
     camera_stop_xclk();
     camera_set_pins_high_z();
     camera_power_disable();
@@ -721,6 +781,8 @@ static bool init_camera() {
     } else if (scene_luma >= 0) {
       if (scene_luma < CAMERA_PREFLIGHT_LUMA_LOW) {
         g_camera_profile = CAM_PROFILE_LOW_LIGHT;
+        uart_send_sense_diag("camera", "low_light", camera_diag_label(),
+                             scene_luma, "adaptive_gain_boost");
       } else {
         g_camera_profile = CAM_PROFILE_NORMAL;
       }
@@ -749,7 +811,64 @@ static bool init_camera() {
     delay(CAMERA_INIT_SETTLE_DELAY_MS);
   }
   camera_timeline_event("init_warmup", CAMERA_INIT_WARMUP_FRAMES);
-  camera_settle_discard(CAMERA_INIT_WARMUP_FRAMES, CAMERA_INIT_WARMUP_DELAY_MS);
+  // Warmup with module auto-detection and adaptive light detection
+  static const size_t LOW_LIGHT_JPEG_THRESHOLD = 40000;  // bytes — below this is "dark"
+  bool detected_low_light = false;
+  for (uint8_t i = 0; i < CAMERA_INIT_WARMUP_FRAMES; ++i) {
+    uint32_t frame_start = millis();
+    camera_fb_t* tmp = esp_camera_fb_get();
+    uint32_t frame_ms = millis() - frame_start;
+    if (tmp) {
+      // Auto-detect camera module on first frame (only once per boot)
+      if (i == 0) {
+        g_camera_first_frame_ms = frame_ms;
+        if (g_camera_module == CAM_MODULE_UNKNOWN) {
+          g_camera_module = (frame_ms > CAMERA_MODULE_DETECT_THRESHOLD_MS)
+                            ? CAM_MODULE_DCX : CAM_MODULE_HD3FM;
+          const char* mod_name = (g_camera_module == CAM_MODULE_DCX) ? "DCX-OV2640-v2" : "HD3FM-811";
+          Serial.printf("[CAMERA] Module detected: %s (frame_ms=%lu threshold=%lu)\n",
+                        mod_name, (unsigned long)frame_ms,
+                        (unsigned long)CAMERA_MODULE_DETECT_THRESHOLD_MS);
+          camera_timeline_event("module", (int32_t)g_camera_module);
+          char det[64];
+          snprintf(det, sizeof(det), "module=%s frame_ms=%lu",
+                   mod_name, (unsigned long)frame_ms);
+          uart_send_sense_diag("camera", "module_detect", camera_diag_label(),
+                               (int32_t)g_camera_module, det);
+          // Boost gain immediately for DCX so remaining warmup frames are faster
+          if (g_camera_module == CAM_MODULE_DCX && s) {
+            s->set_gainceiling(s, GAINCEILING_64X);
+            camera_timeline_event("dcx_gain64", (int32_t)frame_ms);
+          }
+        }
+        // Check for low light
+        if (tmp->len < LOW_LIGHT_JPEG_THRESHOLD) {
+          detected_low_light = true;
+          camera_timeline_event("low_light", (int32_t)tmp->len);
+          Serial.printf("[CAMERA] Low light detected: frame=%u threshold=%u\n",
+                        (unsigned)tmp->len, (unsigned)LOW_LIGHT_JPEG_THRESHOLD);
+          uart_send_sense_diag("camera", "low_light", camera_diag_label(),
+                               (int32_t)tmp->len, "adaptive_gain_boost");
+        }
+      }
+      Serial.printf("[CAMERA] Init warmup frame %d: %u bytes (%lums)\n",
+                    i + 1, tmp->len, (unsigned long)frame_ms);
+      esp_camera_fb_return(tmp);
+    }
+    if (CAMERA_INIT_WARMUP_DELAY_MS > 0) {
+      delay(CAMERA_INIT_WARMUP_DELAY_MS);
+    }
+  }
+  // If low light detected, switch to full low-light profile
+  if (detected_low_light) {
+    g_camera_profile = CAM_PROFILE_LOW_LIGHT;
+    apply_camera_profile(s, g_camera_profile);
+    camera_timeline_event("profile_lowlight", (int32_t)g_camera_profile);
+    // Extra warmup frame for new exposure to settle
+    camera_settle_discard(2, 50);
+    camera_timeline_event("lowlight_settle", 2);
+  }
+  camera_timeline_event("init_fullres", (int32_t)CAPTURE_SIZE);
   return true;
 }
 
@@ -972,7 +1091,7 @@ static bool warmup_and_capture(camera_fb_t*& fb, bool fast_profile) {
   if (!init_camera()) {
     Serial.println("[CAMERA] Recovery init failed");
     camera_timeline_event("reinit_fail", g_camera_last_init_err);
-    diag_record_error("camera_reinit", -1, "init_fail");
+    diag_record_error_persistent("camera_reinit", -1, "init_fail");
     g_camera_profile = original_profile;
     camera_timeline_complete(false, nullptr, "reinit_fail");
     return false;

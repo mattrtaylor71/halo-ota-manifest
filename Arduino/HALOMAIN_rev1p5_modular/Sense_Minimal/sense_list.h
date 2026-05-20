@@ -195,9 +195,6 @@ static void delete_item_from_api(const char* item_id) {
 // ── Fetch shopping list from API ───────────────────────────────────
 
 static void fetch_shopping_list_from_api() {
-  Serial.println("[LIST_REFRESH] fetch skipped (shopping list disabled)");
-  list_refresh_mark_complete("disabled");
-  return;
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("✗ Cannot fetch list: WiFi not connected!");
     list_refresh_fail("wifi_not_connected");

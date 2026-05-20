@@ -177,6 +177,7 @@ static void ship_menu_send_menu_select(const char* menu_item, int menu_index, co
     Serial.println("[PROVISION] menu_select ignored (provisioning_active)");
     return;
   }
+  request_sense_wake("menu_select");
   ship_menu_begin_local_scan_request(menu_item);
   tx_msg_t tx_msg = {};
   strncpy(tx_msg.type, "INPUT_MENU_SELECT", sizeof(tx_msg.type) - 1);
@@ -336,7 +337,7 @@ static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
     Serial.println("[UI_BUSY] tap ignored (screen)");
     return;
   }
-  if (ui_busy || ui_screen_state == SCREEN_RESULT || ui_screen_state == SCREEN_DEBUG) {
+  if (ui_busy || ui_screen_state == SCREEN_RESULT || ui_screen_state == SCREEN_DEBUG || ui_screen_state == SCREEN_ERRLOG || ui_screen_state == SCREEN_ERRLOG_DETAIL || ui_screen_state == SCREEN_SHOPPING_LIST) {
     Serial.println("[UI_BUSY] tap ignored");
     return;
   }
@@ -375,6 +376,17 @@ static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
     }
     case SHIP_MENU_ACTION_MANUAL_OTA:
       ship_menu_send_manual_ota("menu_action");
+      break;
+    case SHIP_MENU_ACTION_DEBUG_LOG:
+      Serial.println("[MENU] tap=DEBUG_LOG");
+      show_errlog_screen();
+      break;
+    case SHIP_MENU_ACTION_SHOPPING_LIST:
+      Serial.println("[MENU] tap=SHOPPING_LIST");
+      show_shopping_list_screen();
+      // Wake Sense and request list refresh
+      request_sense_wake("shopping_list");
+      refresh_sm_set_wake_pending("shopping_list");
       break;
     case SHIP_MENU_ACTION_BACK:
       show_ship_second_menu();
@@ -715,28 +727,29 @@ static void create_custom_ui() {
   // Get default screen
   lv_obj_t *scr = lv_scr_act();
   g_base_screen = scr;
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(scr, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
   
   // Create loading screen
   loading_screen = lv_obj_create(scr);
   lv_obj_set_size(loading_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(loading_screen, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(loading_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(loading_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_center(loading_screen);
-  
+
   lv_obj_t *loading_label = lv_label_create(loading_screen);
   lv_label_set_text(loading_label, "Loading...");
-  lv_obj_set_style_text_color(loading_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(loading_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_center(loading_label);
   
   // Create list container
   list_container = lv_obj_create(scr);
   lv_obj_set_size(list_container, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(list_container, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(list_container, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(list_container, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_bg_img_src(list_container, &ui_img_Frame_439_png, LV_PART_MAIN);
-  lv_obj_set_style_bg_img_opa(list_container, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(list_container, 30, LV_PART_MAIN);
+  lv_obj_set_style_shadow_color(list_container, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
+  lv_obj_set_style_shadow_spread(list_container, -15, LV_PART_MAIN);
   lv_obj_set_style_border_width(list_container, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(list_container, 0, LV_PART_MAIN);
   lv_obj_clear_flag(list_container, LV_OBJ_FLAG_SCROLLABLE);
@@ -758,14 +771,14 @@ static void create_custom_ui() {
   delete_item_btn = lv_btn_create(delete_menu);
   lv_obj_set_size(delete_item_btn, 340, 120);  // Match menu size
   lv_obj_align(delete_item_btn, LV_ALIGN_CENTER, 0, 0);  // Centered in menu
-  lv_obj_set_style_bg_color(delete_item_btn, lv_color_hex(0xF0524D), LV_PART_MAIN);  // Alert Red
+  lv_obj_set_style_bg_color(delete_item_btn, lv_color_hex(0xE53935), LV_PART_MAIN);  // Trepo Red
   lv_obj_set_style_bg_opa(delete_item_btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(delete_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_outline_width(delete_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(delete_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(delete_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(delete_item_btn, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(delete_item_btn, lv_color_hex(0xF0524D), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(delete_item_btn, lv_color_hex(0xE53935), LV_STATE_PRESSED);
   lv_obj_set_style_bg_opa(delete_item_btn, LV_OPA_COVER, LV_STATE_PRESSED);
   delete_item_label = lv_label_create(delete_item_btn);
   lv_label_set_text(delete_item_label, "Delete");
@@ -789,14 +802,14 @@ static void create_custom_ui() {
   menu_item_btn = lv_btn_create(menu_menu);
   lv_obj_set_size(menu_item_btn, 340, 120);  // Match menu size
   lv_obj_align(menu_item_btn, LV_ALIGN_CENTER, 0, 0);  // Centered in menu
-  lv_obj_set_style_bg_color(menu_item_btn, lv_color_hex(0x245DFF), LV_PART_MAIN);  // Halo Blue
+  lv_obj_set_style_bg_color(menu_item_btn, lv_color_hex(0x2D4FFF), LV_PART_MAIN);  // Trepo Deep Blue
   lv_obj_set_style_bg_opa(menu_item_btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(menu_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_outline_width(menu_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(menu_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(menu_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(menu_item_btn, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(menu_item_btn, lv_color_hex(0x245DFF), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(menu_item_btn, lv_color_hex(0x2D4FFF), LV_STATE_PRESSED);
   lv_obj_set_style_bg_opa(menu_item_btn, LV_OPA_COVER, LV_STATE_PRESSED);
   menu_item_label = lv_label_create(menu_item_btn);
   lv_label_set_text(menu_item_label, "Menu");
@@ -810,10 +823,11 @@ static void create_custom_ui() {
   // Create meal result screen (hidden by default)
   meal_result_screen = lv_obj_create(scr);
   lv_obj_set_size(meal_result_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(meal_result_screen, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(meal_result_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(meal_result_screen, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_bg_img_src(meal_result_screen, &ui_img_Frame_439_png, LV_PART_MAIN);
-  lv_obj_set_style_bg_img_opa(meal_result_screen, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(meal_result_screen, 30, LV_PART_MAIN);
+  lv_obj_set_style_shadow_color(meal_result_screen, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
+  lv_obj_set_style_shadow_spread(meal_result_screen, -15, LV_PART_MAIN);
   lv_obj_set_style_border_width(meal_result_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(meal_result_screen, 20, LV_PART_MAIN);
   lv_obj_center(meal_result_screen);
@@ -824,14 +838,14 @@ static void create_custom_ui() {
   meal_calories_label = lv_label_create(meal_result_screen);
   lv_label_set_text(meal_calories_label, "0cal");
   lv_obj_set_style_text_font(meal_calories_label, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_set_style_text_color(meal_calories_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_calories_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_align(meal_calories_label, LV_ALIGN_TOP_MID, 0, 20);
-  
+
   // Meal description label - centered, medium text
   meal_description_label = lv_label_create(meal_result_screen);
   lv_label_set_text(meal_description_label, "");
   lv_obj_set_style_text_font(meal_description_label, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_set_style_text_color(meal_description_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_description_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_set_style_text_align(meal_description_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_label_set_long_mode(meal_description_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping
   lv_obj_set_width(meal_description_label, 280);  // Reduced from 300 to fit circular screen better
@@ -850,45 +864,45 @@ static void create_custom_ui() {
   meal_protein_value_label = lv_label_create(macros_container);
   lv_label_set_text(meal_protein_value_label, "0g");
   lv_obj_set_style_text_font(meal_protein_value_label, &lv_font_montserrat_40, LV_PART_MAIN);  // Doubled font size (20 -> 40)
-  lv_obj_set_style_text_color(meal_protein_value_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_protein_value_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_set_style_text_opa(meal_protein_value_label, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_align(meal_protein_value_label, LV_ALIGN_LEFT_MID, 0, -20);  // More spacing above center (was -10)
-  
+
   // Protein - name label (bottom)
   meal_protein_name_label = lv_label_create(macros_container);
   lv_label_set_text(meal_protein_name_label, "Protein");
   lv_obj_set_style_text_font(meal_protein_name_label, &lv_font_montserrat_14, LV_PART_MAIN);  // Smaller font for label
-  lv_obj_set_style_text_color(meal_protein_name_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_protein_name_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_align(meal_protein_name_label, LV_ALIGN_LEFT_MID, 0, 20);  // More spacing below center (was 10)
   
   // Carbs - value label (top) - doubled font size
   meal_carbs_value_label = lv_label_create(macros_container);
   lv_label_set_text(meal_carbs_value_label, "0g");
   lv_obj_set_style_text_font(meal_carbs_value_label, &lv_font_montserrat_40, LV_PART_MAIN);  // Doubled font size (20 -> 40)
-  lv_obj_set_style_text_color(meal_carbs_value_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_carbs_value_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_set_style_text_opa(meal_carbs_value_label, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_align(meal_carbs_value_label, LV_ALIGN_CENTER, 0, -20);  // More spacing above center (was -10)
-  
+
   // Carbs - name label (bottom)
   meal_carbs_name_label = lv_label_create(macros_container);
   lv_label_set_text(meal_carbs_name_label, "Carbs");
   lv_obj_set_style_text_font(meal_carbs_name_label, &lv_font_montserrat_14, LV_PART_MAIN);  // Smaller font for label
-  lv_obj_set_style_text_color(meal_carbs_name_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_carbs_name_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_align(meal_carbs_name_label, LV_ALIGN_CENTER, 0, 20);  // More spacing below center (was 10)
   
   // Fat - value label (top) - doubled font size
   meal_fat_value_label = lv_label_create(macros_container);
   lv_label_set_text(meal_fat_value_label, "0g");
   lv_obj_set_style_text_font(meal_fat_value_label, &lv_font_montserrat_40, LV_PART_MAIN);  // Doubled font size (20 -> 40)
-  lv_obj_set_style_text_color(meal_fat_value_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_fat_value_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_set_style_text_opa(meal_fat_value_label, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_align(meal_fat_value_label, LV_ALIGN_RIGHT_MID, 0, -20);  // More spacing above center (was -10)
-  
+
   // Fat - name label (bottom)
   meal_fat_name_label = lv_label_create(macros_container);
   lv_label_set_text(meal_fat_name_label, "Fat");
   lv_obj_set_style_text_font(meal_fat_name_label, &lv_font_montserrat_14, LV_PART_MAIN);  // Smaller font for label
-  lv_obj_set_style_text_color(meal_fat_name_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_fat_name_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_align(meal_fat_name_label, LV_ALIGN_RIGHT_MID, 0, 20);  // More spacing below center (was 10)
   
   // Recommendation label - small text at bottom
@@ -896,7 +910,7 @@ static void create_custom_ui() {
   meal_recommendation_label = lv_label_create(meal_result_screen);
   lv_label_set_text(meal_recommendation_label, "");
   lv_obj_set_style_text_font(meal_recommendation_label, &lv_font_montserrat_12, LV_PART_MAIN);
-  lv_obj_set_style_text_color(meal_recommendation_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(meal_recommendation_label, lv_color_hex(0x4A4A4A), LV_PART_MAIN);
   lv_obj_set_style_text_align(meal_recommendation_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_label_set_long_mode(meal_recommendation_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping
   lv_obj_set_width(meal_recommendation_label, 280);  // Reduced from 300 to fit circular screen better
@@ -911,7 +925,7 @@ static void create_custom_ui() {
   lv_obj_align(recording_indicator, LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_style_bg_opa(recording_indicator, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(recording_indicator, 12, LV_PART_MAIN);  // 12px thick border
-  lv_obj_set_style_border_color(recording_indicator, lv_color_hex(0x245DFF), LV_PART_MAIN);  // Halo Blue
+  lv_obj_set_style_border_color(recording_indicator, lv_color_hex(0x2D4FFF), LV_PART_MAIN);  // Trepo Deep Blue
   lv_obj_set_style_radius(recording_indicator, LV_RADIUS_CIRCLE, LV_PART_MAIN);  // Perfect circle
   lv_obj_set_style_border_opa(recording_indicator, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_add_flag(recording_indicator, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
@@ -924,7 +938,7 @@ static void create_custom_ui() {
   lv_obj_align(processing_indicator, LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_style_bg_opa(processing_indicator, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(processing_indicator, 12, LV_PART_MAIN);  // 12px thick border
-  lv_obj_set_style_border_color(processing_indicator, lv_color_hex(0x245DFF), LV_PART_MAIN);  // Halo Blue
+  lv_obj_set_style_border_color(processing_indicator, lv_color_hex(0x2D4FFF), LV_PART_MAIN);  // Trepo Deep Blue
   lv_obj_set_style_radius(processing_indicator, LV_RADIUS_CIRCLE, LV_PART_MAIN);  // Perfect circle
   lv_obj_set_style_border_opa(processing_indicator, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_add_flag(processing_indicator, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
@@ -945,7 +959,7 @@ static void create_custom_ui() {
   status_label = lv_label_create(status_screen);
   lv_label_set_text(status_label, "");
   lv_obj_set_style_text_font(status_label, &lv_font_montserrat_32, LV_PART_MAIN);  // Large font
-  lv_obj_set_style_text_color(status_label, lv_color_hex(0x001A4D), LV_PART_MAIN);  // Dark blue text (#001A4D)
+  lv_obj_set_style_text_color(status_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);  // Off-black text
   lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping for multi-line
   lv_obj_set_width(status_label, 300);  // Width for circular screen
@@ -954,7 +968,7 @@ static void create_custom_ui() {
   // Reset Wi-Fi button (hidden by default)
   status_reset_button = lv_btn_create(status_screen);
   lv_obj_set_size(status_reset_button, 200, 50);
-  lv_obj_set_style_bg_color(status_reset_button, lv_color_hex(0x2563EB), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(status_reset_button, lv_color_hex(0x2D4FFF), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(status_reset_button, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_radius(status_reset_button, 10, LV_PART_MAIN);
   lv_obj_align(status_reset_button, LV_ALIGN_BOTTOM_MID, 0, -30);
@@ -967,7 +981,7 @@ static void create_custom_ui() {
   // Create logged screen (for Discard mode - shown after image capture)
   logged_screen = lv_obj_create(scr);
   lv_obj_set_size(logged_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(logged_screen, lv_color_hex(0x1D4509), LV_PART_MAIN);  // Green background (#1D4509)
+  lv_obj_set_style_bg_color(logged_screen, lv_color_hex(0x1F4D2B), LV_PART_MAIN);  // Trepo dark green
   lv_obj_set_style_bg_opa(logged_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(logged_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(logged_screen, 0, LV_PART_MAIN);
@@ -987,7 +1001,7 @@ static void create_custom_ui() {
   // Create menu screen (blue background with menu items)
   menu_screen = lv_obj_create(scr);
   lv_obj_set_size(menu_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(menu_screen, lv_color_hex(0x0056A5), LV_PART_MAIN);  // Blue background (#0056A5)
+  lv_obj_set_style_bg_color(menu_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);  // Cream background
   lv_obj_set_style_bg_opa(menu_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(menu_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(menu_screen, 0, LV_PART_MAIN);
@@ -1010,7 +1024,7 @@ static void create_custom_ui() {
     menu_item_labels[i] = lv_label_create(menu_list_container);
     lv_label_set_text(menu_item_labels[i], "");
     lv_obj_set_style_text_font(menu_item_labels[i], &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(menu_item_labels[i], lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_set_style_text_color(menu_item_labels[i], lv_color_hex(0x1A1A1A), LV_PART_MAIN);  // Off-black text
     lv_obj_set_style_text_opa(menu_item_labels[i], LV_OPA_70, LV_PART_MAIN);  // Default to slightly transparent
     lv_obj_set_style_text_align(menu_item_labels[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);  // Center align text
     lv_obj_set_style_pad_ver(menu_item_labels[i], 12, LV_PART_MAIN);  // Vertical spacing between items
@@ -1026,7 +1040,7 @@ static void create_custom_ui() {
   // Create expiration date entry screen (for Check-in mode)
   expiry_screen = lv_obj_create(scr);
   lv_obj_set_size(expiry_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(expiry_screen, lv_color_hex(0x0056A5), LV_PART_MAIN);  // Blue background (same as menu)
+  lv_obj_set_style_bg_color(expiry_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);  // Cream background
   lv_obj_set_style_bg_opa(expiry_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(expiry_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(expiry_screen, 0, LV_PART_MAIN);
@@ -1043,9 +1057,9 @@ static void create_custom_ui() {
   lv_arc_set_rotation(expiry_timeout_ring, 270);
   lv_obj_set_style_arc_width(expiry_timeout_ring, 4, LV_PART_MAIN);
   lv_obj_set_style_arc_width(expiry_timeout_ring, 4, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(0x2C71BE), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(0x8A7E72), LV_PART_MAIN);
   lv_obj_set_style_arc_opa(expiry_timeout_ring, (lv_opa_t)80, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(0x1F4D2B), LV_PART_INDICATOR);
   lv_obj_set_style_arc_opa(expiry_timeout_ring, LV_OPA_COVER, LV_PART_INDICATOR);
   lv_obj_set_style_outline_width(expiry_timeout_ring, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(expiry_timeout_ring, 0, LV_PART_MAIN);
@@ -1055,7 +1069,7 @@ static void create_custom_ui() {
   expiry_title_label = lv_label_create(expiry_screen);
   lv_label_set_text(expiry_title_label, "Expiration");
   lv_obj_set_style_text_font(expiry_title_label, &lv_font_montserrat_26, LV_PART_MAIN);
-  lv_obj_set_style_text_color(expiry_title_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(expiry_title_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_set_style_text_align(expiry_title_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_align(expiry_title_label, LV_ALIGN_TOP_MID, 0, 32);
   
@@ -1114,7 +1128,7 @@ static void create_custom_ui() {
   lv_obj_t *check_label = lv_label_create(expiry_check_button);
   lv_label_set_text(check_label, "OK");
   lv_obj_set_style_text_font(check_label, &lv_font_montserrat_24, LV_PART_MAIN);
-  lv_obj_set_style_text_color(check_label, lv_color_hex(0x0E2547), LV_PART_MAIN);
+  lv_obj_set_style_text_color(check_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
   lv_obj_center(check_label);
 
   expiry_backspace_button = NULL;

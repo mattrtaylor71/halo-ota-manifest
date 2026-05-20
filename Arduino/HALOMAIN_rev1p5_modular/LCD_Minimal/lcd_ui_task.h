@@ -20,8 +20,71 @@ static void ui_task(void *arg) {
   Serial.println("[UI] UI task started");
   
   for (;;) {
+    // Check for clean shutdown request BEFORE acquiring the LVGL lock.
+    // This prevents heap corruption from vTaskDelete while holding the lock.
+    if (g_ui_task_exit_requested) {
+      Serial.println("[UI] exit requested — stopping cleanly");
+      ui_task_handle = NULL;
+      vTaskDelete(NULL);  // self-delete; does not return
+    }
+
     if (!example_lvgl_lock(50)) {
       vTaskDelay(pdMS_TO_TICKS(1));
+      continue;
+    }
+    // While OTA screen is active, don't process any screen transitions.
+    // Just tick LVGL to keep the display alive and release the lock.
+    if (g_ota_screen_active) {
+      // OTA overlay — black screen with status text
+      static lv_obj_t* ota_overlay = NULL;
+      static lv_obj_t* ota_label = NULL;
+      static int last_shown_pct = -1;
+      static bool last_was_transfer = false;
+
+      bool is_transfer = g_lcd_ota_show_progress && g_lcd_ota_progress_pct >= 0;
+      bool need_update = false;
+
+      if (!ota_overlay) {
+        // Create overlay on first entry
+        ota_overlay = lv_obj_create(lv_scr_act());
+        lv_obj_remove_style_all(ota_overlay);
+        lv_obj_set_size(ota_overlay, LV_HOR_RES, LV_VER_RES);
+        lv_obj_set_style_bg_color(ota_overlay, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
+        lv_obj_center(ota_overlay);
+
+        ota_label = lv_label_create(ota_overlay);
+        lv_obj_set_style_text_color(ota_label, lv_color_white(), 0);
+        lv_obj_set_style_text_font(ota_label, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_align(ota_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(ota_label);
+        need_update = true;
+      }
+
+      if (is_transfer) {
+        // LCD transfer in progress — show percentage
+        if (g_lcd_ota_progress_pct != last_shown_pct || !last_was_transfer) {
+          last_shown_pct = g_lcd_ota_progress_pct;
+          last_was_transfer = true;
+          char buf[32];
+          snprintf(buf, sizeof(buf), "Updating\n%d%%", last_shown_pct);
+          lv_label_set_text(ota_label, buf);
+          need_update = true;
+        }
+      } else if (!last_was_transfer || need_update) {
+        // Sense self-OTA in progress — show waiting text
+        lv_label_set_text(ota_label, "Software\nUpdate");
+        last_was_transfer = false;
+        last_shown_pct = -1;
+        need_update = true;
+      }
+
+      if (need_update && ota_overlay) {
+        lv_obj_move_foreground(ota_overlay);
+      }
+      lv_timer_handler();
+      example_lvgl_unlock();
+      vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
     app_event_t evt;
@@ -34,7 +97,13 @@ static void ui_task(void *arg) {
     lcd_bsp_get_flush_submit_stats(&submit_ok, &submit_fail, &outstanding, &soft_fault);
 
     if (soft_fault) {
-      lcd_bsp_clear_flush_soft_fault();
+        lcd_bsp_clear_flush_soft_fault();
+        // Force full screen redraw to recover from partial flush corruption
+        lv_obj_t *scr = lv_scr_act();
+        if (scr) {
+            lv_obj_invalidate(scr);
+            Serial.println("[LCD_FLUSH] soft_fault detected — full screen invalidated for redraw");
+        }
     }
       display_busy_hide_at_ms = 0;
 
@@ -250,6 +319,36 @@ static void ui_task(void *arg) {
           if (ui_screen_state == SCREEN_VOICE_JSON) {
             ship_voice_ui_handle_scroll(evt.data.scroll_delta);
             lv_timer_handler();
+            resetActivityTimer();
+            example_lvgl_unlock();
+            continue;
+          }
+          if (ui_screen_state == SCREEN_SHOPPING_LIST) {
+            int new_idx = shopping_list_scroll_idx + evt.data.scroll_delta;
+            if (new_idx < 0) new_idx = 0;
+            if (new_idx >= g_active.count) new_idx = g_active.count - 1;
+            // Track overscroll at top for pull-to-refresh
+            if (shopping_list_scroll_idx == 0 && evt.data.scroll_delta < 0) {
+              shopping_list_overscroll_ticks -= evt.data.scroll_delta;  // delta is negative, so this adds
+              if (shopping_list_overscroll_ticks >= SHOPPING_LIST_REFRESH_TICKS) {
+                shopping_list_overscroll_ticks = 0;
+                Serial.println("[SHOPPING_LIST] overscroll refresh triggered");
+                request_sense_wake("list_refresh");
+                refresh_sm_set_wake_pending("list_refresh");
+                // Show refreshing feedback in title
+                if (shopping_list_title_label) {
+                  lv_label_set_text(shopping_list_title_label, "Refreshing...");
+                  ui_lvgl_tick();
+                }
+              }
+            } else {
+              shopping_list_overscroll_ticks = 0;  // reset if scrolling down or not at top
+            }
+            if (new_idx != shopping_list_scroll_idx && g_active.count > 0) {
+              shopping_list_scroll_idx = new_idx;
+              shopping_list_screen_populate();
+              ui_lvgl_tick();
+            }
             resetActivityTimer();
             example_lvgl_unlock();
             continue;
@@ -553,6 +652,12 @@ static void ui_task(void *arg) {
           }
           xSemaphoreGive(app_state_mutex);
         }
+        // If on shopping list screen, re-populate with new data
+        if (ui_screen_state == SCREEN_SHOPPING_LIST) {
+          shopping_list_screen_populate();
+          ui_lvgl_tick();
+          Serial.println("[UI] Shopping list screen refreshed with new data");
+        }
         processed_anything = true;
       } else if (evt.type == EVT_SHOW_PROVISION_QR) {
         show_provisioning_screen(evt.data.provision.ssid,
@@ -704,7 +809,7 @@ static void ui_task(void *arg) {
                 lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
               }
               // Show status screen with "Hold still!"
-              status_screen_use_image(&ui_img_Frame_439_2_png);
+              status_screen_use_text("");
               lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
               status_screen_shown_time = millis();
               Serial.println("[STATUS] Showing Frame_439_2 for Dish scan");
@@ -722,7 +827,7 @@ static void ui_task(void *arg) {
                 lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
               }
               // Show status screen with "Hold still!"
-              status_screen_use_image(&ui_img_Frame_439_2_png);
+              status_screen_use_text("");
               lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
               status_screen_shown_time = millis();
               Serial.println("[STATUS] Showing Frame_439_2 for Discard scan");
@@ -740,7 +845,7 @@ static void ui_task(void *arg) {
                 lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
               }
               // Show status screen with "Hold still!"
-              status_screen_use_image(&ui_img_Frame_439_2_png);
+              status_screen_use_text("");
               lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
               status_screen_shown_time = millis();
               Serial.println("[STATUS] Showing Frame_439_2 for Check-in scan");

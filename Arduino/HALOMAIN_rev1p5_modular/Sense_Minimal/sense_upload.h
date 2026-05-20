@@ -110,6 +110,22 @@ static bool http_post_json_with_retries(const char* url,
                                         const char* bearer,
                                         uint32_t job_id,
                                         uint32_t deadline_ms) {
+  // Release camera DMA reservation to defragment internal SRAM for TLS.
+  bool dma_was_reserved_post = (g_camera_dma_reserve != nullptr);
+  if (dma_was_reserved_post) {
+    heap_caps_free(g_camera_dma_reserve);
+    g_camera_dma_reserve = nullptr;
+  }
+  struct DmaGuardPost {
+    bool should_reacquire;
+    ~DmaGuardPost() {
+      if (should_reacquire && !g_camera_dma_reserve) {
+        g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+            CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+      }
+    }
+  } dma_guard_post{dma_was_reserved_post};
+
   static const unsigned long backoff_ms[] = {500, 1500, 3500};
   const int max_attempts = 3;
   presign_set_error_text("");
@@ -122,6 +138,15 @@ static bool http_post_json_with_retries(const char* url,
     if (deadline_expired(deadline_ms)) {
       presign_set_error_text("Network timeout");
       Serial.printf("[%s] deadline_exceeded\n", label ? label : "HTTP");
+      break;
+    }
+    // Yield to foreground user action (scan/voice) — break and release http_inflight
+    if (foreground_active || dish_scan_inflight || voice_recording_active) {
+      const char* fg = foreground_active ? "foreground" : dish_scan_inflight ? "scan" : "voice";
+      Serial.printf("[%s] yield_to_foreground reason=%s attempt=%d\n",
+                    label ? label : "HTTP", fg, attempt + 1);
+      uart_send_sense_diag("http", "yield_fg", label, attempt + 1, fg);
+      presign_set_error_text("Yielded to user action");
       break;
     }
     Serial.printf("[%s] attempt=%d/%d url=%s\n",
@@ -217,6 +242,22 @@ static bool http_get_with_retries(const char* url,
                                   const char* bearer,
                                   uint32_t job_id,
                                   uint32_t deadline_ms) {
+  // Release camera DMA reservation to defragment internal SRAM for TLS.
+  bool dma_was_reserved_get = (g_camera_dma_reserve != nullptr);
+  if (dma_was_reserved_get) {
+    heap_caps_free(g_camera_dma_reserve);
+    g_camera_dma_reserve = nullptr;
+  }
+  struct DmaGuardGet {
+    bool should_reacquire;
+    ~DmaGuardGet() {
+      if (should_reacquire && !g_camera_dma_reserve) {
+        g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+            CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+      }
+    }
+  } dma_guard_get{dma_was_reserved_get};
+
   static const unsigned long backoff_ms[] = {500, 1500, 3500};
   const int max_attempts = 3;
   uint32_t effective_job = job_id;
@@ -227,6 +268,15 @@ static bool http_get_with_retries(const char* url,
   for (int attempt = 0; attempt < max_attempts; ++attempt) {
     if (deadline_expired(deadline_ms)) {
       Serial.printf("[%s] deadline_exceeded\n", label ? label : "HTTP_GET");
+      break;
+    }
+    // Yield to foreground user action (scan/voice) — break and release http_inflight
+    if (foreground_active || dish_scan_inflight || voice_recording_active) {
+      const char* fg = foreground_active ? "foreground" : dish_scan_inflight ? "scan" : "voice";
+      Serial.printf("[%s] yield_to_foreground reason=%s attempt=%d\n",
+                    label ? label : "HTTP_GET", fg, attempt + 1);
+      uart_send_sense_diag("http", "yield_fg", label, attempt + 1, fg);
+      presign_set_error_text("Yielded to user action");
       break;
     }
     Serial.printf("[%s] attempt=%d/%d url=%s\n",

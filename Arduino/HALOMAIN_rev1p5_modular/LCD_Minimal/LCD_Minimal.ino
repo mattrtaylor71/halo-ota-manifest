@@ -30,6 +30,7 @@ typedef struct app_event_t app_event_t;
 #include "freertos/semphr.h"
 #include "driver/i2c.h"
 #include "driver/gpio.h"
+#include "driver/rtc_io.h"
 #include "Preferences.h"
 #include <string.h>
 #include <time.h>
@@ -43,12 +44,7 @@ typedef struct app_event_t app_event_t;
 #endif
 #include "../halo_common/BoardConfig.h"
 #include "../halomain_assets/ui.h"
-#include "../halomain_assets/ui_img_Frame_439_1_png.c"
-#include "../halomain_assets/ui_img_Frame_439_2_png.c"
-#include "../halomain_assets/ui_img_Frame_439_png.c"
-#include "../halomain_assets/ui_img_Frame_443_png.c"
-#include "../halomain_assets/ui_img_Frame_443_1_png.c"
-#include "../start_screen/ui_img_Frame_493_png.c"
+// PNG frame images removed — replaced with programmatic LVGL rendering
 
 #ifdef HALO_LCD_PROD_WRAPPER
 void halo_lcd_prod_setup();
@@ -94,7 +90,15 @@ static const gpio_num_t PIN_EC1_B     = GPIO_NUM_7;   // EC1_B
 #define LCD_WAKE_LEVEL HALO_WAKE_LEVEL
 #define WAKE_PIN_BOOT_WARN_MS 200
 #define LCD_SLEEP_FALLBACK_TIMER_SEC 30
+// DEV OVERRIDE: Wake every 60s for unattended OTA testing.
+// Comment out HALO_DEV_WAKE_INTERVAL_SEC to restore production 6-hour interval.
+// #define HALO_DEV_WAKE_INTERVAL_SEC 60
+
+#ifdef HALO_DEV_WAKE_INTERVAL_SEC
+#define LCD_OTA_WAKE_INTERVAL_SEC HALO_DEV_WAKE_INTERVAL_SEC
+#else
 #define LCD_OTA_WAKE_INTERVAL_SEC (6 * 60 * 60)
+#endif
 #define HALO_ALLOW_TIMER_WAKE 1
 static const uint16_t LCD_OTA_SCHED_START_MIN = 120;  // 2:00 AM local
 static const uint16_t LCD_OTA_SCHED_WINDOW_MIN = 30;
@@ -143,6 +147,8 @@ typedef enum {
   SHIP_MENU_ACTION_DEBUG,
   SHIP_MENU_ACTION_RESET_WIFI,
   SHIP_MENU_ACTION_MANUAL_OTA,
+  SHIP_MENU_ACTION_DEBUG_LOG,
+  SHIP_MENU_ACTION_SHOPPING_LIST,
   SHIP_MENU_ACTION_BACK
 } ship_menu_action_t;
 
@@ -165,7 +171,10 @@ typedef enum {
   SCREEN_EXPIRY_CHOICE,
   SCREEN_EXPIRY,
   SCREEN_RESULT,
-  SCREEN_DEBUG
+  SCREEN_DEBUG,
+  SCREEN_ERRLOG,
+  SCREEN_ERRLOG_DETAIL,
+  SCREEN_SHOPPING_LIST
 } ui_screen_t;
 
 typedef enum {
@@ -228,6 +237,7 @@ static void ship_menu_request_fw_info();
 static void ship_menu_service_fw_info_request(unsigned long now_ms);
 static void show_ship_debug_screen();
 static void show_ship_debug_screen_impl();
+static void show_errlog_screen();
 static void ui_show_result(bool is_error, const char* title, const char* mode);
 static void ui_show_result_impl(bool is_error, const char* title, const char* mode);
 static void ui_apply_ship_ui_status(const app_event_t* evt);
@@ -240,6 +250,10 @@ static void ship_update_ai_listening_countdown();
 static bool ship_mode_is_dish(const char* op, const char* mode);
 
 #define UI_SHOW(next, reason) ui_show_screen(next, reason, __FILE__, __LINE__, __func__)
+
+// ── Test Mode (automated testing, disables sleep) ──────────────────
+static bool g_test_mode_active = false;
+static unsigned long g_test_mode_expire_ms = 0;
 
 // ── Double-Buffered List State ──────────────────────────────────────
 // Active: UI reads this only (rendered on screen)
@@ -635,6 +649,9 @@ static const unsigned long WAKE_RETRY_INTERVAL_MS = 1200;
 static const unsigned long WAKE_RETRY_WINDOW_MS = 10000;
 static const unsigned long WAKE_PULSE_DURATION_MS = 80;
 static const unsigned long WAKE_PULSE_SHORT_MS = 30;
+static bool wake_timer_wait_mode = false;
+static unsigned long wake_timer_wait_start_ms = 0;
+static const unsigned long WAKE_TIMER_WAIT_WINDOW_MS = 30000;  // 30s — covers 15s failsafe + boot + margin
 static unsigned long maint_force_wake_last_ms = 0;
 static const unsigned long MAINT_FORCE_WAKE_INTERVAL_MS = 2000;
 static const unsigned long WAKE_LINE_STUCK_WARN_MS = 3000;
@@ -699,6 +716,9 @@ static bool sleep_wait_for_sense_idle = false;
 static bool sleep_cancelled_by_user_input = false;
 static uint32_t sleep_fallback_timer_sec = 0;
 static bool sense_ota_active = false;
+// Forward-declared; true when LCD OTA binary transfer is active (set by lcd_ota_uart.h).
+// Used by sleep_blocked_for_ota() which is defined before the lcd_ota_uart.h include.
+static bool g_lcd_ota_uart_receiving = false;
 static volatile bool sense_sleep_intent_pending = false;
 static unsigned long sense_sleep_intent_received_ms = 0;
 static const unsigned long SENSE_SLEEP_RETRY_INTERVAL_MS = 1000;
@@ -958,6 +978,7 @@ static void haptic_pulse_scroll() {
 
 // ── OTA Lock (Sense-coordinated) ───────────────────────────────────────
 static volatile bool ota_locked = false;
+static volatile bool g_ota_screen_active = false;  // OTA status screen is showing — block UI overwrite
 static unsigned long ota_lock_at_ms = 0;
 static const unsigned long OTA_LOCK_TIMEOUT_MS = 1800000; // 30 min auto-unlock (covers sense OTA + reboot)
 static const unsigned long OTA_UNLOCK_GRACE_MS = 45000;   // keep LCD awake after unlock
@@ -1060,6 +1081,8 @@ static lv_obj_t *ship_menu_settings_btn_ota = NULL;
 static lv_obj_t *ship_menu_settings_label_ota = NULL;
 static lv_obj_t *ship_menu_settings_btn_back = NULL;
 static lv_obj_t *ship_menu_settings_label_back = NULL;
+static lv_obj_t *ship_menu_settings_btn_debug = NULL;
+static lv_obj_t *ship_menu_settings_label_debug = NULL;
 static lv_obj_t *ship_menu_settings_status = NULL;
 static unsigned long ship_menu_settings_status_hide_at_ms = 0;
 static char g_sense_fw_version[32] = "--";
@@ -1122,7 +1145,7 @@ static unsigned long ship_hold_anim_start_ms = 0;
 static int ship_hold_countdown_value = -1;
 static int ship_hold_capture_frame = -1;
 static bool ship_hold_capture_phase = false;
-static const unsigned long SHIP_HOLD_COUNTDOWN_MS = 5000UL;
+static const unsigned long SHIP_HOLD_COUNTDOWN_MS = 3000UL;
 static const unsigned long SHIP_HOLD_CAPTURE_PULSE_MS = 1000UL;
 static unsigned long ship_expiry_choice_shown_time = 0;
 static unsigned long ship_voice_ack_hide_at_ms = 0;
@@ -1346,15 +1369,22 @@ static lv_obj_t *menu_item_labels[MENU_MAX_ITEMS] = {NULL};  // Labels for each 
 #define SHIP_MENU_SECOND_SETTINGS_X SHIP_MENU_MAIN_BOTTOM_X
 #define SHIP_MENU_SECOND_SETTINGS_Y SHIP_MENU_MAIN_BOTTOM_Y
 
+// Second Menu — Shopping List button (TOP position)
+#define SHIP_MENU_SECOND_LIST_W SHIP_MENU_MAIN_ICON_W
+#define SHIP_MENU_SECOND_LIST_H SHIP_MENU_MAIN_ICON_H
+#define SHIP_MENU_SECOND_LIST_X SHIP_MENU_MAIN_TOP_X
+#define SHIP_MENU_SECOND_LIST_Y SHIP_MENU_MAIN_TOP_Y
+
 // Settings screen button bounds
 #define SHIP_MENU_SETTINGS_BTN_W 300
-#define SHIP_MENU_SETTINGS_BTN_H 64
+#define SHIP_MENU_SETTINGS_BTN_H 56
 #define SHIP_MENU_SETTINGS_BTN_X ((SHIP_MENU_W - SHIP_MENU_SETTINGS_BTN_W) / 2)
 #define SHIP_MENU_SETTINGS_VERSION_Y 52
 #define SHIP_MENU_SETTINGS_STATUS_Y 72
-#define SHIP_MENU_SETTINGS_RESET_Y 90
-#define SHIP_MENU_SETTINGS_OTA_Y 170
-#define SHIP_MENU_SETTINGS_BACK_Y 250
+#define SHIP_MENU_SETTINGS_RESET_Y 84
+#define SHIP_MENU_SETTINGS_OTA_Y 148
+#define SHIP_MENU_SETTINGS_DEBUG_Y 212
+#define SHIP_MENU_SETTINGS_BACK_Y 276
 
 #define MENU_INDEX_DISCARD 0
 #define MENU_INDEX_DISH 1
@@ -1391,6 +1421,9 @@ static const ship_menu_hitbox_t ship_menu_hitboxes_main[] = {
 };
 
 static const ship_menu_hitbox_t ship_menu_hitboxes_second[] = {
+  {SHIP_MENU_ACTION_SHOPPING_LIST, "SHOPPING_LIST", NULL, -1,
+   SHIP_MENU_SECOND_LIST_X, SHIP_MENU_SECOND_LIST_Y,
+   SHIP_MENU_SECOND_LIST_X + SHIP_MENU_SECOND_LIST_W - 1, SHIP_MENU_SECOND_LIST_Y + SHIP_MENU_SECOND_LIST_H - 1},
   {SHIP_MENU_ACTION_HOME,     "HOME",     NULL, -1,
    SHIP_MENU_SECOND_HOME_X, SHIP_MENU_SECOND_HOME_Y,
    SHIP_MENU_SECOND_HOME_X + SHIP_MENU_SECOND_HOME_W - 1, SHIP_MENU_SECOND_HOME_Y + SHIP_MENU_SECOND_HOME_H - 1},
@@ -1406,6 +1439,9 @@ static const ship_menu_hitbox_t ship_menu_hitboxes_settings[] = {
   {SHIP_MENU_ACTION_MANUAL_OTA, "MANUAL_OTA", NULL, -1,
    SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_OTA_Y,
    SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_OTA_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
+  {SHIP_MENU_ACTION_DEBUG_LOG, "DEBUG_LOG", NULL, -1,
+   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_DEBUG_Y,
+   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_DEBUG_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
   {SHIP_MENU_ACTION_BACK, "BACK", NULL, -1,
    SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACK_Y,
    SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_BACK_Y + SHIP_MENU_SETTINGS_BTN_H - 1}
@@ -1478,6 +1514,7 @@ static int g_backlight_duty = 255;
 static bool g_panel_enabled = true;
 static bool g_lvgl_running = true;
 static TaskHandle_t ui_task_handle = NULL;
+static volatile bool g_ui_task_exit_requested = false;
 static bool g_ota_mode_active = false;
 
 // ── Status Screen ──────────────────────────────────────────────────────────
@@ -1955,6 +1992,7 @@ static void lcd_ota_request_finish(const char* result,
   lcd_send_ota_check_result(lcd_ota_request_id, result, detail, new_version, err_code);
   ota_check_requested = false;
   ota_check_pending = false;
+  ota_stay_awake_until_ms = 0;
   lcd_ota_request_active = false;
   lcd_ota_request_id = 0;
   lcd_ota_request_allow_reboot = true;
@@ -2006,6 +2044,27 @@ static void lcd_clear_maintenance_state(const char* reason, bool mark_completed)
   Serial.printf("[LCD_MAINT] clear_state reason=%s completed=%d\n",
                 reason ? reason : "unknown",
                 mark_completed ? 1 : 0);
+}
+
+// Exit headless mode but PRESERVE the maintenance wake timer.
+// Used when user touches screen during headless maintenance — screen comes
+// back on, but the timer still fires so both boards wake for OTA.
+static void lcd_exit_maintenance_headless_only(const char* reason) {
+  g_lcd_maintenance_headless = false;
+  g_lcd_maintenance_active = false;
+  g_lcd_maintenance_started = false;
+  g_lcd_maintenance_aborted = false;
+  lcd_mode = LCD_MODE_UI_ACTIVE;
+  ota_stay_awake_until_ms = 0;
+  sleep_deny_received = false;
+  // Mark completed so we don't re-enter headless on retry messages
+  g_lcd_maintenance_completed_ms = millis();
+  // DO NOT zero timer_armed, wake_in_s, remaining_s, or deadline_ms
+  // DO NOT call lcd_clear_persisted_maintenance_state()
+  Serial.printf("[LCD_MAINT] exit_headless_only reason=%s timer_armed=%d wake_in_s=%lu\n",
+                reason ? reason : "unknown",
+                g_lcd_maintenance_timer_armed,
+                (unsigned long)g_lcd_maintenance_wake_in_s);
 }
 
 static void lcd_uart_reset_rx_state() {
@@ -2117,9 +2176,9 @@ static void expiry_apply_segment_style(lv_obj_t* button, lv_obj_t* label, bool a
   if (!button || !label) {
     return;
   }
-  lv_color_t bg = active ? lv_color_hex(0x6EE7B7) : lv_color_hex(0x16335E);
-  lv_color_t border = active ? lv_color_hex(0x6EE7B7) : lv_color_hex(0x355D93);
-  lv_color_t text = active ? lv_color_hex(0x0E2547) : lv_color_hex(0xFFFFFF);
+  lv_color_t bg = active ? lv_color_hex(0x1F4D2B) : lv_color_hex(0xFFFFFF);
+  lv_color_t border = active ? lv_color_hex(0x1F4D2B) : lv_color_hex(0x1A1A1A);
+  lv_color_t text = active ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x1A1A1A);
   lv_obj_set_style_bg_color(button, bg, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_color(button, border, LV_PART_MAIN);
@@ -2576,14 +2635,34 @@ static void log_sleep_decision(unsigned long now_ms,
 }
 
 static bool sleep_blocked_for_ota() {
+  // LCD OTA over UART is actively receiving binary data
+  if (g_lcd_ota_uart_receiving) {
+    return true;
+  }
   unsigned long now_ms = millis();
   if (lcd_maintenance_active() || g_ota_mode_active || sense_ota_apply_required || sense_ota_active) {
+    // Safety: if Sense is asleep and OTA is not locked, these are stale flags — clear and allow sleep
+    if (sense_state == SENSE_ASLEEP && !ota_locked && !g_lcd_ota_uart_receiving) {
+      g_lcd_maintenance_active = false;
+      g_lcd_maintenance_deadline_ms = 0;
+      g_ota_mode_active = false;
+      sense_ota_apply_required = false;
+      sense_ota_active = false;
+      Serial.println("[SLEEP] stale ota/maint flags cleared (sense_asleep)");
+      return false;
+    }
     return true;
   }
   if (ota_check_requested || ota_check_pending) {
     return true;
   }
   if (now_ms < ota_stay_awake_until_ms) {
+    // If Sense went to sleep without OTA_LOCK, the OTA request was missed — don't block
+    if (sense_state == SENSE_ASLEEP && !ota_locked) {
+      ota_stay_awake_until_ms = 0;
+      ota_check_requested = false;
+      return false;
+    }
     return true;
   }
   return false;
@@ -2680,7 +2759,9 @@ static void refresh_sm_set_wake_pending(const char* reason) {
   Serial.printf("[REFRESH] state=WAKE_PENDING start=%lu attempt=%u\n",
                 now_ms,
                 (unsigned)refresh_wake_pending_attempts);
-  pulseWakeSenseShort();
+  if (!sense_awake_confirmed) {
+    pulseWakeSenseShort();
+  }
   send_sense_ping();
   refresh_wake_pending_last_ping_ms = now_ms;
 }
@@ -2854,24 +2935,30 @@ static void configure_sleep_sources(bool enable_ext0, uint32_t timer_sec) {
 }
 
 static void wake_line_pulse_ms(unsigned long pulse_ms, const char* reason) {
-  lcd_wake_pin_set_mode(INT_PIN, OUTPUT);
-  digitalWrite(INT_PIN, HIGH);
+  // GPIO39 is JTAG MTDO on ESP32-S3. When USB-Serial/JTAG is active (CDCOnBoot=cdc),
+  // the JTAG peripheral may claim this pin. Force-detach it via ESP-IDF GPIO API.
+  gpio_reset_pin((gpio_num_t)INT_PIN);
+  gpio_set_direction((gpio_num_t)INT_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level((gpio_num_t)INT_PIN, 1);
   delay(2);
-  Serial.printf("[WAKE_LINE] pulse_begin gpio=%d level=0 len_ms=%lu reason=%s\n",
-                (int)INT_PIN,
+  int pre_level = gpio_get_level((gpio_num_t)INT_PIN);
+  Serial.printf("[WAKE_LINE] pulse_begin gpio=%d pre_level=%d len_ms=%lu reason=%s\n",
+                (int)INT_PIN, pre_level,
                 (unsigned long)pulse_ms,
                 reason ? reason : "unknown");
-  Serial.printf("[LCD_WAKE_PIN] mode=OUT pullup=0 level=%d phase=before_pulse\n",
-                digitalRead(INT_PIN));
-  digitalWrite(INT_PIN, LOW);
+  gpio_set_level((gpio_num_t)INT_PIN, 0);
   delay(pulse_ms);
-  digitalWrite(INT_PIN, HIGH);
+  int during_level = gpio_get_level((gpio_num_t)INT_PIN);
+  gpio_set_level((gpio_num_t)INT_PIN, 1);
   delay(2);
-  // Release line so Sense sees a biased inactive wake pin.
-  lcd_wake_pin_set_mode(INT_PIN, INPUT_PULLUP);
-  int level = digitalRead(INT_PIN);
-  Serial.printf("[WAKE_LINE] pulse_end gpio=%d level=%d\n", (int)INT_PIN, level);
-  Serial.printf("[LCD_WAKE_PIN] mode=IN pullup=1 level=%d phase=after_pulse\n", level);
+  // Release line with pullup so Sense sees inactive level
+  gpio_set_direction((gpio_num_t)INT_PIN, GPIO_MODE_INPUT);
+  gpio_pullup_en((gpio_num_t)INT_PIN);
+  int post_level = gpio_get_level((gpio_num_t)INT_PIN);
+  Serial.printf("[WAKE_LINE] pulse_end gpio=%d during=%d post=%d\n",
+                (int)INT_PIN, during_level, post_level);
+  lcd_wake_pin_mode = INPUT_PULLUP;
+  lcd_wake_pin_pullup = 1;
 }
 
 static void pulseWakeSense() {
@@ -2903,6 +2990,11 @@ static bool wake_reason_requires_immediate_pulse(const char* reason) {
 static bool wake_sense_for_request(const char* reason) {
   bool immediate_user_pulse = wake_reason_requires_immediate_pulse(reason);
   if (g_in_light_sleep || g_sleep_transition) {
+    return false;
+  }
+  // HARD GATE: No GPIO pulse when Sense is confirmed awake. UART only.
+  if (sense_awake_confirmed) {
+    send_sense_ping();
     return false;
   }
   if (sleep_ready_received) {
@@ -2938,6 +3030,11 @@ static bool lcd_maybe_pulse_sense_int(const char* reason) {
   if (g_in_light_sleep || g_sleep_transition) {
     return false;
   }
+  // HARD GATE: No GPIO pulse when Sense is confirmed awake. UART only.
+  if (sense_awake_confirmed) {
+    send_sense_ping();
+    return false;
+  }
   bool immediate_user_pulse = wake_reason_requires_immediate_pulse(reason);
   if (sleep_ready_received) {
     if (!(immediate_user_pulse || sense_state == SENSE_ASLEEP)) {
@@ -2949,18 +3046,12 @@ static bool lcd_maybe_pulse_sense_int(const char* reason) {
     Serial.println("[LCD] skipping Sense wake");
     return false;
   }
-  if (!immediate_user_pulse && sense_awake_confirmed && link_synced) {
-    sense_status_sync_requested = false;
-    return false;
-  }
   unsigned long now = millis();
   if (wake_retry_until_ms == 0) {
     start_sense_wake_handshake();
   }
   if (immediate_user_pulse) {
     cancel_pending_sleep_for_user_input(reason);
-  } else if (now - last_int_pulse_ms < INT_PULSE_COOLDOWN_MS) {
-    return false;
   }
   maybe_extend_sense_awake_grace(reason);
   last_int_pulse_ms = now;
@@ -2978,6 +3069,11 @@ static bool lcd_maybe_pulse_sense_int(const char* reason) {
 }
 
 static void request_sense_wake(const char* reason) {
+  // HARD GATE: No GPIO pulse when Sense is confirmed awake. UART only.
+  if (sense_awake_confirmed) {
+    send_sense_ping();
+    return;
+  }
   sense_wake_explicit_request = true;
   maybe_extend_sense_awake_grace(reason);
   lcd_maybe_pulse_sense_int(reason);
@@ -3076,6 +3172,7 @@ static void start_sense_wake_handshake() {
   wake_retry_until_ms = millis() + WAKE_RETRY_WINDOW_MS;
   wake_retry_attempts = 0;
   last_wake_retry_ms = millis() - WAKE_RETRY_INTERVAL_MS;
+  wake_timer_wait_mode = false;
 }
 
 static unsigned long wake_retry_interval_for_attempt(uint8_t attempt) {
@@ -3098,6 +3195,7 @@ static unsigned long wake_retry_interval_for_attempt(uint8_t attempt) {
 
 #include "lcd_provision.h"
 
+#include "lcd_errlog.h"
 
 #include "lcd_ship_screens.h"
 
@@ -3115,7 +3213,13 @@ static unsigned long wake_retry_interval_for_attempt(uint8_t attempt) {
 
 #include "lcd_sleep.h"
 
+// Forward declaration — defined after lcd_activity.h where all dependencies are available
+static void lcd_errlog_store_with_context(const char* board, const char* area,
+                                           const char* event, int32_t code,
+                                           const char* detail);
+
 #include "lcd_diag.h"
+#include "lcd_ota_uart.h"
 
 #include "lcd_uart_rx.h"
 
@@ -3140,6 +3244,36 @@ static unsigned long wake_retry_interval_for_attempt(uint8_t attempt) {
 #include "lcd_persist.h"
 
 
+// ── Enriched Error Logging ────────────────────────────────────────
+// Wraps errlog_store() with device context (heap, sense state, screen).
+// Placed here because it needs sense_state, ui_screen_state_name(),
+// and ESP.getFreeHeap(), all of which are available after lcd_activity.h.
+static void lcd_errlog_store_with_context(const char* board, const char* area,
+                                           const char* event, int32_t code,
+                                           const char* detail) {
+    char ctx[64];
+    snprintf(ctx, sizeof(ctx), "heap=%luK sense=%s screen=%s",
+             (unsigned long)(ESP.getFreeHeap() / 1024),
+             sense_state == SENSE_AWAKE ? "AWAKE" :
+             sense_state == SENSE_ASLEEP ? "ASLEEP" : "UNKNOWN",
+             ui_screen_state_name(ui_screen_state));
+
+    StaticJsonDocument<384> entry;
+    entry["board"] = board;
+    entry["area"] = area;
+    entry["event"] = event;
+    entry["code"] = code;
+    char enriched_detail[192];
+    snprintf(enriched_detail, sizeof(enriched_detail), "%s | %s",
+             detail ? detail : "", ctx);
+    entry["detail"] = enriched_detail;
+    entry["uptime_ms"] = millis();
+    String json;
+    serializeJson(entry, json);
+    errlog_store(json.c_str());
+}
+
+
 // ── Arduino lifecycle ──────────────────────────────────────────────
 void setup() {
   print_wakeup_diagnostics(HALO_BOARD_NAME);
@@ -3160,6 +3294,12 @@ void setup() {
   }
   esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
   esp_reset_reason_t reset_reason = esp_reset_reason();
+  {
+    if (reset_reason == ESP_RST_BROWNOUT || reset_reason == ESP_RST_INT_WDT ||
+        reset_reason == ESP_RST_TASK_WDT || reset_reason == ESP_RST_PANIC) {
+      lcd_errlog_store_with_context("lcd", "boot", "ABNORMAL_RESET", (int)reset_reason, "watchdog/brownout/panic");
+    }
+  }
   bool restored_maint_state = lcd_restore_persisted_maintenance_state("boot");
   bool deep_sleep_reset = (reset_reason == ESP_RST_DEEPSLEEP);
   bool panic_reset = (reset_reason == ESP_RST_PANIC);
@@ -3262,6 +3402,20 @@ void setup() {
   } else {
     g_lcd_schedule_window_deadline_ms = 0;
   }
+#ifdef HALO_DEV_WAKE_INTERVAL_SEC
+  // DEV: On timer wake, auto-trigger OTA check so we can test OTA unattended.
+  // Skip on COLD_BOOT so the UI initializes normally and the device is usable.
+  // lcd_enter_ota_mode() tears down LVGL before OTA, freeing enough RAM for TLS.
+  if (!ota_check_requested && !ota_check_pending &&
+      wake_cause != ESP_SLEEP_WAKEUP_UNDEFINED /* COLD_BOOT */) {
+    ota_check_requested = true;
+    lcd_manual_ota_override_set("dev_auto_wake");
+    g_lcd_maintenance_active = true;
+    g_lcd_maintenance_started = false;
+    g_lcd_maintenance_wake_window = true;
+    Serial.printf("[DEV_OTA] %s -> auto OTA check\n", wake_cause_label);
+  }
+#endif
 #if HALO_OTA_POLICY_MAINTENANCE_ONLY
   if (!g_lcd_maintenance_active) {
     g_lcd_maintenance_boot_grace_until_ms = millis() + LCD_MAINT_BOOT_GRACE_MS;
@@ -3280,6 +3434,11 @@ void setup() {
   // Initialize UART
   init_uart();
   
+  // Release GPIO39 hold from previous deep sleep and detach JTAG
+  gpio_hold_dis((gpio_num_t)INT_PIN);
+  gpio_deep_sleep_hold_dis();
+  gpio_reset_pin((gpio_num_t)INT_PIN);  // Permanently detach JTAG MTDO
+
   // Initialize INT pin for waking Sense
   lcd_wake_pin_set_mode(INT_PIN, OUTPUT);
   gpio_set_drive_capability((gpio_num_t)INT_PIN, GPIO_DRIVE_CAP_3);
@@ -3287,16 +3446,38 @@ void setup() {
   delay(2);
   lcd_wake_pin_set_mode(INT_PIN, INPUT_PULLUP);
 
-  // On deep-sleep boot wakes, setup() is the active wake path. Start the
-  // Sense wake handshake here so the Sense can boot alongside the LCD.
-  if (wake_cause == ESP_SLEEP_WAKEUP_EXT0 || wake_cause == ESP_SLEEP_WAKEUP_EXT1) {
-    const char* boot_wake_reason =
-        (wake_cause == ESP_SLEEP_WAKEUP_EXT0) ? "boot_ext0_wake" : "boot_ext1_wake";
+  // Start Sense wake handshake on any boot — deep sleep wake, power-on, or
+  // software reset (e.g. after direct flash). Sense may be in deep sleep and
+  // needs a wake pulse to sync with LCD.
+  {
+    const char* boot_wake_reason = "boot_wake";
+    if (wake_cause == ESP_SLEEP_WAKEUP_EXT0) {
+      boot_wake_reason = "boot_ext0_wake";
+    } else if (wake_cause == ESP_SLEEP_WAKEUP_EXT1) {
+      boot_wake_reason = "boot_ext1_wake";
+    } else if (wake_cause == ESP_SLEEP_WAKEUP_TIMER) {
+      boot_wake_reason = "boot_timer_wake";
+    } else {
+      boot_wake_reason = "boot_poweron_wake";
+    }
     Serial.printf("[WAKE] Requesting Sense wake in setup reason=%s\n", boot_wake_reason);
     request_sense_wake(boot_wake_reason);
     sense_state_set(SENSE_UNKNOWN, boot_wake_reason);
   }
   
+  // Restore test mode from NVS (survives OTA reboots)
+  {
+    Preferences prefs;
+    if (prefs.begin("test_cfg", true)) {
+      g_test_mode_active = prefs.getBool("test_mode", false);
+      if (g_test_mode_active) {
+        g_test_mode_expire_ms = millis() + 3600000; // 1 hour from boot
+        Serial.println("[TEST_MODE] restored from NVS (1 hour window)");
+      }
+      prefs.end();
+    }
+  }
+
   // Initialize mutex
   app_state_mutex = xSemaphoreCreateMutex();
   if (app_state_mutex == NULL) {
@@ -3340,17 +3521,38 @@ void setup() {
     Serial.println("No saved list found - will fetch from Sense");
   }
 
+  Serial.printf("[BOOT_DIAG] ship_ota=%d maint_wake=%d eff_timer=%d maint_ctx=%d resume_hint=%d timer_ovr=%d reset=%d wake=%d restored_nvs=%d\n",
+                g_ship_ota_wake_window ? 1 : 0,
+                g_lcd_maintenance_wake_window ? 1 : 0,
+                effective_timer_wake ? 1 : 0,
+                maintenance_context ? 1 : 0,
+                maintenance_resume_hint ? 1 : 0,
+                timer_override ? 1 : 0,
+                (int)reset_reason,
+                (int)wake_cause,
+                restored_maint_state ? 1 : 0);
   if (!g_ship_ota_wake_window && !g_lcd_maintenance_wake_window) {
     init_ui_stack(g_saved_list_count);
   } else {
-    init_touch_once();
-    init_knob_once();
+    Serial.printf("[BOOT_DIAG] UI SKIPPED — clearing stale maintenance NVS and forcing UI init\n");
+    lcd_clear_persisted_maintenance_state("stale_boot_override");
+    g_lcd_maintenance_wake_window = false;
+    g_ship_ota_wake_window = false;
+    init_ui_stack(g_saved_list_count);
+  }
+  // Force LVGL to flush the display buffer immediately after init
+  if (g_ui_initialized) {
+    lv_timer_handler();
+    Serial.printf("[BOOT_DIAG] post_init backlight=%d panel=%d lvgl=%d ui_init=%d\n",
+                  g_backlight_duty, g_panel_enabled ? 1 : 0, g_lvgl_running ? 1 : 0, g_ui_initialized ? 1 : 0);
   }
   if (wake_cause == ESP_SLEEP_WAKEUP_EXT0 || wake_cause == ESP_SLEEP_WAKEUP_EXT1) {
     clear_input_wake_sources("boot_wake");
     touch_ignore_until = millis() + 300;
     scroll_ignore_until = millis() + 150;
   }
+
+  lcd_ota_self_test();
 
 #ifdef HALO_LCD_PROD_WRAPPER
   halo_lcd_prod_setup();
@@ -3360,7 +3562,26 @@ void setup() {
 void loop() {
   // safe mode: disable timeout/force-ready flush path (LVGL finish only via SPI done)
   if (lcd_bsp_display_reset_requested()) {
-    Serial.println("[LCD_FLUSH] display reset requested (flush failures exceeded threshold); consider reinit or power cycle");
+      Serial.println("[LCD_FLUSH] display reset requested (flush failures exceeded threshold)");
+      lcd_bsp_reset_flush_fail_count();
+      lv_obj_t *scr = lv_scr_act();
+      if (scr) {
+          lv_obj_invalidate(scr);
+          Serial.println("[LCD_FLUSH] fail count reset, full screen invalidated for recovery");
+      }
+      // Track persistent failure cycles -- if flush keeps failing with zero
+      // successful renders, force sleep to get a clean boot
+      static uint32_t s_flush_reset_cycles = 0;
+      uint32_t flush_ok = 0, flush_fail_tmp = 0;
+      int out_tmp = 0, sf_tmp = 0;
+      lcd_bsp_get_flush_submit_stats(&flush_ok, &flush_fail_tmp, &out_tmp, &sf_tmp);
+      s_flush_reset_cycles++;
+      if (s_flush_reset_cycles >= 5 && flush_ok == 0) {
+        Serial.printf("[LCD_FLUSH] persistent DMA failure (%u resets, 0 ok) -- forcing sleep\n",
+                      (unsigned)s_flush_reset_cycles);
+        lcd_sleep_ts("dma_persistent_fail");
+        enterLightSleep();
+      }
   }
   bool lvgl_locked = false;
   if (g_ui_initialized) {
@@ -3369,6 +3590,50 @@ void loop() {
       return;
     }
     lvgl_locked = true;
+  }
+  // Fallback: if provisioning intro was queued but UI task hasn't shown it yet, force it
+  if (provision_intro_pending && !provision_intro_visible) {
+    show_provision_intro_screen("force_from_loop");
+  }
+  // Fallback: if UI_STATUS arrived but UI task hasn't applied it, force route from loop
+  if (g_ship_ui_dirty) {
+    ui_apply_ship_ui_status(NULL);
+  }
+  // Fallback: UI task timer-driven updates (countdown, auto-hide, ring animations)
+  if (ship_logged_hide_at_ms && millis() >= ship_logged_hide_at_ms) {
+    ship_logged_hide_at_ms = 0;
+    show_ship_main_menu();
+  }
+  if (ui_screen_state == SCREEN_HOLD_STILL) {
+    ship_update_hold_still_countdown();
+  }
+  if (ui_screen_state == SCREEN_EXPIRY_CHOICE && ship_expiry_choice_shown_time > 0) {
+    ship_update_expiry_choice_timeout_ring();
+  }
+  if (ui_screen_state == SCREEN_AI_LISTENING) {
+    ship_update_ai_listening_countdown();
+  }
+  if (ship_error_hide_at_ms && millis() >= ship_error_hide_at_ms) {
+    ship_error_hide_at_ms = 0;
+    show_ship_main_menu();
+  }
+  if (ship_voice_ack_hide_at_ms && ui_screen_state == SCREEN_VOICE_ACK && millis() >= ship_voice_ack_hide_at_ms) {
+    ship_voice_ack_hide_at_ms = 0;
+    g_voice_fire_and_forget_ignore_ui = false;
+    waiting_for_voice_response = false;
+    voice_response_deadline_ms = 0;
+    g_ship_voice_json_pending = false;
+    stop_glowing_animation();
+    Serial.println("[VOICE_FAF] ack_done -> main_menu (loop_fallback)");
+    show_ship_main_menu();
+  }
+  // Fallback: if provisioning completed but UI task hasn't returned to home, force it
+  if (provision_return_home_pending) {
+    provision_return_home_pending = false;
+    hide_provisioning_screen();
+    hide_provision_intro_screen("return_home_from_loop");
+    show_ship_main_menu();
+    Serial.println("[PROVISION] return_home (force_from_loop)");
   }
   // UART TX/RX is now handled by uart_task - nothing to do here
   
@@ -3421,7 +3686,7 @@ void loop() {
       } else {
         Serial.println("[LCD_MAINT] user_input -> exit_headless");
       }
-      lcd_clear_maintenance_state(exit_reason, true);
+      lcd_exit_maintenance_headless_only(exit_reason);
       lcd_exit_ota_mode(exit_reason);
       g_lcd_maintenance_aborted = false;
       skip_main_loop = false;
@@ -3621,8 +3886,8 @@ void loop() {
       g_ship_voice_json_pending = false;
       g_ship_voice_json_text[0] = '\0';
       ship_queue_voice_input("INPUT_LONG_PRESS_END", "voice_end");
-      ship_voice_end_resends_remaining = 0;
-      ship_voice_end_resend_due_ms = 0;
+      ship_voice_end_resends_remaining = 2;          // 2 backup resends at 220ms intervals
+      ship_voice_end_resend_due_ms = millis() + 220; // first resend in 220ms
       ship_set_processing_text("Processing");
       ship_show_voice_ack();
       ui_lvgl_tick();
@@ -3663,6 +3928,14 @@ void loop() {
         ui_lvgl_tick();
         example_lvgl_unlock();
         return;
+      }
+      if (ui_screen_state == SCREEN_SHOPPING_LIST) {
+        if (shopping_list_handle_touch(check_x, check_y)) {
+          ui_lvgl_tick();
+          resetActivityTimer();
+          example_lvgl_unlock();
+          return;
+        }
       }
       if (expiry_choice_handle_touch(check_x, check_y)) {
         ui_lvgl_tick();
@@ -4063,7 +4336,12 @@ void loop() {
   }
   #endif
   if (!g_in_light_sleep && sense_status_sync_requested) {
-    lcd_maybe_pulse_sense_int("status_sync");
+    if (sense_awake_confirmed) {
+      send_sense_ping();
+      sense_status_sync_requested = false;
+    } else {
+      lcd_maybe_pulse_sense_int("status_sync");
+    }
   }
   
   // Check if "On it!" status screen has been showing for 1 second - hide it and show list with glowing halo
@@ -4227,6 +4505,7 @@ void loop() {
         sense_state_set(SENSE_ASLEEP, "missed_pongs");
       } else {
         sense_state_set(SENSE_UNKNOWN, "missed_pongs");
+        lcd_errlog_store_with_context("lcd", "sense_wake", "MISSED_PONGS", (int)sense_missed_pongs, "sense unresponsive");
       }
     }
     bool need_probe = (sense_state != SENSE_AWAKE) && !(sleep_deny_active && g_idle_screen_dark);
@@ -4285,6 +4564,13 @@ void loop() {
     unsigned long now = millis();
     if (now > wake_retry_until_ms) {
       wake_retry_until_ms = 0;
+      // Enter timer-wait mode — stop pulsing, wait for Sense's failsafe timer
+      if (!wake_timer_wait_mode && !sense_awake_confirmed) {
+        wake_timer_wait_mode = true;
+        wake_timer_wait_start_ms = now;
+        release_wake_line("timer_wait");
+        Serial.println("[WAKE] pulse retries exhausted -> timer-wait mode (30s)");
+      }
     } else if (now - last_wake_retry_ms >= wake_retry_interval_for_attempt(wake_retry_attempts)) {
       if (sense_recently_heard(1500UL)) {
         Serial.println("[LCD] Wake retry waiting for sync...");
@@ -4295,6 +4581,18 @@ void loop() {
         Serial.printf("[LCD] Wake retry pulse attempt=%u\n", (unsigned)wake_retry_attempts);
         lcd_maybe_pulse_sense_int("wake_retry");
       }
+    }
+  }
+
+  // Timer-wait mode: Sense may be in timer-only sleep. Send UART pings until it wakes.
+  if (wake_timer_wait_mode && !sense_awake_confirmed) {
+    unsigned long now = millis();
+    if (now - wake_timer_wait_start_ms > WAKE_TIMER_WAIT_WINDOW_MS) {
+      wake_timer_wait_mode = false;
+      Serial.println("[WAKE] timer-wait expired — Sense unreachable");
+    } else if (now - last_sense_ping_ms > 2000) {
+      uart_send_input_message("INPUT_PING");
+      last_sense_ping_ms = now;
     }
   }
 
@@ -4319,7 +4617,10 @@ void loop() {
         Serial.printf("[REFRESH] state=WAKE_PENDING start=%lu attempt=%u\n",
                       refresh_wake_pending_start_ms,
                       (unsigned)refresh_wake_pending_attempts);
-        pulseWakeSenseShort();
+        if (!sense_awake_confirmed) {
+          pulseWakeSenseShort();
+        }
+        send_sense_ping();
         refresh_wake_pending_next_pulse_ms =
             now + REFRESH_WAKE_WAIT_MS +
             (refresh_wake_pending_attempts - 1) * REFRESH_WAKE_PULSE_BACKOFF_MS;
@@ -4442,12 +4743,21 @@ void loop() {
   if (!g_in_light_sleep && GUARDIAN_FORCE_SLEEP_MS > 0) {
     unsigned long awake_ms = now_ms - guardian_awake_start_ms;
     if (awake_ms >= GUARDIAN_FORCE_SLEEP_MS) {
-      if (!guardian_sleep_triggered) {
-        guardian_sleep_triggered = true;
-        Serial.printf("[GUARDIAN] force_sleep elapsed_ms=%lu\n", awake_ms);
+      if (lcd_ota_uart_active()) {
+        // Do not force-sleep during active LCD OTA
+        static bool guardian_ota_defer_logged = false;
+        if (!guardian_ota_defer_logged) {
+          Serial.println("[GUARDIAN] force_sleep deferred (lcd_ota_uart_active)");
+          guardian_ota_defer_logged = true;
+        }
+      } else {
+        if (!guardian_sleep_triggered) {
+          guardian_sleep_triggered = true;
+          Serial.printf("[GUARDIAN] force_sleep elapsed_ms=%lu\n", awake_ms);
+        }
+        enterLightSleep();
+        goto loop_continue;
       }
-      enterLightSleep();
-      goto loop_continue;
     }
   }
 
@@ -4533,6 +4843,11 @@ void loop() {
       log_sleep_decision(now_ms, screen_name, home_age_ms, false, "dish_processing");
       goto loop_continue;
     }
+    // Test mode: block all sleep for automated testing
+    if (g_test_mode_active && millis() < g_test_mode_expire_ms) {
+      log_sleep_decision(now_ms, screen_name, home_age_ms, false, "test_mode");
+      goto loop_continue;
+    }
     bool eligible = home_age_ms >= HOME_SLEEP_DELAY_MS;
     const char* decision_reason = eligible ? "eligible" : "home_age_lt_timeout";
     if (!eligible) {
@@ -4543,6 +4858,18 @@ void loop() {
         goto loop_continue;
       }
       log_sleep_decision(now_ms, screen_name, home_age_ms, false, decision_reason);
+      goto loop_continue;
+    }
+    if (ota_locked) {
+      log_sleep_decision(now_ms, screen_name, home_age_ms, false, "ota_locked");
+      goto loop_continue;
+    }
+    if (g_lcd_ota_uart_receiving) {
+      log_sleep_decision(now_ms, screen_name, home_age_ms, false, "lcd_ota_uart_receiving");
+      goto loop_continue;
+    }
+    if (lcd_ota_uart_active()) {
+      log_sleep_decision(now_ms, screen_name, home_age_ms, false, "lcd_ota_uart");
       goto loop_continue;
     }
     lcd_set_idle_screen_dark(true, "idle_timeout");
@@ -4600,12 +4927,21 @@ void loop() {
     }
 #endif
     if (!inhibit_reason && g_lcd_maintenance_active) {
-      if (g_lcd_maintenance_deadline_ms == 0 || millis() < g_lcd_maintenance_deadline_ms) {
+      // Safety: if Sense is asleep and OTA not active, maintenance is stale — clear it
+      if (sense_state == SENSE_ASLEEP && !ota_locked && !g_lcd_ota_uart_receiving) {
+        g_lcd_maintenance_active = false;
+        g_lcd_maintenance_deadline_ms = 0;
+        g_ota_mode_active = false;
+        Serial.println("[SLEEP] stale maintenance cleared (sense_asleep, no ota)");
+      } else if (g_lcd_maintenance_deadline_ms == 0 || millis() < g_lcd_maintenance_deadline_ms) {
         inhibit_reason = "maintenance_active";
       }
     }
     if (!inhibit_reason && ota_locked) {
       inhibit_reason = "ota_locked";
+    }
+    if (!inhibit_reason && lcd_ota_uart_active()) {
+      inhibit_reason = "lcd_ota_uart";
     }
     if (inhibit_reason) {
       unsigned long now_ms = millis();
@@ -4652,13 +4988,20 @@ void loop() {
       goto loop_continue;
     }
     if (millis() < ota_stay_awake_until_ms) {
-      static unsigned long last_ota_log_ms = 0;
-      if (millis() - last_ota_log_ms > 5000) {
-        Serial.println("[OTA] stay_awake window active - deferring sleep");
-        last_ota_log_ms = millis();
+      // If Sense went to sleep without OTA_LOCK, the OTA request was missed
+      if (sense_state == SENSE_ASLEEP && !ota_locked) {
+        Serial.println("[OTA] stay_awake cancelled (sense asleep, no ota_lock)");
+        ota_stay_awake_until_ms = 0;
+        ota_check_requested = false;
+      } else {
+        static unsigned long last_ota_log_ms = 0;
+        if (millis() - last_ota_log_ms > 5000) {
+          Serial.println("[OTA] stay_awake window active - deferring sleep");
+          last_ota_log_ms = millis();
+        }
+        log_sleep_decision(now_ms, screen_name, home_age_ms, false, "ota_stay_awake");
+        goto loop_continue;
       }
-      log_sleep_decision(now_ms, screen_name, home_age_ms, false, "ota_stay_awake");
-      goto loop_continue;
     }
     if (millis() < stay_awake_until_ms) {
       static unsigned long last_stay_awake_log_ms = 0;
@@ -4737,6 +5080,7 @@ void loop() {
 
 loop_continue:
   if (lvgl_locked) {
+    lv_timer_handler();  // Tick LVGL animations/timers every loop iteration
     example_lvgl_unlock();
   }
 
@@ -4744,6 +5088,6 @@ loop_continue:
   halo_lcd_prod_loop();
 #endif
 
-  vTaskDelay(pdMS_TO_TICKS(50));  // Poll touch every 50ms (use vTaskDelay to yield to IDLE task)
+  vTaskDelay(pdMS_TO_TICKS(5));  // Fast loop for smooth LVGL rendering (was 50ms, too slow for animations)
 }
 

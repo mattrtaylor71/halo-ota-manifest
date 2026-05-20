@@ -21,10 +21,11 @@
 static uint64_t buildWakeMaskForSleep() {
   uint64_t wakeMask = 0;
 
-  // Temporary hardening: deep-sleep wake is touch-only.
-  // Leave encoder handling enabled while fully awake, but do not let
-  // encoder A/B lines trigger EXT1 wake until the false-wake path is fixed.
-  wakeMask |= (1ULL << LCD_WAKE_GPIO);
+  // Touch-only wake: encoder A/B excluded from EXT1 mask because
+  // input_wake_sources_idle() only gates on touch, not encoder pins.
+  // If enc_b happens to rest LOW, EXT1 ANY_LOW triggers instant wake.
+  // TODO: add RTC pull-ups + idle gate for encoder before re-enabling.
+  wakeMask |= (1ULL << LCD_WAKE_GPIO);   // GPIO9 - touch INT only
   Serial.printf("[EXT1_MASK] touch=%d enc_a_level=%d enc_b_level=%d mask_touch=%d mask_enc_a=%d mask_enc_b=%d\n",
                 digitalRead(PIN_TOUCH_INT),
                 digitalRead(PIN_EC1_A),
@@ -237,10 +238,7 @@ static void enterLightSleep() {
                 sense_wake_level);
   Serial.printf("[LCD_WAKE_PIN] mode=IN pullup=1 level=%d phase=pre_sleep\n",
                 sense_wake_level);
-  // Configure LCD wake pin (touch) for EXT0 sanity checks.
-  lcd_wake_pin_set_mode(LCD_WAKE_GPIO, OUTPUT);
-  digitalWrite(LCD_WAKE_GPIO, HIGH);
-  delay(2);
+  // GPIO9 (touch INT) is open-drain from CST816 - never drive as OUTPUT
   lcd_wake_pin_set_mode(LCD_WAKE_GPIO, INPUT_PULLUP);
   int wake_pin_level = digitalRead(LCD_WAKE_GPIO);
   Serial.printf("[LCD_SLEEP_CFG] ext0_gpio=%d ext0_level=%d pin_level_now=%d\n",
@@ -283,6 +281,15 @@ static void enterLightSleep() {
                 (unsigned long)sleep_timer_sec,
                 g_lcd_maintenance_timer_armed ? 1 : 0,
                 (unsigned long)g_lcd_maintenance_wake_in_s);
+  // Configure RTC pull-up on wake GPIO so the pin doesn't float during deep sleep.
+  // Digital pull-ups are disabled when the digital GPIO controller powers off.
+  rtc_gpio_init((gpio_num_t)LCD_WAKE_GPIO);
+  rtc_gpio_set_direction((gpio_num_t)LCD_WAKE_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
+  rtc_gpio_pullup_en((gpio_num_t)LCD_WAKE_GPIO);
+  rtc_gpio_pulldown_dis((gpio_num_t)LCD_WAKE_GPIO);
+  Serial.printf("[SLEEP_GPIO] gpio=%d rtc_pullup=1 pulldown=0 level_now=%d\n",
+                (int)LCD_WAKE_GPIO, digitalRead(LCD_WAKE_GPIO));
+
   configure_sleep_sources(true, sleep_timer_sec);
   if (sleep_fallback_timer_sec > 0) {
     Serial.printf("[SLEEP_PROTO] fallback_timer_active timer_s=%lu\n",
@@ -302,6 +309,12 @@ static void enterLightSleep() {
   Serial.println("[SLEEP] entering_deep_sleep");
   sleep_entry_time = millis();
 
+  // Put touch IC into standby mode so it generates INT on touch during deep sleep
+  if (g_touch_initialized) {
+    Touch_Standby();
+    Serial.println("[TOUCH] standby mode set for deep sleep wake");
+  }
+
   lcd_set_backlight_binary(false, "deep_sleep");
   if (ui_task_handle != NULL) {
     vTaskDelete(ui_task_handle);
@@ -317,6 +330,16 @@ static void enterLightSleep() {
   Serial.printf("[SLEEP] wake_gpio=%d\n", WAKE_GPIO);
   Serial.printf("[SLEEP] wake_level=%d\n", HALO_WAKE_LEVEL);
   Serial.println("=================================");
+
+    // Hold GPIO39 (INT_PIN) HIGH through deep sleep.
+    // GPIO39 is NOT an RTC GPIO on ESP32-S3, so without hold, the output
+    // driver turns off when the digital domain powers down, leaving it
+    // floating. Floating GPIO39 → Sense GPIO2 may read LOW → disables EXT0.
+    gpio_set_direction((gpio_num_t)INT_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)INT_PIN, 1);
+    gpio_hold_en((gpio_num_t)INT_PIN);
+    gpio_deep_sleep_hold_en();
+
   esp_deep_sleep_start();
   
   // Execution resumes here after wake
@@ -538,11 +561,19 @@ static void sleep_enter_wait_low_power(const char* reason) {
 }
 
 static bool sleep_prepare_wake_line_for_request() {
-  release_wake_line("pre_sleep_request");
+  // Don't call release_wake_line here — it toggles OUTPUT→INPUT which
+  // Sense detects as "lcd_pulsing" and denies sleep. Just ensure the
+  // pin is in INPUT_PULLUP (stable HIGH, no toggle).
+  if (digitalRead(INT_PIN) == LCD_WAKE_LEVEL) {
+    // Pin is at wake level — set to INPUT_PULLUP to let it float HIGH
+    lcd_wake_pin_set_mode(INT_PIN, INPUT_PULLUP);
+    delay(5);
+  }
+  Serial.printf("[SLEEP] wake_line_check level=%d\n", digitalRead(INT_PIN));
   unsigned long start_ms = millis();
   while ((millis() - start_ms) < 40UL) {
     if (digitalRead(INT_PIN) != LCD_WAKE_LEVEL) {
-      Serial.printf("[SLEEP] wake_line_released_local level=%d elapsed_ms=%lu\n",
+      Serial.printf("[SLEEP] wake_line_ready level=%d elapsed_ms=%lu\n",
                     digitalRead(INT_PIN),
                     (unsigned long)(millis() - start_ms));
       return true;
@@ -678,7 +709,9 @@ static bool notify_sense_sleep() {
                          fresh_touch;
       if (user_cancel) {
         // Swallow the wake tap so it does not immediately trigger a UI action
-        // once the panel is back on, and explicitly cancel Sense-side sleep.
+        // once the panel is back on. Don't send INPUT_WAKE — it resets the
+        // Sense cooldown timer and adds 10s penalty. Just abort locally and
+        // let the Sense INPUT_SLEEP timeout naturally.
         touch_pressed = false;
         touch_wake_only_pending = false;
         touch_press_time = 0;
@@ -691,9 +724,7 @@ static bool notify_sense_sleep() {
         scroll_ignore_until = millis() + 200;
         cancel_pending_sleep_for_user_input("pre_sleep_touch");
         abort_sleep_transition("pre_sleep_touch");
-        uart_send_input_message("INPUT_WAKE");
-        Serial.println("[SLEEP] sent INPUT_WAKE after user abort");
-        Serial.println("[SLEEP] abort wait (user_input)");
+        Serial.println("[SLEEP] abort wait (user_input, no INPUT_WAKE sent)");
         return false;
       }
       if (sleep_deny_received) {

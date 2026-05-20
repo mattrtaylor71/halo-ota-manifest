@@ -70,6 +70,12 @@ static void ui_show_screen_impl(ScreenId next) {
     case SCREEN_SHIP_DEBUG:
       show_ship_debug_screen_impl();
       break;
+    case SCREEN_SHIP_ERRLOG:
+      show_errlog_screen();
+      break;
+    case SCREEN_SHIP_SHOPPING_LIST:
+      show_shopping_list_screen_impl();
+      break;
     default:
       break;
   }

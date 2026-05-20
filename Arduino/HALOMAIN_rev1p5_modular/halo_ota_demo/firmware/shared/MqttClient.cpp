@@ -758,6 +758,12 @@ void mqtt_force_failover_to_alt() {
 }
 
 void mqtt_set_allowed(bool allowed) {
+  // MQTT disabled: s_allowed starts false and stays false.
+  // All mqtt_set_allowed(true) + mqtt_force_connect() calls become no-ops.
+  // To re-enable MQTT, change s_allowed default back to true above.
+  if (!s_allowed && allowed) {
+    return;  // Don't re-enable if disabled at init
+  }
   s_allowed = allowed;
   if (!allowed) {
     s_need_stop = true;
