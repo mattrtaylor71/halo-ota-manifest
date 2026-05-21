@@ -90,6 +90,7 @@ static bool ship_scan_request_is_local_only() {
 
 static void ship_cancel_local_scan_request(const char* reason, const char* message) {
   waiting_for_scan_response = false;
+  scan_request_sent_ms = 0;
   dish_processing_active = false;
   dish_processing_start_ms = 0;
   dish_timeout_at_ms = 0;
@@ -156,6 +157,7 @@ static void ship_menu_begin_local_scan_request(const char* menu_item) {
   g_ship_ui_applied_msg_id = 0;
   g_ship_ui_finalized_job_id = 0;
   waiting_for_scan_response = true;
+  scan_request_sent_ms = millis();
   dish_processing_active = false;
   dish_processing_start_ms = 0;
   dish_timeout_at_ms = 0;
@@ -522,6 +524,7 @@ static void ship_menu_handle_ui_status(const JsonDocument& doc) {
     g_ship_ui_error = (strcmp(phase, "ERROR") == 0);
     if (is_terminal) {
       waiting_for_scan_response = false;
+      scan_request_sent_ms = 0;
     }
   }
   g_ship_ui_dirty = true;
@@ -619,6 +622,7 @@ static void ui_apply_ship_meal_result(const JsonDocument& doc) {
   g_ship_ui_terminal = true;
   g_ship_ui_error = false;
   waiting_for_scan_response = false;
+  scan_request_sent_ms = 0;
   if (job_id) {
     g_ship_ui_finalized = true;
     g_ship_ui_finalized_job_id = job_id;

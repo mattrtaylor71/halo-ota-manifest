@@ -260,6 +260,7 @@ static void ui_task(void *arg) {
         dish_processing_active = false;
         dish_processing_start_ms = 0;
         waiting_for_scan_response = false;
+        scan_request_sent_ms = 0;
         dish_timeout_at_ms = now_ms;
         dish_timeout_job_id = g_ship_ui_job_id;
         g_ship_ui_finalized = true;
@@ -272,6 +273,31 @@ static void ui_task(void *arg) {
         g_ship_ui_terminal = true;
         UI_SHOW(SCREEN_SHIP_ERROR, "dish_timeout");
         ship_error_hide_at_ms = now_ms + 2000;
+      }
+    }
+    // Scan response timeout: if LCD sent a capture request and Sense never
+    // responded with any UI_STATUS within SCAN_NO_RESPONSE_TIMEOUT_MS,
+    // show an error and return to menu.  This catches sleep/wake races,
+    // Sense memory exhaustion, and deferred-TX stalls.
+    if (waiting_for_scan_response && scan_request_sent_ms > 0 &&
+        !dish_processing_active) {  // dish has its own timeout
+      unsigned long now_ms = millis();
+      unsigned long age_ms = now_ms - scan_request_sent_ms;
+      if (age_ms > SCAN_NO_RESPONSE_TIMEOUT_MS) {
+        Serial.printf("[SCAN_TIMEOUT] no response from Sense in %lu ms -> error_then_home mode=%s\n",
+                      age_ms, g_ship_ui_mode);
+        waiting_for_scan_response = false;
+        scan_request_sent_ms = 0;
+        g_ship_ui_finalized = true;
+        g_ship_ui_finalized_job_id = g_ship_ui_job_id;
+        strncpy(g_ship_ui_phase, "ERROR", sizeof(g_ship_ui_phase) - 1);
+        g_ship_ui_phase[sizeof(g_ship_ui_phase) - 1] = '\0';
+        strncpy(g_ship_ui_text, "No response. Try again.", sizeof(g_ship_ui_text) - 1);
+        g_ship_ui_text[sizeof(g_ship_ui_text) - 1] = '\0';
+        g_ship_ui_error = true;
+        g_ship_ui_terminal = true;
+        UI_SHOW(SCREEN_SHIP_ERROR, "scan_no_response_timeout");
+        ship_error_hide_at_ms = now_ms + 3000;
       }
     }
     wifi_on_run_deferred_if_ready("ui_tick");

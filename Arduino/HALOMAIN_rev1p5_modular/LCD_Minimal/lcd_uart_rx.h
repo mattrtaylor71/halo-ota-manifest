@@ -1083,6 +1083,7 @@ static void uart_process_received_message(const char* json_str) {
           waiting_for_scan_response = true;
           Serial.printf("[UART] SCAN operation in progress (mode: %s) - extending sleep timeout to 90s\n", mode);
         }
+        scan_request_sent_ms = millis();  // reset timeout — Sense is responding
         // Reset activity timer on each status update to keep screen awake
         resetActivityTimer();
         
@@ -1134,6 +1135,7 @@ static void uart_process_received_message(const char* json_str) {
         }
       } else if (strcmp(phase, "DONE") == 0 || strcmp(phase, "ERROR") == 0) {
         waiting_for_scan_response = false;
+        scan_request_sent_ms = 0;
         Serial.printf("[UART] SCAN operation complete (mode: %s) - restoring normal sleep timeout\n", mode);
         // Reset activity timer so user can see the result before sleep
         resetActivityTimer();

@@ -31,6 +31,7 @@ typedef struct app_event_t app_event_t;
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
+#include "nvs_flash.h"
 #include "Preferences.h"
 #include <string.h>
 #include <time.h>
@@ -797,6 +798,8 @@ static unsigned long voice_response_deadline_ms = 0;
 static volatile bool g_voice_fire_and_forget_ignore_ui = false;
 static volatile bool waiting_for_scan_response = false;  // Track if we're waiting for scan response
 static const unsigned long SCAN_RESPONSE_TIMEOUT_MS = 90000;  // 90 seconds timeout when waiting for scan (image processing can take time)
+static unsigned long scan_request_sent_ms = 0;
+static const unsigned long SCAN_NO_RESPONSE_TIMEOUT_MS = 30000;  // 30s timeout if Sense never responds to capture request
 static const unsigned long PROVISIONING_TIMEOUT_MS = 1800000;  // 30 minutes during provisioning
 static volatile bool waiting_for_list_response = false;  // Track if we're waiting for list/API response
 static const unsigned long API_RESPONSE_TIMEOUT_MS = 60000;  // 60 seconds for API waits
