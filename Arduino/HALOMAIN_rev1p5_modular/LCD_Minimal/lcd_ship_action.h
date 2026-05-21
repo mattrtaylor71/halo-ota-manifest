@@ -251,8 +251,9 @@ static void ship_menu_update_versions_label() {
   }
   const char* lcd_fw = kFirmwareVersion ? kFirmwareVersion : "unknown";
   const char* sense_fw = (g_sense_fw_version[0] != '\0') ? g_sense_fw_version : "--";
-  char buf[96];
-  snprintf(buf, sizeof(buf), "LCD %s  Sense %s", lcd_fw, sense_fw);
+  const char* did = (g_lcd_device_id[0] != '\0') ? g_lcd_device_id : "--";
+  char buf[128];
+  snprintf(buf, sizeof(buf), "LCD %s  Sense %s\nDevice: %s", lcd_fw, sense_fw, did);
   lv_label_set_text(ship_menu_settings_versions, buf);
 }
 
@@ -378,10 +379,6 @@ static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
     }
     case SHIP_MENU_ACTION_MANUAL_OTA:
       ship_menu_send_manual_ota("menu_action");
-      break;
-    case SHIP_MENU_ACTION_DEBUG_LOG:
-      Serial.println("[MENU] tap=DEBUG_LOG");
-      show_errlog_screen();
       break;
     case SHIP_MENU_ACTION_SHOPPING_LIST:
       Serial.println("[MENU] tap=SHOPPING_LIST");

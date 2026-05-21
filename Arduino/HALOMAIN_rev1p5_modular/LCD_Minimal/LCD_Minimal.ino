@@ -32,6 +32,7 @@ typedef struct app_event_t app_event_t;
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
 #include "nvs_flash.h"
+#include "esp_mac.h"
 #include "Preferences.h"
 #include <string.h>
 #include <time.h>
@@ -238,7 +239,6 @@ static void ship_menu_request_fw_info();
 static void ship_menu_service_fw_info_request(unsigned long now_ms);
 static void show_ship_debug_screen();
 static void show_ship_debug_screen_impl();
-static void show_errlog_screen();
 static void ui_show_result(bool is_error, const char* title, const char* mode);
 static void ui_show_result_impl(bool is_error, const char* title, const char* mode);
 static void ui_apply_ship_ui_status(const app_event_t* evt);
@@ -1084,11 +1084,10 @@ static lv_obj_t *ship_menu_settings_btn_ota = NULL;
 static lv_obj_t *ship_menu_settings_label_ota = NULL;
 static lv_obj_t *ship_menu_settings_btn_back = NULL;
 static lv_obj_t *ship_menu_settings_label_back = NULL;
-static lv_obj_t *ship_menu_settings_btn_debug = NULL;
-static lv_obj_t *ship_menu_settings_label_debug = NULL;
 static lv_obj_t *ship_menu_settings_status = NULL;
 static unsigned long ship_menu_settings_status_hide_at_ms = 0;
 static char g_sense_fw_version[32] = "--";
+static char g_lcd_device_id[32] = "";
 static unsigned long g_fw_info_request_ms = 0;
 static unsigned long g_fw_info_last_attempt_ms = 0;
 static unsigned long g_fw_info_retry_deadline_ms = 0;
@@ -1386,8 +1385,7 @@ static lv_obj_t *menu_item_labels[MENU_MAX_ITEMS] = {NULL};  // Labels for each 
 #define SHIP_MENU_SETTINGS_STATUS_Y 72
 #define SHIP_MENU_SETTINGS_RESET_Y 84
 #define SHIP_MENU_SETTINGS_OTA_Y 148
-#define SHIP_MENU_SETTINGS_DEBUG_Y 212
-#define SHIP_MENU_SETTINGS_BACK_Y 276
+#define SHIP_MENU_SETTINGS_BACK_Y 212
 
 #define MENU_INDEX_DISCARD 0
 #define MENU_INDEX_DISH 1
@@ -1442,9 +1440,6 @@ static const ship_menu_hitbox_t ship_menu_hitboxes_settings[] = {
   {SHIP_MENU_ACTION_MANUAL_OTA, "MANUAL_OTA", NULL, -1,
    SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_OTA_Y,
    SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_OTA_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
-  {SHIP_MENU_ACTION_DEBUG_LOG, "DEBUG_LOG", NULL, -1,
-   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_DEBUG_Y,
-   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_DEBUG_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
   {SHIP_MENU_ACTION_BACK, "BACK", NULL, -1,
    SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACK_Y,
    SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_BACK_Y + SHIP_MENU_SETTINGS_BTN_H - 1}
@@ -3294,6 +3289,14 @@ void setup() {
   Serial.println("[BOOT] safe_mode_timeout_flush_disabled=1");
   if (kFirmwareVersion && kFirmwareVersion[0]) {
     Serial.printf("[BUILD_DIAG] VERSION=%s\n", kFirmwareVersion);
+  }
+  // Cache device ID for Settings screen display (from base MAC, no WiFi needed)
+  {
+    uint8_t mac[6];
+    esp_efuse_mac_get_default(mac);
+    snprintf(g_lcd_device_id, sizeof(g_lcd_device_id),
+             "halo-%02x%02x-%02x%02x", mac[4], mac[5], mac[2], mac[3]);
+    Serial.printf("[BOOT] device_id=%s\n", g_lcd_device_id);
   }
   esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
   esp_reset_reason_t reset_reason = esp_reset_reason();

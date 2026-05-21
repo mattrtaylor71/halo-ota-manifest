@@ -2061,19 +2061,6 @@ static void show_ship_settings_screen_impl() {
     lv_obj_set_style_text_color(ship_menu_settings_label_ota, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
     lv_obj_center(ship_menu_settings_label_ota);
 
-    ship_menu_settings_btn_debug = lv_obj_create(ship_menu_settings_screen);
-    lv_obj_set_pos(ship_menu_settings_btn_debug, SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_DEBUG_Y);
-    lv_obj_set_size(ship_menu_settings_btn_debug, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
-    lv_obj_set_style_bg_color(ship_menu_settings_btn_debug, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(ship_menu_settings_btn_debug, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(ship_menu_settings_btn_debug, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(ship_menu_settings_btn_debug, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-
-    ship_menu_settings_label_debug = lv_label_create(ship_menu_settings_btn_debug);
-    lv_label_set_text(ship_menu_settings_label_debug, "Debug");
-    lv_obj_set_style_text_color(ship_menu_settings_label_debug, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-    lv_obj_center(ship_menu_settings_label_debug);
-
     ship_menu_settings_btn_back = lv_obj_create(ship_menu_settings_screen);
     lv_obj_set_pos(ship_menu_settings_btn_back, SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACK_Y);
     lv_obj_set_size(ship_menu_settings_btn_back, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
