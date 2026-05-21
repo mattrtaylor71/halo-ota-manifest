@@ -617,6 +617,7 @@ static SemaphoreHandle_t g_list_mutex = NULL;
 
 #include "sense_time.h"
 #include "sense_diag.h"
+#include "sense_errlog.h"
 #include "sense_uart.h"
 
 // Record error locally AND forward to LCD for NVS persistence.
@@ -662,6 +663,7 @@ static void diag_record_error_persistent(const char* stage, int32_t code, const 
   diag_snapshot_context(ctx, sizeof(ctx));
   snprintf(enriched, sizeof(enriched), "%s | %s", text ? text : "", ctx);
   uart_send_sense_diag_persist(stage, "ERROR", stage, code, enriched);
+  sense_errlog_store(stage, code, enriched);
 }
 
 #include "sense_uart_msg.h"
@@ -3383,9 +3385,15 @@ void loop() {
         if (usb_rx_len > 0 && usb_rx_line[usb_rx_len - 1] == '\r') {
           usb_rx_line[--usb_rx_len] = '\0';
         }
-        if (usb_rx_len > 0 && usb_rx_line[0] == '{') {
-          Serial.printf("[DEBUG_INJECT] Processing USB serial command: %.40s...\n", usb_rx_line);
-          parse_input_message(usb_rx_line);
+        if (usb_rx_len > 0) {
+          if (usb_rx_line[0] == '{') {
+            Serial.printf("[DEBUG_INJECT] Processing USB serial command: %.40s...\n", usb_rx_line);
+            parse_input_message(usb_rx_line);
+          } else if (strcmp(usb_rx_line, "errors") == 0) {
+            sense_errlog_dump(Serial);
+          } else if (strcmp(usb_rx_line, "clearerrors") == 0) {
+            sense_errlog_clear();
+          }
         }
         usb_rx_len = 0;
       } else if (usb_rx_len < UART_RX_FRAME_MAX) {

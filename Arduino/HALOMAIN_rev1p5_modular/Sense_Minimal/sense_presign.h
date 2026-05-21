@@ -49,6 +49,17 @@ static bool do_presign_request_simple(const char* url,
   String body;
   serializeJson(doc, body);
 
+  // Piggyback undelivered error telemetry
+  char err_buf[512];
+  uint32_t err_seq = sense_errlog_collect_json(err_buf, sizeof(err_buf), 3);
+  if (err_seq > 0 && body.length() > 1) {
+    body.remove(body.length() - 1);
+    body += ",\"errors\":";
+    body += err_buf;
+    body += "}";
+    Serial.printf("[PRESIGN] piggyback %s (seq<=%lu)\n", err_buf, (unsigned long)err_seq);
+  }
+
   Serial.printf("[PRESIGN] Using job_type: %s\n", type ? type : "");
   Serial.println("[PRESIGN] POST " + String(url ? url : ""));
   if (!http_post_json_with_retries(url,
@@ -141,6 +152,20 @@ static bool do_presign_request(const char* base_url,
   String body;
   serializeJson(doc, body);
 
+  // Piggyback undelivered error telemetry on presign request.
+  // Append errors JSON array to the serialized body string to avoid
+  // bumping StaticJsonDocument size.
+  char err_buf[512];
+  uint32_t err_seq = sense_errlog_collect_json(err_buf, sizeof(err_buf), 3);
+  if (err_seq > 0 && body.length() > 1) {
+    // Replace trailing "}" with ","errors":[...]}"
+    body.remove(body.length() - 1);  // remove '}'
+    body += ",\"errors\":";
+    body += err_buf;
+    body += "}";
+    Serial.printf("[PRESIGN] piggyback %s (seq<=%lu)\n", err_buf, (unsigned long)err_seq);
+  }
+
   Serial.printf("[PRESIGN] Using type=%s action=%s\n",
                 type ? type : "",
                 action ? action : "");
@@ -218,6 +243,7 @@ static bool get_presign(PresignReply& out,
                            body,
                            deadline_ms)) {
       Serial.println("[PRESIGN] Presign OK");
+      sense_errlog_mark_delivered(g_errlog_last_collect_seq);
       return true;
     }
     Serial.printf("[PRESIGN] Presign failed (primary): %d\n", code);
@@ -234,6 +260,7 @@ static bool get_presign(PresignReply& out,
                            body,
                            deadline_ms)) {
       Serial.println("[PRESIGN] Presign OK (fallback)");
+      sense_errlog_mark_delivered(g_errlog_last_collect_seq);
       return true;
     }
     Serial.printf("[PRESIGN] Presign failed (fallback): %d\n", code);
@@ -253,6 +280,7 @@ static bool get_presign(PresignReply& out,
                          body,
                          deadline_ms)) {
     Serial.println("[PRESIGN] Presign OK");
+    sense_errlog_mark_delivered(g_errlog_last_collect_seq);
     return true;
   }
   Serial.printf("[PRESIGN] Presign failed: %d\n", code);

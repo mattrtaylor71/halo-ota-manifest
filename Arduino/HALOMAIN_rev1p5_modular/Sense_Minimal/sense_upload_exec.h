@@ -361,6 +361,17 @@ static bool get_presign_checkin(PresignReply& out, const char* expiry_date, uint
   String body;
   serializeJson(doc, body);
 
+  // Piggyback undelivered error telemetry
+  char err_buf[512];
+  uint32_t err_seq = sense_errlog_collect_json(err_buf, sizeof(err_buf), 3);
+  if (err_seq > 0 && body.length() > 1) {
+    body.remove(body.length() - 1);
+    body += ",\"errors\":";
+    body += err_buf;
+    body += "}";
+    Serial.printf("[CHECKIN_PRESIGN] piggyback %s (seq<=%lu)\n", err_buf, (unsigned long)err_seq);
+  }
+
   log_camera_meta_for_presign("CHECKIN_PRESIGN", camera_meta);
   Serial.println("[CHECKIN_PRESIGN] POST " + presign_url);
   Serial.println("[CHECKIN_PRESIGN] Body: " + body);
@@ -400,6 +411,7 @@ static bool get_presign_checkin(PresignReply& out, const char* expiry_date, uint
   bool success = !(out.job_id.isEmpty() || out.put_url.isEmpty());
   if (success) {
     Serial.println("[CHECKIN_PRESIGN] Presign OK");
+    sense_errlog_mark_delivered(g_errlog_last_collect_seq);
   } else {
     Serial.println("[CHECKIN_PRESIGN] Presign failed - missing fields");
     diag_record_error("presign_parse", -1, "missing_fields");
