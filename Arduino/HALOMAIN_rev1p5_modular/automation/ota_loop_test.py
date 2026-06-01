@@ -207,34 +207,83 @@ _VER_RX = re.compile(r"^\d+\.\d+\.\d+$")
 _FW_RX = re.compile(r"\[FW\]\s*(\{.*\})")
 
 
+_TRUTH_FW_RX = re.compile(r"\[TRUTH\].*?\bfw=(\d+\.\d+\.\d+)\b")
+
+
+def _lcd_fw_once(lcd_mon, timeout=7):
+    """Read the LCD `fw` status assuming the LCD is already awake (no tap).
+    Returns parsed dict or None. Only accepts a fully-JSON line with a sane
+    version + running_part (discards torn/interleaved serial lines)."""
+    if not lcd_mon.wait_open(6):
+        return None
+    since = time.monotonic()
+    lcd_mon.write(b"fw\n")
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        for t, line in list(lcd_mon.lines):
+            if t < since:
+                continue
+            m = _FW_RX.search(line)
+            if not m:
+                continue
+            try:
+                d = json.loads(m.group(1))
+            except Exception:
+                continue  # torn line — discard
+            if (_VER_RX.match(str(d.get("lcd_fw", ""))) and d.get("running_part")
+                    and d.get("running_state")):
+                return d  # require a COMPLETE read (version+part+state) — reject torn lines
+        time.sleep(0.2)
+    return None
+
+
 def read_lcd_fw(lcd_mon, taps=4, timeout=7):
-    """Tap to wake, then ask the LCD for its real running status via the `fw`
-    USB command. Hardened against torn/interleaved serial lines: only accepts a
-    line that fully JSON-parses AND has a sane version + running_part. Returns
-    parsed dict or None."""
+    """Tap to (cold-)wake, then read the LCD's real running status. Returns dict or None."""
     for attempt in range(taps):
         tap()
         time.sleep(1.8)
-        if not lcd_mon.wait_open(6):
-            continue
-        since = time.monotonic()
-        lcd_mon.write(b"fw\n")
-        end = time.monotonic() + timeout
-        while time.monotonic() < end:
-            for t, line in list(lcd_mon.lines):
-                if t < since:
-                    continue
-                m = _FW_RX.search(line)
-                if not m:
-                    continue
-                try:
-                    d = json.loads(m.group(1))
-                except Exception:
-                    continue  # torn line — discard
-                if _VER_RX.match(str(d.get("lcd_fw", ""))) and d.get("running_part"):
-                    return d
-            time.sleep(0.2)
+        d = _lcd_fw_once(lcd_mon, timeout)
+        if d:
+            return d
     return None
+
+
+def _sense_fw_since(sense_mon, since, timeout=6):
+    """Read the Sense's running version from its [TRUTH] telemetry (fw=X.Y.Z),
+    assuming it was just woken. Returns version string or None."""
+    end = time.monotonic() + timeout
+    latest = None
+    while time.monotonic() < end:
+        for t, line in list(sense_mon.lines):
+            if t >= since:
+                m = _TRUTH_FW_RX.search(line)
+                if m:
+                    latest = m.group(1)
+        if latest:
+            return latest
+        time.sleep(0.3)
+    return latest
+
+
+def read_both(lcd_mon, sense_mon, taps=4):
+    """Cold-wake once and read BOTH boards: LCD via `fw`, Sense via [TRUTH].
+    Returns {lcd_fw, lcd_state, lcd_part, sense_fw} (values may be None)."""
+    lcd = None
+    sense_fw = None
+    for attempt in range(taps):
+        t_tap = time.monotonic()
+        tap()
+        time.sleep(1.8)
+        lcd = _lcd_fw_once(lcd_mon, timeout=7)
+        sense_fw = _sense_fw_since(sense_mon, t_tap, timeout=4)
+        if lcd and sense_fw:
+            break
+    return {
+        "lcd_fw": lcd.get("lcd_fw") if lcd else None,
+        "lcd_state": lcd.get("running_state") if lcd else None,
+        "lcd_part": lcd.get("running_part") if lcd else None,
+        "sense_fw": sense_fw,
+    }
 
 
 def sense_wake(sense_mon):
@@ -287,6 +336,14 @@ def publish_lcd(version, binpath):
                    cwd=HALO_OTA, check=True)
 
 
+def publish_both(version):
+    """Build + publish BOTH Sense and LCD manifests at `version` (publish_both.sh).
+    The manual OTA will then self-update the Sense AND proxy the LCD."""
+    subprocess.run(["bash", os.path.join(HALO_OTA, "publish_both.sh"),
+                    "--version", version, "--channel", CHANNEL, "--profile", PROFILE],
+                   cwd=HALO_OTA, check=True)
+
+
 # ---- Version helpers --------------------------------------------------------
 def parse_ver(v):
     try:
@@ -318,6 +375,10 @@ def main():
     ap.add_argument("--stress-alt", action="store_true",
                     help="alternate: odd cycles run WITH contention stress, even cycles "
                          "run clean — confirms both paths pass (no regression).")
+    ap.add_argument("--both-boards", action="store_true",
+                    help="REALISTIC mode: publish BOTH Sense+LCD at the bumped version, "
+                         "so the manual OTA self-updates the Sense AND proxies the LCD. "
+                         "After each OTA: verify clean sleep -> tap-wake -> BOTH boards on target.")
     args = ap.parse_args()
 
     os.makedirs(LOGDIR, exist_ok=True)
@@ -335,14 +396,24 @@ def main():
     results = []
     try:
         # Baseline read
-        log("Reading baseline LCD status...")
-        base = read_lcd_fw(lcd_mon)
-        if not base:
-            log("!! Could not read baseline LCD fw — aborting.")
-            return 2
-        base_ver = base.get("lcd_fw")
-        log(f"Baseline LCD: fw={base_ver} part={base.get('running_part')} "
-            f"state={base.get('running_state')}")
+        if args.both_boards:
+            log("Reading baseline (both boards)...")
+            b = read_both(lcd_mon, sense_mon)
+            if not b["lcd_fw"] or not b["sense_fw"]:
+                log(f"!! baseline read failed: {b} — aborting.")
+                return 2
+            base_ver = max([b["lcd_fw"], b["sense_fw"]], key=parse_ver)
+            log(f"Baseline: lcd={b['lcd_fw']} sense={b['sense_fw']} -> base={base_ver}")
+            base = b
+        else:
+            log("Reading baseline LCD status...")
+            base = read_lcd_fw(lcd_mon)
+            if not base:
+                log("!! Could not read baseline LCD fw — aborting.")
+                return 2
+            base_ver = base.get("lcd_fw")
+            log(f"Baseline LCD: fw={base_ver} part={base.get('running_part')} "
+                f"state={base.get('running_state')}")
 
         if args.start == "auto":
             target0 = bump(base_ver, 1)
@@ -363,6 +434,69 @@ def main():
             log(f"\n----- CYCLE {i}/{args.cycles}  target={target}  "
                 f"mode={'STRESS' if cycle_stress else 'clean'} -----")
             cyc_start = time.monotonic()
+
+            # ---- REALISTIC both-boards mode --------------------------------
+            if args.both_boards:
+                log(f"  publishing BOTH boards {target}")
+                publish_both(target)
+                pre = read_both(lcd_mon, sense_mon)
+                log(f"  pre-OTA: lcd={pre['lcd_fw']}({pre['lcd_part']}/{pre['lcd_state']}) "
+                    f"sense={pre['sense_fw']}")
+
+                # deep sleep -> user taps to wake -> user "presses OTA button"
+                log("  waiting for coordinated sleep before trigger...")
+                wait_for_sleep([lcd_mon, sense_mon], timeout=90)
+                t0 = time.monotonic()
+                reg = None
+                for attempt in range(4):
+                    tap()
+                    time.sleep(1.5)
+                    t_send = time.monotonic()
+                    trigger_ota(sense_mon, f"loop_{run_id}_c{i}")
+                    reg = sense_mon.wait_for(
+                        r"OTA_MANUAL\] request accepted|INPUT_OTA_CHECK received|OTA_POLICY\] allow=1",
+                        12, t_send)
+                    if reg:
+                        break
+                    log(f"  trigger not registered (attempt {attempt+1}/4) — re-waking")
+                log(f"  trigger registered: {reg.group(0) if reg else 'NO'}")
+
+                # Wait for the FULL dual OTA. Firmware sequence (observed): the Sense
+                # self-OTAs and REBOOTS first (sets lcd_ota_due in NVS), then the
+                # freshly-updated Sense proxies the LCD. The definitive completion is
+                # proxy_result / OTA_UNLOCK. The mid-way Sense reboot is expected — the
+                # monitor reconnects across it, so wait_for spanning it is fine.
+                done = sense_mon.wait_for(r"proxy_result|OTA_UNLOCK", args.ota_timeout, t0)
+                log(f"  OTA complete: {done.group(0) if done else 'TIMEOUT (no proxy_result)'}")
+                time.sleep(8)  # let the LCD reboot to apply its new image
+
+                # Verify it returns to sleep cleanly, then tap-wake and read both.
+                log("  verifying clean post-OTA sleep...")
+                slept = wait_for_sleep([lcd_mon, sense_mon], timeout=120)
+                log(f"  post-OTA sleep: {'OK' if slept else 'NOT detected (120s)'}")
+                post = read_both(lcd_mon, sense_mon)
+                log(f"  post-OTA: lcd={post['lcd_fw']}({post['lcd_part']}/{post['lcd_state']}) "
+                    f"sense={post['sense_fw']}")
+
+                lcd_ok = post["lcd_fw"] == target and post["lcd_state"] == "VALID"
+                sense_ok = post["sense_fw"] == target
+                if lcd_ok and sense_ok:
+                    verdict = "PASS"
+                elif post["lcd_fw"] is None or post["sense_fw"] is None:
+                    verdict = f"ERROR_NO_READ(lcd={post['lcd_fw']} sense={post['sense_fw']})"
+                else:
+                    verdict = (f"FAIL(lcd={post['lcd_fw']}/{post['lcd_state']} "
+                               f"sense={post['sense_fw']} slept={slept})")
+
+                dur = int(time.monotonic() - cyc_start)
+                log(f"  CYCLE {i} VERDICT: {verdict}   (lcd={post['lcd_fw']} "
+                    f"sense={post['sense_fw']}, {dur}s)")
+                results.append({"cycle": i, "target": target, "verdict": verdict,
+                                "pre": pre, "post": post, "registered": bool(reg),
+                                "slept_after": slept, "dur_s": dur})
+                prev = post
+                continue
+            # ---- end both-boards mode --------------------------------------
 
             # Build (if not prebuilt) + publish LCD-only manifest
             binpath = prebuilt.get(target) or build_lcd(target)
