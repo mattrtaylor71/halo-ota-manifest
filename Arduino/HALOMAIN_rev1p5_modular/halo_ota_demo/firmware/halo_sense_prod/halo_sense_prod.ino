@@ -28,6 +28,13 @@ static bool g_lcd_ota_request_active = false;
 static bool g_lcd_ota_ack_received = false;
 static unsigned long g_lcd_ota_request_start_ms = 0;
 static uint32_t g_lcd_ota_last_request_epoch = 0;
+// millis() of the last time g_lcd_ota_version was set from a REAL
+// LCD_OTA_QUERY_RESP (not from a manifest). 0 = never / invalidated.
+static unsigned long g_lcd_fw_query_ms = 0;
+// Refresh the cached LCD fw version if it is older than this when the UART
+// link is recent at pre-sleep. Keeps cloud lcd_fw close to reality after a
+// LCD OTA reboot without querying on every sleep.
+static const unsigned long LCD_FW_QUERY_STALE_MS = 300000;  // 5 min
 RTC_DATA_ATTR static uint32_t g_lcd_ota_recent_request_id = 0;
 static bool g_lcd_ota_attempted_this_window = false;
 static uint32_t g_lcd_ota_window_remaining_s = 0;
@@ -2386,8 +2393,14 @@ static void lcd_ota_proxy_task(void* param) {
   // Map proxy result to g_lcd_ota_result
   if (strcmp(proxy_result, "success") == 0) {
     strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
-    strncpy(g_lcd_ota_version, lcd_manifest.version, sizeof(g_lcd_ota_version) - 1);
-    g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
+    // Do NOT assume the manifest version is now running. The LCD reboots into
+    // the new image; the cloud-reported lcd_fw must reflect the REAL running
+    // version from a future LCD_OTA_QUERY_RESP, not the OTA target. Invalidate
+    // the cached value so the pre-sleep / periodic query path re-queries the
+    // LCD and overwrites it with the actual booted version.
+    g_lcd_ota_version[0] = '\0';
+    g_lcd_fw_query_ms = 0;
+    LOG_INFO("[LCD_OTA_ORCH] cleared cached lcd_fw; will re-query real version post-reboot");
   } else if (strcmp(proxy_result, "up_to_date") == 0) {
     strncpy(g_lcd_ota_result, "noop", sizeof(g_lcd_ota_result) - 1);
   } else {
@@ -3780,13 +3793,27 @@ void halo_prod_pre_sleep() {
     g_maint_sync_wait_until_ms = 0;
   }
 
-  // Query LCD firmware version if not already cached (for OTA report)
-  if (g_lcd_ota_version[0] == '\0' && halo_uart_link_recent(3000)) {
-    char lcd_fw_buf[32] = {0};
-    if (sense_lcd_ota_query(lcd_fw_buf, sizeof(lcd_fw_buf), nullptr)) {
-      strncpy(g_lcd_ota_version, lcd_fw_buf, sizeof(g_lcd_ota_version) - 1);
-      g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
-      LOG_INFO("[PRE_SLEEP] lcd_fw queried: %s", g_lcd_ota_version);
+  // Query LCD for its REAL running firmware version (for OTA report).
+  // The cloud-reported lcd_fw must come from an actual LCD_OTA_QUERY_RESP,
+  // never from an assumed manifest version. Refresh when:
+  //   - the cache is empty (e.g. just cleared after a successful LCD OTA), or
+  //   - the cached value is stale (older than LCD_FW_QUERY_STALE_MS),
+  // provided the UART link is recent and no OTA proxy is in flight.
+  {
+    bool empty = (g_lcd_ota_version[0] == '\0');
+    bool stale = (g_lcd_fw_query_ms == 0) ||
+                 ((millis() - g_lcd_fw_query_ms) > LCD_FW_QUERY_STALE_MS);
+    if ((empty || stale) && !g_lcd_ota_task_running &&
+        halo_uart_link_recent(3000)) {
+      char lcd_fw_buf[32] = {0};
+      if (sense_lcd_ota_query(lcd_fw_buf, sizeof(lcd_fw_buf), nullptr)) {
+        strncpy(g_lcd_ota_version, lcd_fw_buf, sizeof(g_lcd_ota_version) - 1);
+        g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
+        g_lcd_fw_query_ms = millis();
+        LOG_INFO("[PRE_SLEEP] lcd_fw queried (real): %s", g_lcd_ota_version);
+      } else if (empty) {
+        LOG_INFO("[PRE_SLEEP] lcd_fw query failed; cache remains empty");
+      }
     }
   }
 
@@ -4613,6 +4640,27 @@ const char* truth_get_lcd_ota_result() {
 
 const char* truth_get_lcd_fw_version() {
   return g_lcd_ota_version;
+}
+
+// True when any OTA activity is in flight (LCD proxy owns UART, an LCD OTA
+// request/transfer is active, or a Sense OTA check/apply is running).
+// Used by Sense_Minimal.ino to suppress non-OTA HTTP (list refresh) that
+// would otherwise starve the single net stack and stall the OTA download.
+bool lcd_ota_in_progress() {
+  return g_lcd_ota_proxy_owns_uart ||
+         g_lcd_ota_request_active ||
+         g_lcd_ota_task_running ||
+         g_ota_apply_in_progress ||
+         g_ota_check_in_progress;
+}
+
+// Real LCD running partition state, captured from the most recent
+// LCD_OTA_QUERY_RESP (sense_ota_lcd.h getter). Observability only.
+// sense_lcd_last_running_state() is visible here because this TU includes
+// Sense_Minimal.ino which includes sense_ota_lcd.h.
+const char* truth_get_lcd_running_state() {
+  const char* s = sense_lcd_last_running_state();
+  return (s && s[0]) ? s : "UNKNOWN";
 }
 
 int32_t truth_get_lcd_fw_age_s() {

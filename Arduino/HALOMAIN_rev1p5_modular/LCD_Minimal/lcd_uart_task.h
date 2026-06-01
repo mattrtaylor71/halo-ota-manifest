@@ -190,18 +190,20 @@ static void uart_task(void *arg) {
             usb_buf[usb_pos] = '\0';
 
             // --- Plain-text shortcut commands ---
-            if (strcmp(usb_buf, "fw") == 0) {
-              const esp_partition_t* running = esp_ota_get_running_partition();
-              const esp_partition_t* next_ota = esp_ota_get_next_update_partition(NULL);
-              esp_ota_img_states_t ota_state = ESP_OTA_IMG_UNDEFINED;
-              if (running) esp_ota_get_state_partition(running, &ota_state);
+            if (strcasecmp(usb_buf, "fw") == 0 || strcasecmp(usb_buf, "ver") == 0) {
+              // Canonical machine-readable line — reuses the SAME partition/state
+              // logic as LCD_OTA_QUERY_RESP (lcd_build_fw_status_json in
+              // lcd_ota_uart.h) so the two reporting paths never diverge.
+              StaticJsonDocument<256> fwdoc;
+              lcd_build_fw_status_json(fwdoc);
+              String fwout;
+              serializeJson(fwdoc, fwout);
+              Serial.printf("[FW] %s\n", fwout.c_str());
+
+              // Legacy human-readable lines (back-compat for existing tooling).
               Serial.printf("[FW] lcd_fw=%s sense_fw=%s\n",
                             kFirmwareVersion ? kFirmwareVersion : "?",
                             g_sense_fw_version);
-              Serial.printf("[FW] partition=%s ota_state=%d next_ota=%s\n",
-                            running ? running->label : "?",
-                            (int)ota_state,
-                            next_ota ? next_ota->label : "?");
               Serial.printf("[FW] device_id=%s\n",
                             g_lcd_device_id[0] ? g_lcd_device_id : "?");
             } else if (strcmp(usb_buf, "clearwindow") == 0) {

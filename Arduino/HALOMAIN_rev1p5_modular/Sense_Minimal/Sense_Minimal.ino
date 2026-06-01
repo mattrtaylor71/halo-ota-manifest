@@ -97,6 +97,15 @@ void halo_prod_on_lcd_maint_ack(uint32_t remaining_s,
 bool halo_prod_should_defer_sleep_ack(bool* ota_busy, bool* mqtt_busy, bool* time_invalid, bool* ota_check_busy);
 void halo_prod_request_manual_ota(const char* reason);
 void halo_prod_request_maint_test(uint32_t duration_sec);
+// True if any LCD/Sense OTA activity is in progress. Used to suppress
+// non-OTA HTTP traffic (e.g. list refresh) that would starve the single
+// net stack and stall the LCD OTA S3 download. Defined in the prod wrapper.
+bool lcd_ota_in_progress();
+#endif
+
+#ifndef HALO_SENSE_PROD_WRAPPER
+// Non-wrapper (dev) builds have no OTA orchestration; never suppress.
+__attribute__((weak)) bool lcd_ota_in_progress() { return false; }
 #endif
 
 #ifdef HALO_SENSE_PROD_WRAPPER
@@ -724,6 +733,14 @@ static void request_list_refresh(const char* reason, bool send_status) {
     strncpy(g_last_refresh_reason, reason, sizeof(g_last_refresh_reason) - 1);
     g_last_refresh_reason[sizeof(g_last_refresh_reason) - 1] = '\0';
   }
+  // Suppress non-OTA HTTP while an OTA proxy/transfer is active — a list
+  // GET on the single net stack starves the LCD OTA S3 download and can
+  // stall it to abort. Deferred refreshes resume after OTA completes.
+  if (lcd_ota_in_progress()) {
+    Serial.printf("[LIST_REFRESH] deferred (lcd_ota_in_progress) reason=%s\n",
+                  reason ? reason : "unknown");
+    return;
+  }
   if (list_refresh_inflight) {
     Serial.printf("[LIST_REFRESH] already inflight, skipping reason=%s\n",
                   reason ? reason : "unknown");
@@ -866,16 +883,39 @@ static const char* get_sense_fw_version() {
 }
 
 static void uart_send_fw_info() {
-  StaticJsonDocument<128> doc;
+  // Trigger a FRESH LCD query round-trip so FW_INFO reports the REAL running
+  // LCD firmware + partition/state (not the cached OTA manifest value).
+  // Observability only — does not affect OTA control flow.
+  char     lcd_fw_buf[32] = {0};
+  uint32_t lcd_part_size  = 0;
+  unsigned long query_start_ms = millis();
+  bool lcd_ok = sense_lcd_ota_query(lcd_fw_buf, sizeof(lcd_fw_buf), &lcd_part_size);
+  unsigned long lcd_fw_age_s = (millis() - query_start_ms) / 1000UL;
+
+  StaticJsonDocument<320> doc;
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = "FW_INFO";
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   doc["sense_fw"] = get_sense_fw_version();
+  if (lcd_ok && lcd_fw_buf[0] != '\0') {
+    doc["lcd_fw"]            = lcd_fw_buf;
+    doc["lcd_running_part"]  = sense_lcd_last_running_part();
+    doc["lcd_running_state"] = sense_lcd_last_running_state();
+    doc["lcd_boot_part"]     = sense_lcd_last_boot_part();
+    doc["lcd_fw_age_s"]      = (uint32_t)lcd_fw_age_s;
+  } else {
+    // Fresh query failed/timed out — still emit sense_fw, mark LCD unknown.
+    doc["lcd_fw"] = "unknown";
+  }
+
   String output;
   serializeJson(doc, output);
   uart_send_json(output.c_str());
-  Serial.println("[UART_TX] FW_INFO sent");
+  Serial.printf("[UART_TX] FW_INFO sent (lcd_ok=%d lcd_fw=%s state=%s)\n",
+                lcd_ok ? 1 : 0,
+                lcd_ok ? lcd_fw_buf : "unknown",
+                lcd_ok ? sense_lcd_last_running_state() : "-");
 }
 
 static void uart_send_ui_status_extended(const char* op, const char* phase, const char* text, const char* mode = NULL, uint32_t job_id = 0, const char* ui_policy = NULL, const char* screen_hint = NULL) {
@@ -1896,8 +1936,12 @@ static bool parse_input_message(const char* json_str) {
       return true;
     }
     Serial.println("[INPUT_WAKE] accepted");
-    Serial.println("[UART] LCD wake-up detected - requesting list refresh");
-    request_list_refresh("input_wake", false);
+    if (lcd_ota_in_progress()) {
+      Serial.println("[INPUT_WAKE] list refresh deferred (lcd_ota_in_progress)");
+    } else {
+      Serial.println("[UART] LCD wake-up detected - requesting list refresh");
+      request_list_refresh("input_wake", false);
+    }
     last_wake_ms = now_ms;
   } else if (strcmp(type, "MAINT_WINDOW_ACK") == 0) {
     uint32_t remaining_s = doc["remaining_s"] | 0;
@@ -2465,9 +2509,21 @@ static bool parse_input_message(const char* json_str) {
     strncpy(g_lcd_ota_query_resp_fw, fw, sizeof(g_lcd_ota_query_resp_fw) - 1);
     g_lcd_ota_query_resp_fw[sizeof(g_lcd_ota_query_resp_fw) - 1] = '\0';
     g_lcd_ota_query_resp_part_size = part_size;
+    // Extended observability fields (real LCD partition/state). Optional —
+    // older LCD firmware may omit them; default to "" / "UNKNOWN".
+    const char* running_part  = doc["running_part"]  | "";
+    const char* running_state = doc["running_state"] | "UNKNOWN";
+    const char* boot_part     = doc["boot_part"]     | "";
+    strncpy(g_lcd_query_running_part, running_part, sizeof(g_lcd_query_running_part) - 1);
+    g_lcd_query_running_part[sizeof(g_lcd_query_running_part) - 1] = '\0';
+    strncpy(g_lcd_query_running_state, running_state, sizeof(g_lcd_query_running_state) - 1);
+    g_lcd_query_running_state[sizeof(g_lcd_query_running_state) - 1] = '\0';
+    strncpy(g_lcd_query_boot_part, boot_part, sizeof(g_lcd_query_boot_part) - 1);
+    g_lcd_query_boot_part[sizeof(g_lcd_query_boot_part) - 1] = '\0';
     g_lcd_ota_query_resp_ready = true;
-    Serial.printf("[UART] LCD_OTA_QUERY_RESP fw=%s part_size=%lu\n",
-                  fw, (unsigned long)part_size);
+    Serial.printf("[UART] LCD_OTA_QUERY_RESP fw=%s part_size=%lu running_part=%s running_state=%s boot_part=%s\n",
+                  fw, (unsigned long)part_size,
+                  running_part, running_state, boot_part);
   } else if (strcmp(type, "LCD_OTA_BEGIN_ACK") == 0) {
     bool accepted = doc["accepted"] | false;
     const char* reason = doc["reason"] | "unknown";
