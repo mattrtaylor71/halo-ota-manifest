@@ -1206,7 +1206,11 @@ static bool ota_report_build_pre_sleep_payload(String& out) {
   ota_report_add_optional_str(payload, "maint_sync_resolution", truth_get_maint_sync_resolution());
   ota_report_add_optional_str(payload, "maint_last_idle_gate_reason", g_maint_last_idle_gate_reason);
   ota_report_add_optional_str(payload, "maint_last_tx_request_id", truth_get_maint_last_tx_request_id());
-  ota_report_add_optional_str(payload, "lcd_fw", truth_get_lcd_fw_version());
+  // Always send lcd_fw — even if empty, so backend knows field exists
+  {
+    const char* lcd_v = truth_get_lcd_fw_version();
+    payload["lcd_fw"] = (lcd_v && lcd_v[0]) ? lcd_v : "unknown";
+  }
   ota_report_add_optional_str(payload, "lcd_ota_result", truth_get_lcd_ota_result());
   ota_report_add_optional_str(payload, "lcd_maint_ack_request_id", truth_get_lcd_maint_ack_request_id());
   ota_report_add_optional_str(payload, "lcd_maint_ack_status", truth_get_lcd_maint_ack_status());
@@ -3677,7 +3681,7 @@ void halo_prod_pre_sleep() {
       LOG_INFO("[PRE_SLEEP] skip http (budget_exhausted)");
       return;
     }
-    uint32_t wifi_timeout_ms = 4000;
+    uint32_t wifi_timeout_ms = 10000;  // 10s — WiFi often takes 5-8s on cold boot
     if (budget_ms < wifi_timeout_ms) {
       wifi_timeout_ms = budget_ms;
     }
@@ -3774,6 +3778,16 @@ void halo_prod_pre_sleep() {
     }
   } else {
     g_maint_sync_wait_until_ms = 0;
+  }
+
+  // Query LCD firmware version if not already cached (for OTA report)
+  if (g_lcd_ota_version[0] == '\0' && halo_uart_link_recent(3000)) {
+    char lcd_fw_buf[32] = {0};
+    if (sense_lcd_ota_query(lcd_fw_buf, sizeof(lcd_fw_buf), nullptr)) {
+      strncpy(g_lcd_ota_version, lcd_fw_buf, sizeof(g_lcd_ota_version) - 1);
+      g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
+      LOG_INFO("[PRE_SLEEP] lcd_fw queried: %s", g_lcd_ota_version);
+    }
   }
 
   dump_system_truth("pre_sleep");

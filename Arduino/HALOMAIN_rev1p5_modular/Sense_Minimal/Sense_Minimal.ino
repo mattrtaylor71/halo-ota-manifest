@@ -22,6 +22,7 @@
 #include <esp_sleep.h>
 #include <esp_log.h>
 #include <esp_wifi.h>
+#include <esp_mac.h>
 #include <esp_heap_caps.h>
 #include <driver/gpio.h>
 #include <driver/uart.h>
@@ -340,12 +341,10 @@ static void load_runtime_device_id(char* out, size_t out_len) {
   }
   out[0] = '\0';
 
-  uint64_t mac = ESP.getEfuseMac();
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_ETH);
   snprintf(out, out_len, "halo-%02x%02x-%02x%02x",
-           (unsigned)((mac >> 24) & 0xFF),
-           (unsigned)((mac >> 16) & 0xFF),
-           (unsigned)((mac >> 8) & 0xFF),
-           (unsigned)(mac & 0xFF));
+           mac[2], mac[3], mac[4], mac[5]);
 }
 
 static String build_runtime_ota_topic() {

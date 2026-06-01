@@ -439,9 +439,16 @@ static void uart_process_received_message(const char* json_str) {
     // Conditional headless entry — only if not already completed this cycle
     const char* ack_status = "stored";
     if (remaining_s > 0 && wake_in_s == 0) {
-      if (!g_lcd_maintenance_active && g_lcd_maintenance_completed_ms > 0) {
+      // Skip headless if maintenance already completed this cycle, OR if
+      // we just received OTA_UNLOCK (Sense confirmed LCD is up to date).
+      // The Sense sends MAINT_WINDOW during pre_sleep sync even after OTA
+      // is done — entering headless at that point kills the UI for no reason.
+      unsigned long unlock_age = (ota_unlock_received_ms > 0) ? (millis() - ota_unlock_received_ms) : 0xFFFFFFFF;
+      bool recently_unlocked = (unlock_age < 10000);  // within 10s of OTA_UNLOCK
+      if (!g_lcd_maintenance_active && (g_lcd_maintenance_completed_ms > 0 || recently_unlocked)) {
         // Timer is armed above, just don't re-enter headless mode
-        Serial.println("[UART] MAINT_WINDOW timer_armed (headless already completed this cycle)");
+        Serial.printf("[UART] MAINT_WINDOW skip headless (completed=%lu unlock_age=%lu)\n",
+                      g_lcd_maintenance_completed_ms, unlock_age);
         ack_status = "timer_armed";
       } else {
         // Full activation + headless entry
@@ -483,8 +490,13 @@ static void uart_process_received_message(const char* json_str) {
         sleep_deny_reason[sizeof(sleep_deny_reason) - 1] = '\0';
         sleep_deny_received_ms = millis();
 #ifdef HALO_LCD_PROD_WRAPPER
-        lcd_enter_maintenance_headless("maint_window");
-        touch_ignore_until = millis() + 2000;  // Grace period for TAP actuator retraction
+        // Do NOT enter headless mode. LCD OTA is proxied by Sense over UART —
+        // the LCD doesn't need WiFi/TLS RAM, so keep the UI running. Headless
+        // mode kills the UI task and turns off the display, causing a cascade
+        // of recovery bugs (stale NVS, black screen, failed reboots).
+        // The UART binary transfer works fine with the UI running.
+        Serial.println("[LCD_MAINT] staying in UI mode (OTA proxied by Sense)");
+        touch_ignore_until = millis() + 2000;
 #endif
         ack_status = "active";
       }
@@ -644,6 +656,7 @@ static void uart_process_received_message(const char* json_str) {
     g_lcd_maintenance_active = false;
     g_lcd_maintenance_deadline_ms = 0;
     g_ota_mode_active = false;
+    ota_unlock_received_ms = millis();
     Serial.println("[OTA] unlock received - all OTA flags cleared");
     return;
   } else if (strcmp(type, "OTA_CHECK") == 0) {
@@ -799,9 +812,6 @@ static void uart_process_received_message(const char* json_str) {
   }
 
   if (strcmp(type, "UI_LIST") == 0) {
-    // List feature disabled — ignore list updates to prevent activity timer resets
-    Serial.println("[UART] UI_LIST ignored (list feature disabled)");
-    return;
     unsigned long now_ms = millis();
     if (!lcd_refresh_inflight &&
         lcd_last_ui_list_complete_ms > 0 &&

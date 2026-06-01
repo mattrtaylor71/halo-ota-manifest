@@ -298,7 +298,7 @@ void halo_lcd_prod_loop() {
 
   if (lcd_maintenance_active()) {
     unsigned long remaining_ms = lcd_maintenance_remaining_ms();
-    if (remaining_ms == 0 && next_ota_check_ms > 0) {
+    if (remaining_ms == 0) {
       Serial.println("[LCD_OTA] maintenance window expired before retry");
       next_ota_check_ms = 0;
       if (!ota_check_in_progress && !ota_check_requested) {
@@ -322,6 +322,26 @@ void halo_lcd_prod_loop() {
   if (ota_check_requested && !ota_locked) {
     ota_check_requested = false;
     runLcdOtaCheckOnce();
+  }
+
+  // Headless recovery: if in headless mode and no OTA activity for 15s,
+  // exit headless. The LCD can't do OTA itself (proxied by Sense), so
+  // if the Sense doesn't start a proxy within 15s, nothing will happen
+  // and the user is stuck with a black screen.
+  {
+    static unsigned long s_headless_wait_start = 0;
+    if (g_lcd_maintenance_headless && !ota_locked && !g_lcd_ota_uart_receiving) {
+      if (s_headless_wait_start == 0) {
+        s_headless_wait_start = millis();
+      } else if ((millis() - s_headless_wait_start) > 120000) {  // 2 min — Sense needs ~60s for own OTA + reboot + WiFi before LCD proxy starts
+        Serial.println("[LCD_OTA] headless recovery (no OTA activity for 15s)");
+        lcd_finish_maintenance("headless_no_ota");
+        lcd_exit_ota_mode("headless_no_ota");
+        s_headless_wait_start = 0;
+      }
+    } else {
+      s_headless_wait_start = 0;
+    }
   }
 }
 

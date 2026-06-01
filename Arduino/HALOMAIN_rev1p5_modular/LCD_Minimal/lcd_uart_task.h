@@ -190,9 +190,38 @@ static void uart_task(void *arg) {
             usb_buf[usb_pos] = '\0';
 
             // --- Plain-text shortcut commands ---
-            if (strcmp(usb_buf, "ota") == 0) {
+            if (strcmp(usb_buf, "fw") == 0) {
+              const esp_partition_t* running = esp_ota_get_running_partition();
+              const esp_partition_t* next_ota = esp_ota_get_next_update_partition(NULL);
+              esp_ota_img_states_t ota_state = ESP_OTA_IMG_UNDEFINED;
+              if (running) esp_ota_get_state_partition(running, &ota_state);
+              Serial.printf("[FW] lcd_fw=%s sense_fw=%s\n",
+                            kFirmwareVersion ? kFirmwareVersion : "?",
+                            g_sense_fw_version);
+              Serial.printf("[FW] partition=%s ota_state=%d next_ota=%s\n",
+                            running ? running->label : "?",
+                            (int)ota_state,
+                            next_ota ? next_ota->label : "?");
+              Serial.printf("[FW] device_id=%s\n",
+                            g_lcd_device_id[0] ? g_lcd_device_id : "?");
+            } else if (strcmp(usb_buf, "clearwindow") == 0) {
+              lcd_clear_persisted_maintenance_state("usb_clear");
+              g_lcd_maintenance_active = false;
+              g_lcd_maintenance_timer_armed = 0;
+              g_lcd_maintenance_wake_in_s = 0;
+              g_lcd_maintenance_remaining_s = 0;
+              g_lcd_maintenance_deadline_ms = 0;
+              Serial.println("[USB_CMD] maintenance window cleared");
+            } else if (strcmp(usb_buf, "ota") == 0) {
               Serial.println("[USB_CMD] shortcut 'ota' -> INPUT_OTA_CHECK");
               uart_send_input_message("INPUT_OTA_CHECK");
+            } else if (strcmp(usb_buf, "list") == 0) {
+              Serial.println("[USB_CMD] shortcut 'list' -> Shopping List");
+              show_shopping_list_screen();
+              request_sense_wake("usb_list");
+              uart_send_input_message("INPUT_WAKE");
+              refresh_sm_set_wake_pending("usb_list");
+              resetActivityTimer();
             } else if (strcmp(usb_buf, "wake") == 0) {
               Serial.println("[USB_CMD] shortcut 'wake' -> INPUT_WAKE");
               uart_send_input_message("INPUT_WAKE");

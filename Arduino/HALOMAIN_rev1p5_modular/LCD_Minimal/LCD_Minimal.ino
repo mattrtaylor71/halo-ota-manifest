@@ -768,21 +768,21 @@ static bool refresh_retry_pending = false;
 static uint32_t refresh_success_count = 0;
 static uint32_t refresh_timeout_count = 0;
 static uint32_t refresh_retry_count = 0;
-static const unsigned long REFRESH_TOTAL_TIMEOUT_MS = 12000;
-static const unsigned long REFRESH_PROOF_OF_LIFE_TIMEOUT_MS = 6000;
-static const unsigned long REFRESH_TOTAL_MAX_MS = 30000;
-static const unsigned long REFRESH_NO_UI_POL_TIMEOUT_MS = 15000;
-static const unsigned long REFRESH_MAX_MS = 8000;
+static const unsigned long REFRESH_TOTAL_TIMEOUT_MS = 25000;    // 25s — Sense WiFi connect (~10s) + API (~3s) + margin
+static const unsigned long REFRESH_PROOF_OF_LIFE_TIMEOUT_MS = 20000; // 20s — generous window for proof after INFLIGHT
+static const unsigned long REFRESH_TOTAL_MAX_MS = 35000;        // 35s hard max
+static const unsigned long REFRESH_NO_UI_POL_TIMEOUT_MS = 25000; // 25s — no UI poll timeout
+static const unsigned long REFRESH_MAX_MS = 30000;  // 30s — Sense needs boot (~5s) + WiFi connect (~15s) + API call (~3s)
 static const unsigned long REFRESH_FAILED_SHOW_MS = 2000;
 static const unsigned long REFRESH_COMPLETE_SHOW_MS = 500;
 static const unsigned long REFRESH_PULSE_COOLDOWN_MS = 1500;
 static const unsigned long REFRESH_PULSE_NO_POL_MS = 1500;
 static const uint8_t REFRESH_PULSE_MAX = 2;
-static const unsigned long REFRESH_WAKE_WAIT_MS = 4000;
+static const unsigned long REFRESH_WAKE_WAIT_MS = 5000;         // 5s per attempt (Sense needs up to 12s to boot)
 static const unsigned long REFRESH_WAKE_PING_INTERVAL_MS = 400;
 static const unsigned long SENSE_CONTROL_READY_WINDOW_MS = 2000;
 static const unsigned long REFRESH_WAKE_PULSE_BACKOFF_MS = 1500;
-static const uint8_t REFRESH_WAKE_MAX_ATTEMPTS = 3;
+static const uint8_t REFRESH_WAKE_MAX_ATTEMPTS = 5;             // 5 attempts (total ~25s window for Sense boot)
 static unsigned long last_sense_msg_ms = 0;
 static unsigned long last_proof_of_life_ms = 0;
 static bool sense_rx_stale_logged = false;
@@ -983,6 +983,7 @@ static void haptic_pulse_scroll() {
 static volatile bool ota_locked = false;
 static volatile bool g_ota_screen_active = false;  // OTA status screen is showing — block UI overwrite
 static unsigned long ota_lock_at_ms = 0;
+static unsigned long ota_unlock_received_ms = 0;
 static const unsigned long OTA_LOCK_TIMEOUT_MS = 1800000; // 30 min auto-unlock (covers sense OTA + reboot)
 static const unsigned long OTA_UNLOCK_GRACE_MS = 45000;   // keep LCD awake after unlock
 static volatile bool ota_check_requested = false;
@@ -2702,6 +2703,8 @@ static void refresh_sm_set_state(RefreshState state, const char* reason) {
   refresh_sm_log(reason, now_ms);
 }
 
+static void refresh_sm_set_wake_pending(const char* reason);  // forward declaration
+
 static void refresh_soft_fail(const char* reason) {
   unsigned long now_ms = millis();
   Serial.printf("[REFRESH_SM] soft_fail reason=%s\n", reason ? reason : "unknown");
@@ -2742,6 +2745,20 @@ static void refresh_soft_fail(const char* reason) {
   refresh_last_pulse_ms = 0;
   refresh_last_wake_send_ms = 0;
   refresh_done_ms = 0;
+
+  // Auto-retry if user is still on the shopping list screen.
+  // The Sense WiFi may take 15-25s to connect on cold boot — the first
+  // refresh attempt times out before WiFi is ready. Re-trigger so the
+  // user doesn't have to manually retry.
+  static uint8_t s_list_auto_retry_count = 0;
+  if (ui_screen_state == SCREEN_SHOPPING_LIST && s_list_auto_retry_count < 3) {
+    s_list_auto_retry_count++;
+    Serial.printf("[REFRESH] auto-retry %d/3 (user on shopping list)\n", s_list_auto_retry_count);
+    request_sense_wake("list_retry");
+    refresh_sm_set_wake_pending("list_auto_retry");
+  } else {
+    s_list_auto_retry_count = 0;
+  }
 }
 
 static void refresh_sm_set_wake_pending(const char* reason) {
@@ -3544,6 +3561,18 @@ void setup() {
     lcd_clear_persisted_maintenance_state("stale_boot_override");
     g_lcd_maintenance_wake_window = false;
     g_ship_ota_wake_window = false;
+    // Clear maintenance active state that was set before we detected stale NVS
+    g_lcd_maintenance_active = false;
+    g_lcd_maintenance_started = false;
+    g_lcd_maintenance_headless = false;
+    g_ota_mode_active = false;
+    g_lcd_maintenance_timer_armed = 0;
+    g_lcd_maintenance_wake_in_s = 0;
+    g_lcd_maintenance_remaining_s = 0;
+    g_lcd_maintenance_deadline_ms = 0;
+    lcd_mode = LCD_MODE_UI_ACTIVE;
+    g_lvgl_running = true;
+    g_panel_enabled = true;
     init_ui_stack(g_saved_list_count);
   }
   // Force LVGL to flush the display buffer immediately after init
@@ -3720,7 +3749,20 @@ void loop() {
           Serial.println("[LCD_MAINT] headless waiting_for_ota_check");
         }
       }
-      skip_main_loop = true;
+      // Deadline check: exit headless if maintenance window expired or failsafe hit
+      unsigned long headless_age_ms = millis() - guardian_awake_start_ms;
+      bool deadline_expired = (g_lcd_maintenance_deadline_ms > 0 && millis() > g_lcd_maintenance_deadline_ms);
+      bool failsafe_expired = (headless_age_ms >= GUARDIAN_FORCE_SLEEP_MS);
+      if (deadline_expired || failsafe_expired) {
+        Serial.printf("[LCD_MAINT] headless exit reason=%s age_ms=%lu\n",
+                      deadline_expired ? "deadline_expired" : "failsafe_timeout",
+                      headless_age_ms);
+        lcd_finish_maintenance(deadline_expired ? "deadline_expired" : "failsafe_timeout");
+        lcd_exit_ota_mode(deadline_expired ? "deadline_expired" : "failsafe_timeout");
+        skip_main_loop = false;
+      } else {
+        skip_main_loop = true;
+      }
     }
   }
   if (g_lcd_maintenance_wake_window && !g_ui_initialized) {
