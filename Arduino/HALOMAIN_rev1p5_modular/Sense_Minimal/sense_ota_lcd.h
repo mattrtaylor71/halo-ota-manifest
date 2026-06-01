@@ -36,6 +36,13 @@
 #define LCD_OTA_PROXY_STALL_WINDOW_MS   30000      // no-data window before stall
 #define LCD_OTA_PROXY_MAX_RECONNECTS    5          // consecutive stall reconnect budget
 
+// ── TEST-ONLY debug hook ───────────────────────────────────────────
+// When 1, injects a SINGLE forced mid-transfer stall (closes the HTTP
+// connection once, at ~50% of the image) to exercise and verify the
+// reconnect/resume-on-stall path. This MUST be 0 in shipping builds.
+// It has no effect on real OTA behavior when set to 0.
+#define LCD_OTA_PROXY_TEST_FORCE_STALL 0   // TEST-ONLY: set to 1 to inject one mid-transfer stall (verified reconnect/resume 2026-06-01).
+
 // ── Forward declarations of externs from Sense_Minimal.ino ──────────
 
 extern HardwareSerial lcdSerial;
@@ -388,6 +395,9 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
   unsigned long stream_start_ms = millis();
   unsigned long last_data_ms = millis();
   int reconnects = 0;  // consecutive stalls; reset on any data progress
+#if LCD_OTA_PROXY_TEST_FORCE_STALL
+  bool forced_stall_done = false;  // TEST-ONLY: one-shot stall injection guard
+#endif
 
   // Attempt to recover from a stall by re-opening the HTTP GET at the current
   // offset with a Range header. Returns true if a fresh connected stream was
@@ -527,6 +537,19 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
                     elapsed_s, rate_bps, t_read_ms, t_rtt_ms);
       last_pct_10 = pct_bucket;
     }
+
+#if LCD_OTA_PROXY_TEST_FORCE_STALL
+    if (!forced_stall_done && bytes_sent >= (manifest.size / 2)) {
+      forced_stall_done = true;
+      Serial.printf("[LCD_OTA_PROXY][TEST] stopping stream at offset %lu (%.0f%%) to exercise reconnect\n",
+                    (unsigned long)bytes_sent, 100.0 * bytes_sent / manifest.size);
+      stream->stop();   // close the actual TCP socket the loop reads from.
+                        // http.end() alone does NOT stop a user-supplied
+                        // tls_client, so the stream kept flowing. Stopping the
+                        // stream makes next iteration's pre-read
+                        // !available() && !connected() check fire -> try_reconnect().
+    }
+#endif
   }
 
   // ── Cleanup on stream error ───────────────────────────────────────
