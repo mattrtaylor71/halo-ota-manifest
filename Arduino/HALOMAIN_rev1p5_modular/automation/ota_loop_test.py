@@ -241,6 +241,25 @@ def sense_wake(sense_mon):
     sense_mon.write(proto_msg("INPUT_WAKE"))
 
 
+def wait_for_sleep(mons, timeout=90, stable=6.0):
+    """Wait until ALL monitored ports are gone (boards deep-asleep / de-enumerated)
+    and stay gone for `stable` seconds. A stylus tap only pulses the Sense wake GPIO
+    when the LCD itself wakes FROM sleep — so we must let both boards fully sleep,
+    then a single tap cold-wakes both. Returns True if sleep detected, else False."""
+    end = time.monotonic() + timeout
+    stable_since = None
+    while time.monotonic() < end:
+        if all(not m.is_open for m in mons):
+            if stable_since is None:
+                stable_since = time.monotonic()
+            elif time.monotonic() - stable_since >= stable:
+                return True
+        else:
+            stable_since = None
+        time.sleep(0.5)
+    return False
+
+
 def trigger_ota(sense_mon, reason):
     sense_mon.wait_open(8)
     sense_mon.write(proto_msg("INPUT_WAKE"))
@@ -355,9 +374,17 @@ def main():
             pre_ver = pre.get("lcd_fw")
             log(f"  pre-OTA: fw={pre_ver} part={pre_part} state={pre.get('running_state')}")
 
-            # Trigger manual OTA. The Sense idle-sleeps within ~10-15s, so it may be
-            # asleep when we fire (trigger lost). Tap to wake right before each send,
-            # and retry until the trigger REGISTERS (request accepted / allow=1).
+            # Let BOTH boards fully sleep first, then the trigger's tap cold-wakes
+            # both (LCD wake-from-sleep pulses the Sense wake GPIO). Without this,
+            # a post-read-awake LCD swallows the tap and the Sense never wakes.
+            log("  waiting for coordinated sleep before trigger...")
+            if wait_for_sleep([lcd_mon, sense_mon], timeout=90):
+                log("  both boards asleep -> cold-waking via tap")
+            else:
+                log("  sleep not detected within 90s -> proceeding (tap-retry fallback)")
+
+            # Trigger manual OTA. Tap to (cold-)wake right before each send, and
+            # retry until the trigger REGISTERS (request accepted / allow=1).
             log("  triggering manual OTA (INPUT_OTA_CHECK)")
             t0 = time.monotonic()
             reg = None
