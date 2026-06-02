@@ -623,6 +623,7 @@ If LCD sent INPUT_OTA_CHECK but Sense goes to sleep before processing it, LCD re
 - Two-phase overlay: "Software Update" text during Sense self-OTA, "Updating XX%" during LCD binary transfer
 - Rendered with black background, white text, lv_font_montserrat_28
 - All rendering happens on Core 1 (UI task) — Core 0 only sets the volatile flags
+- **Overlay lifecycle / stale-overlay fix:** The overlay (`ota_overlay`) and its label are `lv_obj_create(lv_scr_act())` children of whatever screen was active when OTA began. Since manual OTA is launched from the **Settings** screen, the overlay becomes a child of the settings screen. The four overlay statics (`ota_overlay`, `ota_label`, `last_shown_pct`, `last_was_transfer`) are now declared at the top of the loop body (just before the `if (g_ota_screen_active)` block) instead of inside it, so a teardown immediately **after** that block can see them. When `g_ota_screen_active` clears, the UI task deletes the overlay (`lv_obj_del(ota_overlay)`, which also frees the child label) and resets the statics, logging `[OTA] overlay torn down (screen inactive)`. Without this, the overlay lingered as a permanent child of the settings screen and the "Software Update" text reappeared on top every time Settings was reopened (even with all OTA flags clear). The teardown runs while the LVGL lock acquired at the top of the loop is still held — it does **not** re-lock or unlock (the normal path below releases the lock exactly once).
 
 #### Task Loop Structure
 
@@ -630,7 +631,8 @@ If LCD sent INPUT_OTA_CHECK but Sense goes to sleep before processing it, LCD re
 for (;;) {
   1. Check g_ui_task_exit_requested -> self-delete if true
   2. Acquire LVGL lock (50ms timeout)
-  3. If g_ota_screen_active: just tick LVGL, release, delay 50ms
+  3. If g_ota_screen_active: just tick LVGL, release, delay 50ms (overlay statics hoisted to loop top)
+  3b. Else (OTA inactive): if ota_overlay still exists, lv_obj_del it + reset statics (lock still held)
   4. Drain ship UI events (EVT_SHIP_UI_STATUS, EVT_SHIP_UI_TOAST, EVT_SHIP_VOICE_JSON)
   5. Handle provision_return_home_pending -> show_ship_main_menu()
   6. Service timed screen transitions (voice_ack hide, logged hide, error hide)

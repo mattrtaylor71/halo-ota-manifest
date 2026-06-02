@@ -32,15 +32,19 @@ static void ui_task(void *arg) {
       vTaskDelay(pdMS_TO_TICKS(1));
       continue;
     }
+    // OTA overlay state — hoisted out of the if (g_ota_screen_active) block so
+    // the teardown below (reached only when OTA is no longer active) can see and
+    // delete the overlay. These remain static so they persist across loop
+    // iterations and across the active/inactive transition.
+    static lv_obj_t* ota_overlay = NULL;
+    static lv_obj_t* ota_label = NULL;
+    static int last_shown_pct = -1;
+    static bool last_was_transfer = false;
+
     // While OTA screen is active, don't process any screen transitions.
     // Just tick LVGL to keep the display alive and release the lock.
     if (g_ota_screen_active) {
       // OTA overlay — black screen with status text
-      static lv_obj_t* ota_overlay = NULL;
-      static lv_obj_t* ota_label = NULL;
-      static int last_shown_pct = -1;
-      static bool last_was_transfer = false;
-
       bool is_transfer = g_lcd_ota_show_progress && g_lcd_ota_progress_pct >= 0;
       bool need_update = false;
 
@@ -87,6 +91,24 @@ static void ui_task(void *arg) {
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
+
+    // OTA screen no longer active: delete the overlay so it doesn't linger as a
+    // child of whatever screen it was created on (e.g. created while on Settings
+    // -> "Software Update" reappears every time Settings is reopened). Runs on
+    // the UI task (Core 1) so LVGL is safe here. The LVGL lock acquired at the
+    // top of this loop iteration is still held at this point (the active-OTA
+    // branch above releases it only inside its own block before continuing), so
+    // call lv_obj_del directly — do NOT re-lock (deadlock) and do NOT unlock
+    // (the normal path below releases the lock exactly once).
+    if (ota_overlay) {
+      lv_obj_del(ota_overlay);   // also deletes child ota_label
+      ota_overlay = NULL;
+      ota_label = NULL;
+      last_shown_pct = -1;
+      last_was_transfer = false;
+      Serial.println("[OTA] overlay torn down (screen inactive)");
+    }
+
     app_event_t evt;
     bool processed_anything = false;
     bool deferred_evt_ready = false;
