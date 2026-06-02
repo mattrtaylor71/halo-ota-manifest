@@ -4000,6 +4000,17 @@ static void handle_ota_proof() {
 }
 
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
+  // Breadcrumb: record OTA-check entry in the persistent black box (area
+  // "ota_orch") so the manual-OTA decision/handshake trail survives reboots
+  // and is readable later via the LCD error log.
+  {
+    char crumb[96];
+    snprintf(crumb, sizeof(crumb), "reason=%s manual=%d t=%lu",
+             reason ? reason : "(null)",
+             (int)halo_ota_manual_override_active(),
+             (unsigned long)millis());
+    diag_record_error_persistent("ota_orch", 0, crumb);
+  }
   if (g_ota_check_done || g_ota_apply_in_progress) {
     return;
   }
@@ -4309,14 +4320,49 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     const OtaUrlConfig* lcd_cfg = ota_get_config();
     char lcd_fw[32] = {0};
     OtaManifest lcd_manifest;
+    {
+      // Breadcrumb: about to send LCD_OTA_QUERY over UART.
+      char crumb[96];
+      snprintf(crumb, sizeof(crumb), "lcd_query_tx t=%lu link_recent=%d",
+               (unsigned long)millis(), (int)halo_uart_link_recent(3000));
+      diag_record_error_persistent("ota_orch", 0, crumb);
+    }
     if (!sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr)) {
       LOG_INFO("[OTA_ORCH] lcd proxy result=lcd_query_fail (will defer to lcd_ota_due)");
+      // Breadcrumb: LCD never answered the query (the failure we're chasing).
+      char crumb[96];
+      snprintf(crumb, sizeof(crumb), "lcd_query_fail t=%lu", (unsigned long)millis());
+      diag_record_error_persistent("ota_orch", -1, crumb);
     } else if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest)) {
       LOG_INFO("[OTA_ORCH] lcd proxy result=manifest_fetch_fail (will defer to lcd_ota_due)");
+      // Breadcrumb: query succeeded; record the LCD fw it reported.
+      char crumb[96];
+      snprintf(crumb, sizeof(crumb), "lcd_query_ok lcd_fw=%s t=%lu", lcd_fw, (unsigned long)millis());
+      diag_record_error_persistent("ota_orch", 0, crumb);
     } else if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0) {
+      // Breadcrumb: query succeeded; record the LCD fw it reported.
+      {
+        char crumb[96];
+        snprintf(crumb, sizeof(crumb), "lcd_query_ok lcd_fw=%s t=%lu", lcd_fw, (unsigned long)millis());
+        diag_record_error_persistent("ota_orch", 0, crumb);
+      }
       send_ota_uart_message("OTA_LOCK");
+      {
+        // Breadcrumb: starting the LCD OTA proxy stream.
+        char crumb[96];
+        snprintf(crumb, sizeof(crumb), "lcd_proxy_start ver=%s t=%lu",
+                 lcd_manifest.version, (unsigned long)millis());
+        diag_record_error_persistent("ota_orch", 0, crumb);
+      }
       const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
       LOG_INFO("[OTA_ORCH] lcd proxy result=%s", lcd_res);
+      {
+        // Breadcrumb: LCD OTA proxy returned.
+        char crumb[96];
+        snprintf(crumb, sizeof(crumb), "lcd_proxy_done res=%s t=%lu",
+                 lcd_res ? lcd_res : "(null)", (unsigned long)millis());
+        diag_record_error_persistent("ota_orch", 0, crumb);
+      }
       if (lcd_res && strcmp(lcd_res, "success") == 0) {
         lcd_proxy_succeeded = true;
         // LCD reboots into the new image; invalidate the cached version so a
@@ -4332,6 +4378,10 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     } else {
       LOG_INFO("[OTA_ORCH] lcd proxy result=up_to_date (lcd=%s manifest=%s)",
                lcd_fw, lcd_manifest.version);
+      // Breadcrumb: query succeeded; LCD already up-to-date.
+      char crumb[96];
+      snprintf(crumb, sizeof(crumb), "lcd_query_ok lcd_fw=%s t=%lu", lcd_fw, (unsigned long)millis());
+      diag_record_error_persistent("ota_orch", 0, crumb);
       lcd_proxy_succeeded = true;  // nothing owed; don't set lcd_ota_due
     }
   }
@@ -4344,6 +4394,14 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
            lcd_proxy_succeeded ? 0 : 1, lcd_proxy_succeeded ? 1 : 0);
 
   // ── THEN the Sense self-OTA (reboots on success, never returns) ──
+  {
+    // Breadcrumb: about to apply the Sense self-OTA (this reboots on success,
+    // so this is the last crumb before the LCD-owed state at next boot).
+    char crumb[96];
+    snprintf(crumb, sizeof(crumb), "sense_apply_start ver=%s lcd_due=%d t=%lu",
+             manifest.version, (int)(!lcd_proxy_succeeded), (unsigned long)millis());
+    diag_record_error_persistent("ota_orch", 0, crumb);
+  }
   send_ota_uart_message("OTA_LOCK");
   g_ota_apply_in_progress = true;
 

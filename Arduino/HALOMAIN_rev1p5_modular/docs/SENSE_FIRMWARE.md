@@ -718,6 +718,8 @@ During binary streaming, `g_lcd_ota_proxy_owns_uart = true` prevents the main lo
 
 **`sense_lcd_ota_query()`** -- Query LCD firmware version and OTA partition size. The dispatch of `LCD_OTA_QUERY_RESP` also captures extended observability fields (`running_part`, `running_state`, `boot_part`) into static buffers exposed by `sense_lcd_last_running_part/state/boot_part()`.
 
+**Stale-RX flush (hardening):** Inside the per-attempt loop, immediately after clearing the mailbox (`g_lcd_ota_query_resp_ready = false`) and before sending the query JSON, the function drains the hardware FIFO (`while (lcdSerial.available() > 0) lcdSerial.read();`) and resets the RX ring / partial-frame state (`uart_reset_rx_state()`). During the Sense's HTTPS-blocking self-OTA window the main-loop UART drain is starved, so a backlog/overflow can accumulate on `lcdSerial` and desync parsing of the fresh `LCD_OTA_QUERY_RESP` (the no-response failure mode). Ordering is mailbox-clear → raw-flush → send fresh query, so an already-parsed response cannot be dropped.
+
 **`uart_send_fw_info()`** -- Triggers a FRESH `sense_lcd_ota_query()` round-trip, then emits a `FW_INFO` JSON reporting the REAL running firmware of BOTH boards plus LCD partition/state. Fields:
 - `sense_fw` -- live running Sense version (`kFirmwareVersion`)
 - `lcd_fw` -- freshly queried LCD running version (NOT the cached OTA manifest value); `"unknown"` if the query fails/times out
@@ -735,6 +737,17 @@ Observability only; does not affect OTA control flow. A failed/timed-out query d
 **Dual-board OTA order — LCD proxy FIRST, then Sense self-OTA (`maybeRunOtaCheck()` in `halo_sense_prod.ino`):** When a Sense update is found and ready to apply, the LCD is proxied **inline, before** the Sense self-OTA, while the LCD is still awake from the button press:
 1. Inline (main task, blocking the loop so there is no UART-drain race): `sense_lcd_ota_query()` → `sense_lcd_ota_fetch_manifest(cfg->base_dir, cfg->channel, …)` (via `ota_get_config()`) → `ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0` → `send_ota_uart_message("OTA_LOCK")` + `sense_lcd_ota_proxy(lcd_manifest, lcd_fw)`. Logged as `[OTA_ORCH] lcd proxy result=<res>`. MQTT is already stopped (`mqtt_stop_for_ota()` earlier in the function) and camera DMA already released; the manifest-client connection is released (`g_manifest_client.releaseConnection()`) for TLS headroom. `sense_lcd_ota_proxy()` manages `g_lcd_ota_proxy_owns_uart` itself — not double-managed here. On `"success"` the cached LCD version is invalidated (`g_lcd_ota_version[0]='\0'`, `g_lcd_fw_query_ms=0`).
 2. **Then** `g_ota_applier.applyToOtaPartition(...)` + reboot (success never returns; failure keeps the existing MQTT-reconnect / `OTA_UNLOCK` / `recordOtaResult` path).
+
+**Persistent OTA-orchestration breadcrumbs (black box, area `ota_orch`):** `maybeRunOtaCheck()` writes concise breadcrumbs to the persistent error-log black box via `diag_record_error_persistent("ota_orch", code, detail)` (forwards to `sense_errlog_store()` + `uart_send_sense_diag_persist()`, so they survive reboots and are readable later via the LCD error log). Because the API is `(stage, code, text)` rather than printf-style, each `detail` string is built with `snprintf` into a local `char crumb[96]` and is prefixed with the event name. Events:
+- `otachk_enter` (top of `maybeRunOtaCheck`) -- `reason=<reason> manual=<override> t=<millis>`
+- `lcd_query_tx` (before the inline `sense_lcd_ota_query`) -- `t=<millis> link_recent=<halo_uart_link_recent(3000)>`
+- `lcd_query_fail` (code `-1`; inline query returned false) -- `t=<millis>`
+- `lcd_query_ok` (query succeeded; emitted on the manifest-fail, update-needed, and up-to-date branches) -- `lcd_fw=<lcd_fw> t=<millis>`
+- `lcd_proxy_start` (before `sense_lcd_ota_proxy`) -- `ver=<lcd_manifest.version> t=<millis>`
+- `lcd_proxy_done` (after `sense_lcd_ota_proxy`) -- `res=<lcd_res> t=<millis>`
+- `sense_apply_start` (before `applyToOtaPartition`) -- `ver=<manifest.version> lcd_due=<!lcd_proxy_succeeded> t=<millis>`
+
+These breadcrumbs make the manual-OTA LCD-rendezvous decision/handshake trail visible in the black box even though the Sense reboots on a successful self-OTA.
 
 **`lcd_ota_due` is a fallback only.** `set_lcd_ota_due_nvs()` is set from the inline-proxy outcome: **cleared** on proxy success or already-up-to-date; **set** when the proxy was skipped or failed (`lcd_query_fail`, `manifest_fetch_fail`, or non-`"success"` result). The boot-time handler in `run_maintenance_if_needed()` (the `get_lcd_ota_due_nvs()` block) retries the LCD OTA on next boot in the failure case. The post-apply code no longer unconditionally clears `lcd_ota_due`, so a transient LCD failure followed by a successful Sense apply keeps the next-boot retry armed. This replaces the old order (Sense self-OTA + reboot first, LCD deferred to next boot) that caused intermittent `lcd_query_fail` because the LCD had gone back to sleep by the time the rebooted Sense queried it.
 

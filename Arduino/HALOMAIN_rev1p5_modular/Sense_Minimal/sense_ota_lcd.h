@@ -136,6 +136,16 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
     // Clear mailbox before sending
     g_lcd_ota_query_resp_ready = false;
 
+    // Flush stale UART RX before sending the fresh query. During the Sense's
+    // HTTPS-blocking OTA window the main-loop UART drain is starved, so a
+    // backlog or ring overflow can accumulate on lcdSerial; if left in place it
+    // would desync parsing of the LCD_OTA_QUERY_RESP (the no-response failure
+    // we're hardening). The mailbox was already cleared above, so we cannot drop
+    // an already-parsed response here. Drain the hardware FIFO, then reset the
+    // RX ring / partial-frame state so the next response parses cleanly.
+    while (lcdSerial.available() > 0) lcdSerial.read();
+    uart_reset_rx_state();
+
     // Send query (fresh msg_id each attempt)
     StaticJsonDocument<128> doc;
     doc["ver"]    = PROTOCOL_VERSION;
