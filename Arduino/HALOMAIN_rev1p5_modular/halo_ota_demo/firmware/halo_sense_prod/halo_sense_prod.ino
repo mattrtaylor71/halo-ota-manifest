@@ -1840,7 +1840,7 @@ static void maybe_set_reboot_guard_override() {
 #if OTA_TEST_BYPASS_REBOOT_LOOP_GUARD
   Preferences prefs;
   if (prefs.begin("halo", false)) {
-    prefs.putUInt("dev_disable_reset_guard", 1);
+    prefs.putUInt("dev_dis_rstgrd", 1);
     prefs.end();
   }
   if (!logged) {
@@ -1850,7 +1850,7 @@ static void maybe_set_reboot_guard_override() {
 #else
   Preferences prefs;
   if (prefs.begin("halo", false)) {
-    prefs.putUInt("dev_disable_reset_guard", 0);
+    prefs.putUInt("dev_dis_rstgrd", 0);
     prefs.end();
   }
 #endif
@@ -4024,6 +4024,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     g_reboot_loop_detected = BootState::checkRebootLoop(3, 30000);
     if (g_reboot_loop_detected) {
       if (ota_test_bypass_reboot_guard_enabled()) {
+        g_reboot_loop_detected = false;
+      } else if (halo_ota_manual_override_active()) {
+        LOG_INFO("[OTA] reboot_loop_guard bypassed by manual OTA request");
         g_reboot_loop_detected = false;
       } else {
         LOG_INFO("[OTA] skip reboot_loop_guard");
