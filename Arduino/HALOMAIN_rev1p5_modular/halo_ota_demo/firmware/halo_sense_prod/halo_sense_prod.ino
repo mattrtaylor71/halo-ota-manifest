@@ -3230,6 +3230,47 @@ static bool get_lcd_ota_due_nvs() {
   return due;
 }
 
+// Persist the outcome+target version of a SUCCESSFUL inline LCD OTA proxy.
+// The Sense self-OTAs and reboots immediately after the inline proxy returns
+// success, so RAM globals (g_lcd_ota_result / g_lcd_ota_version) are wiped
+// before the post-reboot pre_sleep cloud OTA report is built. We stash the
+// result here so load_lcd_ota_result_nvs() can repopulate those globals on the
+// next boot. NVS key names MUST be <=15 chars (longer keys silently fail);
+// "lcd_ota_res" (11) and "lcd_ota_ver" (11) are both within budget.
+static void set_lcd_ota_result_nvs(const char* result, const char* version) {
+  Preferences p;
+  if (p.begin("halo", false)) {
+    p.putString("lcd_ota_res", result ? result : "");
+    p.putString("lcd_ota_ver", version ? version : "");
+    p.end();
+  }
+}
+
+// One-shot load of a persisted inline-LCD-OTA result into the RAM truth
+// globals. Consumes (removes) the keys so a single success is reported exactly
+// once. Returns true if a persisted result was found and loaded.
+static bool load_lcd_ota_result_nvs() {
+  Preferences p;
+  bool loaded = false;
+  if (p.begin("halo", false)) {
+    if (p.isKey("lcd_ota_res")) {
+      String res = p.getString("lcd_ota_res", "");
+      String ver = p.getString("lcd_ota_ver", "");
+      strncpy(g_lcd_ota_result, res.c_str(), sizeof(g_lcd_ota_result) - 1);
+      g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+      strncpy(g_lcd_ota_version, ver.c_str(), sizeof(g_lcd_ota_version) - 1);
+      g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
+      p.remove("lcd_ota_res");
+      p.remove("lcd_ota_ver");
+      loaded = true;
+      LOG_INFO("[OTA_REPORT] loaded persisted lcd result=%s ver=%s",
+               g_lcd_ota_result, g_lcd_ota_version);
+    }
+    p.end();
+  }
+  return loaded;
+}
+
 static void run_lcd_maintenance_ota_attempt(const char* maintenance_reason,
                                             uint32_t window_end_epoch,
                                             uint32_t* remaining_s_io) {
@@ -4365,6 +4406,12 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       }
       if (lcd_res && strcmp(lcd_res, "success") == 0) {
         lcd_proxy_succeeded = true;
+        // Record the success to the truth globals AND persist to NVS. The Sense
+        // self-OTAs and reboots right after this, wiping RAM; the persisted
+        // result is reloaded next boot so the cloud report shows updated/target.
+        strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
+        g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+        set_lcd_ota_result_nvs("updated", lcd_manifest.version);
         // LCD reboots into the new image; invalidate the cached version so a
         // future LCD_OTA_QUERY_RESP overwrites it with the real booted version
         // (mirrors lcd_ota_proxy_task success handling).
@@ -5156,6 +5203,13 @@ void halo_prod_setup() {
     LOG_INFO("[MAINT] lcd_ota_due from NVS (sense rebooted during maintenance)");
     g_maintenance_mode = true;
   }
+
+  // Repopulate g_lcd_ota_result / g_lcd_ota_version from a SUCCESSFUL inline
+  // LCD OTA proxy that happened just before the Sense self-OTA reboot. One-shot
+  // (the keys are consumed) so the post-reboot pre_sleep cloud report shows
+  // last_lcd_ota_result=updated + last_lcd_fw=<target>. The live pre_sleep LCD
+  // query later confirms/corrects this with the real booted version.
+  load_lcd_ota_result_nvs();
 
   BootState::init();
   maybe_set_reboot_guard_override();
