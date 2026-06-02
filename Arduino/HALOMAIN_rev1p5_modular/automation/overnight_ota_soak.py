@@ -198,13 +198,16 @@ def _open_after_wake(globpat, boot_wait=3.0):
     return p
 
 def read_lcd():
-    """Return dict {version, part, state} or None."""
+    """Return dict {version, part, state} or None. Retries until the [FW] line
+    parses to a well-formed X.Y.Z version (the firmware's [FW] debug line
+    occasionally mangles into e.g. "6.1.6VALID")."""
+    import re as _re
     p = _open_after_wake(LCD_GLOB, 3.0)
     if not p:
         return None
     cap = []
-    end = time.time() + 9
-    seq = ["fw", "fw"]; si = 0; nxt = 0
+    end = time.time() + 13
+    seq = ["fw", "fw", "fw"]; si = 0; nxt = 0
     try:
         while time.time() < end:
             now = time.time()
@@ -221,18 +224,18 @@ def read_lcd():
     res = None
     for l in cap:
         if l.startswith("[FW] {") and "lcd_fw" in l:
-            try:
-                # tolerate the firmware's occasional malformed running_state token
-                import re
-                ver = re.search(r'"lcd_fw":"([^"]+)"', l)
-                part = re.search(r'"running_part":"([^"]+)"', l)
-                state = re.search(r'"running_state":"([^"]+)"', l)
-                res = {"version": ver.group(1) if ver else None,
-                       "part": part.group(1) if part else None,
-                       "state": state.group(1) if state else None,
-                       "raw": l}
-            except Exception:
-                res = {"raw": l}
+            # require a well-formed X.Y.Z version (skip mangled "6.1.6VALID" lines)
+            ver = _re.search(r'"lcd_fw":"(\d+\.\d+\.\d+)"', l)
+            if not ver:
+                if res is None:
+                    res = {"version": None, "raw": l}  # keep a fallback if nothing better
+                continue
+            part = _re.search(r'"running_part":"([^"]+)"', l)
+            state = _re.search(r'"running_state":"([^"]+)"', l)
+            res = {"version": ver.group(1),
+                   "part": part.group(1) if part else None,
+                   "state": state.group(1) if state else None,
+                   "raw": l}
     return res
 
 def read_sense_breadcrumbs(maxlines=12):
@@ -303,6 +306,14 @@ def main():
                 time.sleep(10)
                 continue
             published = target
+
+            # Settle so the just-overwritten S3 manifest_latest.json is fully
+            # consistent before the device fetches it. Without this, a publish
+            # immediately followed by an OTA could fetch a stale LCD manifest ->
+            # compareVersions == 0 -> proxy "noop" (LCD skipped). Field OTAs
+            # never publish-then-trigger within seconds, so this is harness-only.
+            logln("  settle 25s for S3 manifest consistency before trigger")
+            time.sleep(25)
 
             if not trigger_ota(reason):
                 logln(f"  CYCLE {cycle} WARN: trigger failed; will still poll cloud")
