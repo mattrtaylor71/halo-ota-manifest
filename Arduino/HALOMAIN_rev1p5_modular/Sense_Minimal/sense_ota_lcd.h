@@ -314,6 +314,7 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     unsigned long start = millis();
     while (!g_lcd_ota_begin_ack_ready &&
            (millis() - start) < LCD_OTA_PROXY_BEGIN_TIMEOUT_MS) {
+      pump_uart_rx_once();   // inline proxy: no concurrent loop() drain, so pump RX here
       delay(10);
     }
 
@@ -621,6 +622,7 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     unsigned long start = millis();
     while (!g_lcd_ota_end_ack_ready &&
            (millis() - start) < LCD_OTA_PROXY_END_TIMEOUT_MS) {
+      pump_uart_rx_once();   // inline proxy: no concurrent loop() drain, so pump RX here
       delay(10);
     }
 
