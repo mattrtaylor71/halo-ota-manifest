@@ -996,6 +996,12 @@ static bool lcd_ota_request_allow_reboot = true;
 static char lcd_ota_request_reason[24] = "";
 static unsigned long lcd_ota_request_start_ms = 0;
 static const unsigned long LCD_OTA_CHECK_STAY_AWAKE_MS = 600000;  // 10 min
+// Stay-awake window applied on OTA_LOCK. Must cover the entire dual-board OTA
+// sequence: Sense self-OTA download (~40s) + reboot (~15s) + boot/wifi/proxy
+// start (~20s). Keeps the LCD UART-responsive so the Sense's post-reboot
+// LCD_OTA_QUERY gets a reply instead of timing out (lcd_query_fail). The LCD
+// will sleep sooner once the proxy actually starts (transfer keeps it busy).
+static const unsigned long LCD_OTA_LOCK_STAY_AWAKE_MS = 180000;   // 3 min
 static const unsigned long LCD_OTA_USER_ACTIVE_GRACE_MS = 120000; // 2 min
 static volatile bool g_manual_ota_override = false;
 static unsigned long g_manual_ota_override_until_ms = 0;

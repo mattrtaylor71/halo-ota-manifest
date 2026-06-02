@@ -128,27 +128,41 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
   lcd_fw_out[0] = '\0';
   if (part_size_out) *part_size_out = 0;
 
-  // Clear mailbox before sending
-  g_lcd_ota_query_resp_ready = false;
+  // Retry the send + wait a few times so a single missed response doesn't
+  // immediately fail the proxy (defense-in-depth alongside the LCD-side
+  // keep-awake fix).
+  const int LCD_OTA_QUERY_ATTEMPTS = 3;
+  for (int attempt = 1; attempt <= LCD_OTA_QUERY_ATTEMPTS; attempt++) {
+    // Clear mailbox before sending
+    g_lcd_ota_query_resp_ready = false;
 
-  // Send query
-  StaticJsonDocument<128> doc;
-  doc["ver"]    = PROTOCOL_VERSION;
-  doc["type"]   = "LCD_OTA_QUERY";
-  doc["msg_id"] = get_next_msg_id();
-  doc["ts"]     = (uint32_t)millis();
+    // Send query (fresh msg_id each attempt)
+    StaticJsonDocument<128> doc;
+    doc["ver"]    = PROTOCOL_VERSION;
+    doc["type"]   = "LCD_OTA_QUERY";
+    doc["msg_id"] = get_next_msg_id();
+    doc["ts"]     = (uint32_t)millis();
 
-  String output;
-  serializeJson(doc, output);
-  uart_send_json(output.c_str());
-  Serial.println("[LCD_OTA_PROXY] TX LCD_OTA_QUERY");
+    String output;
+    serializeJson(doc, output);
+    uart_send_json(output.c_str());
+    Serial.printf("[LCD_OTA_PROXY] TX LCD_OTA_QUERY (attempt %d/%d)\n",
+                  attempt, LCD_OTA_QUERY_ATTEMPTS);
 
-  // Wait for mailbox to be filled by parse_input_message dispatch
-  unsigned long start = millis();
-  while (!g_lcd_ota_query_resp_ready &&
-         (millis() - start) < LCD_OTA_PROXY_QUERY_TIMEOUT_MS) {
-    pump_uart_rx_once();   // process incoming frames so INPUT_OTA_CHECK isn't dropped
-    delay(10);
+    // Wait for mailbox to be filled by parse_input_message dispatch
+    unsigned long start = millis();
+    while (!g_lcd_ota_query_resp_ready &&
+           (millis() - start) < LCD_OTA_PROXY_QUERY_TIMEOUT_MS) {
+      pump_uart_rx_once();   // process incoming frames so INPUT_OTA_CHECK isn't dropped
+      delay(10);
+    }
+
+    if (g_lcd_ota_query_resp_ready) {
+      break;   // success
+    }
+
+    Serial.printf("[LCD_OTA_PROXY] LCD_OTA_QUERY_RESP timeout (attempt %d/%d)\n",
+                  attempt, LCD_OTA_QUERY_ATTEMPTS);
   }
 
   if (!g_lcd_ota_query_resp_ready) {

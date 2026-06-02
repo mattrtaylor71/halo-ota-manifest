@@ -581,7 +581,7 @@ Clears all OTA/maintenance flags, sets `provision_return_home_pending = true` so
 | `RELEASE_WAKE` | Releases INT_PIN wake line on Sense request |
 | `SYNC` / `SYNC_ACK` | Link synchronization protocol |
 | `MAINT_WINDOW` | Maintenance window management -- arms timer, enters headless mode, or clears state |
-| `OTA_LOCK` / `OTA_UNLOCK` | Sets/clears OTA lock flags. UNLOCK also clears `lcd_manual_ota_override`, hides status overlays, sets `provision_return_home_pending` (if LVGL running). 2-min auto-unlock timeout in `loop()` as safety net. |
+| `OTA_LOCK` / `OTA_UNLOCK` | Sets/clears OTA lock flags. **OTA_LOCK** extends `ota_stay_awake_until_ms` by `LCD_OTA_LOCK_STAY_AWAKE_MS` (180000 ms = 3 min, only-extend like `ship_menu_send_manual_ota`) to keep the LCD awake/UART-responsive through the entire dual-board OTA: Sense self-OTA (~40s) + reboot (~15s) + boot/wifi/proxy start (~20s). Logs `[OTA] ota_stay_awake extended <ms>ms (ota_lock)`. It also still extends the maintenance deadline by `OTA_LOCK_TIMEOUT_MS` when maintenance is active. **OTA_UNLOCK** clears the OTA flags but **does NOT zero `ota_stay_awake_until_ms` while a live OTA_LOCK window remains** (`millis() < ota_stay_awake_until_ms`): the Sense sends OTA_UNLOCK *before* its self-OTA reboot, so clearing the window would let the LCD deep-sleep and miss the post-reboot `LCD_OTA_QUERY` (`lcd_query_fail`). UNLOCK also clears `lcd_manual_ota_override`, hides status overlays, sets `provision_return_home_pending` (if LVGL running). 2-min auto-unlock timeout in `loop()` as safety net. |
 | `OTA_CHECK` | Initiates OTA check, sends ACK, respects maintenance-only policy |
 | `OTA_APPLY_REQUIRED` | Flags that Sense needs wake for OTA apply |
 | `PROVISION_QR` | Caches QR data, shows provisioning screen |

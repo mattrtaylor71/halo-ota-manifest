@@ -632,6 +632,21 @@ static void uart_process_received_message(const char* json_str) {
       Serial.printf("[LCD_MAINT] deadline extended %lu ms (ota_lock during maintenance)\n",
                     (unsigned long)OTA_LOCK_TIMEOUT_MS);
     }
+    // Extend the stay-awake window to cover the WHOLE dual-board OTA sequence:
+    // Sense self-OTA (~40s) + reboot (~15s) + boot/wifi/proxy start (~20s).
+    // The Sense sends OTA_UNLOCK before its self-OTA reboot (to let the LCD
+    // sleep), which zeroes ota_stay_awake_until_ms — so OTA_UNLOCK must NOT
+    // clear it while a recent OTA_LOCK extension is still live, otherwise the
+    // LCD deep-sleeps and the post-reboot LCD_OTA_QUERY gets no UART reply
+    // (lcd_query_fail). Only extend (never shorten), like ship_menu_send_manual_ota.
+    {
+      unsigned long ota_lock_awake_until = millis() + LCD_OTA_LOCK_STAY_AWAKE_MS;
+      if (ota_lock_awake_until > ota_stay_awake_until_ms) {
+        ota_stay_awake_until_ms = ota_lock_awake_until;
+      }
+      Serial.printf("[OTA] ota_stay_awake extended %lums (ota_lock)\n",
+                    (unsigned long)LCD_OTA_LOCK_STAY_AWAKE_MS);
+    }
     // Wake display from idle-dark if needed
     if (g_idle_screen_dark) {
       lcd_set_idle_screen_dark(false, "ota_lock");
@@ -651,7 +666,18 @@ static void uart_process_received_message(const char* json_str) {
     ota_check_requested = false;
     sense_ota_active = false;
     sense_ota_apply_required = false;
-    ota_stay_awake_until_ms = 0;
+    // Do NOT blindly clear ota_stay_awake_until_ms here. The Sense sends
+    // OTA_UNLOCK *before* its self-OTA reboot so the LCD is allowed to sleep,
+    // but the LCD must stay awake (and UART-responsive) through the Sense
+    // reboot + the post-reboot LCD_OTA_QUERY/proxy. The OTA_LOCK handler set a
+    // long stay-awake window for exactly this; preserve it so the normal
+    // sleep-decision keeps the LCD awake until the window naturally expires.
+    if (millis() < ota_stay_awake_until_ms) {
+      Serial.printf("[OTA] unlock - keep ota_stay_awake remaining %lums (dual-OTA)\n",
+                    (unsigned long)(ota_stay_awake_until_ms - millis()));
+    } else {
+      ota_stay_awake_until_ms = 0;
+    }
     g_ota_screen_active = false;
     g_lcd_maintenance_active = false;
     g_lcd_maintenance_deadline_ms = 0;
