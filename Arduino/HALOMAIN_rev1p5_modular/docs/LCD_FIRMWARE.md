@@ -232,6 +232,10 @@ Buttons use hitbox-based touch detection (not LVGL events) for the round display
 
 Three buttons: Shopping List (top), Home (center), Settings (bottom).
 
+#### Menu transition touch-ignore guard (bleed-through fix)
+
+When a menu screen loads, the show function sets `touch_ignore_until = millis() + 500` (right after `home_shown_ms = millis();`). This guards against touch *bleed-through*: a single physical press during the slow screen transition can register a residual touch ~200ms after the new screen appears, landing on whatever button is now under the finger. Without the guard, tapping **Settings** on the second menu could auto-fire the **Run OTA Update** button (which loads under the finger at y≈156), triggering `[OTA_MANUAL] override=1 reason=manual_button` and the Software Update overlay. The 500ms window covers the observed ~210ms bleed-through with margin and is too short to block any legitimate user tap on the new screen. Applied in `show_ship_main_menu_impl`, `show_ship_second_menu_impl`, and `show_ship_settings_screen_impl` (lcd_ship_screens.h). The touch handler enforces this via `if (millis() < touch_ignore_until)` (LCD_Minimal.ino:3733).
+
 #### AI Listening Screen
 
 Shows animated microphone icon with countdown ring. Active while user holds the AI button. `ship_ai_listening_countdown_start_ms` tracks recording duration.

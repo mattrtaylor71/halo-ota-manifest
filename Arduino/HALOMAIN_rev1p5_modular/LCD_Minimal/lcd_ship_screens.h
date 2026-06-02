@@ -1160,6 +1160,7 @@ static void show_ship_main_menu_impl() {
   ui_busy = false;
   ship_ai_touch_active = false;
   home_shown_ms = millis();
+  touch_ignore_until = millis() + 500;  // guard: ignore bleed-through touch from the navigation tap so it can't trigger a button on the just-loaded screen (e.g. tapping Settings auto-firing Run OTA Update)
   ship_logged_hide_at_ms = 0;
   ship_main_menu_reset_visual_state();
   lv_scr_load(ship_menu_screen);
@@ -1209,6 +1210,7 @@ static void show_ship_second_menu_impl() {
   ui_screen_state = SCREEN_SECOND;
   ui_busy = false;
   home_shown_ms = millis();
+  touch_ignore_until = millis() + 500;  // guard: ignore bleed-through touch from the navigation tap so it can't trigger a button on the just-loaded screen (e.g. tapping Settings auto-firing Run OTA Update)
   lv_scr_load(ship_menu_second_screen);
   Serial.println("[MENU] screen=SECOND_MENU");
   lv_timer_handler();
@@ -2080,6 +2082,7 @@ static void show_ship_settings_screen_impl() {
   ui_screen_state = SCREEN_SETTINGS;
   ui_busy = false;
   home_shown_ms = millis();
+  touch_ignore_until = millis() + 500;  // guard: ignore bleed-through touch from the navigation tap so it can't trigger a button on the just-loaded screen (e.g. tapping Settings auto-firing Run OTA Update)
   if (ship_menu_settings_status != NULL) {
     lv_obj_add_flag(ship_menu_settings_status, LV_OBJ_FLAG_HIDDEN);
     ship_menu_settings_status_hide_at_ms = 0;
