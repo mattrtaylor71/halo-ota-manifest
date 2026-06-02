@@ -1,0 +1,16 @@
+[2026-06-02 03:17:51] ======================================================================
+[2026-06-02 03:17:51] OVERNIGHT OTA SOAK START  base_version=6.1.651
+[2026-06-02 03:17:51]   STOP file to halt: /Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular/automation/overnight_STOP
+[2026-06-02 03:17:51] ======================================================================
+[2026-06-02 03:17:51] --- CYCLE 1  target=6.1.652 (prev_published=6.1.651) ---
+[2026-06-02 03:17:51]   publish 6.1.652 ...
+[2026-06-02 03:19:47]   publish done sense_manifest=6.1.652 lcd_manifest=6.1.652 ok=True
+[2026-06-02 03:20:10]   trigger: injected INPUT_OTA_CHECK x3 (reason=overnight_c1, no INPUT_WAKE)
+[2026-06-02 03:20:10]   CYCLE 1 triggered; polling cloud for Sense->6.1.652
+[2026-06-02 03:20:31]   CYCLE 1 Sense reached 6.1.652; reading LCD ground truth
+[2026-06-02 03:20:50]   CYCLE 1 ✅ PASS  LCD=6.1.652 part=app1 state=VALID  (178s)  [pass=1 fail=0]
+[2026-06-02 03:20:50] --- CYCLE 2  target=6.1.653 (prev_published=6.1.652) ---
+[2026-06-02 03:20:50]   publish 6.1.653 ...
+[2026-06-02 03:22:28]   publish done sense_manifest=6.1.653 lcd_manifest=6.1.653 ok=True
+[2026-06-02 03:22:47]   trigger: write failed write failed: [Errno 6] Device not configured
+[2026-06-02 03:22:47]   CYCLE 2 WARN: trigger failed; will still poll cloud

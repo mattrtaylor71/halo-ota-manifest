@@ -141,32 +141,48 @@ def publish(version):
 
 # ---------- trigger (USB inject == button) ----------
 def trigger_ota(reason):
-    if not actuator_tap():
-        return False
-    port = wait_port(SENSE_GLOB, 8)
-    if not port:
-        logln("  trigger: Sense port never enumerated")
-        return False
-    try:
-        s = serial.Serial(port, 115200, timeout=1)  # open resets the Sense
-    except Exception as e:
-        logln(f"  trigger: open failed {e}")
-        return False
-    try:
-        time.sleep(3.5)  # let the Sense reboot after the USB reset
-        # send INPUT_WAKE then INPUT_OTA_CHECK a few times to beat boot timing
-        for i in range(3):
-            s.write(proto("INPUT_WAKE")); s.flush(); time.sleep(0.4)
-            s.write(proto("INPUT_OTA_CHECK", reason=reason)); s.flush()
-            time.sleep(1.2)
-        logln(f"  trigger: injected INPUT_OTA_CHECK (reason={reason})")
+    # Inject INPUT_OTA_CHECK over the Sense USB == the real "Software Update"
+    # button path. We do NOT send INPUT_WAKE (it fires a /v1/list refresh that
+    # contends with the OTA). Opening the USB port resets the Sense; we settle
+    # ~4s for boot, then inject 3x. Robust to the port dropping mid-inject
+    # (Errno 6) by re-waking + reopening, up to a few attempts.
+    for attempt in range(1, 4):
+        if not actuator_tap():
+            continue
+        port = wait_port(SENSE_GLOB, 8)
+        if not port:
+            logln(f"  trigger attempt {attempt}: Sense port never enumerated")
+            continue
+        try:
+            s = serial.Serial(port, 115200, timeout=1)  # open resets the Sense
+        except Exception as e:
+            logln(f"  trigger attempt {attempt}: open failed {e}")
+            continue
+        sent = 0
+        try:
+            time.sleep(4.0)  # boot after USB reset (proven settle)
+            for i in range(3):
+                s.write(proto("INPUT_OTA_CHECK", reason=reason)); s.flush()
+                sent += 1
+                time.sleep(1.2)
+        except Exception as e:
+            logln(f"  trigger attempt {attempt}: write dropped after {sent} ({e})")
+            try: s.close()
+            except Exception: pass
+            if sent >= 1:
+                # at least one INPUT_OTA_CHECK landed before the drop -> the
+                # manual override is set; good enough to run the OTA.
+                logln(f"  trigger: injected INPUT_OTA_CHECK x{sent} (partial, reason={reason})")
+                return True
+            time.sleep(1.0)
+            continue
+        finally:
+            try: s.close()
+            except Exception: pass
+        logln(f"  trigger: injected INPUT_OTA_CHECK x{sent} (reason={reason})")
         return True
-    except Exception as e:
-        logln(f"  trigger: write failed {e}")
-        return False
-    finally:
-        try: s.close()
-        except Exception: pass
+    logln("  trigger: FAILED all attempts")
+    return False
 
 # ---------- serial reads (post-OTA only; reset is harmless once OTA done) ----------
 def _open_after_wake(globpat, boot_wait=3.0):
