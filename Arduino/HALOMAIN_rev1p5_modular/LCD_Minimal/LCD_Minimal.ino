@@ -990,6 +990,17 @@ static volatile bool ota_check_requested = false;
 static volatile bool ota_check_pending = false;
 static unsigned long ota_stay_awake_until_ms = 0;
 static const unsigned long OTA_STAY_AWAKE_MS = 20000;
+// Set by the OTA_LOCK handler (= millis() + LCD_OTA_LOCK_STAY_AWAKE_MS). While
+// millis() < this value a genuine dual-board OTA is in progress: the Sense sends
+// OTA_UNLOCK *before* its self-OTA reboot, so during that ~15s reboot the LCD
+// sees sense_state == SENSE_ASLEEP && !ota_locked and the "missed-OTA race
+// guard" would otherwise cancel ota_stay_awake_until_ms and deep-sleep — making
+// the LCD UART-unreachable for the post-reboot LCD_OTA_QUERY/proxy
+// (lcd_query_fail). The guards check this window and KEEP the stay-awake when a
+// fresh OTA_LOCK window is live. Cleared once the proxy actually starts
+// (LCD_OTA_BEGIN) and on the post-OTA restore/reboot path. A stale stay-awake
+// (no recent OTA_LOCK) leaves this at 0 and is still canceled as before.
+static unsigned long g_ota_lock_window_until_ms = 0;
 static bool lcd_ota_request_active = false;
 static uint32_t lcd_ota_request_id = 0;
 static bool lcd_ota_request_allow_reboot = true;
@@ -2662,8 +2673,11 @@ static bool sleep_blocked_for_ota() {
     return true;
   }
   if (now_ms < ota_stay_awake_until_ms) {
-    // If Sense went to sleep without OTA_LOCK, the OTA request was missed — don't block
-    if (sense_state == SENSE_ASLEEP && !ota_locked) {
+    // If Sense went to sleep without OTA_LOCK, the OTA request was missed — don't block.
+    // EXCEPTION: a fresh OTA_LOCK window means the Sense is mid self-OTA reboot and
+    // will proxy the LCD afterward — keep the LCD awake + UART-reachable.
+    if (sense_state == SENSE_ASLEEP && !ota_locked &&
+        now_ms >= g_ota_lock_window_until_ms) {
       ota_stay_awake_until_ms = 0;
       ota_check_requested = false;
       return false;
@@ -5072,11 +5086,22 @@ void loop() {
       goto loop_continue;
     }
     if (millis() < ota_stay_awake_until_ms) {
-      // If Sense went to sleep without OTA_LOCK, the OTA request was missed
-      if (sense_state == SENSE_ASLEEP && !ota_locked) {
+      // If Sense went to sleep without OTA_LOCK, the OTA request was missed.
+      // EXCEPTION: a fresh OTA_LOCK window means a real dual-OTA is pending and
+      // the Sense is just mid self-OTA reboot — keep the LCD awake + reachable.
+      if (sense_state == SENSE_ASLEEP && !ota_locked &&
+          millis() >= g_ota_lock_window_until_ms) {
         Serial.println("[OTA] stay_awake cancelled (sense asleep, no ota_lock)");
         ota_stay_awake_until_ms = 0;
         ota_check_requested = false;
+      } else if (sense_state == SENSE_ASLEEP && !ota_locked) {
+        static unsigned long last_ota_lock_keep_log_ms = 0;
+        if (millis() - last_ota_lock_keep_log_ms > 5000) {
+          Serial.println("[OTA] keep stay_awake (ota_lock window active, sense rebooting)");
+          last_ota_lock_keep_log_ms = millis();
+        }
+        log_sleep_decision(now_ms, screen_name, home_age_ms, false, "ota_stay_awake");
+        goto loop_continue;
       } else {
         static unsigned long last_ota_log_ms = 0;
         if (millis() - last_ota_log_ms > 5000) {

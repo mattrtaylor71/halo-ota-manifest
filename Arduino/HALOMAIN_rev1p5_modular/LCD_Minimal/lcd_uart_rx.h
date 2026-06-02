@@ -644,6 +644,12 @@ static void uart_process_received_message(const char* json_str) {
       if (ota_lock_awake_until > ota_stay_awake_until_ms) {
         ota_stay_awake_until_ms = ota_lock_awake_until;
       }
+      // Mark a FRESH dual-OTA-in-progress window. The SENSE_ASLEEP "missed-OTA
+      // race guard" must NOT cancel ota_stay_awake_until_ms while this is live —
+      // the Sense is mid self-OTA reboot (offline ~15s) and will proxy the LCD
+      // afterward. A stale stay-awake with no recent OTA_LOCK leaves this at 0
+      // and is still canceled normally. Cleared on LCD_OTA_BEGIN / post-OTA.
+      g_ota_lock_window_until_ms = ota_lock_awake_until;
       Serial.printf("[OTA] ota_stay_awake extended %lums (ota_lock)\n",
                     (unsigned long)LCD_OTA_LOCK_STAY_AWAKE_MS);
     }

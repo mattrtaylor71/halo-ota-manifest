@@ -207,6 +207,7 @@ static void lcd_ota_uart_restore_ui() {
     sense_ota_active = false;
     sense_ota_apply_required = false;
     ota_stay_awake_until_ms = 0;
+    g_ota_lock_window_until_ms = 0;
 
     // Clear maintenance window and OTA mode flags so sleep is no longer blocked
     g_lcd_maintenance_active = false;
@@ -526,6 +527,11 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
             }
         }
     }
+
+    // Proxy has started — the dual-OTA "Sense rebooting" window is over, the
+    // LCD OTA is now actively receiving. Clear the lock window so the
+    // SENSE_ASLEEP guards resume normal behavior once this OTA finishes.
+    g_ota_lock_window_until_ms = 0;
 
     // Keep the UI task alive but in OTA idle mode (g_ota_screen_active).
     // The UI task will just tick LVGL without processing events.

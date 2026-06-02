@@ -581,7 +581,7 @@ Clears all OTA/maintenance flags, sets `provision_return_home_pending = true` so
 | `RELEASE_WAKE` | Releases INT_PIN wake line on Sense request |
 | `SYNC` / `SYNC_ACK` | Link synchronization protocol |
 | `MAINT_WINDOW` | Maintenance window management -- arms timer, enters headless mode, or clears state |
-| `OTA_LOCK` / `OTA_UNLOCK` | Sets/clears OTA lock flags. **OTA_LOCK** extends `ota_stay_awake_until_ms` by `LCD_OTA_LOCK_STAY_AWAKE_MS` (180000 ms = 3 min, only-extend like `ship_menu_send_manual_ota`) to keep the LCD awake/UART-responsive through the entire dual-board OTA: Sense self-OTA (~40s) + reboot (~15s) + boot/wifi/proxy start (~20s). Logs `[OTA] ota_stay_awake extended <ms>ms (ota_lock)`. It also still extends the maintenance deadline by `OTA_LOCK_TIMEOUT_MS` when maintenance is active. **OTA_UNLOCK** clears the OTA flags but **does NOT zero `ota_stay_awake_until_ms` while a live OTA_LOCK window remains** (`millis() < ota_stay_awake_until_ms`): the Sense sends OTA_UNLOCK *before* its self-OTA reboot, so clearing the window would let the LCD deep-sleep and miss the post-reboot `LCD_OTA_QUERY` (`lcd_query_fail`). UNLOCK also clears `lcd_manual_ota_override`, hides status overlays, sets `provision_return_home_pending` (if LVGL running). 2-min auto-unlock timeout in `loop()` as safety net. |
+| `OTA_LOCK` / `OTA_UNLOCK` | Sets/clears OTA lock flags. **OTA_LOCK** extends `ota_stay_awake_until_ms` by `LCD_OTA_LOCK_STAY_AWAKE_MS` (180000 ms = 3 min, only-extend like `ship_menu_send_manual_ota`) to keep the LCD awake/UART-responsive through the entire dual-board OTA: Sense self-OTA (~40s) + reboot (~15s) + boot/wifi/proxy start (~20s). It **also sets `g_ota_lock_window_until_ms = millis() + LCD_OTA_LOCK_STAY_AWAKE_MS`** (see "Dual-OTA stay-awake survives Sense reboot" below). Logs `[OTA] ota_stay_awake extended <ms>ms (ota_lock)`. It also still extends the maintenance deadline by `OTA_LOCK_TIMEOUT_MS` when maintenance is active. **OTA_UNLOCK** clears the OTA flags but **does NOT zero `ota_stay_awake_until_ms` while a live OTA_LOCK window remains** (`millis() < ota_stay_awake_until_ms`): the Sense sends OTA_UNLOCK *before* its self-OTA reboot, so clearing the window would let the LCD deep-sleep and miss the post-reboot `LCD_OTA_QUERY` (`lcd_query_fail`). UNLOCK also clears `lcd_manual_ota_override`, hides status overlays, sets `provision_return_home_pending` (if LVGL running). 2-min auto-unlock timeout in `loop()` as safety net. |
 | `OTA_CHECK` | Initiates OTA check, sends ACK, respects maintenance-only policy |
 | `OTA_APPLY_REQUIRED` | Flags that Sense needs wake for OTA apply |
 | `PROVISION_QR` | Caches QR data, shows provisioning screen |
@@ -763,6 +763,17 @@ Returns false (blocks sleep) if any of these are true:
 13. Not on a sleep-eligible screen (HOME, SECOND, SETTINGS only)
 14. HOME screen shown less than `HOME_SLEEP_DELAY_MS` (10s) ago
 15. Dish processing in progress
+
+#### Dual-OTA stay-awake survives Sense reboot (missed-OTA race guard)
+
+There are **three** SENSE_ASLEEP "missed-OTA race guards" that cancel `ota_stay_awake_until_ms` when `sense_state == SENSE_ASLEEP && !ota_locked`:
+- `lcd_activity.h` (`lcd_sleep_intent_allowed`, the sleep gate, ~line 79)
+- `LCD_Minimal.ino` `sleep_blocked_for_ota()` (~line 2666)
+- `LCD_Minimal.ino` `loop()` sleep decision (~line 5076)
+
+Their real purpose is to drop a **stale** stay-awake set by an `INPUT_OTA_CHECK` that the Sense missed (it slept before sending `OTA_LOCK`), so the LCD doesn't stay awake forever. But they fired incorrectly during a **genuine** dual-board OTA: the Sense sends `OTA_UNLOCK` (clears `ota_locked`) then *reboots* for its self-OTA, going offline ~15s. During that window the LCD sees `SENSE_ASLEEP && !ota_locked`, so the guard canceled the stay-awake and the LCD deep-slept — becoming UART-unreachable (the LCD can't wake on UART), so the Sense's post-reboot `LCD_OTA_QUERY` failed (`lcd_query_fail`) and the LCD never updated.
+
+**Fix:** `g_ota_lock_window_until_ms` (file-scope in `LCD_Minimal.ino`) is set by the `OTA_LOCK` handler to `millis() + LCD_OTA_LOCK_STAY_AWAKE_MS` (180s). Each guard now only cancels the stay-awake when `millis() >= g_ota_lock_window_until_ms` (i.e. no *fresh* OTA_LOCK). While the window is live the guards keep the stay-awake and log `[OTA] keep stay_awake (ota_lock window active, sense rebooting)`. The window is cleared when the proxy actually starts (`lcd_ota_handle_begin` in `lcd_ota_uart.h`, alongside `g_ota_screen_active = true`) and on the post-OTA restore/reboot path (`lcd_ota_uart_restore_ui`, alongside `ota_stay_awake_until_ms = 0`). A stale stay-awake (no recent OTA_LOCK) leaves the window at 0 and is still canceled as before; after 180s with no proxy, both windows expire and the LCD sleeps normally.
 
 #### Activity Timeout Values
 
