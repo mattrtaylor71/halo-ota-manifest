@@ -689,6 +689,16 @@ static void uart_process_received_message(const char* json_str) {
     g_lcd_maintenance_deadline_ms = 0;
     g_ota_mode_active = false;
     ota_unlock_received_ms = millis();
+    // Clear the manual-OTA override so the INPUT_OTA_CHECK resend loop in loop()
+    // stops. Without this, an already-up-to-date manual OTA leaves the override
+    // set; the resend condition (override_active() && !ota_locked) keeps firing,
+    // re-locking/unlocking the Sense and looping the "Software Update" screen
+    // (black-flash) until the 5-min override TTL. OTA_UNLOCK is the single
+    // termination point for all Sense "nothing to do" exits (up_to_date,
+    // downgrade blocked, rollout skip, apply blocked) — they all go through
+    // release_waiting_lcd_ota -> OTA_UNLOCK. Safe/idempotent: early-returns if
+    // the override is not set.
+    lcd_manual_ota_override_clear("ota_unlock");
     Serial.println("[OTA] unlock received - all OTA flags cleared");
     return;
   } else if (strcmp(type, "OTA_CHECK") == 0) {
