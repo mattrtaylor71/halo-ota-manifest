@@ -330,26 +330,37 @@ def main():
                 logln("  breadcrumbs: " + " || ".join(bc[-6:]))
                 continue
 
-            logln(f"  CYCLE {cycle} Sense reached {target}; reading LCD ground truth")
-            lcd = read_lcd()
-            rec["lcd"] = lcd
-            lcd_ok = bool(lcd and lcd.get("version") == target and
-                          (lcd.get("state") in (None, "VALID")))
-            # require VALID when we got a state; some reads drop the token
-            if lcd and lcd.get("version") == target and lcd.get("state") not in ("VALID", None):
-                lcd_ok = False
+            # Verify the LCD via the CLOUD — the reporting fix makes
+            # last_lcd_fw / last_lcd_ota_result reliable (success => updated +
+            # target; fail => timeout/noop/lcd_query_fail). No serial read: that
+            # resets the LCD every cycle and occasionally garbles the [FW] line
+            # into false fails. The LCD result lands in the same or a slightly
+            # later report than last_fw==target, so poll briefly for it.
+            logln(f"  CYCLE {cycle} Sense reached {target}; confirming LCD via cloud")
+            lcd_fw = snap.get("last_lcd_fw"); lcd_res = snap.get("last_lcd_ota_result")
+            lcd_deadline = time.time() + 150
+            while (time.time() < lcd_deadline and lcd_fw != target
+                   and lcd_res != "updated" and not os.path.exists(STOP)):
+                time.sleep(15)
+                c = cloud_get()
+                if c:
+                    snap = c; rec["cloud"] = snap
+                    lcd_fw = c.get("last_lcd_fw"); lcd_res = c.get("last_lcd_ota_result")
+            lcd_ok = (lcd_fw == target) or (lcd_res == "updated")
 
             dt = int(time.time() - t0)
             if lcd_ok:
                 npass += 1
-                rec.update(verdict="PASS", secs=dt)
-                logln(f"  CYCLE {cycle} ✅ PASS  LCD={lcd.get('version')} part={lcd.get('part')} "
-                      f"state={lcd.get('state')}  ({dt}s)  [pass={npass} fail={nfail}]")
+                rec.update(verdict="PASS", secs=dt, lcd_fw=lcd_fw, lcd_res=lcd_res)
+                logln(f"  CYCLE {cycle} ✅ PASS  lcd_fw={lcd_fw} lcd_res={lcd_res}  "
+                      f"({dt}s)  [pass={npass} fail={nfail}]")
             else:
                 nfail += 1
                 bc = read_sense_breadcrumbs()
-                rec.update(verdict="lcd_mismatch", secs=dt, breadcrumbs=bc)
-                logln(f"  CYCLE {cycle} ❌ FAIL  LCD={lcd}  ({dt}s)  [pass={npass} fail={nfail}]")
+                rec.update(verdict="lcd_mismatch", secs=dt, lcd_fw=lcd_fw,
+                           lcd_res=lcd_res, breadcrumbs=bc)
+                logln(f"  CYCLE {cycle} ❌ FAIL  lcd_fw={lcd_fw} lcd_res={lcd_res}  "
+                      f"({dt}s)  [pass={npass} fail={nfail}]")
                 logln("  breadcrumbs: " + " || ".join(bc[-8:]))
             record(rec)
 
