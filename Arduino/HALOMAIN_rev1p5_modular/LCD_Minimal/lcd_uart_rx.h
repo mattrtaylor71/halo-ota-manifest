@@ -699,6 +699,8 @@ static void uart_process_received_message(const char* json_str) {
     // release_waiting_lcd_ota -> OTA_UNLOCK. Safe/idempotent: early-returns if
     // the override is not set.
     lcd_manual_ota_override_clear("ota_unlock");
+    provision_return_home_pending = true;   // UI task (Core 1) tears down the OTA UI and shows HOME, so sleep/wake doesn't redraw "Software Update"
+    Serial.println("[OTA] return_home_pending=1 (ota_unlock)");
     Serial.println("[OTA] unlock received - all OTA flags cleared");
     return;
   } else if (strcmp(type, "OTA_CHECK") == 0) {
