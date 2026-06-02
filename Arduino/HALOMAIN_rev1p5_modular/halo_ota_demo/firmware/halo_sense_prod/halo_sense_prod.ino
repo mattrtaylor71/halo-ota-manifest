@@ -4284,15 +4284,76 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     LOG_INFO("[OTA] apply blocked reason=%s override=1", why);
   }
 
-  set_lcd_ota_due_nvs(true);
-  LOG_INFO("[OTA] lcd_ota_due=1 (sense reboot imminent, lcd will OTA on next boot)");
+  // ── LCD proxy FIRST, while the LCD is still awake from the button press ──
+  // The Sense self-OTA below reboots the device, so if we deferred the LCD
+  // proxy to the next boot (the old lcd_ota_due path), the rebooted Sense
+  // would query an LCD that has gone back to sleep -> intermittent
+  // lcd_query_fail. By proxying inline here, on the main task, while the LCD
+  // is awake, we avoid that race. lcd_ota_due remains as the fallback if the
+  // proxy is skipped or fails transiently.
+  //
+  // This runs on the main task (maybeRunOtaCheck is called from the main
+  // loop), so the main-loop UART drain is blocked while it runs — no race.
+  // sense_lcd_ota_proxy() manages g_lcd_ota_proxy_owns_uart itself (true
+  // during COBS streaming, false after); we do not double-manage it.
+  bool lcd_proxy_succeeded = false;
+  {
+    // Free internal RAM for the LCD download/stream + later Sense apply.
+    // MQTT is already stopped (mqtt_stop_for_ota() above) and camera DMA is
+    // already released; release the manifest-client connection too so the
+    // TLS download of the LCD binary has headroom — same as
+    // maybe_trigger_lcd_ota_check() / lcd_ota_proxy_task().
+    g_manifest_client.releaseConnection();
+    delay(100);  // Let memory coalesce before the LCD TLS download
+
+    const OtaUrlConfig* lcd_cfg = ota_get_config();
+    char lcd_fw[32] = {0};
+    OtaManifest lcd_manifest;
+    if (!sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr)) {
+      LOG_INFO("[OTA_ORCH] lcd proxy result=lcd_query_fail (will defer to lcd_ota_due)");
+    } else if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest)) {
+      LOG_INFO("[OTA_ORCH] lcd proxy result=manifest_fetch_fail (will defer to lcd_ota_due)");
+    } else if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0) {
+      send_ota_uart_message("OTA_LOCK");
+      const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
+      LOG_INFO("[OTA_ORCH] lcd proxy result=%s", lcd_res);
+      if (lcd_res && strcmp(lcd_res, "success") == 0) {
+        lcd_proxy_succeeded = true;
+        // LCD reboots into the new image; invalidate the cached version so a
+        // future LCD_OTA_QUERY_RESP overwrites it with the real booted version
+        // (mirrors lcd_ota_proxy_task success handling).
+        g_lcd_ota_version[0] = '\0';
+        g_lcd_fw_query_ms = 0;
+      }
+      // OTA_LOCK above leaves the LCD locked-awake; the Sense reboots right
+      // after the apply below. The LCD's own OTA_LOCK timeout / post-OTA
+      // reboot handles re-sleeping. (On the up-to-date branch below no lock
+      // was taken, so nothing to unlock.)
+    } else {
+      LOG_INFO("[OTA_ORCH] lcd proxy result=up_to_date (lcd=%s manifest=%s)",
+               lcd_fw, lcd_manifest.version);
+      lcd_proxy_succeeded = true;  // nothing owed; don't set lcd_ota_due
+    }
+  }
+
+  // Fallback: only owe an lcd_ota_due retry on the next boot if the LCD was
+  // NOT brought up-to-date here (query/manifest fail, or proxy non-success).
+  // On success (or already up-to-date) clear it — the LCD is already done.
+  set_lcd_ota_due_nvs(!lcd_proxy_succeeded);
+  LOG_INFO("[OTA] lcd_ota_due=%d (lcd_proxy_succeeded=%d)",
+           lcd_proxy_succeeded ? 0 : 1, lcd_proxy_succeeded ? 1 : 0);
+
+  // ── THEN the Sense self-OTA (reboots on success, never returns) ──
   send_ota_uart_message("OTA_LOCK");
   g_ota_apply_in_progress = true;
 
   SenseOtaApplier::Result res = g_ota_applier.applyToOtaPartition(
       manifest.url, manifest.sha256, manifest.size, 1200000, true, manifest.version);
   g_ota_apply_in_progress = false;
-  set_lcd_ota_due_nvs(false);
+  // NOTE: lcd_ota_due was already set above based on whether the inline LCD
+  // proxy succeeded (clear) or was skipped/failed (set as next-boot fallback).
+  // Do NOT clear it unconditionally here — that would drop the fallback when
+  // the LCD proxy failed but the Sense apply then succeeds and reboots.
   clear_intent_once();
 
   if (res != SenseOtaApplier::RESULT_SUCCESS) {

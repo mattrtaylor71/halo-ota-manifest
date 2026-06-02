@@ -466,6 +466,17 @@ The Sense board acts as a TLS proxy for LCD OTA:
 
 **Cloud `lcd_fw` is the REAL running version:** the cloud-reported LCD firmware version (`truth_get_lcd_fw_version()`) is sourced exclusively from an actual `LCD_OTA_QUERY_RESP`, never from the OTA manifest. On proxy success the cached value is cleared and re-queried (pre-sleep / periodic, refreshed when empty or >5min stale), so a transfer that completes but never boots the new image no longer masquerades as success in the dashboard.
 
+### OTA Orchestration Order (LCD proxy FIRST, then Sense self-OTA)
+
+When a manual/button-triggered OTA check (`maybeRunOtaCheck()` in `halo_sense_prod.ino`) finds a Sense update to apply, the dual-board update is ordered **LCD proxy first, Sense self-OTA second**:
+
+1. **LCD proxy (inline, while the LCD is awake from the button press):** Before applying the Sense image, Sense runs the LCD proxy inline on the main task — `sense_lcd_ota_query()` → `sense_lcd_ota_fetch_manifest(cfg->base_dir, cfg->channel, …)` → version compare → `OTA_LOCK` + `sense_lcd_ota_proxy()`. This blocks the main loop (so there is no UART-drain race), and `sense_lcd_ota_proxy()` manages `g_lcd_ota_proxy_owns_uart` itself during COBS streaming.
+2. **Sense self-OTA + reboot:** Only after the LCD proxy completes does Sense call `applyToOtaPartition()` and reboot.
+
+**Why:** Previously the Sense applied its own image and **rebooted FIRST**, deferring the LCD proxy to the next boot via the `lcd_ota_due` NVS flag. By the time the rebooted Sense queried the LCD, the LCD had often gone back to sleep → intermittent `lcd_query_fail`. Doing the LCD proxy first, while the LCD is still awake, eliminates that race.
+
+**`lcd_ota_due` is now a fallback only:** `set_lcd_ota_due_nvs()` is set based on the inline proxy outcome — **cleared on success / already-up-to-date**, **set when the proxy is skipped or fails** (query fail, manifest fetch fail, or a non-`"success"` proxy result). The boot-time `lcd_ota_due` handler in `run_maintenance_if_needed()` retries the LCD OTA on the next boot in the failure case. The post-apply code no longer unconditionally clears `lcd_ota_due`, so a transient LCD failure followed by a successful Sense apply still leaves the next-boot retry armed.
+
 ### S3 Bucket Layout
 
 ```
