@@ -128,7 +128,7 @@ static const uint32_t MAINT_FOLLOWUP_RETRY_DELAYS_S[MAINT_FOLLOWUP_RETRY_MAX_ATT
 #ifndef OTA_S3_PREFIX
 #define OTA_S3_PREFIX ""
 #endif
-#define OTA_TEST_BYPASS_REBOOT_LOOP_GUARD 1
+#define OTA_TEST_BYPASS_REBOOT_LOOP_GUARD 0  // 0 = NORMAL (reboot-loop guard active); 1 = test-only OTA forcing
 #define OTA_DEV_BUCKET  "halo-ota-dev"
 #define OTA_DEV_REGION  "us-east-1"
 #define OTA_DEV_PREFIX  "halo/ota"
