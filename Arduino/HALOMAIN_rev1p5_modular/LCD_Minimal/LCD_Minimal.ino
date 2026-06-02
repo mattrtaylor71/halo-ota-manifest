@@ -3670,6 +3670,36 @@ void loop() {
     show_ship_main_menu();
     Serial.println("[PROVISION] return_home (force_from_loop)");
   }
+
+  // Periodic resend of INPUT_OTA_CHECK while a manual OTA request is latched but
+  // the OTA has not yet started. The single send from ship_menu_send_manual_ota()
+  // can be dropped on the Sense during its wake/boot LCD_OTA_QUERY window; the
+  // event-driven resends (SLEEP_READY/FW_INFO) depend on receiving those messages
+  // back, so they can miss. This timer guarantees delivery. Stops immediately once
+  // OTA starts (ota_locked) so it never spams during the actual OTA transfer, and
+  // stops when the override TTL expires (lcd_manual_ota_override_active() == false).
+  {
+    static unsigned long last_resend_ms = 0;
+    if (lcd_manual_ota_override_active() && !ota_locked) {
+      unsigned long now_ms = millis();
+      if (now_ms - last_resend_ms >= 1500) {
+        last_resend_ms = now_ms;
+        StaticJsonDocument<160> resendDoc;
+        resendDoc["ver"] = PROTOCOL_VERSION;
+        resendDoc["type"] = "INPUT_OTA_CHECK";
+        resendDoc["msg_id"] = get_next_msg_id();
+        resendDoc["ts"] = now_ms;
+        resendDoc["reason"] = "timer_resend";
+        String resendOut;
+        serializeJson(resendDoc, resendOut);
+        senseSerial.println(resendOut);
+        Serial.println("[OTA_MANUAL] resend INPUT_OTA_CHECK reason=timer");
+      }
+    } else {
+      last_resend_ms = 0;
+    }
+  }
+
   // UART TX/RX is now handled by uart_task - nothing to do here
   
   // Poll touch input

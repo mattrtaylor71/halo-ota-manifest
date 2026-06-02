@@ -602,6 +602,10 @@ When woken by timer, LCD enters `wake_timer_wait_mode`: waits up to 30s for Sens
 
 If LCD sent INPUT_OTA_CHECK but Sense goes to sleep before processing it, LCD re-wakes Sense and resends the request.
 
+#### Manual OTA Periodic Resend (timer)
+
+`loop()` resends INPUT_OTA_CHECK (`reason=timer_resend`) every ~1500 ms while `lcd_manual_ota_override_active()` is true and `ota_locked` is false. This guarantees delivery if the original single send from `ship_menu_send_manual_ota()` is dropped during the Sense's wake/boot LCD_OTA_QUERY window (the event-driven resends on SLEEP_READY/FW_INFO depend on receiving those messages back, so they can miss). The resend stops immediately once `ota_locked` becomes true (so it never spams during the actual OTA transfer) or when the override TTL expires. Uses a `static unsigned long last_resend_ms` gate reset to 0 when inactive. Logs `[OTA_MANUAL] resend INPUT_OTA_CHECK reason=timer`.
+
 ---
 
 ### 13. lcd_ui_task.h -- FreeRTOS UI Task

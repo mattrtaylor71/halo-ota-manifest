@@ -3408,24 +3408,7 @@ void loop() {
   // Process incoming UART messages (line-based JSON protocol) - non-blocking.
   // Skip when the LCD OTA proxy task owns the serial port for binary
   // COBS framing — the proxy reads lcdSerial directly during that phase.
-  if (!g_lcd_ota_proxy_owns_uart) {
-    while (lcdSerial.available() > 0) {
-      char c = lcdSerial.read();
-      if (UART_RX_DEBUG) {
-        Serial.printf("[UART_RAW] rx_byte=0x%02X\n", (uint8_t)c);
-      }
-      if (c == '\n') {
-        uart_ring_push('\n');
-      } else if (c == '\r') {
-        continue;
-      } else if (uart_rx_is_printable(c)) {
-        uart_ring_push(c);
-      } else {
-        uart_rx_dropped_since_frame++;
-      }
-    }
-    uart_process_rx_ring();
-  }
+  pump_uart_rx_once();
 
   // DEBUG: USB serial command injection — allows injecting UART JSON messages
   // via USB CDC (/dev/cu.usbmodem*) so they are processed as if sent by the LCD.

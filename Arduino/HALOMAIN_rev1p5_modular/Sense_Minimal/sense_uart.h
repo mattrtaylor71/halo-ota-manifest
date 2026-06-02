@@ -192,6 +192,37 @@ static void uart_process_rx_ring() {
   }
 }
 
+// ── One-shot RX pump ─────────────────────────────────────────────────
+//
+// Drains any bytes waiting on lcdSerial into the RX ring and dispatches
+// complete JSON frames via uart_process_rx_ring().  This is the same work
+// the main loop() performs each iteration, factored out so blocking waits
+// (e.g. sense_lcd_ota_query) can keep processing inbound frames such as
+// INPUT_OTA_CHECK instead of dropping them.
+//
+// No-op while the LCD OTA proxy owns the serial port (binary COBS framing).
+static void pump_uart_rx_once() {
+  if (g_lcd_ota_proxy_owns_uart) {
+    return;
+  }
+  while (lcdSerial.available() > 0) {
+    char c = lcdSerial.read();
+    if (UART_RX_DEBUG) {
+      Serial.printf("[UART_RAW] rx_byte=0x%02X\n", (uint8_t)c);
+    }
+    if (c == '\n') {
+      uart_ring_push('\n');
+    } else if (c == '\r') {
+      continue;
+    } else if (uart_rx_is_printable(c)) {
+      uart_ring_push(c);
+    } else {
+      uart_rx_dropped_since_frame++;
+    }
+  }
+  uart_process_rx_ring();
+}
+
 // ── Post-wake RX sanitization ────────────────────────────────────────
 
 static void wake_rx_sanitize() {

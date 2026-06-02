@@ -532,24 +532,10 @@ static bool sense_action_inflight() {
   return false;
 }
 
-static void pump_uart_rx_once() {
-  while (lcdSerial.available() > 0) {
-    char c = lcdSerial.read();
-    if (UART_RX_DEBUG) {
-      Serial.printf("[UART_RAW] rx_byte=0x%02X\n", (uint8_t)c);
-    }
-    if (c == '\n') {
-      uart_ring_push('\n');
-    } else if (c == '\r') {
-      continue;
-    } else if (uart_rx_is_printable(c)) {
-      uart_ring_push(c);
-    } else {
-      uart_rx_dropped_since_frame++;
-    }
-  }
-  uart_process_rx_ring();
-}
+// pump_uart_rx_once() is defined once in Sense_Minimal/sense_uart.h (with the
+// g_lcd_ota_proxy_owns_uart guard so it's safe to call from the main loop and
+// from blocking waits). The previous unguarded copy here was removed to avoid a
+// duplicate definition.
 
 static const unsigned long OTA_PROOF_TIMEOUT_MS = 15000;
 

@@ -147,6 +147,7 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
   unsigned long start = millis();
   while (!g_lcd_ota_query_resp_ready &&
          (millis() - start) < LCD_OTA_PROXY_QUERY_TIMEOUT_MS) {
+    pump_uart_rx_once();   // process incoming frames so INPUT_OTA_CHECK isn't dropped
     delay(10);
   }
 
