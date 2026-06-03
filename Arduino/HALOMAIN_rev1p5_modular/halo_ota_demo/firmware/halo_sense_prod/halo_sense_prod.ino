@@ -5233,7 +5233,24 @@ void halo_prod_setup() {
                   g_ota_config_source ? g_ota_config_source : "unknown");
   }
   g_boot_count = BootState::nextBootCount();
-  BootState::recordBootTimestamp();
+  {
+    esp_reset_reason_t rr = esp_reset_reason();
+    bool boot_was_crash = (rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT ||
+                           rr == ESP_RST_TASK_WDT || rr == ESP_RST_WDT ||
+                           rr == ESP_RST_BROWNOUT);
+    if (boot_was_crash) {
+      // Only genuine crashes feed the reboot-loop guard.
+      BootState::recordBootTimestamp();
+      LOG_INFO("[BOOT] crash reset=%s recorded for reboot-loop guard", reset_reason_to_str(rr));
+    } else {
+      // Clean boot (deep-sleep wake / power-on / SW restart from OTA) = healthy:
+      // clear the reboot-loop history so normal wakes and scheduled-OTA wakes can
+      // never trip the guard. A real crash-loop still trips it (3 consecutive
+      // crashes with no clean boot between).
+      BootState::clearRebootHistory();
+      LOG_INFO("[BOOT] reset=%s (clean) -> reboot-loop history cleared", reset_reason_to_str(rr));
+    }
+  }
   g_reboot_loop_detected = BootState::checkRebootLoop(3, 30000);
 
   ProvisioningState::init();

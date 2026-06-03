@@ -105,6 +105,27 @@ Boot flow:
 16. Register WiFi event handler
 17. Call `halo_prod_setup()` (production wrapper)
 
+##### Reboot-loop guard feeds on crash resets only
+
+The production wrapper's early init increments `BootState::nextBootCount()` (monotonic
+counter, used elsewhere) and then decides how to treat the reboot-loop history based on
+`esp_reset_reason()`:
+
+- **Crash reset** (`ESP_RST_PANIC`, `ESP_RST_INT_WDT`, `ESP_RST_TASK_WDT`, `ESP_RST_WDT`,
+  `ESP_RST_BROWNOUT`): calls `BootState::recordBootTimestamp()` so the boot feeds the
+  loop detector.
+- **Clean boot** (deep-sleep wake / power-on / SW restart, e.g. post-OTA): calls
+  `BootState::clearRebootHistory()` instead, so normal wakes and scheduled-OTA wakes can
+  never trip the guard.
+
+`g_reboot_loop_detected = BootState::checkRebootLoop(3, 30000)` then only fires on 3
+genuine crashes with no clean boot between. **Why this matters:** a scheduled OTA wakes
+the device from deep sleep (timer wake + in-window retries), and the detector used
+`boot_count` as a pseudo-timestamp, so a few normal wakes used to trip the guard and latch
+`ota_en=0` (`why=reboot_loop_guard`) — permanently disabling scheduled OTA. Manual OTA
+bypasses the guard via `halo_ota_manual_override_active`, which is why manual worked but
+scheduled did not. `reset_reason_to_str()` (sketch ~line 547) maps the enums for logging.
+
 #### `loop()`
 
 Main loop responsibilities:
@@ -683,10 +704,17 @@ In production builds, all MQTT variables are stubbed:
 | `LCD_OTA_PROXY_CHUNK_SIZE` | 512 | Bytes per COBS frame |
 | `LCD_OTA_PROXY_MAX_RETRIES` | 5 | Per-chunk retry limit |
 | `LCD_OTA_PROXY_ACK_TIMEOUT_MS` | 3000 | Wait for chunk ACK |
-| `LCD_OTA_PROXY_QUERY_TIMEOUT_MS` | 5000 | Wait for LCD version query |
+| `LCD_OTA_PROXY_QUERY_TIMEOUT_MS` | 7000 | Wait for LCD version query (per attempt) |
 | `LCD_OTA_PROXY_BEGIN_TIMEOUT_MS` | 10000 | Wait for OTA begin ACK |
 | `LCD_OTA_PROXY_END_TIMEOUT_MS` | 60000 | Wait for SHA verify + reboot |
 | `LCD_OTA_PROXY_DOWNLOAD_TIMEOUT_MS` | 2400000 | 40 min overall download limit |
+
+**Cold-wake LCD query budget = 35s.** `sense_lcd_ota_query()` retries the version query
+`LCD_OTA_QUERY_ATTEMPTS = 5` times at `LCD_OTA_PROXY_QUERY_TIMEOUT_MS = 7000` ms each
+(5 x 7s = up to 35s, raised from the old 3 x 5s = 15s). The scheduled-OTA case wakes the
+LCD from its own deep-sleep timer at the maintenance window, so the LCD may still be
+running LVGL init when the Sense's first `LCD_OTA_QUERY` arrives; the larger budget gives
+the LCD time to boot and answer before the proxy gives up.
 
 #### Mailbox Pattern
 

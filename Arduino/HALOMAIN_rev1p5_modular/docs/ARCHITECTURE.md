@@ -200,6 +200,18 @@ Message types:
 1. **Reset reason check** -- Classify: deep sleep, brownout, WDT, panic, power-on
 2. **RTC crash diagnostics** -- Record crash info from RTC_DATA_ATTR variables
 3. **`halo_prod_pre_setup()`** -- Production wrapper early init (boot count, reboot loop guard)
+   - **Reboot-loop guard counts crash resets ONLY.** The loop detector is fed
+     (`BootState::recordBootTimestamp()`) only when `esp_reset_reason()` is a genuine
+     crash: `ESP_RST_PANIC`, `ESP_RST_INT_WDT`, `ESP_RST_TASK_WDT`, `ESP_RST_WDT`,
+     `ESP_RST_BROWNOUT`. Any clean boot -- deep-sleep wake, power-on, or SW restart
+     (e.g. post-OTA) -- instead **clears** the reboot history
+     (`BootState::clearRebootHistory()`). This fixes scheduled OTA being permanently
+     disabled: a scheduled OTA wakes the device from deep sleep (timer wake + in-window
+     retries), and the detector used `boot_count` as a pseudo-timestamp, so a few normal
+     wakes used to trip the guard and latch `ota_en=0` (`why=reboot_loop_guard`). Manual
+     OTA bypassed the guard via `halo_ota_manual_override_active`, which is why manual
+     worked but scheduled did not. A real crash-loop (3 crashes with no clean boot
+     between) still trips the guard.
 4. **UART init** (`initUarts`) -- Configure UART1 to LCD
 5. **Camera PWDN init** -- Configure GPIO1 for camera power control
 6. **Wake cause dispatch:**

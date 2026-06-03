@@ -29,7 +29,10 @@
 #define LCD_OTA_PROXY_CHUNK_SIZE        512
 #define LCD_OTA_PROXY_MAX_RETRIES       5
 #define LCD_OTA_PROXY_ACK_TIMEOUT_MS    3000
-#define LCD_OTA_PROXY_QUERY_TIMEOUT_MS  5000
+#define LCD_OTA_PROXY_QUERY_TIMEOUT_MS  7000   // 7s per attempt: extra margin for the
+                                               // scheduled cold-wake case (LCD wakes from
+                                               // its own timer and needs LVGL init before
+                                               // it can answer LCD_OTA_QUERY)
 #define LCD_OTA_PROXY_BEGIN_TIMEOUT_MS  10000
 #define LCD_OTA_PROXY_END_TIMEOUT_MS    60000
 #define LCD_OTA_PROXY_DOWNLOAD_TIMEOUT_MS 2400000  // 40 min
@@ -131,7 +134,10 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
   // Retry the send + wait a few times so a single missed response doesn't
   // immediately fail the proxy (defense-in-depth alongside the LCD-side
   // keep-awake fix).
-  const int LCD_OTA_QUERY_ATTEMPTS = 3;
+  // 5 attempts x 7s = up to 35s cold-boot query budget. The scheduled-OTA
+  // case wakes the LCD from its own deep-sleep timer, so it may still be
+  // running LVGL init when the first query arrives; give it more retries.
+  const int LCD_OTA_QUERY_ATTEMPTS = 5;
   for (int attempt = 1; attempt <= LCD_OTA_QUERY_ATTEMPTS; attempt++) {
     // Clear mailbox before sending
     g_lcd_ota_query_resp_ready = false;
