@@ -783,6 +783,18 @@ These breadcrumbs make the manual-OTA LCD-rendezvous decision/handshake trail vi
 
 **`lcd_ota_due` is a fallback only.** `set_lcd_ota_due_nvs()` is set from the inline-proxy outcome: **cleared** on proxy success or already-up-to-date; **set** when the proxy was skipped or failed (`lcd_query_fail`, `manifest_fetch_fail`, or non-`"success"` result). The boot-time handler in `run_maintenance_if_needed()` (the `get_lcd_ota_due_nvs()` block) retries the LCD OTA on next boot in the failure case. The post-apply code no longer unconditionally clears `lcd_ota_due`, so a transient LCD failure followed by a successful Sense apply keeps the next-boot retry armed. This replaces the old order (Sense self-OTA + reboot first, LCD deferred to next boot) that caused intermittent `lcd_query_fail` because the LCD had gone back to sleep by the time the rebooted Sense queried it.
 
+### Window-Start Schedule Re-Validation (Cancel-Safety)
+
+`ota_sched_revalidate(const MaintenanceWindow& cached, uint64_t now_epoch, uint32_t timeout_ms)` returns a `SchedRevalidate` enum (`REVAL_VALID` / `REVAL_CANCELLED` / `REVAL_REPLACED` / `REVAL_FETCH_FAILED`). It performs a dedicated GET of `ota_sched_http_build_url()` (`/ota/schedule`) using the same HTTPS/TLS setup as `ota_sched_http_fetch_window()`, but inspects the response directly:
+
+- **204** -> `REVAL_CANCELLED` (schedule deleted)
+- **200, `enabled=false`** -> `REVAL_CANCELLED` (disabled)
+- **200, `enabled=true`, `request_id` differs from cached** -> `REVAL_REPLACED`
+- **200, `enabled=true`, `request_id` matches** -> `REVAL_VALID`
+- **not configured / no WiFi / time invalid / begin fail / empty body / parse error / any other HTTP code / network error** -> `REVAL_FETCH_FAILED` (**fail-open**)
+
+`run_maintenance_if_needed()` calls it (only when `has_mw`) **after the in-window + idle checks pass and before `send_ota_uart_message("OTA_LOCK")`**, with timeout `max(2000UL, OTA_SCHED_HTTP_TIMEOUT_MS)`. On `REVAL_CANCELLED`/`REVAL_REPLACED` it aborts the OTA: records `ota_set_last_result("schedule_cancelled"/"schedule_replaced")` (reported to cloud at pre-sleep), `sched_event_note(res, request_id)` (request_id captured before clearing), `maintenance_followup_retry_clear(res)`, `maintenance_window_consumed_clear(res)`, then `mw.clear()` to **wipe the cached NVS `mw` window** so the next pre-sleep won't re-arm it, sets `g_maintenance_in_window=false` / `g_maintenance_mode=false`, and enters `sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT)`. `OTA_LOCK` was never sent on this path, so no `OTA_UNLOCK` is needed. `REVAL_VALID` and `REVAL_FETCH_FAILED` both proceed with the cached window (fail-open).
+
 ---
 
 ## Cross-Module Dependencies

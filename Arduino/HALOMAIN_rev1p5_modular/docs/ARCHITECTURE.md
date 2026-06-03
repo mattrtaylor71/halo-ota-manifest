@@ -512,6 +512,18 @@ The OTA schedule is managed via a cloud API:
 - **Response**: Maintenance window with `start_epoch`, `duration_sec`, `grace_before/after_sec`, `request_id`
 - **Report**: POST to `/ota/report` with result status
 
+### Window-Start Cancel-Safety (Schedule Re-Validation)
+
+A scheduled window is fetched and armed (RTC timer + NVS) hours before it fires. If the operator **deletes, disables, or replaces** the schedule in the cloud after the device has armed it, the device would otherwise act on its stale cached copy. To prevent this, `run_maintenance_if_needed()` re-GETs `/ota/schedule` at window-start — after the in-window and idle checks pass, but **before** sending `OTA_LOCK` — via `ota_sched_revalidate()`:
+
+- **HTTP 204** (schedule deleted) -> abort, result `schedule_cancelled`
+- **HTTP 200 `enabled=false`** (disabled) -> abort, result `schedule_cancelled`
+- **HTTP 200 `enabled=true`** with a `request_id` different from the cached window -> abort, result `schedule_replaced`
+- **HTTP 200 `enabled=true`** with matching `request_id` -> proceed with OTA
+- **Network error / not-ready (no WiFi, time invalid, parse error, other HTTP code)** -> **fail-open**, proceed with the cached window
+
+On abort the device records the result (reported to cloud at pre-sleep), clears the consumed/follow-up retry state, and calls `MaintenanceWindow::clear()` to **wipe the cached NVS window** so the next pre-sleep does not re-arm it. Because `OTA_LOCK` has not been sent yet on the abort path, no `OTA_UNLOCK` is required; the device simply enters `SENSE_SLEEP_DEEP_MAINT`.
+
 ### Cloud Truth Payload (Observability)
 
 `build_truth_json()` (Sense `Truth.cpp`) emits the device ground-truth state to the cloud. For LCD observability it now carries, in addition to the existing `lcd_fw` / `lcd_fw_age_s`:

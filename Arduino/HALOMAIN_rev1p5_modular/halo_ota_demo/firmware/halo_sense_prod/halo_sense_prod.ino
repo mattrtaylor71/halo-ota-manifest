@@ -82,6 +82,12 @@ static volatile bool g_lcd_ota_task_running = false;
 #include "../shared/Version.h"
 #include "../shared/Log.h"
 #include "../shared/BootState.h"
+
+// Forward-declared enum (must precede the .ino auto-prototype hoist of
+// ota_sched_revalidate(), whose return type is SchedRevalidate; definition is
+// near line ~1525).
+enum SchedRevalidate { REVAL_VALID, REVAL_CANCELLED, REVAL_REPLACED, REVAL_FETCH_FAILED };
+
 #include "../shared/ProvisioningState.h"
 #include "../shared/ProvisioningManager.h"
 #include "../shared/Truth.h"
@@ -1509,6 +1515,111 @@ static bool ota_sched_http_fetch_window(uint32_t timeout_ms) {
            (unsigned long)incoming.grace_after_sec,
            (unsigned)g_ota_sched.min_idle_min);
   return true;
+}
+
+// Cancel-safety: re-validate the LIVE cloud schedule at maintenance-window start.
+// The device may have fetched+armed a window earlier; if the operator has since
+// deleted/disabled/replaced it in the cloud, the cached RTC/NVS window must NOT
+// be acted upon. This GET inspects the response directly (unlike
+// ota_sched_http_fetch_window, which treats 204 as "keep existing window").
+//   204                      -> REVAL_CANCELLED (schedule deleted)
+//   200 enabled=false        -> REVAL_CANCELLED (schedule disabled)
+//   200 enabled=true, rid !=  -> REVAL_REPLACED (different request_id)
+//   200 enabled=true, rid ==  -> REVAL_VALID
+//   any error / not ready    -> REVAL_FETCH_FAILED (fail-open, proceed with OTA)
+static SchedRevalidate ota_sched_revalidate(const MaintenanceWindow& cached,
+                                            uint64_t now_epoch,
+                                            uint32_t timeout_ms) {
+  (void)now_epoch;
+  if (!ota_sched_http_configured() || !wifi_is_connected() || !is_time_valid()) {
+    LOG_INFO("[MAINT_RUN] revalidate skip (not_ready) -> REVAL_FETCH_FAILED (fail-open)");
+    return REVAL_FETCH_FAILED;
+  }
+
+  String url = ota_sched_http_build_url();
+  LOG_INFO("[MAINT_RUN] revalidate GET url=%s timeout_ms=%lu", url.c_str(), (unsigned long)timeout_ms);
+
+  HTTPClient http;
+  WiFiClient plain_client;
+  WiFiClientSecure secure_client;
+  int http_code = 0;
+  String body;
+  bool started = false;
+  if (ota_sched_http_is_https(url.c_str())) {
+#if OTA_SCHED_HTTP_INSECURE
+    secure_client.setInsecure();
+#else
+    ota_http_configure_tls(secure_client, "OTA_HTTP_REVAL", OTA_SCHED_HTTP_ROOT_CA);
+#endif
+    secure_client.setHandshakeTimeout(15);
+    secure_client.setTimeout(timeout_ms);
+    started = http.begin(secure_client, url);
+  } else {
+    plain_client.setTimeout(timeout_ms);
+    started = http.begin(plain_client, url);
+  }
+  if (!started) {
+    LOG_WARN("[MAINT_RUN] revalidate begin failed -> REVAL_FETCH_FAILED (fail-open)");
+    return REVAL_FETCH_FAILED;
+  }
+
+  http.setConnectTimeout((int)timeout_ms);
+  http.setTimeout((int)timeout_ms);
+  http.setReuse(false);
+  http_code = http.GET();
+  if (http_code > 0) {
+    body = http.getString();
+  }
+  http.end();
+
+  if (http_code == HTTP_CODE_NO_CONTENT) {
+    LOG_INFO("[MAINT_RUN] revalidate http=204 -> REVAL_CANCELLED (deleted)");
+    return REVAL_CANCELLED;
+  }
+
+  if (http_code != HTTP_CODE_OK) {
+    LOG_WARN("[MAINT_RUN] revalidate http=%d -> REVAL_FETCH_FAILED (fail-open)", http_code);
+    return REVAL_FETCH_FAILED;
+  }
+
+  if (body.length() == 0) {
+    LOG_WARN("[MAINT_RUN] revalidate http=200 empty_body -> REVAL_FETCH_FAILED (fail-open)");
+    return REVAL_FETCH_FAILED;
+  }
+
+  DynamicJsonDocument doc(1024);
+  DeserializationError err = deserializeJson(doc, body);
+  if (err || !doc.is<JsonObject>()) {
+    LOG_WARN("[MAINT_RUN] revalidate parse_error=%s -> REVAL_FETCH_FAILED (fail-open)", err.c_str());
+    return REVAL_FETCH_FAILED;
+  }
+
+  JsonObject root = ota_sched_http_get_payload_root(doc);
+  if (root.isNull()) {
+    LOG_WARN("[MAINT_RUN] revalidate invalid_payload -> REVAL_FETCH_FAILED (fail-open)");
+    return REVAL_FETCH_FAILED;
+  }
+
+  bool enabled = root["enabled"].isNull() ? true : (root["enabled"] | false);
+  if (!enabled) {
+    LOG_INFO("[MAINT_RUN] revalidate http=200 enabled=false -> REVAL_CANCELLED (disabled)");
+    return REVAL_CANCELLED;
+  }
+
+  const char* resp_request_id = root["request_id"] | "";
+  if (!resp_request_id || !resp_request_id[0]) {
+    resp_request_id = doc["request_id"] | "";
+  }
+  if (cached.request_id[0] && resp_request_id && resp_request_id[0] &&
+      strcmp(cached.request_id, resp_request_id) != 0) {
+    LOG_INFO("[MAINT_RUN] revalidate http=200 request_id changed cached=%s live=%s -> REVAL_REPLACED",
+             cached.request_id, resp_request_id);
+    return REVAL_REPLACED;
+  }
+
+  LOG_INFO("[MAINT_RUN] revalidate http=200 request_id=%s -> REVAL_VALID",
+           (resp_request_id && resp_request_id[0]) ? resp_request_id : "-");
+  return REVAL_VALID;
 }
 
 static void ota_sched_self_test() {
@@ -3574,6 +3685,34 @@ static void run_maintenance_if_needed() {
     }
   } else {
     maintenance_idle_diag_note(0, false, false, has_mw, "maintenance_no_activity");
+  }
+
+  // Cancel-safety: re-validate the LIVE cloud schedule before committing to OTA.
+  // If the operator deleted (204) / disabled (enabled=false) / replaced (new
+  // request_id) the window after the device armed its cached copy, abort here.
+  // OTA_LOCK has NOT been sent yet, so no OTA_UNLOCK is needed on this path.
+  // Fail-open: a fetch failure proceeds with the cached window.
+  if (has_mw) {
+    SchedRevalidate rv = ota_sched_revalidate(
+        mw, (uint64_t)now, max(2000UL, (unsigned long)OTA_SCHED_HTTP_TIMEOUT_MS));
+    if (rv == REVAL_CANCELLED || rv == REVAL_REPLACED) {
+      const char* res = (rv == REVAL_CANCELLED) ? "schedule_cancelled" : "schedule_replaced";
+      char aborted_request_id[64];
+      strncpy(aborted_request_id, mw.request_id, sizeof(aborted_request_id) - 1);
+      aborted_request_id[sizeof(aborted_request_id) - 1] = '\0';
+      LOG_INFO("[MAINT_RUN] %s at window-start -> abort OTA (request_id=%s)",
+               res, aborted_request_id[0] ? aborted_request_id : "-");
+      sched_event_note(res, aborted_request_id);
+      ota_set_last_result(res);
+      maintenance_followup_retry_clear(res);
+      maintenance_window_consumed_clear(res);
+      mw.clear();  // wipe cached NVS window so pre_sleep won't re-arm it
+      g_maintenance_in_window = false;
+      g_maintenance_mode = false;
+      sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
+      return;
+    }
+    // REVAL_VALID or REVAL_FETCH_FAILED -> proceed (fail-open on fetch failure)
   }
 
   const char* maintenance_reason = has_mw ? "scheduled_http" : "maintenance";
