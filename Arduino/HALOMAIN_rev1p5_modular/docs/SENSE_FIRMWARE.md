@@ -716,25 +716,6 @@ LCD from its own deep-sleep timer at the maintenance window, so the LCD may stil
 running LVGL init when the Sense's first `LCD_OTA_QUERY` arrives; the larger budget gives
 the LCD time to boot and answer before the proxy gives up.
 
-**Scheduled-proxy wake-gate (cold-link).** Before the version query, `lcd_ota_proxy_task()`
-runs a bounded wake-gate so the 5 quick queries aren't fired at a still-booting LCD.
-**Why:** the Sense *cannot* wake the LCD — the GPIO39 wake line is LCD→Sense only and the
-LCD ignores UART while in deep sleep. On a scheduled OTA the LCD self-wakes from its own
-`MAINT_WINDOW` RTC timer, but that timer is slightly skewed vs the Sense and the LCD needs
-boot + LVGL-init time before it can answer `LCD_OTA_QUERY`. If the Sense queries immediately
-on its own wake, the LCD is often not linked yet → `lcd_query_fail` → LCD proxy skipped →
-boards split (Sense updates, LCD doesn't). Manual OTA avoids this because user taps keep the
-LCD awake/linked. The gate: if the UART link is NOT already recent
-(`halo_uart_link_recent(LCD_OTA_WAKE_LINK_RECENT_MS = 3000)` — skipped entirely in the manual
-case so no added latency), loop for up to `LCD_OTA_WAKE_GATE_MS = 90000` (90s, covers timer
-skew + boot/LVGL), re-sending `MAINT_WINDOW` via `send_maint_window(&mw, g_lcd_ota_window_remaining_s, 0, false)`
-(window from `maintenance_window_load()`; harmless if the LCD already has it) and pumping
-`pump_uart_rx_once()` in 500ms slices, breaking as soon as the link becomes recent. Logs
-`[LCD_OTA_ORCH] wake_gate linked|timeout after <ms>`. **Purely additive:** on timeout it
-falls through to `sense_lcd_ota_query()` unchanged (no new abort); it only delays/retries and
-does not touch the transfer, finalize, or `lcd_query_fail` handling. Constants live in
-`halo_sense_prod.ino` next to the other `LCD_MAINT_*` constants.
-
 #### Mailbox Pattern
 
 The proxy task cannot read `lcdSerial` directly (main loop owns it). Instead, `parse_input_message()` in the main loop dispatches LCD OTA responses into mailbox variables:
@@ -800,11 +781,7 @@ Observability only; does not affect OTA control flow. A failed/timed-out query d
 
 These breadcrumbs make the manual-OTA LCD-rendezvous decision/handshake trail visible in the black box even though the Sense reboots on a successful self-OTA.
 
-**`lcd_ota_due` is the next-boot LCD-proxy self-heal flag.** `set_lcd_ota_due_nvs()` is set from the LCD-proxy outcome in BOTH the inline and scheduled paths, keyed on `lcd_maintenance_result_successful(g_lcd_ota_result)` (true for `updated`/`noop`/`success:`/`no_update:`): **cleared** on success/already-up-to-date; **set** otherwise (`lcd_query_fail`, `manifest_fetch_fail`, `proxy_timeout`, non-`"success"` result).
-- **Inline path** (`maybeRunOtaCheck`): `set_lcd_ota_due_nvs(!lcd_proxy_succeeded)` before the Sense self-OTA reboot, so the rebooted Sense retries the LCD on next boot. The post-apply code no longer unconditionally clears it, so a transient LCD failure + successful Sense apply keeps the next-boot retry armed. This replaced the old order (Sense self-OTA + reboot first, LCD deferred) that caused intermittent `lcd_query_fail` because the LCD had gone back to sleep by the time the rebooted Sense queried it.
-- **Scheduled path** (`run_maintenance_if_needed` → LCD in-window retry loop): after the in-window retries are exhausted it now does `set_lcd_ota_due_nvs(!lcd_maintenance_result_successful(g_lcd_ota_result))` (was an unconditional `false`). This belt-and-suspenders self-heals a scheduled cold-link miss: if the LCD's skewed self-wake never linked in time (terminal `lcd_query_fail`) the flag is armed so the **next** boot/wake retries the LCD proxy promptly instead of waiting for the next scheduled window. Coexists with (and is redundant to) the in-window retry loop and the follow-up retry schedule.
-
-**Consumption + clear-on-success (no loop).** The boot-time handler in `run_maintenance_if_needed()` (the `get_lcd_ota_due_nvs()` block, checked FIRST before window logic) connects WiFi and calls `run_lcd_maintenance_ota_attempt("lcd_ota_due", 0, nullptr)` — re-running the full LCD proxy including the wake-gate. It then re-arms or clears the flag based on success (`set_lcd_ota_due_nvs(!lcd_maintenance_result_successful(...))`): cleared on success so it can't loop; re-armed if the LCD still didn't reach target so the cold-link self-heal keeps retrying on subsequent wakes. One attempt per wake, then deep sleep — cannot busy-loop within a boot.
+**`lcd_ota_due` is a fallback only.** `set_lcd_ota_due_nvs()` is set from the inline-proxy outcome: **cleared** on proxy success or already-up-to-date; **set** when the proxy was skipped or failed (`lcd_query_fail`, `manifest_fetch_fail`, or non-`"success"` result). The boot-time handler in `run_maintenance_if_needed()` (the `get_lcd_ota_due_nvs()` block) retries the LCD OTA on next boot in the failure case. The post-apply code no longer unconditionally clears `lcd_ota_due`, so a transient LCD failure followed by a successful Sense apply keeps the next-boot retry armed. This replaces the old order (Sense self-OTA + reboot first, LCD deferred to next boot) that caused intermittent `lcd_query_fail` because the LCD had gone back to sleep by the time the rebooted Sense queried it.
 
 ### Window-Start Schedule Re-Validation (Cancel-Safety)
 

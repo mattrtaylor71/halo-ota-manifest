@@ -118,18 +118,6 @@ static const uint8_t LCD_MAINT_OTA_MAX_ATTEMPTS = 3;
 static const uint8_t MAINT_FOLLOWUP_RETRY_MAX_ATTEMPTS = 3;
 static const uint32_t MAINT_FOLLOWUP_RETRY_DELAYS_S[MAINT_FOLLOWUP_RETRY_MAX_ATTEMPTS] = {120, 300, 600};
 
-// Wake-gate for the scheduled LCD-OTA proxy (cold-link). The Sense cannot wake
-// the LCD (GPIO39 wake is LCD->Sense only; the LCD ignores UART in deep sleep).
-// On a scheduled OTA the LCD self-wakes from its own MAINT_WINDOW RTC timer, but
-// that timer is skewed vs the Sense and the LCD needs boot + LVGL-init time
-// before it can answer LCD_OTA_QUERY. The gate (in lcd_ota_proxy_task, before
-// the query) re-sends MAINT_WINDOW keepalives and waits up to LCD_OTA_WAKE_GATE_MS
-// for the UART link to come up, so we don't fire the 5 quick queries at a
-// still-booting LCD and cold-miss. Skipped entirely when the link is already
-// recent (manual case, LCD awake).
-static const unsigned long LCD_OTA_WAKE_GATE_MS = 90000;        // 90s: covers timer skew + LCD boot/LVGL
-static const unsigned long LCD_OTA_WAKE_LINK_RECENT_MS = 3000;  // link counts as up if RX within 3s
-
 // OTA configuration defaults (same behavior as halo_ota_demo)
 #ifndef OTA_CHANNEL
 #define OTA_CHANNEL "dev"
@@ -2475,39 +2463,6 @@ static void lcd_ota_proxy_task(void* param) {
     LOG_INFO("[LCD_OTA_PROXY] Camera DMA reservation released for TLS headroom");
   }
 
-  // Wake-gate: the Sense can't wake the LCD (GPIO39 is LCD->Sense only); the LCD
-  // self-wakes on its MAINT_WINDOW RTC timer but is skewed + needs boot/LVGL time.
-  // Before querying, re-send MAINT_WINDOW keepalives and wait for the LCD link to
-  // come up, so we don't fire 5 quick queries at a still-booting LCD and cold-miss.
-  // If the link is already recent (manual case, LCD awake) this is skipped and
-  // adds no latency. On timeout we fall through to the query anyway (it may still
-  // succeed, or fail as before) — no new abort here.
-  if (!halo_uart_link_recent(LCD_OTA_WAKE_LINK_RECENT_MS)) {
-    MaintenanceWindow gate_mw;
-    bool gate_has_window = maintenance_window_load(&gate_mw);
-    uint32_t gate_remaining_s = g_lcd_ota_window_remaining_s;
-    unsigned long gate_start = millis();
-    bool linked = false;
-    while ((millis() - gate_start) < LCD_OTA_WAKE_GATE_MS) {
-      // Re-notify the window (harmless if the LCD already has it). Mirrors the
-      // send used by keep_lcd_awake_for_maintenance().
-      send_maint_window(gate_has_window ? &gate_mw : nullptr, gate_remaining_s, 0, false);
-      // Pump RX for a short slice so a freshly-booted LCD's frames are parsed.
-      unsigned long slice = millis();
-      while ((millis() - slice) < 500) {
-        pump_uart_rx_once();
-        delay(10);
-      }
-      if (halo_uart_link_recent(LCD_OTA_WAKE_LINK_RECENT_MS)) {
-        linked = true;
-        break;
-      }
-    }
-    LOG_INFO("[LCD_OTA_ORCH] wake_gate %s after %lums",
-             linked ? "linked" : "timeout",
-             (unsigned long)(millis() - gate_start));
-  }
-
   // Step 1: Query LCD for its current firmware version
   char lcd_fw[32] = {0};
   uint32_t lcd_part_size = 0;
@@ -3579,15 +3534,8 @@ static void run_maintenance_if_needed() {
       return;
     }
     run_lcd_maintenance_ota_attempt("lcd_ota_due", 0, nullptr);
-    // Clear the flag on success; re-arm it if the LCD still didn't reach target
-    // (e.g. the LCD's skewed self-wake again failed to link before the query).
-    // This keeps the cold-link self-heal retrying on subsequent wakes instead of
-    // dropping after a single failed retry. One attempt per wake, then sleep —
-    // cannot busy-loop within a boot.
-    bool lcd_ota_due_succeeded = lcd_maintenance_result_successful(g_lcd_ota_result);
-    set_lcd_ota_due_nvs(!lcd_ota_due_succeeded);
-    LOG_INFO("[MAINT_RUN] lcd_ota_due completed result=%s rearm=%d",
-             g_lcd_ota_result, lcd_ota_due_succeeded ? 0 : 1);
+    set_lcd_ota_due_nvs(false);
+    LOG_INFO("[MAINT_RUN] lcd_ota_due completed result=%s", g_lcd_ota_result);
     g_maintenance_mode = false;
     sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
     return;
@@ -3855,21 +3803,7 @@ static void run_maintenance_if_needed() {
       break;
     }
   }
-  // Belt-and-suspenders cold-link self-heal: after the in-window retries are
-  // exhausted, owe an lcd_ota_due retry on the NEXT boot/wake iff the LCD proxy
-  // did NOT ultimately succeed (e.g. terminal lcd_query_fail because the LCD's
-  // skewed self-wake never linked in time). The consumption path
-  // (get_lcd_ota_due_nvs() block in run_maintenance_if_needed) re-runs
-  // run_lcd_maintenance_ota_attempt() promptly on next wake — including the
-  // wake-gate — instead of waiting for the next scheduled window. On success
-  // (updated/noop/already-current) clear it so it can't loop. This coexists
-  // with (and is redundant to) the in-window retry loop and the follow-up
-  // retry scheduling below.
-  bool lcd_ota_succeeded = lcd_maintenance_result_successful(g_lcd_ota_result);
-  set_lcd_ota_due_nvs(!lcd_ota_succeeded);
-  LOG_INFO("[MAINT_RUN] lcd_ota_due=%d (lcd_result=%s)",
-           lcd_ota_succeeded ? 0 : 1,
-           g_lcd_ota_result[0] ? g_lcd_ota_result : "pending");
+  set_lcd_ota_due_nvs(false);
   dump_system_truth("maintenance_done");
   bool followup_retry_needed =
       sense_maintenance_result_retryable(g_last_ota_result) ||
