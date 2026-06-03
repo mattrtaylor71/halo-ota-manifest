@@ -797,6 +797,12 @@ These breadcrumbs make the manual-OTA LCD-rendezvous decision/handshake trail vi
 
 `run_maintenance_if_needed()` calls it (only when `has_mw`) **after the in-window + idle checks pass and before `send_ota_uart_message("OTA_LOCK")`**, with timeout `max(2000UL, OTA_SCHED_HTTP_TIMEOUT_MS)`. On `REVAL_CANCELLED`/`REVAL_REPLACED` it aborts the OTA: records `ota_set_last_result("schedule_cancelled"/"schedule_replaced")` (reported to cloud at pre-sleep), `sched_event_note(res, request_id)` (request_id captured before clearing), `maintenance_followup_retry_clear(res)`, `maintenance_window_consumed_clear(res)`, then `mw.clear()` to **wipe the cached NVS `mw` window** so the next pre-sleep won't re-arm it, sets `g_maintenance_in_window=false` / `g_maintenance_mode=false`, and enters `sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT)`. `OTA_LOCK` was never sent on this path, so no `OTA_UNLOCK` is needed. `REVAL_VALID` and `REVAL_FETCH_FAILED` both proceed with the cached window (fail-open).
 
+**Outside-window handling (MaintenanceWindow path) — before vs. after.** In `run_maintenance_if_needed()`, the `MaintenanceWindow` outside-window branch (`now_epoch < window_start || now_epoch > window_end`) now distinguishes two cases:
+- **Before-window** (`now_epoch < window_start && !mw.hasExpired(now_epoch)`): the device woke too early — the clock was off at arm-time and NTP has just corrected it (`run_maintenance_if_needed()` re-syncs NTP before this check), or a prior fixed-delay followup retry landed early. Instead of scheduling another fixed-delay retry (120/300/600s) that is misaligned with the real window and could miss again — ultimately exhausting the 3-attempt retry machinery and **abandoning the scheduled OTA** — it calls `maintenance_followup_retry_clear("woke_before_window")`. With no followup retry pending, the pre-sleep timer re-arm (`ota_sched_configure_timer_wakeup`) re-targets the actual window start using `maintenance_window_wake_delta_s` (wakes at `start-15`). Because the clock is now NTP-synced, this converges in a single cycle (next wake lands inside the window).
+- **After-window** (`now_epoch > window_end`): unchanged — the existing expire/retry logic (`mw.hasExpired` clear + fixed-delay followup retry) is correct.
+
+This fixes the case where an early wake (clock skew corrected by NTP) burned all followup retries and abandoned the scheduled OTA. The separate `ota_sched_in_window` outside-window branch (the `else`/no-`has_mw` schedule path) is independent and was not changed.
+
 ---
 
 ## Cross-Module Dependencies

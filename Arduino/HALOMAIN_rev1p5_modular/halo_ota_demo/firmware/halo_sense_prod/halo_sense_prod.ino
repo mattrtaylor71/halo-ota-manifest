@@ -3628,7 +3628,16 @@ static void run_maintenance_if_needed() {
                (unsigned long long)now_epoch,
                (unsigned long long)window_start,
                (unsigned long long)window_end);
-      if (retry_wake || g_maint_followup_retry_attempts > 0) {
+      if (now_epoch < window_start && !mw.hasExpired(now_epoch)) {
+        // Woke BEFORE the window opens — clock was off at arm-time (NTP just
+        // corrected it) or a fixed-delay retry landed early. Don't burn misaligned
+        // followup retries that may also miss and ultimately abandon the window;
+        // clear the retry so the pre-sleep timer re-arm (ota_sched_configure_timer_
+        // wakeup) re-targets the actual window start (start-15) using the now-synced
+        // clock. Converges in one cycle.
+        LOG_INFO("[MAINT_RUN] woke_before_window -> clear retry, re-arm for window start");
+        maintenance_followup_retry_clear("woke_before_window");
+      } else if (retry_wake || g_maint_followup_retry_attempts > 0) {
         if (!maintenance_followup_retry_schedule(&mw, "outside_window")) {
           maintenance_followup_retry_clear("outside_window");
         }
