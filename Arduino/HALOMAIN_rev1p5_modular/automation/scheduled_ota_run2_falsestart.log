@@ -1,0 +1,14 @@
+[20:44:35] ================================================================
+[20:44:35] SCHEDULED OTA SOAK START base=6.1.714 cycles=5 lead=300s
+[20:44:35] ================================================================
+[20:44:35] --- SCHED CYCLE 1/5  target=6.1.715 (cur=6.1.714) ---
+[20:44:35]   publish 6.1.715 ...
+[20:46:18]   publish done ok=True
+[20:46:19]   schedule set: start=03:51:19Z (+300s) rid=sched-1780458379-soak
+[20:46:20]   GET endpoint enabled=True
+[20:46:53]   ack: sched_api_hits=1 report_updated=2026-06-03T03:45:19Z -> acknowledged=True
+[20:46:53]   waiting for window (03:51:19Z) + scheduled OTA -> sense 6.1.715 ...
+[20:46:53]   sense reached 6.1.715 on schedule. verifying LCD (cloud, then serial ground-truth) ...
+[20:47:39]   CYCLE 1 ❌ LCD_FAIL: sense=6.1.715 lcd_real=None (GENUINE miss) (184s) [pass=0 fail=1]
+[20:47:39] --- SCHED CYCLE 2/5  target=6.1.716 (cur=6.1.715) ---
+[20:47:39]   publish 6.1.716 ...

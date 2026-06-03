@@ -183,6 +183,20 @@ def main():
     logln("=" * 64)
     logln("SCHEDULED OTA SOAK START base=%s cycles=%d lead=%ds" % (cur, N_CYCLES, LEAD_SEC))
     logln("=" * 64)
+    # PREFLIGHT: don't start on a device that isn't settled on the expected base
+    # version (e.g. mid-OTA, or split, or carrying a leftover/cached maintenance
+    # window from a prior mid-window STOP). The operator must also confirm via a
+    # Sense [TRUTH] read that maintenance_in_window=0 / next_ota_epoch=0 before a
+    # restart-after-stop — a cloud schedule delete does NOT cancel a window the
+    # device already fetched+armed.
+    clear_schedules()
+    pf = cloud()
+    if pf.get("last_fw") != cur:
+        logln("PREFLIGHT FAIL: cloud last_fw=%s != base %s — device not at clean baseline. ABORT."
+              % (pf.get("last_fw"), cur)); return
+    if pf.get("last_ota_result") == "pending" or pf.get("last_lcd_ota_result") == "pending":
+        logln("PREFLIGHT FAIL: device shows OTA pending — not settled. ABORT."); return
+    logln("preflight ok: device settled on %s (lcd=%s); 0 schedules pending" % (cur, pf.get("last_lcd_fw")))
     for cyc in range(1, N_CYCLES + 1):
         if os.path.exists(STOP): logln("STOP sentinel — halting"); break
         target = bump(cur); t0 = time.time()

@@ -1,0 +1,1 @@
+{"cycle": 1, "target": "6.1.715", "ts": "2026-06-02T20:44:35", "acknowledged": true, "cloud": {"last_fw": "6.1.715", "last_lcd_fw": "unknown", "last_ota_result": "none", "last_lcd_ota_result": "lcd_query_fail", "updated_at": "2026-06-03T03:45:19Z"}, "lcd_real": null, "verdict": "lcd_fail", "secs": 184}
