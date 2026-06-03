@@ -514,13 +514,17 @@ The OTA schedule is managed via a cloud API:
 
 ### Window-Start Cancel-Safety (Schedule Re-Validation)
 
-A scheduled window is fetched and armed (RTC timer + NVS) hours before it fires. If the operator **deletes, disables, or replaces** the schedule in the cloud after the device has armed it, the device would otherwise act on its stale cached copy. To prevent this, `run_maintenance_if_needed()` re-GETs `/ota/schedule` at window-start — after the in-window and idle checks pass, but **before** sending `OTA_LOCK` — via `ota_sched_revalidate()`:
+A scheduled window is fetched and armed (RTC timer + NVS) hours before it fires. If the operator **disables or replaces** the schedule in the cloud after the device has armed it, the device would otherwise act on its stale cached copy. To prevent this, `run_maintenance_if_needed()` re-GETs `/ota/schedule` at window-start — after the in-window and idle checks pass, but **before** sending `OTA_LOCK` — via `ota_sched_revalidate()`.
 
-- **HTTP 204** (schedule deleted) -> abort, result `schedule_cancelled`
+The cancel is honored via `enabled=false` on the schedule row (HTTP 200), **not** a row delete. The schedule GET only returns enabled windows whose `start_epoch` is in the **future**, so a 204 means "no future window" — which includes a live, enabled window whose start has already passed (the normal case, since the device wakes **at** the window) as well as a deleted row. A 204 is therefore **fail-open** so legitimate scheduled OTAs are never falsely aborted; an `enabled=false` row returns HTTP 200 at any wake time, making it the only reliable cancel signal.
+
+- **HTTP 204** (no future window — includes a live past-start window, or a deleted row) -> **fail-open**, proceed with the cached window
 - **HTTP 200 `enabled=false`** (disabled) -> abort, result `schedule_cancelled`
 - **HTTP 200 `enabled=true`** with a `request_id` different from the cached window -> abort, result `schedule_replaced`
 - **HTTP 200 `enabled=true`** with matching `request_id` -> proceed with OTA
 - **Network error / not-ready (no WiFi, time invalid, parse error, other HTTP code)** -> **fail-open**, proceed with the cached window
+
+> **Operational rule:** to pull a scheduled release, set `enabled=false` on the device's schedule row — do **not** delete it (a delete returns 204, which is fail-open).
 
 On abort the device records the result (reported to cloud at pre-sleep), clears the consumed/follow-up retry state, and calls `MaintenanceWindow::clear()` to **wipe the cached NVS window** so the next pre-sleep does not re-arm it. Because `OTA_LOCK` has not been sent yet on the abort path, no `OTA_UNLOCK` is required; the device simply enters `SENSE_SLEEP_DEEP_MAINT`.
 

@@ -1522,7 +1522,13 @@ static bool ota_sched_http_fetch_window(uint32_t timeout_ms) {
 // deleted/disabled/replaced it in the cloud, the cached RTC/NVS window must NOT
 // be acted upon. This GET inspects the response directly (unlike
 // ota_sched_http_fetch_window, which treats 204 as "keep existing window").
-//   204                      -> REVAL_CANCELLED (schedule deleted)
+// NOTE: the schedule GET only returns enabled windows whose start_epoch is in
+// the FUTURE, so a 204 means "no future window" — which includes a live,
+// enabled window whose start has already passed (the normal wake-at-window
+// case) as well as a truly deleted row. We therefore fail-open on 204. A real
+// cancel must be expressed as enabled=false on the schedule row (HTTP 200),
+// which returns at any wake time and reliably aborts.
+//   204                      -> REVAL_FETCH_FAILED (no future window / past-start, fail-open)
 //   200 enabled=false        -> REVAL_CANCELLED (schedule disabled)
 //   200 enabled=true, rid !=  -> REVAL_REPLACED (different request_id)
 //   200 enabled=true, rid ==  -> REVAL_VALID
@@ -1573,8 +1579,14 @@ static SchedRevalidate ota_sched_revalidate(const MaintenanceWindow& cached,
   http.end();
 
   if (http_code == HTTP_CODE_NO_CONTENT) {
-    LOG_INFO("[MAINT_RUN] revalidate http=204 -> REVAL_CANCELLED (deleted)");
-    return REVAL_CANCELLED;
+    // 204 = no FUTURE window. The schedule GET only returns enabled windows
+    // whose start_epoch is still in the future. A live, enabled window whose
+    // start has already passed (the normal case — the device wakes AT the
+    // window) returns 204, as does a deleted row. Treating 204 as CANCELLED
+    // would falsely abort legitimate scheduled OTAs, so fail-open here. A real
+    // cancel is expressed as enabled=false (HTTP 200), which reliably aborts.
+    LOG_INFO("[MAINT_RUN] revalidate http=204 (no future window / past-start) -> fail_open (REVAL_FETCH_FAILED)");
+    return REVAL_FETCH_FAILED;
   }
 
   if (http_code != HTTP_CODE_OK) {
@@ -3688,10 +3700,12 @@ static void run_maintenance_if_needed() {
   }
 
   // Cancel-safety: re-validate the LIVE cloud schedule before committing to OTA.
-  // If the operator deleted (204) / disabled (enabled=false) / replaced (new
-  // request_id) the window after the device armed its cached copy, abort here.
+  // If the operator disabled (enabled=false) or replaced (new request_id) the
+  // window after the device armed its cached copy, abort here. To pull a
+  // release, set enabled=false on the schedule row — do NOT delete it: a delete
+  // (204) is indistinguishable from a live past-start window and is fail-open.
   // OTA_LOCK has NOT been sent yet, so no OTA_UNLOCK is needed on this path.
-  // Fail-open: a fetch failure proceeds with the cached window.
+  // Fail-open: a fetch failure / 204 proceeds with the cached window.
   if (has_mw) {
     SchedRevalidate rv = ota_sched_revalidate(
         mw, (uint64_t)now, max(2000UL, (unsigned long)OTA_SCHED_HTTP_TIMEOUT_MS));

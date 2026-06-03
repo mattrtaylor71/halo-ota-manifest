@@ -787,11 +787,13 @@ These breadcrumbs make the manual-OTA LCD-rendezvous decision/handshake trail vi
 
 `ota_sched_revalidate(const MaintenanceWindow& cached, uint64_t now_epoch, uint32_t timeout_ms)` returns a `SchedRevalidate` enum (`REVAL_VALID` / `REVAL_CANCELLED` / `REVAL_REPLACED` / `REVAL_FETCH_FAILED`). It performs a dedicated GET of `ota_sched_http_build_url()` (`/ota/schedule`) using the same HTTPS/TLS setup as `ota_sched_http_fetch_window()`, but inspects the response directly:
 
-- **204** -> `REVAL_CANCELLED` (schedule deleted)
-- **200, `enabled=false`** -> `REVAL_CANCELLED` (disabled)
+- **204** -> `REVAL_FETCH_FAILED` (**fail-open**). The schedule GET only returns enabled windows whose `start_epoch` is in the **future**, so a 204 means "no future window" — which includes a live, enabled window whose start has already passed (the normal case, since the device wakes **at** the window) as well as a truly deleted row. Treating 204 as cancelled would falsely abort legitimate scheduled OTAs, so the device proceeds with its cached window.
+- **200, `enabled=false`** -> `REVAL_CANCELLED` (disabled). This is the **only** reliable cancel signal: an `enabled=false` row returns HTTP 200 at any wake time regardless of `start_epoch`.
 - **200, `enabled=true`, `request_id` differs from cached** -> `REVAL_REPLACED`
-- **200, `enabled=true`, `request_id` matches** -> `REVAL_VALID`
+- **200, `enabled=true`, `request_id` matches (or empty)** -> `REVAL_VALID`
 - **not configured / no WiFi / time invalid / begin fail / empty body / parse error / any other HTTP code / network error** -> `REVAL_FETCH_FAILED` (**fail-open**)
+
+> **Operational rule:** to pull a scheduled release, set `enabled=false` on the device's schedule row — do **not** delete it. A deleted row returns 204, indistinguishable from a live past-start window, and is fail-open (the device will proceed with its cached window).
 
 `run_maintenance_if_needed()` calls it (only when `has_mw`) **after the in-window + idle checks pass and before `send_ota_uart_message("OTA_LOCK")`**, with timeout `max(2000UL, OTA_SCHED_HTTP_TIMEOUT_MS)`. On `REVAL_CANCELLED`/`REVAL_REPLACED` it aborts the OTA: records `ota_set_last_result("schedule_cancelled"/"schedule_replaced")` (reported to cloud at pre-sleep), `sched_event_note(res, request_id)` (request_id captured before clearing), `maintenance_followup_retry_clear(res)`, `maintenance_window_consumed_clear(res)`, then `mw.clear()` to **wipe the cached NVS `mw` window** so the next pre-sleep won't re-arm it, sets `g_maintenance_in_window=false` / `g_maintenance_mode=false`, and enters `sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT)`. `OTA_LOCK` was never sent on this path, so no `OTA_UNLOCK` is needed. `REVAL_VALID` and `REVAL_FETCH_FAILED` both proceed with the cached window (fail-open).
 
