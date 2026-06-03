@@ -547,14 +547,25 @@ When Sense receives a maintenance schedule from the cloud:
 4. Timer wake: LCD enters maintenance mode (headless, no UI init)
 5. LCD wakes Sense via INT_PIN
 6. Sense performs OTA checks for both boards
-7. LCD receives OTA via UART COBS if update available
-8. Both boards sleep after maintenance completes
+7. **Wake-gate before the scheduled LCD proxy query:** the Sense **cannot** wake the LCD
+   (GPIO39 wake is LCD→Sense only; the LCD ignores UART in deep sleep). The LCD self-wakes
+   on its own `MAINT_WINDOW` RTC timer, but that timer is skewed vs the Sense and needs
+   boot + LVGL-init time before it can answer `LCD_OTA_QUERY`. Before issuing the version
+   query, `lcd_ota_proxy_task()` runs a bounded ~90s gate (`LCD_OTA_WAKE_GATE_MS`) that
+   re-sends `MAINT_WINDOW` keepalives and pumps UART RX until the link becomes recent
+   (`LCD_OTA_WAKE_LINK_RECENT_MS = 3000`), so the proxy doesn't cold-miss with
+   `lcd_query_fail`. Skipped when the link is already recent (manual case). Purely
+   additive — only delays/retries; falls through to the query unchanged on timeout.
+8. LCD receives OTA via UART COBS if update available
+9. Both boards sleep after maintenance completes
 
 Key constants:
 - `MAINT_SYNC_RESEND_MS = 1500` -- Resend MAINT_WINDOW if no ACK
 - `MAINT_SYNC_MAX_SENDS = 3` -- Max retransmissions
 - `LCD_OTA_SCHED_START_MIN = 120` -- Default schedule: 2:00 AM local
 - `LCD_OTA_SCHED_WINDOW_MIN = 30` -- 30-minute window
+- `LCD_OTA_WAKE_GATE_MS = 90000` -- Scheduled-proxy wake-gate budget (LCD self-wake/boot)
+- `LCD_OTA_WAKE_LINK_RECENT_MS = 3000` -- Link considered up if RX within 3s
 
 ---
 
