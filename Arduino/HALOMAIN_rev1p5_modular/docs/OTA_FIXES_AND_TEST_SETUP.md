@@ -43,6 +43,40 @@ proxy to the next boot — by which point the LCD had slept and couldn't be woke
 
 Newest → oldest. Each line: `commit` — what broke / what fixed it.
 
+**Session 2026-06-03 (v720–754, device recovered to 754):**
+- `ef12156` — **REVERT of `f939b2d` (#5 cold-link wake-gate).** The #5 attempt did NOT work and was
+  HARMFUL, so it was reverted and the device USB-reflashed. See the "#5 — what NOT to do" note in §5.
+- `f939b2d` — *(reverted)* attempted #5: a Sense-side "wake-gate" (wait ≤90 s for the LCD UART link
+  before the proxy query) + `lcd_ota_due` self-heal. **Failed** (the Sense cannot wake the LCD — GPIO39
+  is LCD→Sense only — so waiting for a self-wake the gate can't cause doesn't help: 1/4 cold cycles),
+  **and regressed the proxy** (when the LCD *was* awake the gate disrupted the transfer → `timeout`,
+  which BLOCKS the Sense self-OTA), **and deadlocked** (`lcd_ota_due` stuck true → its consume-path
+  hijacks every maintenance wake to retry the broken proxy then sleeps, never doing the Sense self-OTA).
+  Net: device couldn't OTA out by any path; recovered only by USB reflash (see §4 recovery).
+- `db45fd5` — **Soak harness: read the LCD via the Sense-UART `INPUT_FW_INFO` query, NEVER open port 101.**
+  Opening the LCD's own port (even DTR/RTS-deasserted) STILL intermittently resets it → rolls back an
+  in-flight `PENDING_VERIFY` image → false "one behind" reads + collateral Sense misses next cycle. A
+  3 h soak's "8/13" was entirely this artifact (gold-standard showed the LCD tracked the Sense the whole
+  run). `read_lcd_version()` now queries the LCD *through the Sense* and only passes on `running_state=VALID`.
+- `8a69921` — **#4: early-wake `maintenance_outside_window`** abandoned scheduled OTAs. When the device
+  woke BEFORE the window (clock fast at arm-time, NTP corrects at wake), it scheduled fixed-delay retries
+  (120/300/600 s) that misalign with the window and after 3 misses abandoned it. Fix: the before-window
+  case clears the followup retry so the pre-sleep timer re-arm re-targets the real window start (start-15)
+  with the now-synced clock; converges in one cycle. (After-window + the separate `g_next_ota_epoch`
+  path unchanged.)
+- `821645c` — **#1: the Sense LCD-OTA proxy now requires `sha_match && ota_ok` for success** (was
+  `sha_match` alone). Rare gap: SHA verifies but the LCD's `esp_ota_set_boot_partition` fails → LCD stays
+  on old fw (doesn't reboot) yet the Sense reported success + self-OTA'd → silent board divergence. The
+  LCD already sent `ota_ok` in `LCD_OTA_END_ACK`; the Sense just ignored it. New verdict `lcd_boot_part_fail`.
+- `171b03f`/`db45fd5` — soak harness: arm-tap retry + wall-clock deadline + the Sense-UART LCD read above.
+- `b9cc200` + `0ef7e39` — **Scheduled-OTA cancel safety.** The device re-validates the live schedule at
+  window-start (`ota_sched_revalidate()`) before locking the OTA and aborts if pulled. The `/ota/schedule`
+  GET is FUTURE-only, so a live enabled window whose start already passed returns `204` (same as deleted)
+  → **204 is FAIL-OPEN** (proceed), else a legit scheduled OTA would falsely abort. **Cancel = set
+  `enabled=false`** (returns HTTP 200 `{enabled:false}` at any wake time → reliably aborts as
+  `schedule_cancelled`); a `request_id` change → `schedule_replaced`. Operational rule: to pull a release,
+  set `enabled=false`; do NOT delete the row.
+
 **LCD manual-OTA UI bugs (live serial-capture debugging, v706–709):**
 - `d9e1c60` — **Stale overlay**: the "Software\nUpdate" black overlay (`lcd_ui_task.h`) was created
   once as a child of `lv_scr_act()` (the Settings screen, since OTA launches there) and **never
@@ -106,6 +140,14 @@ Newest → oldest. Each line: `commit` — what broke / what fixed it.
 
 Device id `halo-d45b-8295`; owner id `7d7df434-d942-4037-b054-2d3005ea6abc`.
 
+**Device-id uniqueness:** generated from the Sense board's hardware MAC — `load_runtime_device_id()`
+(`Sense_Minimal.ino:347`) does `esp_read_mac(mac, ESP_MAC_ETH)` → `halo-%02x%02x-%02x%02x` over
+`mac[2..5]`. Unique per chip by construction (each device's Sense has a distinct factory MAC), so devices
+never share an id; always use the **Sense** id for cloud ops (the LCD derives its own from its MAC and is
+provisioning-only). **Pre-scale caveat:** it uses only 4 MAC bytes = 32-bit space → birthday-bound ~50%
+collision chance across a fleet around ~77k units. Fine now; widen the id (include `mac[1]` or hash all 6
+bytes) before scaling to tens of thousands.
+
 ### Cloud (AWS profile `trepo-dev`, region `us-east-1`)
 - **Device report:** DynamoDB `TrepoOtaDeviceLatest-dev`, key `device_id` → `last_fw`, `last_lcd_fw`,
   `last_ota_result`, `last_lcd_ota_result`, `updated_at`. (Written by `OtaReportApiFunction`.)
@@ -128,12 +170,18 @@ LCD and garbles the `[FW]` line. STOP sentinel `automation/overnight_STOP`; resu
 
 ### Scheduled-OTA soak — `automation/scheduled_ota_soak.py`
 Per cycle: publish → clear stale schedule rows + write a fresh window (`start=now+300`, dur 600) to
-`TrepoOtaSchedules-dev` → actuator tap (Sense fetches schedule + arms RTC timer; verify via
-`OtaScheduleApiFunction` log hit + fresh report) → wait for the window (device auto-wakes ~grace_before
-before `start_epoch`) → poll cloud for `last_fw==target` → tap to wake (so the LCD is reachable and the
-Sense re-queries) → poll for `last_lcd_fw==target`. Run: `python3 automation/scheduled_ota_soak.py <base_ver> <n_cycles>`.
-STOP sentinel `automation/sched_STOP`; results in `automation/scheduled_ota_results.jsonl`.
-**A new window per cycle (new `request_id`) is never seen as "consumed", so back-to-back works.**
+`TrepoOtaSchedules-dev` → actuator tap, **retried until the Sense actually fetches** (`OtaScheduleApiFunction`
+log hit) → wait for the window (device auto-wakes ~grace_before before `start_epoch`) → poll cloud for
+`last_fw==target` (Sense) → **verify the LCD via `read_lcd_version()` = the Sense-UART `INPUT_FW_INFO`
+gold-standard read, passing only on `running_state=VALID`** (NEVER opens port 101 — see §4). Run:
+`python3 automation/scheduled_ota_soak.py <base_ver> <n_cycles> [deadline_min]`. STOP sentinel
+`automation/sched_STOP`; results in `automation/scheduled_ota_results.jsonl`.
+- **CONSUMED-WINDOW COOLDOWN (~20 min):** after a successful OTA the device declines to re-OTA for ~20 min
+  (`ota=up_to_date`, `sched_api_hits=1`, never wakes at the too-soon window). The soak fires windows every
+  ~15 min, so **every other cycle is cooldown-blocked** — this shows up as a FAIL but is the device behaving
+  correctly (real schedules are hours/days apart). For a clean pass-rate, **space windows >20 min apart**.
+  A clean 3 h run climbed the device through 5 consecutive versions, both boards VALID, no skips — every
+  OTA the cooldown permitted succeeded.
 
 ### Reading device state / breadcrumbs (only when NOT mid-OTA)
 - Sense USB `errors` → `sense_errlog_dump` (the `ota_orch` breadcrumb trail, NVS black box).
@@ -143,11 +191,30 @@ STOP sentinel `automation/sched_STOP`; results in `automation/scheduled_ota_resu
 ---
 
 ## 4. Critical gotchas
-- **Opening a USB-CDC port RESETS the ESP32-S3** (`rst:0x15 USB_UART_CHIP_RESET`), even with
-  dtr/rts=False, and it re-enumerates on every deep-sleep wake. **Never live-monitor serial during an
-  OTA** — verify via the cloud report. Safe to read serial only when no OTA is in flight.
+- **A DEFAULT-open USB-CDC port RESETS the ESP32-S3** (`rst:0x15 USB_UART_CHIP_RESET`) — `serial.Serial(port,baud)`
+  opens before you can deassert the lines, so it asserts DTR → reset. **Never default-open / live-monitor
+  serial during an OTA.**
+- **CORRECTED (2026-06-03): you CAN open non-destructively** with a DEFERRED open and DTR/RTS off first:
+  `s=serial.Serial(); s.port=p; s.baudrate=115200; s.dtr=False; s.rts=False; s.open()`. Verified on BOTH
+  boards — reads the live version without resetting. **BUT** the LCD's OWN port (`usbmodem101`) STILL
+  resets intermittently even this way (rolls back an in-flight `PENDING_VERIFY` image). **Gold-standard
+  LCD read = query it THROUGH the Sense, never open port 101:** send `{"type":"INPUT_FW_INFO"}` to the
+  Sense (deferred/DTR-off open) → Sense UART-queries the LCD → returns `sense_fw`, `lcd_fw`,
+  `lcd_running_part`, `lcd_running_state` (NEW/PENDING_VERIFY/VALID/…). LCD must be awake (tap first).
+  This is the only trustworthy way to confirm the LCD version/finalize state. (`/tmp/fwinfo4.py` pattern.)
+- **LCD finalize is correct & prompt** (proven via the running_state probe, both manual + scheduled):
+  `mark_valid` runs unconditionally in LCD `setup()` (`LCD_Minimal.ino:3610`, after LVGL init, before
+  loop/sleep), so the LCD reaches VALID within ~seconds of its post-OTA boot. The only rollback trigger
+  is an external reset during that brief PENDING_VERIFY window — which only a USB-port open causes; nothing
+  in the field does. So a "one behind" LCD reading from a port-101 tool is a MEASUREMENT artifact.
 - **The LCD can only wake via touch/encoder/timer, never UART** — hence the actuator and the cold-link
-  rendezvous issue for scheduled OTA.
+  rendezvous issue for scheduled OTA. A proxy `lcd_query_fail` (LCD asleep, quick) lets the Sense self-OTA
+  proceed; a proxy `timeout` (LCD awake but transfer fails) BLOCKS the Sense self-OTA.
+- **No-OTA recovery (USB reflash):** if a device can't OTA out of bad firmware, app-only reflash the Sense:
+  `python3 -m esptool --chip esp32s3 --port /dev/cu.usbmodem1101 --baud 921600 write_flash <off> <bin>`.
+  **Flash BOTH partitions** — `ota_0`=`0x10000`, `ota_1`=`0x1F0000` (Sense `partitions.csv`) — because the
+  device may be booting from `ota_1`; a `0x10000`-only flash won't change the running fw. App-only preserves
+  NVS/WiFi (no re-provision). Tap to wake first so the port enumerates. Then a manual OTA syncs the LCD.
 - **Cloud LCD field lag:** right after a scheduled OTA the cloud may show `last_lcd_fw=unknown` /
   `last_lcd_ota_result=lcd_query_fail` (Sense couldn't re-query the asleep LCD); it **self-corrects**
   to the real version on the next wake-with-both-awake. Ground-truth with LCD USB `fw` if needed.
@@ -158,8 +225,23 @@ STOP sentinel `automation/sched_STOP`; results in `automation/scheduled_ota_resu
 
 ---
 
-## 5. Known follow-up (optional)
-`docs/OTA_HARDENING_TODO.md` — the cold-link rendezvous hardening (idempotent LCD `BEGIN` re-ACK +
-Sense `BEGIN`/query retry). Would make the LCD half of a *scheduled* OTA succeed on the first wake
-instead of occasionally needing the `lcd_ota_due` catch-up / cloud self-correct. Not required (it
-converges without it) — a coordinated two-board change for a supervised pass.
+## 5. Known follow-up (optional) + #5 "what NOT to do"
+
+**#5 cold-link rendezvous — UNSOLVED, and the obvious fix is WRONG.** A *scheduled* OTA can leave the
+boards split for one cycle: the Sense wakes on its timer, the LCD is asleep, the proxy `lcd_query_fail`s,
+the Sense self-OTAs alone → LCD one version behind. It **self-corrects on the next OTA / any user
+interaction** (both boards awake), so it's the *least* important gap.
+
+**Do NOT "fix" it with a Sense-side wake-gate** (we tried — `f939b2d`, reverted `ef12156`). Root reason:
+**the Sense physically cannot wake the LCD** (GPIO39 is LCD→Sense only; the LCD ignores UART in deep
+sleep). The LCD self-wakes only via its own MAINT_WINDOW RTC timer, which is the unreliable part — and
+no amount of Sense-side waiting/retrying can cause a self-wake. Worse, the wake-gate disrupted the
+working proxy (`timeout` → blocks Sense self-OTA) and the `lcd_ota_due` self-heal deadlocked the device
+(every maintenance wake hijacked to retry the broken proxy, never self-OTAing). Recovery required a USB
+reflash of both Sense partitions. **Any real fix must be LCD-side** (make the LCD's MAINT_WINDOW self-wake
+reliable + stay awake through the window) and must be proven on a bench/test unit BEFORE deploying to the
+only device. `docs/OTA_HARDENING_TODO.md` has the older idempotent-BEGIN-re-ACK idea — also a coordinated
+two-board change; same "prove it first" rule applies.
+
+**HARD RULE learned this session:** never deploy an unproven OTA-PATH firmware change to the only device.
+The OTA path is the recovery path — break it and you can't roll back over the air.

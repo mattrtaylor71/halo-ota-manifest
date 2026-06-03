@@ -3,6 +3,14 @@
 Status: NOT YET IMPLEMENTED. Surfaced by the overnight soak (2026-06-02). Needs a
 coordinated two-board change + attended OTA test — do not land unsupervised.
 
+> ⚠️ **2026-06-03: a Sense-side "wake-gate" attempt at this FAILED and bricked OTA (commit `f939b2d`,
+> reverted `ef12156`; device recovered by USB reflash).** Root reason: **the Sense cannot wake the LCD**
+> (GPIO39 is LCD→Sense only). Waiting/retrying on the Sense for an LCD self-wake it can't cause does not
+> help, and it regressed the working proxy (`timeout` → blocks Sense self-OTA) and deadlocked via a stuck
+> `lcd_ota_due` retry loop. **Any real fix must be LCD-SIDE** (reliable MAINT_WINDOW self-wake + stay
+> awake through the window) and MUST be proven on a bench/test unit first. Do NOT deploy unproven OTA-path
+> changes to the only device. See `docs/OTA_FIXES_AND_TEST_SETUP.md` §5.
+
 ## Observation
 Overnight soak (button-free USB-inject trigger) passes ~8/9 dual-board OTA cycles.
 The occasional failure is always the same signature:
