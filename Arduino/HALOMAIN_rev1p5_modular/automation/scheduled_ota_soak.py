@@ -126,48 +126,55 @@ def tap():
         logln("  tap err %s" % e)
 
 def read_lcd_version():
-    """Ground-truth the LCD version over serial (the cloud last_lcd_fw field lags
-    after a scheduled OTA because the Sense can't re-query the asleep LCD). One tap
-    to wake; a second only if the port doesn't enumerate.
+    """Ground-truth the LCD version via the SENSE over UART — the GOLD-STANDARD
+    non-destructive read. We send `INPUT_FW_INFO` to the Sense (port 1101) and the
+    Sense does a live UART query of the LCD, returning its real running fw +
+    `lcd_running_state`. This NEVER opens the LCD's own USB port (101).
 
-    CRITICAL: open with DTR/RTS DEASSERTED. A default open asserts DTR, which
-    triggers USB_UART_CHIP_RESET on the ESP32-S3 — resetting the LCD. If that
-    reset lands during the brief post-OTA PENDING_VERIFY window (before the LCD
-    marks the new image valid in setup()), the bootloader ROLLS BACK to the
-    previous slot and we read "one behind" — a self-inflicted false failure.
-    Deasserting DTR/RTS reads the live running version without resetting the LCD."""
-    import re as _re
-    for attempt in range(2):
-        tap()
-        port = None
-        for _ in range(20):
-            g = glob.glob("/dev/cu.usbmodem101")
-            if g: port = g[0]; break
-            time.sleep(0.3)
-        if not port:
-            continue  # port didn't come up — tap again
+    Why not open port 101: even with DTR/RTS deasserted, opening the LCD port
+    STILL intermittently triggers USB_UART_CHIP_RESET on the LCD, which rolls back
+    an in-flight PENDING_VERIFY image -> false "one version behind" reads (and the
+    reset can disrupt the Sense<->LCD sleep coordination, causing collateral
+    Sense-side misses on the NEXT cycle). Opening the SENSE port (1101) with
+    DTR/RTS deasserted does NOT reset it (verified), and the Sense's UART query
+    never resets the LCD. Returns the LCD's running fw string only when its
+    running_state is VALID (a real, finalized image); else None."""
+    for attempt in range(3):
+        tap(); time.sleep(1.0)          # wake both so the Sense can UART-query the LCD
+        g = glob.glob("/dev/cu.usbmodem1101")
+        if not g:
+            time.sleep(1); continue
         try:
-            p = serial.Serial()
-            p.port = port; p.baudrate = 115200; p.timeout = 0.3
-            p.dtr = False; p.rts = False   # do NOT reset the LCD on open
-            p.open()
+            s = serial.Serial()
+            s.port = g[0]; s.baudrate = 115200; s.timeout = 0.3
+            s.dtr = False; s.rts = False   # deferred, DTR/RTS off -> no Sense reset
+            s.open()
         except Exception:
-            continue
-        time.sleep(1.0)  # no reset -> no reboot wait needed
-        ver = None; endt = time.time() + 9; nxt = 0; n = 0
-        while time.time() < endt:
-            if time.time() >= nxt and n < 3:
-                try: p.write(b"fw\n"); p.flush()
-                except Exception: break
-                n += 1; nxt = time.time() + 2.0
-            try: line = p.readline().decode("utf-8", "ignore").rstrip()
-            except Exception: break
-            if line and "[FW]" in line:
-                m = _re.search(r'"lcd_fw":"(\d+\.\d+\.\d+)"', line)
-                if m: ver = m.group(1)
-        try: p.close()
+            time.sleep(1); continue
+        mid = 8500; ver = None; t0 = time.time()
+        while time.time() - t0 < 12 and ver is None:
+            try:
+                s.write((json.dumps({"ver": 1, "type": "INPUT_FW_INFO",
+                                     "msg_id": mid, "ts": mid * 7 % 1900000000}) + "\n").encode())
+                s.flush(); mid += 1
+            except Exception:
+                break
+            te = time.time() + 0.6
+            while time.time() < te:
+                try: line = s.readline().decode("utf-8", "ignore").rstrip()
+                except Exception: line = None
+                if line and "FW_INFO" in line and "lcd_running_state" in line:
+                    try:
+                        j = json.loads(line[line.index("{"):])
+                        lcd_fw = j.get("lcd_fw"); state = j.get("lcd_running_state")
+                        if lcd_fw and lcd_fw != "unknown" and state == "VALID":
+                            ver = lcd_fw
+                        break
+                    except Exception: pass
+        try: s.close()
         except Exception: pass
         if ver: return ver
+        time.sleep(1)
     return None
 
 def sched_api_hits(since_epoch):
