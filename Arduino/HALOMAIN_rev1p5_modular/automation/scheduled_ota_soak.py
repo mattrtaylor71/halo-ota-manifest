@@ -128,7 +128,14 @@ def tap():
 def read_lcd_version():
     """Ground-truth the LCD version over serial (the cloud last_lcd_fw field lags
     after a scheduled OTA because the Sense can't re-query the asleep LCD). One tap
-    to wake; a second only if the port doesn't enumerate."""
+    to wake; a second only if the port doesn't enumerate.
+
+    CRITICAL: open with DTR/RTS DEASSERTED. A default open asserts DTR, which
+    triggers USB_UART_CHIP_RESET on the ESP32-S3 — resetting the LCD. If that
+    reset lands during the brief post-OTA PENDING_VERIFY window (before the LCD
+    marks the new image valid in setup()), the bootloader ROLLS BACK to the
+    previous slot and we read "one behind" — a self-inflicted false failure.
+    Deasserting DTR/RTS reads the live running version without resetting the LCD."""
     import re as _re
     for attempt in range(2):
         tap()
@@ -140,10 +147,13 @@ def read_lcd_version():
         if not port:
             continue  # port didn't come up — tap again
         try:
-            p = serial.Serial(port, 115200, timeout=0.3)
+            p = serial.Serial()
+            p.port = port; p.baudrate = 115200; p.timeout = 0.3
+            p.dtr = False; p.rts = False   # do NOT reset the LCD on open
+            p.open()
         except Exception:
             continue
-        time.sleep(3.5)  # LCD boot after the USB-open reset
+        time.sleep(1.0)  # no reset -> no reboot wait needed
         ver = None; endt = time.time() + 9; nxt = 0; n = 0
         while time.time() < endt:
             if time.time() >= nxt and n < 3:
@@ -180,8 +190,10 @@ def poll_until(field, target, timeout_s, stop_check=True):
 def main():
     cur = sys.argv[1] if len(sys.argv) > 1 else "6.1.712"
     npass = nfail = 0
+    wall_start = time.time()
+    deadline_min = int(sys.argv[3]) if len(sys.argv) > 3 else 60
     logln("=" * 64)
-    logln("SCHEDULED OTA SOAK START base=%s cycles=%d lead=%ds" % (cur, N_CYCLES, LEAD_SEC))
+    logln("SCHEDULED OTA SOAK START base=%s cycles=%d lead=%ds deadline=%dmin" % (cur, N_CYCLES, LEAD_SEC, deadline_min))
     logln("=" * 64)
     # PREFLIGHT: don't start on a device that isn't settled on the expected base
     # version (e.g. mid-OTA, or split, or carrying a leftover/cached maintenance
@@ -199,6 +211,8 @@ def main():
     logln("preflight ok: device settled on %s (lcd=%s); 0 schedules pending" % (cur, pf.get("last_lcd_fw")))
     for cyc in range(1, N_CYCLES + 1):
         if os.path.exists(STOP): logln("STOP sentinel — halting"); break
+        if time.time() - wall_start > deadline_min * 60:
+            logln("DEADLINE %dmin reached — stopping (completed %d cycles)" % (deadline_min, cyc - 1)); break
         target = bump(cur); t0 = time.time()
         logln("--- SCHED CYCLE %d/%d  target=%s (cur=%s) ---" % (cyc, N_CYCLES, target, cur))
         r = {"cycle": cyc, "target": target, "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
@@ -212,9 +226,17 @@ def main():
                   (time.strftime("%H:%M:%SZ", time.gmtime(start)), LEAD_SEC, rid))
             getok = sched_get_ok(cur)
             logln("  GET endpoint enabled=%s" % getok)
-            tap()  # wake -> fetch + arm
-            time.sleep(20)
-            hits = sched_api_hits(now); snap = cloud()
+            # wake -> fetch + arm; retry the tap until the device actually fetches
+            # (a single tap occasionally fails to wake the device — verify via the
+            # schedule-API hit and re-tap rather than burning the whole cycle).
+            hits = 0
+            for arm_try in range(3):
+                tap()
+                time.sleep(20)
+                hits = sched_api_hits(now)
+                if hits >= 1: break
+                logln("  arm tap %d: device didn't fetch yet (hits=%d), re-tapping..." % (arm_try + 1, hits))
+            snap = cloud()
             ack = (hits >= 1)
             logln("  ack: sched_api_hits=%s report_updated=%s -> acknowledged=%s" %
                   (hits, snap.get("updated_at"), ack))
