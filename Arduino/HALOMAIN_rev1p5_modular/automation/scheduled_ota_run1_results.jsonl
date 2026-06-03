@@ -1,0 +1,2 @@
+{"cycle": 1, "target": "6.1.713", "ts": "2026-06-02T20:04:28", "acknowledged": true, "cloud": {"last_fw": "6.1.713", "last_lcd_fw": "6.1.713", "last_ota_result": "up_to_date", "last_lcd_ota_result": "updated", "updated_at": "2026-06-03T03:17:09Z"}, "verdict": "PASS", "secs": 768}
+{"cycle": 2, "target": "6.1.714", "ts": "2026-06-02T20:17:17", "acknowledged": true, "cloud": {"last_fw": "6.1.714", "last_lcd_fw": "unknown", "last_ota_result": "up_to_date", "last_lcd_ota_result": "noop", "updated_at": "2026-06-03T03:32:17Z"}, "verdict": "lcd_lag", "secs": 1170}

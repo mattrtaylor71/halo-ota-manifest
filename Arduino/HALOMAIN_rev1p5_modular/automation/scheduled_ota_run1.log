@@ -1,0 +1,28 @@
+[20:04:28] ================================================================
+[20:04:28] SCHEDULED OTA SOAK START base=6.1.712 cycles=5 lead=300s
+[20:04:28] ================================================================
+[20:04:28] --- SCHED CYCLE 1/5  target=6.1.713 (cur=6.1.712) ---
+[20:04:28]   publish 6.1.713 ...
+[20:06:11]   publish done ok=True
+[20:06:13]   schedule set: start=03:11:12Z (+300s) rid=sched-1780455972-soak
+[20:06:15]   GET endpoint enabled=True
+[20:06:46]   ack: sched_api_hits=2 report_updated=2026-06-03T03:06:33Z -> acknowledged=True
+[20:06:46]   waiting for window (03:11:12Z) + scheduled OTA -> sense 6.1.713 ...
+[20:12:54]   sense reached 6.1.713 on schedule. waking to self-correct LCD ...
+[20:17:17]   CYCLE 1 ✅ PASS both=6.1.713 (768s) [pass=1 fail=0]
+[20:17:17] --- SCHED CYCLE 2/5  target=6.1.714 (cur=6.1.713) ---
+[20:17:17]   publish 6.1.714 ...
+[20:19:04]   publish done ok=True
+[20:19:06]   schedule set: start=03:24:05Z (+300s) rid=sched-1780456745-soak
+[20:19:06]   GET endpoint enabled=True
+[20:19:38]   ack: sched_api_hits=2 report_updated=2026-06-03T03:19:24Z -> acknowledged=True
+[20:19:38]   waiting for window (03:24:05Z) + scheduled OTA -> sense 6.1.714 ...
+[20:31:54]   sense reached 6.1.714 on schedule. waking to self-correct LCD ...
+[20:36:47]   CYCLE 2 ⚠ lcd_lag: sense=6.1.714 but cloud lcd=unknown (cold-link; may catch up) (1170s) [pass=1 fail=1]
+[20:36:47] --- SCHED CYCLE 3/5  target=6.1.715 (cur=6.1.714) ---
+[20:36:47]   publish 6.1.715 ...
+[20:38:32]   publish done ok=True
+[20:38:33]   schedule set: start=03:43:33Z (+300s) rid=sched-1780457913-soak
+[20:38:34]   GET endpoint enabled=True
+[20:39:06]   ack: sched_api_hits=2 report_updated=2026-06-03T03:38:52Z -> acknowledged=True
+[20:39:06]   waiting for window (03:43:33Z) + scheduled OTA -> sense 6.1.715 ...
