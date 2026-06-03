@@ -138,7 +138,7 @@ Maximum line length: 4096 bytes (allows rich voice response payloads).
 | `PONG` | Response to PING |
 | `LCD_OTA_QUERY_RESP` | LCD running fw + partition size + real partition/state: `running_part`, `running_state` (`NEW`/`PENDING_VERIFY`/`VALID`/`INVALID`/`ABORTED`/`UNDEFINED`/`UNKNOWN`), `boot_part`, optional `last_ota_result` |
 | `LCD_OTA_BEGIN_ACK` | Acknowledge OTA begin (accepted/rejected, resume offset) |
-| `LCD_OTA_END_ACK` | Acknowledge OTA end (SHA256 match result) |
+| `LCD_OTA_END_ACK` | Acknowledge OTA end: `sha_match` (SHA256 verify) + `ota_ok` (`esp_ota_set_boot_partition()` result). Sense proxy requires **both** true for success |
 | `RELEASE_WAKE_ACK` | Acknowledged wake pin release |
 | `MAINT_WINDOW` | Maintenance window acknowledgment with timing details |
 
@@ -447,7 +447,8 @@ Cloud (S3)                    Sense                         LCD
   |                             |                             |
   |                             |-- LCD_OTA_END ------------>|
   |                             |<- LCD_OTA_END_ACK ---------|
-  |                             |  (SHA256 match result)     |
+  |                             |  (sha_match + ota_ok;       |
+  |                             |   success needs BOTH true)  |
   |                             |                      [reboot]
 ```
 

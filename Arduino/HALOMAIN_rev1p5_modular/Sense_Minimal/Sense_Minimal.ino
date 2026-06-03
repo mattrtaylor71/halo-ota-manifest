@@ -2537,9 +2537,11 @@ static bool parse_input_message(const char* json_str) {
                   accepted ? 1 : 0, reason, (unsigned long)resume_offset);
   } else if (strcmp(type, "LCD_OTA_END_ACK") == 0) {
     bool sha_match = doc["sha_match"] | false;
+    bool ota_ok    = doc["ota_ok"] | false;
     g_lcd_ota_end_ack_sha_match = sha_match;
-    g_lcd_ota_end_ack_ready = true;
-    Serial.printf("[UART] LCD_OTA_END_ACK sha_match=%d\n", sha_match ? 1 : 0);
+    g_lcd_ota_end_ack_ota_ok    = ota_ok;
+    g_lcd_ota_end_ack_ready     = true;
+    Serial.printf("[UART] LCD_OTA_END_ACK sha_match=%d ota_ok=%d\n", sha_match ? 1 : 0, ota_ok ? 1 : 0);
   } else if (strcmp(type, "LCD_OTA_STATUS") == 0) {
     uint8_t pct = doc["progress"] | (uint8_t)0;
     const char* phase = doc["phase"] | "";

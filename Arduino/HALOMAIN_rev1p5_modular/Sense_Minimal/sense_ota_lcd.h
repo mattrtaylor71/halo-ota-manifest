@@ -85,6 +85,7 @@ static uint32_t      g_lcd_ota_begin_ack_resume_offset = 0;
 
 static volatile bool g_lcd_ota_end_ack_ready = false;
 static bool          g_lcd_ota_end_ack_sha_match = false;
+static bool          g_lcd_ota_end_ack_ota_ok = false;
 
 // When true, the proxy task owns lcdSerial for binary COBS framing.
 // The main loop must skip reading lcdSerial while this is set.
@@ -605,6 +606,7 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
 
   // Clear mailbox before sending END
   g_lcd_ota_end_ack_ready = false;
+  g_lcd_ota_end_ack_ota_ok = false;   // clear stale boot-part result
 
   {
     StaticJsonDocument<256> end_doc;
@@ -642,6 +644,12 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
       Serial.println("[LCD_OTA_PROXY] SHA mismatch reported by LCD");
       diag_record_error_persistent("lcd_ota", -1, "sha_mismatch");
       return "sha_mismatch";
+    }
+
+    if (!g_lcd_ota_end_ack_ota_ok) {
+      Serial.println("[LCD_OTA_PROXY] LCD reported sha_match but set_boot_partition FAILED (ota_ok=0) — not a real success");
+      diag_record_error_persistent("lcd_ota", -1, "lcd_boot_part_fail");
+      return "lcd_boot_part_fail";
     }
 
     Serial.printf("[LCD_OTA_PROXY] success version=%s bytes=%lu elapsed=%lu ms\n",
