@@ -226,6 +226,8 @@ Four buttons in diamond layout + center AI button:
 - **Bottom:** More (...)
 - **Center:** AI (hold-to-talk)
 
+The center AI button (92×92 green box, `ship_main_menu_ai_button`) displays the `sparkles_ai` image (76×76 RGB565+alpha sparkles icon, declared via `LV_IMG_DECLARE(sparkles_ai)`; asset in `halo_lcd_prod/sparkles_ai.c`) instead of the "AI" text. The `ship_main_menu_ai_label` ("AI") is still created (other code references it) but kept hidden via `LV_OBJ_FLAG_HIDDEN`. `ship_main_menu_set_ai_hold_active()` provides hold feedback by recoloring the button background/shadow (blue glow on hold), so the sparkles image stays visible in both idle and hold states.
+
 Buttons use hitbox-based touch detection (not LVGL events) for the round display.
 
 #### Second Menu

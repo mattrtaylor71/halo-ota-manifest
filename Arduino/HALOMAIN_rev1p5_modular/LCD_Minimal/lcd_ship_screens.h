@@ -13,6 +13,8 @@
 #ifndef LCD_SHIP_SCREENS_H
 #define LCD_SHIP_SCREENS_H
 
+LV_IMG_DECLARE(sparkles_ai);
+
 static int ship_main_menu_button_index_for_action(ship_menu_action_t action) {
   switch (action) {
     case SHIP_MENU_ACTION_LOG_DISH: return 0;
@@ -45,7 +47,7 @@ static void ship_main_menu_style_button(lv_obj_t* btn, bool primary) {
   lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_radius(btn, SHIP_MAIN_MENU_BTN_RADIUS, LV_PART_MAIN);
   lv_obj_set_style_bg_color(btn,
-                            primary ? lv_color_hex(0x1F4D2B) : lv_color_hex(0xFFFFFF),
+                            primary ? lv_color_hex(0x296065) : lv_color_hex(0xFFFFFF),
                             LV_PART_MAIN);
   lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
@@ -61,7 +63,7 @@ static void ship_main_menu_set_ai_hold_active(bool active) {
     return;
   }
   lv_obj_set_style_bg_color(ship_main_menu_ai_button,
-                            active ? lv_color_hex(0x2D4FFF) : lv_color_hex(0x1F4D2B),
+                            active ? lv_color_hex(0x2D4FFF) : lv_color_hex(0x296065),
                             LV_PART_MAIN);
   lv_obj_set_style_border_width(ship_main_menu_ai_button, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(ship_main_menu_ai_button, active ? 18 : 0, LV_PART_MAIN);
@@ -1152,6 +1154,10 @@ static void show_ship_main_menu_impl() {
     lv_label_set_text(ship_main_menu_ai_label, "AI");
     lv_obj_set_style_text_font(ship_main_menu_ai_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_center(ship_main_menu_ai_label);
+    lv_obj_add_flag(ship_main_menu_ai_label, LV_OBJ_FLAG_HIDDEN);   // hide "AI" text; sparkles icon shown instead
+    lv_obj_t *ai_img = lv_img_create(ship_main_menu_ai_button);
+    lv_img_set_src(ai_img, &sparkles_ai);
+    lv_obj_center(ai_img);
     ship_main_menu_set_ai_hold_active(false);
   }
   ui_log_asset("show_main_menu", "SHIP_MAIN_MENU", "custom_main_menu");
