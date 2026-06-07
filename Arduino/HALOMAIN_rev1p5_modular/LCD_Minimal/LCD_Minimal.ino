@@ -149,6 +149,7 @@ typedef enum {
   SHIP_MENU_ACTION_DEBUG,
   SHIP_MENU_ACTION_RESET_WIFI,
   SHIP_MENU_ACTION_MANUAL_OTA,
+  SHIP_MENU_ACTION_BACKLIGHT,
   SHIP_MENU_ACTION_DEBUG_LOG,
   SHIP_MENU_ACTION_SHOPPING_LIST,
   SHIP_MENU_ACTION_BACK
@@ -164,6 +165,7 @@ typedef enum {
   SCREEN_HOME = 0,
   SCREEN_SECOND,
   SCREEN_SETTINGS,
+  SCREEN_BACKLIGHT,
   SCREEN_AI_LISTENING,
   SCREEN_VOICE_JSON,
   SCREEN_HOLD_STILL,
@@ -773,6 +775,7 @@ static const unsigned long REFRESH_PROOF_OF_LIFE_TIMEOUT_MS = 20000; // 20s — 
 static const unsigned long REFRESH_TOTAL_MAX_MS = 35000;        // 35s hard max
 static const unsigned long REFRESH_NO_UI_POL_TIMEOUT_MS = 25000; // 25s — no UI poll timeout
 static const unsigned long REFRESH_MAX_MS = 30000;  // 30s — Sense needs boot (~5s) + WiFi connect (~15s) + API call (~3s)
+static const unsigned long REFRESH_HARD_TIMEOUT_MS = 12000;    // 12s hard cap on a single inflight refresh (recover from stuck "Refreshing")
 static const unsigned long REFRESH_FAILED_SHOW_MS = 2000;
 static const unsigned long REFRESH_COMPLETE_SHOW_MS = 500;
 static const unsigned long REFRESH_PULSE_COOLDOWN_MS = 1500;
@@ -1098,6 +1101,8 @@ static lv_obj_t *ship_menu_settings_title = NULL;
 static lv_obj_t *ship_menu_settings_versions = NULL;
 static lv_obj_t *ship_menu_settings_btn_reset = NULL;
 static lv_obj_t *ship_menu_settings_label_reset = NULL;
+static lv_obj_t *ship_menu_settings_btn_backlight = NULL;
+static lv_obj_t *ship_menu_settings_label_backlight = NULL;
 static lv_obj_t *ship_menu_settings_btn_ota = NULL;
 static lv_obj_t *ship_menu_settings_label_ota = NULL;
 static lv_obj_t *ship_menu_settings_btn_back = NULL;
@@ -1117,11 +1122,16 @@ static lv_obj_t *ship_hold_screen = NULL;
 static lv_obj_t *ship_processing_screen = NULL;
 static lv_obj_t *ship_ai_listening_screen = NULL;
 static lv_obj_t *ship_ai_listening_ring = NULL;
+static lv_obj_t *ship_backlight_screen = NULL;
+static lv_obj_t *ship_backlight_ring = NULL;
+static lv_obj_t *ship_backlight_pct_label = NULL;
 static lv_obj_t *ship_ai_listening_title = NULL;
 static lv_obj_t *ship_ai_listening_hint = NULL;
 static lv_obj_t *ship_ai_listening_mic_head = NULL;
 static lv_obj_t *ship_ai_listening_mic_stem = NULL;
 static lv_obj_t *ship_ai_listening_mic_base = NULL;
+static lv_obj_t *ship_ai_listening_mic_disc = NULL;
+static lv_obj_t *ship_ai_listening_pulse[3] = {NULL, NULL, NULL};
 static unsigned long ship_ai_listening_countdown_start_ms = 0;
 static const unsigned long SHIP_AI_LISTENING_COUNTDOWN_MS = 10000;
 static lv_obj_t *ship_voice_json_screen = NULL;
@@ -1395,15 +1405,15 @@ static lv_obj_t *menu_item_labels[MENU_MAX_ITEMS] = {NULL};  // Labels for each 
 #define SHIP_MENU_SECOND_LIST_X SHIP_MENU_MAIN_TOP_X
 #define SHIP_MENU_SECOND_LIST_Y SHIP_MENU_MAIN_TOP_Y
 
-// Settings screen button bounds
-#define SHIP_MENU_SETTINGS_BTN_W 300
-#define SHIP_MENU_SETTINGS_BTN_H 56
+// Settings screen button bounds (four buttons, fit within round 360x360 display)
+#define SHIP_MENU_SETTINGS_BTN_W 220
+#define SHIP_MENU_SETTINGS_BTN_H 54
 #define SHIP_MENU_SETTINGS_BTN_X ((SHIP_MENU_W - SHIP_MENU_SETTINGS_BTN_W) / 2)
-#define SHIP_MENU_SETTINGS_VERSION_Y 52
-#define SHIP_MENU_SETTINGS_STATUS_Y 72
-#define SHIP_MENU_SETTINGS_RESET_Y 84
-#define SHIP_MENU_SETTINGS_OTA_Y 148
-#define SHIP_MENU_SETTINGS_BACK_Y 212
+#define SHIP_MENU_SETTINGS_RESET_Y 38
+#define SHIP_MENU_SETTINGS_BACKLIGHT_Y 108
+#define SHIP_MENU_SETTINGS_OTA_Y 178
+#define SHIP_MENU_SETTINGS_BACK_Y 248
+#define SHIP_MENU_SETTINGS_VERSION_Y 324
 
 #define MENU_INDEX_DISCARD 0
 #define MENU_INDEX_DISH 1
@@ -1455,6 +1465,9 @@ static const ship_menu_hitbox_t ship_menu_hitboxes_settings[] = {
   {SHIP_MENU_ACTION_RESET_WIFI, "RESET_WIFI", NULL, -1,
    SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_RESET_Y,
    SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_RESET_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
+  {SHIP_MENU_ACTION_BACKLIGHT, "BACKLIGHT", NULL, -1,
+   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACKLIGHT_Y,
+   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_BACKLIGHT_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
   {SHIP_MENU_ACTION_MANUAL_OTA, "MANUAL_OTA", NULL, -1,
    SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_OTA_Y,
    SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_OTA_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
@@ -1527,6 +1540,7 @@ static volatile unsigned long lvgl_timer_calls = 0;
 static unsigned long last_ui_heartbeat_ms = 0;
 static volatile unsigned long ui_heartbeat_counter = 0;
 static int g_backlight_duty = 255;
+static int g_user_brightness_duty = 255;  // 0..255, the "on" target (user-adjustable backlight level)
 static bool g_panel_enabled = true;
 static bool g_lvgl_running = true;
 static TaskHandle_t ui_task_handle = NULL;
@@ -1587,9 +1601,16 @@ typedef enum {
   EVT_STOP_GLOWING,   // From UART: UI task calls stop_glowing_animation + lv_timer_handler
   EVT_START_GLOWING,  // From UART: UI task calls start_glowing_animation(reason)
   EVT_UI_STATUS_IDLE, // From UART: UI task calls set_status_reset_visible(false), stop_glowing if needed
+  EVT_REFRESH_TIMEOUT, // Refresh stuck inflight too long: stop glowing, show "Couldn't refresh", re-render existing list
   EVT_SHIP_UI_STATUS, // From UART: Ship menu UI_STATUS -> update overlay/result
   EVT_SHIP_UI_TOAST,
   EVT_SHIP_VOICE_JSON,
+  // USB test-command injection (port 101). Posted by the Core-0 USB reader so the
+  // real screen/list actions run on the UI task (Core 1) — never LVGL from Core 0.
+  EVT_USB_ENTER_LIST,   // emulate tapping List on the second menu
+  EVT_USB_REFRESH,      // emulate pull-to-refresh gesture on the list
+  EVT_USB_DELETE,       // emulate delete-touch on N-th visible item (data.usb_index)
+  EVT_USB_HOME,         // emulate returning to the main menu
 } app_event_type_t;
 
 typedef struct app_event_t {
@@ -1598,6 +1619,7 @@ typedef struct app_event_t {
     int8_t scroll_delta;
     int new_count;
     int menu_index;  // For EVT_MENU_SELECTED
+    int usb_index;   // For EVT_USB_DELETE (0-based visible-item index)
     char glow_reason[32];  // For EVT_START_GLOWING
     char ship_toast[64];
     struct {
@@ -2781,6 +2803,46 @@ static void refresh_soft_fail(const char* reason) {
   }
 }
 
+// Hard-timeout recovery: clear all "refresh inflight" state WITHOUT auto-retrying
+// (unlike refresh_soft_fail) so a stuck refresh stops spinning and the 10s idle
+// sleep can engage. Surfaces a brief non-blocking "Couldn't refresh" notice on
+// the list via the UI task (never touches LVGL from here / Core 0). Mirrors the
+// flag-clearing done by the UI_LIST-received handler and refresh_soft_fail.
+static void refresh_hard_timeout_clear(const char* reason) {
+  Serial.printf("[REFRESH] timeout -> cleared (reason=%s)\n", reason ? reason : "unknown");
+
+  refresh_state = REFRESH_IDLE;
+  lcd_refresh_inflight = false;
+  waiting_for_list_response = false;
+  refresh_request_pending = false;
+  refresh_request_needs_send = false;
+  refresh_input_wake_sent = false;
+  refresh_request_retry_count = 0;
+  refresh_grace_extended = false;
+  lcd_refresh_ack_seen = false;
+  lcd_refresh_retry_count = 0;
+  lcd_refresh_sent_ms = 0;
+  refresh_retry_pending = false;
+  refresh_requested_again = false;
+  refresh_wake_pending_attempts = 0;
+  refresh_wake_pending_last_ping_ms = 0;
+  refresh_wake_pending_next_pulse_ms = 0;
+  refresh_wake_pending_start_ms = 0;
+  refresh_wake_sent = false;
+  refresh_last_ui_pol_ms = 0;
+  refresh_last_proof_ms = 0;
+  refresh_pulse_count = 0;
+  refresh_last_pulse_ms = 0;
+  refresh_last_wake_send_ms = 0;
+  refresh_done_ms = 0;
+
+  // Stop the glow and surface a brief notice on the list — UI-task only.
+  if (app_event_queue != NULL) {
+    app_event_t evt = {EVT_REFRESH_TIMEOUT, {0}};
+    xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+  }
+}
+
 static void refresh_sm_set_wake_pending(const char* reason) {
   unsigned long now_ms = millis();
   refresh_state = REFRESH_WAKE_PENDING;
@@ -3334,6 +3396,13 @@ void setup() {
     snprintf(g_lcd_device_id, sizeof(g_lcd_device_id),
              "halo-%02x%02x-%02x%02x", mac[4], mac[5], mac[2], mac[3]);
     Serial.printf("[BOOT] device_id=%s\n", g_lcd_device_id);
+  }
+  // Restore saved backlight brightness before the first backlight-on so the
+  // "on" target reflects the user's setting (sets g_user_brightness_duty).
+  {
+    int saved_pct = backlight_load_pct_from_nvs();
+    backlight_apply_pct(saved_pct);
+    Serial.printf("[BOOT] backlight_restore pct=%d duty=%d\n", saved_pct, g_user_brightness_duty);
   }
   esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
   esp_reset_reason_t reset_reason = esp_reset_reason();
@@ -4027,6 +4096,15 @@ void loop() {
         example_lvgl_unlock();
         return;
       }
+      if (ui_screen_state == SCREEN_BACKLIGHT) {
+        // Any tap saves the (already-applied) brightness and returns to Settings.
+        backlight_save_to_nvs();
+        show_ship_settings_screen();
+        ui_lvgl_tick();
+        resetActivityTimer();
+        example_lvgl_unlock();
+        return;
+      }
       if (ui_screen_state == SCREEN_SHOPPING_LIST) {
         if (shopping_list_handle_touch(check_x, check_y)) {
           ui_lvgl_tick();
@@ -4656,6 +4734,28 @@ void loop() {
     }
   }
 
+  // Keep the Sense awake + WiFi-connected ONLY while the user is actively on the
+  // shopping list. Re-assert LIST_ACTIVE(1) every ~3s during active use (the Sense
+  // auto-clears after ~30s of silence). Once the list goes idle past the inactivity
+  // timeout, send LIST_ACTIVE(0) once so the Sense releases its keep-awake flag and
+  // the normal coordinated 10s idle-sleep can proceed (otherwise the re-assert pins
+  // the Sense awake and the device never sleeps on the list). Plain UART (no LVGL).
+  if (!g_in_light_sleep && ui_screen_state == SCREEN_SHOPPING_LIST) {
+    static unsigned long last_list_active_tx_ms = 0;
+    unsigned long now_la = millis();
+    unsigned long last_act = last_user_activity_ms;
+    if (last_scroll_activity_ms > last_act) last_act = last_scroll_activity_ms;
+    unsigned long idle_age = (last_act > 0) ? (now_la - last_act) : 0;
+    // Active use -> assert(1) (Sense stays awake + WiFi up). Idle past the timeout ->
+    // assert(0) so the Sense releases and the coordinated 10s sleep can proceed.
+    // Re-send the CURRENT desired state every ~3s (robust to a dropped UART message;
+    // the Sense also auto-clears after ~30s as a backstop).
+    if (last_list_active_tx_ms == 0 || (now_la - last_list_active_tx_ms) >= 3000) {
+      uart_send_list_active(idle_age < INACTIVITY_TIMEOUT_MS);
+      last_list_active_tx_ms = now_la;
+    }
+  }
+
   // If Sense didn't acknowledge wake, retry wake pulses for a short window
   if (!g_in_light_sleep && !sense_awake_confirmed && wake_retry_until_ms > 0 &&
       refresh_state != REFRESH_INFLIGHT) {
@@ -4736,6 +4836,16 @@ void loop() {
       lcd_refresh_start_ms = now;
     }
     unsigned long total_ms = now - lcd_refresh_start_ms;
+    // Hard timeout on the shopping list: if the Sense never returns UI_LIST,
+    // clear the stuck state (no auto-retry) so the user isn't stuck on
+    // "Refreshing..." forever and the 10s idle-sleep can engage.
+    if (ui_screen_state == SCREEN_SHOPPING_LIST &&
+        total_ms > REFRESH_HARD_TIMEOUT_MS) {
+      refresh_timeout_count++;
+      refresh_hard_timeout_clear("inflight_hard_timeout");
+      example_lvgl_unlock();
+      return;
+    }
     if (total_ms > REFRESH_MAX_MS) {
       Serial.println("[REFRESH_SM] max_ms exceeded in INFLIGHT -> soft_fail");
       refresh_timeout_count++;

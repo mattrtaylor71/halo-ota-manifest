@@ -29,7 +29,19 @@ static void ui_show_screen(ScreenId next, const char* reason, const char* file, 
                 from_meta && from_meta->bitmap ? from_meta->bitmap : "(none)",
                 to_meta && to_meta->bitmap ? to_meta->bitmap : "(none)");
   g_current_screen_id = next;
+  // Snapshot the runtime UI screen state before the impl runs so we can detect
+  // entering/leaving the shopping list and notify the Sense (LIST_ACTIVE).
+  ui_screen_t prev_ui_screen = ui_screen_state;
   ui_show_screen_impl(next);
+  // Tell the Sense to stay awake + keep WiFi up while on the list, and to
+  // allow sleep again when leaving. Plain UART send — safe on the UI task.
+  bool was_list = (prev_ui_screen == SCREEN_SHOPPING_LIST);
+  bool now_list = (ui_screen_state == SCREEN_SHOPPING_LIST);
+  if (now_list && !was_list) {
+    uart_send_list_active(true);
+  } else if (was_list && !now_list) {
+    uart_send_list_active(false);
+  }
 }
 
 static void ui_show_screen_impl(ScreenId next) {
@@ -42,6 +54,9 @@ static void ui_show_screen_impl(ScreenId next) {
       break;
     case SCREEN_SHIP_SETTINGS:
       show_ship_settings_screen_impl();
+      break;
+    case SCREEN_SHIP_BACKLIGHT:
+      show_ship_backlight_screen_impl();
       break;
     case SCREEN_SHIP_HOLD_STILL:
       ship_show_hold_still_impl();

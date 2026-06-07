@@ -810,6 +810,10 @@ Both use the same S3 prefix: `halo/ota/{channel}/{board}/`
 
 All tools are in `/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular/tools/`.
 
+### LVGL Image Converter (lvgl_image_converter/)
+
+Turns any image into an LVGL `lv_img_dsc_t` C asset for the LCD UI. Web UI (`python3 tools/lvgl_image_converter/server.py` → http://localhost:9097, drag-drop + live preview on checkerboard/teal/white/black) and a CLI (`convert.py`). Defaults are tuned for this project: RGB565 with `LV_COLOR_16_SWAP=1` byte-swap ON (the easy-to-get-wrong part). Formats: `true_color_alpha` (colour+alpha), `alpha_8bit` (recolourable mono mask), `true_color`. Options: crop-to-content, recolour to a single colour, alpha modes (source / white-key / opaque). Drop the generated `.c` in `halo_ota_demo/firmware/halo_lcd_prod/`, `LV_IMG_DECLARE(name)`, and `lv_img_set_src`. Used to generate the menu/listening icon assets (`dish_icon.c`, `mic_icon.c`). Needs Pillow.
+
 ### TAP Actuator (tap_implementation/tap.py)
 
 Physical servo actuator that taps the device touch screen to wake it from deep sleep. Used for automated testing when the device is sealed in its enclosure.

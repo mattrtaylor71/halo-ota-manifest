@@ -140,6 +140,36 @@ static int load_list_from_storage(app_state_t *s) {
   return actual_count;
 }
 
+// ── Backlight brightness persistence ─────────────────────────────────────
+static const char* PREF_BACKLIGHT_NAMESPACE = "lcd_ui";
+static const char* PREF_BACKLIGHT_KEY = "brightness";
+
+// Save the current backlight percentage (5..100) to NVS.
+static void backlight_save_to_nvs() {
+  Preferences p;
+  if (!p.begin(PREF_BACKLIGHT_NAMESPACE, false)) {
+    Serial.println("✗ Failed to open prefs for backlight save");
+    return;
+  }
+  int pct = backlight_get_pct();
+  p.putInt(PREF_BACKLIGHT_KEY, pct);
+  p.end();
+  Serial.printf("✓ Saved backlight pct=%d to NVS\n", pct);
+}
+
+// Load the saved backlight percentage (default 100 if none stored).
+static int backlight_load_pct_from_nvs() {
+  Preferences p;
+  if (!p.begin(PREF_BACKLIGHT_NAMESPACE, true)) {
+    return 100;
+  }
+  int pct = p.getInt(PREF_BACKLIGHT_KEY, 100);
+  p.end();
+  if (pct < 5) pct = 5;
+  if (pct > 100) pct = 100;
+  return pct;
+}
+
 static const char* reset_reason_label(esp_reset_reason_t reason) {
   switch (reason) {
     case ESP_RST_POWERON:

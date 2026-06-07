@@ -194,11 +194,28 @@ static void delete_item_from_api(const char* item_id) {
 
 // ── Fetch shopping list from API ───────────────────────────────────
 
+// Short, bounded WiFi-connect budget for the LIST fetch only. On flaky WiFi
+// the global ensure_wifi_ready() path can churn ~40s (25s connect timeout +
+// ~15s hard-reset chain), which pins op_inflight and blocks deep sleep on the
+// darkened list screen. For the list fetch we use a short budget and DO NOT
+// escalate to the hard-reset chain — if WiFi isn't up in time we fail the
+// fetch fast so the op (current_job) completes and op_inflight releases.
+// Other paths (OTA/uploads) keep using WIFI_CONNECT_TIMEOUT_MS unchanged.
+static const uint32_t LIST_FETCH_WIFI_BUDGET_MS = 6000;
+
 static void fetch_shopping_list_from_api() {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("✗ Cannot fetch list: WiFi not connected!");
-    list_refresh_fail("wifi_not_connected");
-    return;
+    // Bounded, no-hard-reset connect attempt. ensure_wifi_connected() does NOT
+    // escalate to wifi_hard_reset_and_reconnect() (only ensure_wifi_ready()
+    // does), so this caps the wait at LIST_FETCH_WIFI_BUDGET_MS.
+    Serial.printf("[LIST_FETCH] wifi not connected; bounded connect budget_ms=%lu\n",
+                  (unsigned long)LIST_FETCH_WIFI_BUDGET_MS);
+    if (!ensure_wifi_connected("list_fetch", LIST_FETCH_WIFI_BUDGET_MS) ||
+        WiFi.status() != WL_CONNECTED) {
+      Serial.println("✗ Cannot fetch list: WiFi not connected (bounded budget exhausted)!");
+      list_refresh_fail("wifi_not_connected");
+      return;
+    }
   }
 
   Serial.println("\n=== Fetching Shopping List from Trepo API ===");

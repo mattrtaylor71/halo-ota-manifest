@@ -192,8 +192,33 @@ static const char* lcd_backlight_state_label() {
   return "idle";
 }
 
+// User-adjustable brightness. backlight_apply_pct() updates the "on" target
+// (g_user_brightness_duty) and applies it live. A 5% floor keeps the screen
+// recoverable so the control can never blank the display.
+static int backlight_get_pct() {
+  return (g_user_brightness_duty * 100 + 127) / 255;
+}
+
+static void backlight_apply_pct(int pct) {
+  if (pct < 5) pct = 5;
+  if (pct > 100) pct = 100;
+  int duty = (pct * 255 + 50) / 100;
+  g_user_brightness_duty = duty;
+  // Apply live only if the backlight is already on (PWM initialized). At boot
+  // we only seed g_user_brightness_duty; the first lcd_set_backlight_level(.,"on")
+  // brings the panel up at the saved level (avoids flashing the BL on early).
+  if (g_backlight_initialized) {
+    setUpdutySubdivide(duty);
+    g_backlight_duty = duty;
+  }
+  // NOTE: the % label / arc are updated by the caller on the UI task (knob
+  // handler / screen builder). Never touch LVGL from here — this helper runs
+  // from boot, wake, and OTA paths that may not be on the UI task.
+  Serial.printf("[BL] apply_pct pct=%d duty=%d initialized=%d\n", pct, duty, g_backlight_initialized ? 1 : 0);
+}
+
 static void lcd_set_backlight_level(int level, const char* reason) {
-  int target = (level > 0) ? 255 : 0;
+  int target = (level > 0) ? g_user_brightness_duty : 0;
   if (target > 0 && !g_backlight_initialized) {
     lcd_bl_pwm_bsp_init(LCD_PWM_MODE_255);
     g_backlight_initialized = true;

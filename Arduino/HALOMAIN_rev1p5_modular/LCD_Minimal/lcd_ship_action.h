@@ -251,9 +251,10 @@ static void ship_menu_update_versions_label() {
   }
   const char* lcd_fw = kFirmwareVersion ? kFirmwareVersion : "unknown";
   const char* sense_fw = (g_sense_fw_version[0] != '\0') ? g_sense_fw_version : "--";
-  const char* did = (g_lcd_device_id[0] != '\0') ? g_lcd_device_id : "--";
-  char buf[128];
-  snprintf(buf, sizeof(buf), "LCD %s  Sense %s\nDevice: %s", lcd_fw, sense_fw, did);
+  char buf[64];
+  // Compact single-line version string for the bottom of the round settings
+  // screen (kept narrow so it stays within the 360x360 circle).
+  snprintf(buf, sizeof(buf), "LCD %s \xC2\xB7 Sense %s", lcd_fw, sense_fw);
   lv_label_set_text(ship_menu_settings_versions, buf);
 }
 
@@ -379,6 +380,10 @@ static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
     }
     case SHIP_MENU_ACTION_MANUAL_OTA:
       ship_menu_send_manual_ota("menu_action");
+      break;
+    case SHIP_MENU_ACTION_BACKLIGHT:
+      Serial.println("[MENU] tap=BACKLIGHT");
+      show_ship_backlight_screen();
       break;
     case SHIP_MENU_ACTION_SHOPPING_LIST:
       Serial.println("[MENU] tap=SHOPPING_LIST");

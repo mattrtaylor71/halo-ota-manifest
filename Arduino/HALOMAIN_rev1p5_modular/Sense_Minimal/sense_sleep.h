@@ -605,14 +605,23 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     sleep_notify_late_block("pre_wifi_off");
     return;
   }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("[SENSE] Disconnecting Wi-Fi before deep sleep...");
+  // Belt-and-suspenders: never tear down WiFi while the user is on the LCD
+  // shopping-list screen. Normally the sleep gate (sense_can_sleep_now) blocks
+  // us from ever reaching here while list-active, but if we somehow do, keep
+  // WiFi up so a list refresh/delete still hits a live connection.
+  if (g_list_screen_active) {
+    Serial.println("[SLEEP] WiFi teardown SKIPPED reason=list_screen_active");
+    btStop();
+  } else {
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("[SENSE] Disconnecting Wi-Fi before deep sleep...");
+    }
+    WiFi.disconnect(true);
+    delay(50);
+    WiFi.mode(WIFI_OFF);
+    esp_wifi_stop();
+    btStop();
   }
-  WiFi.disconnect(true);
-  delay(50);
-  WiFi.mode(WIFI_OFF);
-  esp_wifi_stop();
-  btStop();
 
   // 3. Ensure UART is idle
   Serial.println("[SENSE] Flushing UART buffers...");

@@ -161,6 +161,13 @@ static void enterLightSleep() {
   sleep_retry_allowed_ms = 0;
   sleep_wait_for_sense_idle = false;
 
+  // If the LCD is idle-sleeping while still on the shopping list, tell the
+  // Sense the list is no longer active so it may sleep + drop WiFi too.
+  // Plain UART send (no LVGL) — safe from this Core-0 sleep path.
+  if (ui_screen_state == SCREEN_SHOPPING_LIST) {
+    uart_send_list_active(false);
+  }
+
   user_activity_since_sleep = false;
   sense_awake_confirmed = false;
   sense_state_set(SENSE_ASLEEP, "enter_sleep");

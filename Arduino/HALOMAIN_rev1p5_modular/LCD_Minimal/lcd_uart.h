@@ -231,6 +231,25 @@ static void uart_send_ack(const char* type) {
   Serial.printf("[PROTO] TX: type=%s\n", type);
 }
 
+// LIST_ACTIVE: tell the Sense to stay awake + keep WiFi up while the user is
+// on the shopping-list screen (state=1), or that the user has left and the
+// Sense may sleep again (state=0). The Sense auto-clears the keep-awake flag
+// after ~30s of silence, so this is re-asserted periodically while on the list.
+// Plain UART send — safe to call from loop()/Core 0 (no LVGL).
+static void uart_send_list_active(bool state) {
+  if (g_suppress_uart_json_tx) return;
+  StaticJsonDocument<128> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = "LIST_ACTIVE";
+  doc["state"] = state ? 1 : 0;
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  String output;
+  serializeJson(doc, output);
+  uart_send_json(output.c_str());
+  Serial.printf("[LIST_ACTIVE] tx state=%d\n", state ? 1 : 0);
+}
+
 static void uart_send_maint_window_ack(uint32_t remaining_s,
                                        uint32_t wake_in_s,
                                        bool clear,

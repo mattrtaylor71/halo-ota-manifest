@@ -8,7 +8,7 @@
 - **Encoder:** Rotary encoder on GPIO8 (EC1_A) and GPIO7 (EC1_B)
 - **UART to Sense:** TX=GPIO38, RX=GPIO48, 115200 baud (UART1)
 - **Wake line:** GPIO39 (INT_PIN) -- LCD drives LOW to wake Sense board (Sense EXT0 on GPIO2)
-- **Backlight:** PWM-controlled, binary on/off in practice (0 or 255)
+- **Backlight:** PWM-controlled. "On" maps to a user-adjustable level `g_user_brightness_duty` (0..255, 5% floor); off is 0. Set via the Settings → Backlight screen (knob to adjust, tap to save), persisted in NVS (`lcd_ui`/`brightness`), restored at boot. `lcd_set_backlight_level()` uses `(level>0) ? g_user_brightness_duty : 0`. `backlight_apply_pct(pct)`/`backlight_get_pct()` in lcd_anim.h apply/read it; `backlight_save_to_nvs()`/`backlight_load_pct_from_nvs()` in lcd_persist.h persist it.
 
 ## Architecture Overview
 
@@ -59,12 +59,14 @@ struct app_state_t {
 
 #### Enumerations
 
-- **`ui_screen_t`**: SCREEN_HOME, SCREEN_SECOND, SCREEN_SETTINGS, SCREEN_AI_LISTENING, SCREEN_VOICE_JSON, SCREEN_HOLD_STILL, SCREEN_VOICE_ACK, SCREEN_PROCESSING, SCREEN_LOGGED, SCREEN_EXPIRY_CHOICE, SCREEN_EXPIRY, SCREEN_RESULT, SCREEN_DEBUG, SCREEN_ERRLOG, SCREEN_ERRLOG_DETAIL, SCREEN_SHOPPING_LIST
-- **`ship_menu_action_t`**: CHECK_IN, CHECK_OUT, LOG_DISH, MORE, AI, HOME, SETTINGS, DEBUG, RESET_WIFI, MANUAL_OTA, DEBUG_LOG, SHOPPING_LIST, BACK
+- **`ui_screen_t`**: SCREEN_HOME, SCREEN_SECOND, SCREEN_SETTINGS, SCREEN_BACKLIGHT, SCREEN_AI_LISTENING, SCREEN_VOICE_JSON, SCREEN_HOLD_STILL, SCREEN_VOICE_ACK, SCREEN_PROCESSING, SCREEN_LOGGED, SCREEN_EXPIRY_CHOICE, SCREEN_EXPIRY, SCREEN_RESULT, SCREEN_DEBUG, SCREEN_ERRLOG, SCREEN_ERRLOG_DETAIL, SCREEN_SHOPPING_LIST (plus `ScreenId` SCREEN_SHIP_BACKLIGHT in ui_screen_registry.h)
+- **`ship_menu_action_t`**: CHECK_IN, CHECK_OUT, LOG_DISH, MORE, AI, HOME, SETTINGS, DEBUG, RESET_WIFI, MANUAL_OTA, BACKLIGHT, DEBUG_LOG, SHOPPING_LIST, BACK
 - **`ship_user_state_t`**: ASLEEP, MENU_READY, CAPTURE_COMMITTED, USER_WAITING_RESULT, USER_INPUT_REQUIRED, USER_FEEDBACK
 - **`lcd_mode_t`**: LCD_MODE_UI_ACTIVE, LCD_MODE_MAINTENANCE
 - **`SenseState`**: SENSE_UNKNOWN, SENSE_AWAKE, SENSE_ASLEEP
 - **`RefreshState`**: REFRESH_IDLE, REFRESH_WAKE_PENDING, REFRESH_INFLIGHT, REFRESH_COMPLETE, REFRESH_FAILED
+  - On the shopping list, a hard 12s cap (`REFRESH_HARD_TIMEOUT_MS`) on REFRESH_INFLIGHT calls `refresh_hard_timeout_clear()` — clears all inflight flags with **no auto-retry** (unlike `refresh_soft_fail`), posts `EVT_REFRESH_TIMEOUT` so the UI task stops the glow, re-renders the cached list, and shows a brief "Couldn't refresh" title. Lets the 10s idle-sleep engage instead of spinning forever.
+- **Shopping-list keep-awake (`LIST_ACTIVE`)**: `uart_send_list_active(bool)` in lcd_uart.h tells the Sense to stay awake + keep WiFi up. Sent `true` on entering the list and re-asserted ~every 3s from `loop()`; sent `false` on leaving (both via `ui_show_screen` enter/leave detection) and on LCD idle-sleep entry (`enterLightSleep`) if still on the list.
 
 #### Sleep/Wake State Variables (RTC_DATA_ATTR -- survive deep sleep)
 
@@ -163,7 +165,9 @@ Messages are queued via `uart_tx_queue` (FreeRTOS queue of `tx_msg_t`) from ISR 
 | Function | Description |
 |----------|-------------|
 | `ui_lvgl_tick()` | Guarded `lv_timer_handler()` call; skips if `!g_lvgl_running` or `g_sleep_transition` |
-| `lcd_set_backlight_binary(on, reason)` | PWM backlight on (255) or off (0) |
+| `lcd_set_backlight_binary(on, reason)` | PWM backlight on (`g_user_brightness_duty`) or off (0) |
+| `lcd_set_backlight_level(level, reason)` | "On" target = `g_user_brightness_duty`; off = 0 |
+| `backlight_apply_pct(pct)` / `backlight_get_pct()` | Set/read user brightness (5..100%); applies live only when backlight already initialized (boot just seeds the global) |
 | `lcd_set_idle_screen_dark(dark, reason)` | Powers off panel + backlight but keeps firmware running. Used during sleep wait and maintenance headless |
 | `ensure_awake_for_ui(reason)` | Restores display from any low-power state (idle dark, sleep transition, panel off). Exits headless OTA if user touches |
 | `abort_sleep_transition(reason)` | Recovers from aborted sleep -- restores panel, backlight, LVGL, resets activity timer |
@@ -217,30 +221,51 @@ awake -> idle_dark -> sleep_transition -> deep_sleep
 
 **Purpose:** Creates all LVGL screen objects: main menu, second menu, settings, AI listening, voice response viewer, shopping list, expiry date picker, and the legacy list/menu/status overlays.
 
+#### UI Design System (redesigned 2026-06-05)
+
+The ship UI uses a consistent design language across menus and screens:
+- **Background:** cream `0xFDF2DE` (fills the round 360×360 panel)
+- **Buttons:** white `0xFFFFFF` rounded rects, 2px dark `0x1A1A1A` border, hard drop shadow (shadow_width 8, ofs 4–5/6–7, opa ~40–50)
+- **Accents:** teal `0x296065` (primary/center), gold `0xF6BF41` (mic/icons on teal), dark `0x1A1A1A` text/icons
+- Icon assets are RGB565+alpha LVGL images generated by `tools/lvgl_image_converter/` (byte-swapped for `LV_COLOR_16_SWAP=1`); simple glyphs (+, −, ⋯) are drawn natively as rounded `lv_obj` bars/dots (zero flash). See memory `reference_lvgl_image_converter`.
+
 #### Main Menu (Home Screen)
 
-Four buttons in diamond layout + center AI button:
-- **Top:** Dish (plate icon)
-- **Left:** Check In (+)
-- **Right:** Discard (-)
-- **Bottom:** More (...)
-- **Center:** AI (hold-to-talk)
+Cream background, four white shadowed buttons in a cross layout + a teal center button. No text captions (icon-only):
+- **Top:** Dish — `dish_icon.c` (plate + fork/knife image, dark), `ship_main_menu_add_dish_icon`
+- **Left:** Check In — drawn **+** (`ship_main_menu_add_plus`)
+- **Right:** Discard — drawn **−** (`ship_main_menu_add_minus`)
+- **Bottom:** More — drawn **⋯** (`ship_main_menu_add_dots`)
+- **Center:** AI/voice (hold-to-talk) — teal `0x296065` box (`ship_main_menu_ai_button`) holding the gold mic image `mic_icon.c` (`ship_main_menu_add_mic_icon`)
 
-The center AI button (92×92 green box, `ship_main_menu_ai_button`) displays the `sparkles_ai` image (76×76 RGB565+alpha sparkles icon, declared via `LV_IMG_DECLARE(sparkles_ai)`; asset in `halo_lcd_prod/sparkles_ai.c`) instead of the "AI" text. The `ship_main_menu_ai_label` ("AI") is still created (other code references it) but kept hidden via `LV_OBJ_FLAG_HIDDEN`. `ship_main_menu_set_ai_hold_active()` provides hold feedback by recoloring the button background/shadow (blue glow on hold), so the sparkles image stays visible in both idle and hold states.
-
-Buttons use hitbox-based touch detection (not LVGL events) for the round display.
+`ship_main_menu_ai_label` ("AI") is still created but hidden (`LV_OBJ_FLAG_HIDDEN`) so other code can reference it. `ship_main_menu_set_ai_hold_active()` gives press feedback by lightening the teal bg + turning the border gold (it no longer touches the drop shadow). Buttons styled via `ship_main_menu_style_button(btn, primary)`. The old `sparkles_ai.c` / `ai_bird.c` assets were removed. Buttons use hitbox-based touch detection (not LVGL events) for the round display.
 
 #### Second Menu
 
-Three buttons: Shopping List (top), Home (center), Settings (bottom).
+Same design language. Three buttons: Shopping List (top, white), **Home** (center, **teal** with a gold back-arrow — mirrors the main-menu center accent), Settings (bottom, white).
+
+#### Settings Screen
+
+Cream `0xFDF2DE` background. Four white rounded buttons (220x54, X=70, radius 18, 2px dark border + hard drop shadow), in order: **Reset Wi-Fi** (Y=38), **Backlight** (Y=108), **Run OTA Update** (Y=178), **Back** (Y=248). Compact firmware-version line (`LCD x · Sense y`, montserrat_14) centered at the very bottom (Y=324); the hidden status-overlay label reuses that position for transient "Starting OTA..." text. Geometry constants `SHIP_MENU_SETTINGS_*` and the matching 4-entry `ship_menu_hitboxes_settings[]` (actions RESET_WIFI, BACKLIGHT, MANUAL_OTA, BACK) live in LCD_Minimal.ino. Buttons styled via `ship_settings_style_button()` in lcd_ship_screens.h.
+
+#### Backlight Screen (`SCREEN_BACKLIGHT` / `SCREEN_SHIP_BACKLIGHT`)
+
+Opened from Settings → Backlight (`SHIP_MENU_ACTION_BACKLIGHT` → `show_ship_backlight_screen()`). Cream bg, gold brightness `lv_arc` (190px, faint teal track + gold rounded indicator, range 0..1000, rotation 270) with a "Backlight" title above, a big centered "%" label (montserrat_28, `ship_backlight_pct_label`), and a "Scroll to adjust · Tap to save" hint below. The knob handler in lcd_ui_task.h adjusts in 5% steps (5..100), calls `backlight_apply_pct()` for live brightness, and updates the arc (`pct*10`) + % label on the UI task. Any tap calls `backlight_save_to_nvs()` then returns to Settings (brightness already applied live). Builder `show_ship_backlight_screen_impl()` in lcd_ship_screens.h seeds the arc/label from `backlight_get_pct()` on show.
 
 #### Menu transition touch-ignore guard (bleed-through fix)
 
-When a menu screen loads, the show function sets `touch_ignore_until = millis() + 500` (right after `home_shown_ms = millis();`). This guards against touch *bleed-through*: a single physical press during the slow screen transition can register a residual touch ~200ms after the new screen appears, landing on whatever button is now under the finger. Without the guard, tapping **Settings** on the second menu could auto-fire the **Run OTA Update** button (which loads under the finger at y≈156), triggering `[OTA_MANUAL] override=1 reason=manual_button` and the Software Update overlay. The 500ms window covers the observed ~210ms bleed-through with margin and is too short to block any legitimate user tap on the new screen. Applied in `show_ship_main_menu_impl`, `show_ship_second_menu_impl`, and `show_ship_settings_screen_impl` (lcd_ship_screens.h). The touch handler enforces this via `if (millis() < touch_ignore_until)` (LCD_Minimal.ino:3733).
+When a menu screen loads, the show function sets `touch_ignore_until = millis() + 280` (right after `home_shown_ms = millis();`). This guards against touch *bleed-through*: a single physical press during the slow screen transition can register a residual touch ~200ms after the new screen appears, landing on whatever button is now under the finger. Without the guard, tapping **Settings** on the second menu could auto-fire the **Run OTA Update** button (which loads under the finger at y≈156), triggering `[OTA_MANUAL] override=1 reason=manual_button` and the Software Update overlay. The 280ms window still covers the observed ~210ms bleed-through but is much snappier than the old 500ms (which made menu changes feel sluggish). Applied to the four menu/settings/backlight show functions (main menu, second menu, settings, backlight) in lcd_ship_screens.h. The touch handler enforces this via `if (millis() < touch_ignore_until)` (LCD_Minimal.ino:3733). NOTE: other touch guards are intentionally left longer — sleep wake (~300/450ms in lcd_sleep.h), the 2000ms UART-RX guard (lcd_uart_rx.h), and the loop()-level guard.
 
-#### AI Listening Screen
+#### AI Listening Screen (redesigned 2026-06-05)
 
-Shows animated microphone icon with countdown ring. Active while user holds the AI button. `ship_ai_listening_countdown_start_ms` tracks recording duration.
+Active while the user holds the AI button (recording). `ship_ai_listening_countdown_start_ms` tracks recording duration; `ship_update_ai_listening_countdown()` drives the ring value. Design-system styling (`ship_init_ai_listening_screen`):
+- Cream `0xFDF2DE` background
+- **Gold countdown ring** (`ship_ai_listening_ring`, `lv_arc` 176px, width 11, rounded caps) — gold `0xF6BF41` indicator over a faint teal track; depletes as the recording counts down
+- **Gold mic on a teal disc** (`ship_ai_listening_mic_disc` 128px teal circle; mic head/stem/base recolored gold, parented to the disc so they scale together) — mirrors the menu center button
+- **Looping "sound-pulse" ripples** (`ship_ai_listening_pulse[3]`, teal ring outlines) expand outward, staggered (`ship_listen_pulse_cb`)
+- **Breathing** — the disc gently zooms via `transform_zoom` (`ship_listen_zoom_cb`)
+- "Listening" title + "Release to return" hint, with the staggered entry fade-ins
+All animation runs on the UI task (Core 1). New globals are nulled in `ui_reset_lvgl_objects()` (lcd_activity.h).
 
 #### Voice Response Screen (JSON Viewer)
 
@@ -679,6 +704,10 @@ for (;;) {
 | `EVT_RENDER_ACTIVE_LIST` | new_count | Render g_active list |
 | `EVT_VOICE_ITEMS_ADDED` | new_count | Optimistic voice items |
 | `EVT_UI_STATUS_IDLE` | (none) | Clear status overlay |
+| `EVT_USB_ENTER_LIST` | (none) | USB `list`: show shopping list + arm refresh (UI task) |
+| `EVT_USB_REFRESH` | (none) | USB `refresh`: pull-to-refresh path (UI task) |
+| `EVT_USB_DELETE` | `int usb_index` | USB `del N`: delete N-th visible item (UI task) |
+| `EVT_USB_HOME` | (none) | USB `home`: return to main menu (UI task) |
 
 #### Scroll Routing by Screen
 
@@ -722,6 +751,10 @@ for (;;) {
 |---------|--------|
 | `fw` / `ver` | Print `[FW] {json}` line (lcd_fw, running_part, running_state, boot_part, next_part) via `lcd_build_fw_status_json()`, then legacy human-readable `[FW]` lines. Case-insensitive. |
 | `ota` | Send INPUT_OTA_CHECK |
+| `list` | Emulate tapping List on the second menu. Sends INPUT_WAKE, posts `EVT_USB_ENTER_LIST` so the UI task runs `show_shopping_list_screen()` + arms a list refresh. Prints `[USB] list`. |
+| `refresh` | Emulate the pull-to-refresh gesture (5 CCW ticks at top). Posts `EVT_USB_REFRESH`; UI task calls `shopping_list_trigger_refresh()` (only on the list screen). Prints `[USB] refresh`. |
+| `del N` | Emulate the DELETE touch on the N-th visible list item (0-based). Posts `EVT_USB_DELETE` (index N); UI task calls `shopping_list_delete_index(N)` (sends INPUT_DELETE + local removal) then re-renders. Guarded against `g_active.count`. Prints `[USB] del N -> <id>`. |
+| `home` | Return to the main menu. Posts `EVT_USB_HOME`; UI task calls `show_ship_main_menu()`. Prints `[USB] home`. |
 | `wake` | Force-wake Sense board |
 | `sleep` | Send INPUT_SLEEP |
 | `ping` | Send INPUT_PING |
@@ -802,7 +835,7 @@ Their real purpose is to drop a **stale** stay-awake set by an `INPUT_OTA_CHECK`
 |----------|-------------|
 | `resetActivityTimer()` | Sets `last_user_activity_ms = millis()`, resets sleep skip logging |
 | `user_activity_bump(reason)` | Resets activity timer with log reason |
-| `ui_is_sleep_eligible_menu_screen(state)` | Returns true for HOME, SECOND, SETTINGS |
+| `ui_is_sleep_eligible_menu_screen(state)` | Returns true for HOME, SECOND, SETTINGS, SHOPPING_LIST (list honors the normal 10s inactivity timeout) |
 | `ship_user_state_current()` | Returns current user state enum based on UI and operation state |
 | `init_ui_stack(saved_count)` | Full UI initialization: LCD, LVGL, backlight, rotation, create_custom_ui, knob, UI task |
 | `enter_ship_ota_sleep()` | Enters deep sleep for ship OTA wake window |

@@ -187,7 +187,8 @@ static const char* ui_screen_state_name(ui_screen_t state) {
 static bool ui_is_sleep_eligible_menu_screen(ui_screen_t state) {
   return state == SCREEN_HOME ||
          state == SCREEN_SECOND ||
-         state == SCREEN_SETTINGS;
+         state == SCREEN_SETTINGS ||
+         state == SCREEN_SHOPPING_LIST;
 }
 
 static ship_user_state_t ship_user_state_current() {
@@ -298,6 +299,8 @@ static void ui_reset_lvgl_objects() {
   ship_menu_settings_title = NULL;
   ship_menu_settings_btn_reset = NULL;
   ship_menu_settings_label_reset = NULL;
+  ship_menu_settings_btn_backlight = NULL;
+  ship_menu_settings_label_backlight = NULL;
   ship_menu_settings_btn_ota = NULL;
   ship_menu_settings_label_ota = NULL;
   ship_menu_settings_btn_back = NULL;
@@ -312,11 +315,18 @@ static void ui_reset_lvgl_objects() {
   ship_processing_screen = NULL;
   ship_ai_listening_screen = NULL;
   ship_ai_listening_ring = NULL;
+  ship_backlight_screen = NULL;
+  ship_backlight_ring = NULL;
+  ship_backlight_pct_label = NULL;
   ship_ai_listening_title = NULL;
   ship_ai_listening_hint = NULL;
   ship_ai_listening_mic_head = NULL;
   ship_ai_listening_mic_stem = NULL;
   ship_ai_listening_mic_base = NULL;
+  ship_ai_listening_mic_disc = NULL;
+  ship_ai_listening_pulse[0] = NULL;
+  ship_ai_listening_pulse[1] = NULL;
+  ship_ai_listening_pulse[2] = NULL;
   ship_voice_json_screen = NULL;
   ship_voice_json_card = NULL;
   ship_voice_json_title = NULL;

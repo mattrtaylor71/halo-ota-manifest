@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LVGL Image Converter</title>
+<style>
+  :root { --teal:#296065; --bg:#0e1413; --panel:#16201f; --line:#26302f; --txt:#e7efed; --mut:#8aa3a0; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:16px 22px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:12px; }
+  header h1 { font-size:17px; margin:0; }
+  header span { color:var(--mut); font-size:12px; }
+  .wrap { display:grid; grid-template-columns:330px 1fr; gap:0; height:calc(100vh - 54px); }
+  .controls { padding:18px 20px; overflow:auto; border-right:1px solid var(--line); }
+  .out { padding:18px 20px; overflow:auto; display:flex; flex-direction:column; gap:16px; }
+  #drop { border:2px dashed var(--line); border-radius:12px; padding:22px; text-align:center; color:var(--mut);
+          cursor:pointer; transition:.15s; margin-bottom:18px; }
+  #drop.hot { border-color:var(--teal); color:var(--txt); background:#1a2625; }
+  #drop img { max-width:120px; max-height:120px; margin-top:10px; image-rendering:auto; }
+  label { display:block; font-size:12px; color:var(--mut); margin:14px 0 4px; text-transform:uppercase; letter-spacing:.04em; }
+  input[type=text], input[type=number], select {
+      width:100%; background:var(--panel); border:1px solid var(--line); color:var(--txt);
+      border-radius:7px; padding:8px 10px; font:13px monospace; }
+  .row { display:flex; gap:8px; }
+  .row > div { flex:1; }
+  .chk { display:flex; align-items:center; gap:8px; margin:12px 0; color:var(--txt); font-size:13px; cursor:pointer; }
+  .chk input { width:16px; height:16px; accent-color:var(--teal); }
+  .colorrow { display:flex; align-items:center; gap:10px; }
+  .colorrow input[type=color] { width:42px; height:34px; padding:0; border:1px solid var(--line); border-radius:6px; background:none; }
+  .preview-card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .pv-grid { display:flex; gap:18px; flex-wrap:wrap; align-items:center; }
+  .pv-cell { text-align:center; }
+  .pv-cell small { display:block; color:var(--mut); margin-top:6px; font-size:11px; }
+  .checker { background-image:linear-gradient(45deg,#2a3433 25%,transparent 25%),linear-gradient(-45deg,#2a3433 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#2a3433 75%),linear-gradient(-45deg,transparent 75%,#2a3433 75%);
+             background-size:14px 14px; background-position:0 0,0 7px,7px -7px,-7px 0; }
+  .swatch { display:inline-block; border-radius:10px; padding:14px; }
+  .swatch img, .checker img { image-rendering:pixelated; }
+  .meta { color:var(--mut); font-size:12px; }
+  .meta b { color:var(--txt); }
+  pre { background:#0a100f; border:1px solid var(--line); border-radius:10px; padding:14px; overflow:auto;
+        max-height:340px; font:12px/1.45 monospace; margin:0; }
+  .btns { display:flex; gap:10px; }
+  button { background:var(--teal); color:#fff; border:0; border-radius:8px; padding:9px 16px; font-size:13px;
+           cursor:pointer; font-weight:600; }
+  button.ghost { background:var(--panel); border:1px solid var(--line); color:var(--txt); }
+  button:disabled { opacity:.4; cursor:default; }
+  .err { color:#ff8c8c; font-size:13px; }
+  .hint { color:var(--mut); font-size:11px; margin-top:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LVGL Image Converter</h1>
+  <span>image &rarr; lv_img_dsc_t &nbsp;·&nbsp; RGB565 · LV_COLOR_16_SWAP=1</span>
+</header>
+<div class="wrap">
+  <div class="controls">
+    <div id="drop">
+      <div id="dropmsg">Drop an image here<br>or click to pick</div>
+      <input id="file" type="file" accept="image/*" hidden>
+    </div>
+
+    <label>Symbol name</label>
+    <input id="name" type="text" value="my_img" spellcheck="false">
+
+    <label>Format</label>
+    <select id="format">
+      <option value="true_color_alpha">true_color_alpha — colour + transparency (3 B/px)</option>
+      <option value="alpha_8bit">alpha_8bit — mono mask, recolour at runtime (1 B/px)</option>
+      <option value="true_color">true_color — opaque, no alpha (2 B/px)</option>
+    </select>
+
+    <div class="row">
+      <div><label>Width</label><input id="width" type="number" min="1" placeholder="auto"></div>
+      <div><label>Height</label><input id="height" type="number" min="1" placeholder="auto"></div>
+    </div>
+    <div class="hint">Set one to scale by aspect, both for exact, neither to keep original.</div>
+
+    <label>Transparency source</label>
+    <select id="alpha">
+      <option value="source">source — use image's own alpha</option>
+      <option value="white_key">white_key — white &rarr; transparent</option>
+      <option value="opaque">opaque — no transparency</option>
+    </select>
+
+    <label class="chk"><input id="crop" type="checkbox"> Crop to content (trim transparent edges)</label>
+
+    <label class="chk"><input id="recolor_on" type="checkbox"> Force single colour</label>
+    <div class="colorrow">
+      <input id="recolor" type="color" value="#1a1a1a" disabled>
+      <span class="hint" id="recolor_hint">keeps alpha; for alpha_8bit this is the preview tint</span>
+    </div>
+
+    <label class="chk"><input id="swap" type="checkbox" checked> Byte-swap RGB565 (this project = on)</label>
+  </div>
+
+  <div class="out">
+    <div class="preview-card">
+      <div class="pv-grid">
+        <div class="pv-cell"><span class="swatch checker"><img id="pv_checker" alt=""></span><small>transparency</small></div>
+        <div class="pv-cell"><span class="swatch" style="background:#296065"><img id="pv_teal" alt=""></span><small>on teal button</small></div>
+        <div class="pv-cell"><span class="swatch" style="background:#fff"><img id="pv_white" alt=""></span><small>on white button</small></div>
+        <div class="pv-cell"><span class="swatch" style="background:#000"><img id="pv_black" alt=""></span><small>on black</small></div>
+      </div>
+      <div class="meta" id="meta" style="margin-top:14px">Load an image to begin.</div>
+      <div class="err" id="err"></div>
+    </div>
+
+    <div class="btns">
+      <button id="download" disabled>Download .c</button>
+      <button id="copy" class="ghost" disabled>Copy source</button>
+      <button id="copydecl" class="ghost" disabled>Copy LV_IMG_DECLARE</button>
+    </div>
+    <pre id="src">// converted LVGL source appears here</pre>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let imageData = null, lastC = "", lastName = "my_img";
+
+const drop = $("drop"), file = $("file");
+drop.onclick = () => file.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("hot"); };
+drop.ondragleave = () => drop.classList.remove("hot");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("hot"); if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); };
+file.onchange = () => { if (file.files[0]) load(file.files[0]); };
+
+function load(f) {
+  const r = new FileReader();
+  r.onload = () => {
+    imageData = r.result;
+    $("dropmsg").innerHTML = f.name + "<br><img src='" + imageData + "'>";
+    const base = f.name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_]/g, "_");
+    $("name").value = /^[0-9]/.test(base) ? "img_" + base : (base || "my_img");
+    run();
+  };
+  r.readAsDataURL(f);
+}
+
+["name","format","width","height","alpha","crop","recolor_on","recolor","swap"].forEach(id => {
+  $(id).addEventListener("change", run);
+  $(id).addEventListener("input", debounce(run, 250));
+});
+$("recolor_on").addEventListener("change", () => { $("recolor").disabled = !$("recolor_on").checked; });
+
+function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+
+async function run() {
+  if (!imageData) return;
+  $("err").textContent = "";
+  const opt = {
+    name: $("name").value.trim() || "my_img",
+    format: $("format").value,
+    width: parseInt($("width").value) || null,
+    height: parseInt($("height").value) || null,
+    crop: $("crop").checked,
+    alpha: $("alpha").value,
+    recolor: $("recolor_on").checked ? $("recolor").value.replace("#","") : null,
+    swap: $("swap").checked,
+  };
+  try {
+    const res = await fetch("/convert", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ image: imageData, options: opt }) });
+    const j = await res.json();
+    if (!j.ok) { $("err").textContent = "Error: " + j.error; return; }
+    lastC = j.c_source; lastName = j.meta.name;
+    for (const k of ["pv_checker","pv_teal","pv_white","pv_black"]) $(k).src = j.preview;
+    const m = j.meta;
+    $("meta").innerHTML = `<b>${m.w}×${m.h}</b> · ${m.fmt} · <b>${m.bytes.toLocaleString()} bytes</b> flash `
+      + `(${m.bytes_per_px} B/px)` + (m.recolor ? ` · recolour ${m.recolor}` : "")
+      + (m.alpha_mode!=="source" ? ` · alpha:${m.alpha_mode}` : "");
+    $("src").textContent = j.c_source;
+    $("download").disabled = $("copy").disabled = $("copydecl").disabled = false;
+  } catch (e) { $("err").textContent = "Request failed: " + e; }
+}
+
+$("download").onclick = () => {
+  const blob = new Blob([lastC], {type:"text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = lastName + ".c"; a.click();
+};
+$("copy").onclick = () => navigator.clipboard.writeText(lastC);
+$("copydecl").onclick = () => navigator.clipboard.writeText("LV_IMG_DECLARE(" + lastName + ");");
+</script>
+</body>
+</html>

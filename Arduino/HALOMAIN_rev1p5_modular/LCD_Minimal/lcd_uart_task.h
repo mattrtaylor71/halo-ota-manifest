@@ -218,12 +218,44 @@ static void uart_task(void *arg) {
               Serial.println("[USB_CMD] shortcut 'ota' -> INPUT_OTA_CHECK");
               uart_send_input_message("INPUT_OTA_CHECK");
             } else if (strcmp(usb_buf, "list") == 0) {
-              Serial.println("[USB_CMD] shortcut 'list' -> Shopping List");
-              show_shopping_list_screen();
-              request_sense_wake("usb_list");
+              // Emulate tapping List on the second menu. LVGL/screen work MUST run
+              // on the UI task (Core 1), so post an event — never call LVGL here.
+              Serial.println("[USB] list");
               uart_send_input_message("INPUT_WAKE");
-              refresh_sm_set_wake_pending("usb_list");
-              resetActivityTimer();
+              if (app_event_queue != NULL) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_ENTER_LIST;
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
+            } else if (strcmp(usb_buf, "refresh") == 0) {
+              // Emulate the pull-to-refresh gesture on the list (UI task handles it).
+              Serial.println("[USB] refresh");
+              if (app_event_queue != NULL) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_REFRESH;
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
+            } else if (strncmp(usb_buf, "del", 3) == 0 &&
+                       (usb_buf[3] == ' ' || usb_buf[3] == '\0')) {
+              // 'del N' — emulate the DELETE touch on the N-th visible item.
+              int del_idx = (usb_buf[3] == ' ') ? atoi(usb_buf + 4) : -1;
+              Serial.printf("[USB] del %d\n", del_idx);
+              if (del_idx < 0) {
+                Serial.println("[USB] del: usage 'del N' (0-based index)");
+              } else if (app_event_queue != NULL) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_DELETE;
+                evt.data.usb_index = del_idx;
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
+            } else if (strcmp(usb_buf, "home") == 0) {
+              // Emulate returning to the main menu (UI task handles the screen swap).
+              Serial.println("[USB] home");
+              if (app_event_queue != NULL) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_HOME;
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
             } else if (strcmp(usb_buf, "wake") == 0) {
               Serial.println("[USB_CMD] shortcut 'wake' -> INPUT_WAKE");
               uart_send_input_message("INPUT_WAKE");

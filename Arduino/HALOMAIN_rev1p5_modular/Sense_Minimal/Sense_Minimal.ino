@@ -588,9 +588,22 @@ volatile bool delete_requested = false;
 volatile bool reset_wifi_requested = false;
 
 static bool list_refresh_inflight = false;
+// Set true while the user is on the LCD shopping-list screen. Pins the Sense
+// awake + WiFi connected so list refresh/delete hit a live connection instantly.
+// The LCD re-asserts LIST_ACTIVE(state=1) every few seconds; if it stops
+// (e.g. LCD crash), the staleness watchdog auto-clears this after ~30s so a
+// stuck flag can never pin the device awake forever.
+static volatile bool g_list_screen_active = false;
+static unsigned long last_list_active_ms = 0;
+static const unsigned long LIST_ACTIVE_STALE_MS = 30000;
 static unsigned long list_refresh_start_ms = 0;
 static unsigned long list_refresh_cooldown_until_ms = 0;
 static const unsigned long LIST_REFRESH_TIMEOUT_MS = 20000;
+// Max time an in-flight list refresh may block idle sleep in sense_can_sleep_now().
+// After this the gate stops pinning the device awake so a stuck refresh (flaky
+// WiFi) can never hold it past the idle timeout. Belt-and-suspenders alongside
+// the coordinated-sleep background-force path and the 20s inflight watchdog.
+static const unsigned long LIST_REFRESH_BLOCK_MAX_MS = 12000;
 #ifndef HALO_SENSE_PROD_WRAPPER
 static const unsigned long LIST_REFRESH_COOLDOWN_MS = 3000;
 #endif
@@ -995,6 +1008,32 @@ static bool sense_can_sleep_now(const char** reason) {
     }
     if (reason) *reason = "result_pending";
     return false;
+  }
+  // Keep the device awake while the user is on the LCD shopping-list screen so
+  // list refresh/delete hit a live WiFi connection instantly (no cold reconnect).
+  if (g_list_screen_active) {
+    if (reason) *reason = "list_screen_active";
+    return false;
+  }
+  // An in-flight list refresh blocks idle sleep so SLEEP_READY isn't sent +
+  // WiFi torn down mid-fetch (which hangs the refresh). But this must be
+  // FORCE-DEFERRABLE, not a permanent pin: a stuck refresh (e.g. flaky WiFi)
+  // should never hold the device awake past the idle timeout. We only block
+  // while the refresh is young (< LIST_REFRESH_BLOCK_MAX_MS); after that we
+  // allow sleep. ("list_refresh_inflight" is also registered in
+  // sleep_reason_is_background_deferable() so the 10s background-force path in
+  // the coordinated-sleep loop applies too — belt-and-suspenders.)
+  if (list_refresh_inflight) {
+    if (background_sleep_bypass_active) {
+      return true;
+    }
+    unsigned long refresh_age_ms =
+        (list_refresh_start_ms > 0) ? (millis() - list_refresh_start_ms) : 0;
+    if (refresh_age_ms < LIST_REFRESH_BLOCK_MAX_MS) {
+      if (reason) *reason = "list_refresh_inflight";
+      return false;
+    }
+    // Stale refresh — stop pinning; let the device sleep.
   }
   return true;
 }
@@ -2549,6 +2588,42 @@ static bool parse_input_message(const char* json_str) {
   } else if (strcmp(type, "LCD_OTA_ABORT") == 0) {
     const char* reason = doc["reason"] | "unknown";
     Serial.printf("[UART] LCD_OTA_ABORT reason=%s\n", reason);
+  } else if (strcmp(type, "LIST_ACTIVE") == 0) {
+    // LCD asserts this while the user is on the shopping-list screen. While
+    // active we pin the Sense awake (sleep gate) and keep WiFi up so list
+    // refresh/delete hit a live connection instantly. The LCD re-asserts
+    // state=1 every few seconds; staleness watchdog in loop() clears it if the
+    // LCD goes silent (e.g. crash) so a stuck flag can't pin us awake forever.
+    int state = doc["state"] | 0;
+    unsigned long now_ms = millis();
+    if (state == 1) {
+      // Rising edge = list entry (false -> true). The LCD re-asserts state=1
+      // every ~3s; only nudge WiFi on the transition so we don't re-kick the
+      // connection repeatedly (which would prolong wifi_connect_inflight / the
+      // current op). While already list-active + awake, g_list_screen_active
+      // keeps WiFi up by blocking the pre-sleep teardown — no re-kick needed.
+      bool rising_edge = !g_list_screen_active;
+      g_list_screen_active = true;
+      last_list_active_ms = now_ms;
+      // Extend awake grace/holdoff like INPUT_WAKE so idle sleep doesn't fire.
+      sleep_holdoff_until_ms = now_ms + SLEEP_HOLDOFF_MS;
+      sleep_grace_until_ms = now_ms + MIN_AWAKE_BEFORE_SLEEP_MS;
+      if (rising_edge) {
+        // Kick off WiFi bring-up non-blockingly on list entry only.
+        // service_wifi_maintenance() in loop() services the connection; we just
+        // nudge it here so a fetch has a live link ready. Skip the blocking
+        // wait (timeout_ms=0) so this UART handler never stalls.
+        if (WiFi.status() != WL_CONNECTED) {
+          ensure_wifi_connected("list_active", 0);
+        }
+        Serial.println("[LIST_ACTIVE] state=1 (rising_edge)");
+      } else {
+        Serial.println("[LIST_ACTIVE] state=1 (refresh)");
+      }
+    } else {
+      g_list_screen_active = false;
+      Serial.println("[LIST_ACTIVE] state=0");
+    }
   } else {
     Serial.printf("[PROTO] Unknown type: %s\n", type);
   }
@@ -3444,6 +3519,18 @@ void loop() {
   }
 
   service_boot_wifi_connect(millis());
+
+  // LIST_ACTIVE staleness watchdog: the LCD re-asserts LIST_ACTIVE(state=1)
+  // every few seconds while the user is on the list screen. If it goes silent
+  // (e.g. LCD crash) we must not stay pinned awake forever — auto-clear after
+  // ~30s of no refresh. Only clears on staleness; a live screen keeps it set.
+  if (g_list_screen_active &&
+      last_list_active_ms > 0 &&
+      (millis() - last_list_active_ms) >= LIST_ACTIVE_STALE_MS) {
+    g_list_screen_active = false;
+    Serial.printf("[LIST_ACTIVE] auto-clear stale age_ms=%lu\n",
+                  (unsigned long)(millis() - last_list_active_ms));
+  }
 
   if (wifi_connect_inflight) {
     wifi_guard_poll();

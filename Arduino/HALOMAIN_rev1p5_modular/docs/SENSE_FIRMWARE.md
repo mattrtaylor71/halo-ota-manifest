@@ -153,6 +153,7 @@ Central UART message dispatcher. Parses JSON, validates protocol fields, routes 
 | `INPUT_EXPIRY_DATE` | Store expiry + quantity for check-in job |
 | `INPUT_DISCARD_OPTIONS` | Store add-to-shopping-list flag |
 | `INPUT_DELETE` | Queue item delete from shopping list API |
+| `LIST_ACTIVE` | `state=1`: user on the list screen → set `g_list_screen_active` (keep awake + WiFi up), extend grace, ensure WiFi **on the rising edge only**; `state=0`: clear it (allow sleep). 30s staleness auto-clear watchdog in `loop()` |
 | `INPUT_PING` | Reply with PONG, update heartbeat timestamp |
 | `INPUT_RESET_WIFI` | Flag WiFi credential reset |
 | `INPUT_FW_INFO` | Trigger fresh LCD query, then reply with `FW_INFO` carrying BOTH board versions + LCD partition/state |
@@ -205,6 +206,16 @@ Sleep flow:
 4. If clear, drains upload queue (30s window), disconnects WiFi/MQTT, deinits camera
 5. Configures EXT0 + timer wake, sends `SLEEP_READY` + WiFi diag summary
 6. Calls `esp_deep_sleep_start()` (no return)
+
+**Shopping-list keep-awake + hardening (v6.1.759).** `sense_can_sleep_now()` blocks idle sleep while
+`g_list_screen_active` (user on the list — hard block) OR `list_refresh_inflight` (a fetch in flight —
+the original root-cause check; **force-deferrable after `LIST_REFRESH_BLOCK_MAX_MS`≈12s** so a stuck
+fetch can't pin awake forever). The pre-deep-sleep WiFi teardown (`sense_sleep.h`) is **skipped while
+`g_list_screen_active`** so WiFi stays up for instant refresh/delete. The list fetch
+(`fetch_shopping_list_from_api`, sense_list.h) uses a **bounded ~6s WiFi-connect budget with no
+hard-reset escalation** (`LIST_FETCH_WIFI_BUDGET_MS`) so flaky WiFi fails fast (`list_refresh_fail`)
+and `op_inflight` releases (was the ~40s hard-reset chain that pinned `SLEEP_DENY reason=op_inflight`).
+See memory `project_halo_list_feature`.
 
 ---
 

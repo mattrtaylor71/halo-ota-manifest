@@ -371,6 +371,22 @@ static void ui_task(void *arg) {
             example_lvgl_unlock();
             continue;
           }
+          if (ui_screen_state == SCREEN_BACKLIGHT) {
+            int pct = constrain(backlight_get_pct() + evt.data.scroll_delta * 5, 5, 100);
+            backlight_apply_pct(pct);  // applies live; floor keeps screen recoverable
+            if (ship_backlight_ring != NULL) {
+              lv_arc_set_value(ship_backlight_ring, pct * 10);
+            }
+            if (ship_backlight_pct_label != NULL) {
+              char buf[8];
+              snprintf(buf, sizeof(buf), "%d%%", pct);
+              lv_label_set_text(ship_backlight_pct_label, buf);
+            }
+            lv_timer_handler();
+            resetActivityTimer();
+            example_lvgl_unlock();
+            continue;
+          }
           if (ui_screen_state == SCREEN_SHOPPING_LIST) {
             int new_idx = shopping_list_scroll_idx + evt.data.scroll_delta;
             if (new_idx < 0) new_idx = 0;
@@ -380,14 +396,7 @@ static void ui_task(void *arg) {
               shopping_list_overscroll_ticks -= evt.data.scroll_delta;  // delta is negative, so this adds
               if (shopping_list_overscroll_ticks >= SHOPPING_LIST_REFRESH_TICKS) {
                 shopping_list_overscroll_ticks = 0;
-                Serial.println("[SHOPPING_LIST] overscroll refresh triggered");
-                request_sense_wake("list_refresh");
-                refresh_sm_set_wake_pending("list_refresh");
-                // Show refreshing feedback in title
-                if (shopping_list_title_label) {
-                  lv_label_set_text(shopping_list_title_label, "Refreshing...");
-                  ui_lvgl_tick();
-                }
+                shopping_list_trigger_refresh("list_refresh");
               }
             } else {
               shopping_list_overscroll_ticks = 0;  // reset if scrolling down or not at top
@@ -558,6 +567,24 @@ static void ui_task(void *arg) {
           stop_glowing_animation();
           ui_lvgl_tick();
         }
+        processed_anything = true;
+      } else if (evt.type == EVT_REFRESH_TIMEOUT) {
+        // Refresh got stuck inflight (Sense never returned UI_LIST). The Core-0
+        // refresh SM already cleared all the inflight flags; here we just stop
+        // the glow, re-render the existing (cached) list, and surface a brief
+        // "Couldn't refresh" notice so the user isn't stuck on "Refreshing...".
+        Serial.println("[UI] Refresh timeout event - clearing stuck refresh UI");
+        if (is_glowing_animation) {
+          stop_glowing_animation();
+        }
+        if (ui_screen_state == SCREEN_SHOPPING_LIST) {
+          // Revert to the existing list, then overwrite the title with the notice.
+          shopping_list_screen_populate();
+          if (shopping_list_title_label) {
+            lv_label_set_text(shopping_list_title_label, "Couldn't refresh");
+          }
+        }
+        ui_lvgl_tick();
         processed_anything = true;
       } else if (evt.type == EVT_LIST_REPLACED) {
         // List was replaced (from UART task) - stop glowing, then swap pending → active and render
@@ -912,6 +939,46 @@ static void ui_task(void *arg) {
           // Reset activity timer
           resetActivityTimer();
         }
+        processed_anything = true;
+      } else if (evt.type == EVT_USB_ENTER_LIST) {
+        // USB 'list' — same path as tapping List on the second menu
+        // (SHIP_MENU_ACTION_SHOPPING_LIST in lcd_ship_action.h).
+        show_shopping_list_screen();
+        request_sense_wake("usb_list");
+        refresh_sm_set_wake_pending("usb_list");
+        resetActivityTimer();
+        Serial.println("[USB] list -> shopping list");
+        processed_anything = true;
+      } else if (evt.type == EVT_USB_REFRESH) {
+        // USB 'refresh' — same path as the pull-to-refresh gesture.
+        if (ui_screen_state == SCREEN_SHOPPING_LIST) {
+          shopping_list_trigger_refresh("usb_refresh");
+          resetActivityTimer();
+          Serial.println("[USB] refresh -> list refresh triggered");
+        } else {
+          Serial.println("[USB] refresh ignored (not on shopping list screen)");
+        }
+        processed_anything = true;
+      } else if (evt.type == EVT_USB_DELETE) {
+        // USB 'del N' — same path as the DELETE touch on the N-th visible item.
+        int idx = evt.data.usb_index;
+        if (ui_screen_state != SCREEN_SHOPPING_LIST) {
+          Serial.println("[USB] del ignored (not on shopping list screen)");
+        } else if (idx < 0 || idx >= g_active.count) {
+          Serial.printf("[USB] del %d -> out of range (count=%d)\n", idx, g_active.count);
+        } else {
+          const char* del_id = shopping_list_delete_index(idx);
+          shopping_list_screen_populate();
+          ui_lvgl_tick();
+          resetActivityTimer();
+          Serial.printf("[USB] del %d -> %s\n", idx, del_id[0] ? del_id : "(no id)");
+        }
+        processed_anything = true;
+      } else if (evt.type == EVT_USB_HOME) {
+        // USB 'home' — return to the main menu.
+        show_ship_main_menu();
+        resetActivityTimer();
+        Serial.println("[USB] home -> main menu");
         processed_anything = true;
       } else if (evt.type == EVT_TOGGLE_BUTTONS) {
         // Toggle menu buttons visibility
