@@ -36,6 +36,7 @@ typedef struct app_event_t app_event_t;
 #include "Preferences.h"
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>  // settimeofday() for syncing clock from Sense MAINT_WINDOW now_epoch
 #include "src/provisioning/qr_display.h"
 #include <string>
 #ifdef HALO_LCD_PROD_WRAPPER
@@ -386,6 +387,26 @@ static inline void lcd_sleep_ts(const char* label) {
 static bool lcd_time_valid() {
   time_t now = time(nullptr);
   return now > 1700000000;
+}
+
+// The LCD has no NTP/RTC time source of its own. The Sense carries its wall
+// clock in MAINT_WINDOW (now_epoch); applying it here makes lcd_time_valid()
+// true and lets the absolute-epoch maintenance machinery (window-current /
+// remaining-s / self-wake target) run. ESP-IDF carries the set time across
+// deep sleep via the RTC, so subsequent partial wakes keep an accurate clock.
+// Cheap to re-apply on every MAINT_WINDOW (corrects drift). No-op for epoch<=0.
+static void lcd_set_clock_from_sense(uint64_t now_epoch, const char* reason) {
+  if (now_epoch <= 1700000000ULL) {
+    return;  // invalid / absent (old Sense) — keep relative fallback behavior
+  }
+  struct timeval tv;
+  tv.tv_sec = (time_t)now_epoch;
+  tv.tv_usec = 0;
+  settimeofday(&tv, nullptr);
+  Serial.printf("[LCD_TIME] set from sense now_epoch=%llu reason=%s valid=%d\n",
+                (unsigned long long)now_epoch,
+                reason ? reason : "unknown",
+                lcd_time_valid() ? 1 : 0);
 }
 
 static bool lcd_maintenance_context_present() {
@@ -5150,6 +5171,27 @@ void loop() {
     }
     if (!inhibit_reason && lcd_ota_uart_active()) {
       inhibit_reason = "lcd_ota_uart";
+    }
+    // Stay awake through the absolute maintenance window so the Sense's
+    // LCD-first OTA proxy (which queries the LCD with retries over ~35s at
+    // window entry) can reach us. The LCD has a real clock now (set from the
+    // Sense's now_epoch in MAINT_WINDOW), so once we are inside the window we
+    // must not idle-sleep until the OTA completes or the window+grace ends.
+    // lcd_maintenance_window_is_current() is bounded by start_epoch +
+    // duration + grace_after, so this self-terminates. Clock-gated so it never
+    // affects normal (non-maintenance) idle-sleep or an old-Sense/no-clock LCD.
+    if (!inhibit_reason && lcd_time_valid() &&
+        g_lcd_maintenance_start_epoch > 0 &&
+        lcd_maintenance_window_is_current((uint64_t)time(nullptr))) {
+      static unsigned long last_maint_window_log_ms = 0;
+      unsigned long mw_now = millis();
+      if (mw_now - last_maint_window_log_ms > 5000) {
+        Serial.printf("[LCD_MAINT] stay_awake in_window now_epoch=%llu remaining_s=%lu\n",
+                      (unsigned long long)time(nullptr),
+                      (unsigned long)lcd_maintenance_window_remaining_s((uint64_t)time(nullptr)));
+        last_maint_window_log_ms = mw_now;
+      }
+      inhibit_reason = "maintenance_window";
     }
     if (inhibit_reason) {
       unsigned long now_ms = millis();

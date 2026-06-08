@@ -2238,6 +2238,13 @@ static void send_maint_window(const MaintenanceWindow* mw,
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   doc["remaining_s"] = remaining_s;
+  // Carry the Sense's current wall clock so the LCD (which has no NTP/RTC time
+  // source of its own) can settimeofday() and run its absolute-epoch maintenance
+  // machinery. Omitted when our own clock is invalid; the LCD then falls back to
+  // the relative wake_in_s/remaining_s offsets (backward compatible).
+  if (is_time_valid()) {
+    doc["now_epoch"] = (uint64_t)time(nullptr);
+  }
   if (mw) {
     if (mw->request_id[0]) {
       doc["request_id"] = mw->request_id;
@@ -2258,12 +2265,13 @@ static void send_maint_window(const MaintenanceWindow* mw,
   String output;
   serializeJson(doc, output);
   uart_send_json(output.c_str());
-  LOG_INFO("[MAINT_TX] to_lcd remaining_s=%lu wake_in_s=%lu clear=%d request_id=%s start_epoch=%llu",
+  LOG_INFO("[MAINT_TX] to_lcd remaining_s=%lu wake_in_s=%lu clear=%d request_id=%s start_epoch=%llu now_epoch=%llu",
            (unsigned long)remaining_s,
            (unsigned long)wake_in_s,
            clear_schedule ? 1 : 0,
            (mw && mw->request_id[0]) ? mw->request_id : "-",
-           (unsigned long long)((mw && mw->start_epoch > 0) ? mw->start_epoch : 0ULL));
+           (unsigned long long)((mw && mw->start_epoch > 0) ? mw->start_epoch : 0ULL),
+           (unsigned long long)(is_time_valid() ? (uint64_t)time(nullptr) : 0ULL));
 }
 
 static void keep_lcd_awake_for_maintenance(uint32_t remaining_s, const char* reason) {
@@ -3740,9 +3748,71 @@ static void run_maintenance_if_needed() {
 
   const char* maintenance_reason = has_mw ? "scheduled_http" : "maintenance";
 
-  // Lock LCD OTA to prevent simultaneous WiFi downloads (sequencing: Sense first)
+  // ── New scheduled-OTA order: LCD proxy FIRST, then Sense self-OTA ──
+  // At window entry BOTH boards are freshly awake (timer wake). The Sense
+  // self-OTA (inside maybeRunOtaCheck below) esp_restart()s on a successful
+  // apply; if the LCD were proxied AFTER that, the rebooted Sense would have
+  // to find/wake an LCD that has already idle-slept (Sense cannot wake the
+  // LCD — GPIO39 is LCD→Sense only), leaving the LCD stranded on old fw.
+  // Doing the LCD proxy first, while the LCD is still awake from this wake,
+  // sidesteps the limitation entirely: neither board needs to wake the other
+  // after a reboot.
+  LOG_INFO("[MAINT_RUN] LCD proxy first (pre-sense-ota)");
+
+  // OTA_LOCK keeps the LCD awake/listening for the UART-proxied OTA stream
+  // (extends ota_stay_awake_until_ms, wakes display from idle-dark, extends
+  // the maintenance deadline, blocks the LCD's own autonomous OTA check).
   send_ota_uart_message("OTA_LOCK");
-  LOG_INFO("[MAINT_RUN] OTA_LOCK sent (sequencing: sense downloads first)");
+  LOG_INFO("[MAINT_RUN] OTA_LOCK sent (lcd proxy first)");
+
+  // ── Phase 1: LCD OTA proxy (independent of any Sense self-OTA) ──
+  // run_lcd_maintenance_ota_attempt() spawns lcd_ota_proxy_task which does its
+  // own LCD_OTA_QUERY → manifest fetch → sense_lcd_ota_proxy(); it no-ops with
+  // result "noop" when the LCD is already on the target version. Success ->
+  // g_lcd_ota_result "updated" (or "noop"); failures leave a retryable result.
+  // The proxy task sends its own OTA_UNLOCK at completion (preserving the
+  // stay-awake window). Window budget is enforced via
+  // maintenance_window_active_for_retry / maintenance_wait_for_retry_slot.
+  for (uint8_t attempt = 0; attempt < LCD_MAINT_OTA_MAX_ATTEMPTS; ++attempt) {
+    if (!maintenance_window_active_for_retry(window_end_epoch, &remaining_s)) {
+      break;
+    }
+    if (attempt > 0) {
+      LOG_INFO("[MAINT_RUN] retry_lcd attempt=%u last_result=%s remaining_s=%lu",
+               (unsigned)(attempt + 1),
+               g_lcd_ota_result,
+               (unsigned long)remaining_s);
+      reset_lcd_maintenance_ota_state("pending");
+    }
+    run_lcd_maintenance_ota_attempt(maintenance_reason, window_end_epoch, &remaining_s);
+    if (!lcd_maintenance_result_retryable(g_lcd_ota_result)) {
+      break;
+    }
+    if ((attempt + 1) >= LCD_MAINT_OTA_MAX_ATTEMPTS) {
+      LOG_INFO("[MAINT_RUN] retry_lcd exhausted last_result=%s", g_lcd_ota_result);
+      break;
+    }
+    if (!maintenance_wait_for_retry_slot(window_end_epoch,
+                                         MAINT_OTA_RETRY_INTERVAL_MS,
+                                         "maintenance_lcd_retry",
+                                         &remaining_s)) {
+      break;
+    }
+  }
+  bool lcd_proxy_succeeded = lcd_maintenance_result_successful(g_lcd_ota_result);
+  LOG_INFO("[MAINT_RUN] lcd proxy phase done result=%s succeeded=%d",
+           g_lcd_ota_result[0] ? g_lcd_ota_result : "pending",
+           lcd_proxy_succeeded ? 1 : 0);
+
+  // ── Phase 2: Sense self-OTA (may esp_restart on success — EXPECTED) ──
+  // Re-assert OTA_LOCK so the LCD's stay-awake window covers the Sense self-OTA
+  // download + reboot (the LCD proxy task above sent OTA_UNLOCK at its end;
+  // OTA_LOCK only ever extends the window, never shortens it). The LCD is
+  // already up-to-date now, so the inline LCD-proxy inside maybeRunOtaCheck()
+  // will see compareVersions<=0 and no-op ("up_to_date") rather than wastefully
+  // re-streaming — confirmed in sense_lcd_ota_proxy()'s version check.
+  send_ota_uart_message("OTA_LOCK");
+  LOG_INFO("[MAINT_RUN] OTA_LOCK re-asserted (sense self-ota next)");
 
   // Reset OTA check gate — a previous check in this boot cycle may have set
   // g_ota_check_done=true, which would cause maybeRunOtaCheck() to skip entirely.
@@ -3773,37 +3843,22 @@ static void run_maintenance_if_needed() {
     }
   }
 
-  // Unlock LCD OTA now that Sense is done — LCD's turn to download
+  // The Sense self-OTA did not reboot (no update / blocked / failed); release
+  // the LCD so it can sleep. (On a successful Sense apply, esp_restart() above
+  // never returns here.)
   send_ota_uart_message("OTA_UNLOCK");
-  LOG_INFO("[MAINT_RUN] OTA_UNLOCK sent (lcd turn to download)");
+  LOG_INFO("[MAINT_RUN] OTA_UNLOCK sent (sense self-ota done, no reboot)");
 
-  for (uint8_t attempt = 0; attempt < LCD_MAINT_OTA_MAX_ATTEMPTS; ++attempt) {
-    if (!maintenance_window_active_for_retry(window_end_epoch, &remaining_s)) {
-      break;
-    }
-    if (attempt > 0) {
-      LOG_INFO("[MAINT_RUN] retry_lcd attempt=%u last_result=%s remaining_s=%lu",
-               (unsigned)(attempt + 1),
-               g_lcd_ota_result,
-               (unsigned long)remaining_s);
-      reset_lcd_maintenance_ota_state("pending");
-    }
-    run_lcd_maintenance_ota_attempt(maintenance_reason, window_end_epoch, &remaining_s);
-    if (!lcd_maintenance_result_retryable(g_lcd_ota_result)) {
-      break;
-    }
-    if ((attempt + 1) >= LCD_MAINT_OTA_MAX_ATTEMPTS) {
-      LOG_INFO("[MAINT_RUN] retry_lcd exhausted last_result=%s", g_lcd_ota_result);
-      break;
-    }
-    if (!maintenance_wait_for_retry_slot(window_end_epoch,
-                                         MAINT_OTA_RETRY_INTERVAL_MS,
-                                         "maintenance_lcd_retry",
-                                         &remaining_s)) {
-      break;
-    }
-  }
-  set_lcd_ota_due_nvs(false);
+  // Conditional lcd_ota_due fallback: only CLEAR the next-boot LCD retry when
+  // the LCD proxy actually succeeded above (or was already up-to-date). If the
+  // LCD proxy failed/was skipped, SET it so the boot-time get_lcd_ota_due_nvs()
+  // branch at the top of run_maintenance_if_needed() reliably re-proxies the
+  // LCD next boot/window as the fallback. (In the Sense-update case the inline
+  // proxy inside maybeRunOtaCheck() already manages this flag before its reboot;
+  // since the LCD is up-to-date by then it clears it — consistent with success.)
+  set_lcd_ota_due_nvs(!lcd_proxy_succeeded);
+  LOG_INFO("[MAINT_RUN] lcd_ota_due=%d (lcd_proxy_succeeded=%d)",
+           lcd_proxy_succeeded ? 0 : 1, lcd_proxy_succeeded ? 1 : 0);
   dump_system_truth("maintenance_done");
   bool followup_retry_needed =
       sense_maintenance_result_retryable(g_last_ota_result) ||

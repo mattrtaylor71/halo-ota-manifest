@@ -163,7 +163,7 @@ Maximum line length: 4096 bytes (allows rich voice response payloads).
 | `LCD_OTA_ABORT` | Abort OTA transfer |
 | `WIFI_CREDS` | Send WiFi credentials to LCD for NVS storage |
 | `WIFI_ON` | Request LCD enable WiFi (legacy, now no-op) |
-| `MAINT_WINDOW` | Maintenance window schedule from cloud API |
+| `MAINT_WINDOW` | Maintenance window schedule from cloud API. Fields: `remaining_s`, `wake_in_s`, `start_epoch`, `duration_sec`, `grace_before_sec`, `grace_after_sec`, `request_id`, `clear`, and `now_epoch` (Sense wall clock, present only when the Sense clock is valid — LCD uses it to set its own clock) |
 | `PROVISION_QR` | QR code data for provisioning display |
 | `FW_INFO` | Real running firmware of BOTH boards + LCD partition/state: `sense_fw`, `lcd_fw` (freshly queried, not cached manifest), `lcd_running_part`, `lcd_running_state`, `lcd_boot_part`, `lcd_fw_age_s`. `lcd_fw="unknown"` if the fresh LCD query fails |
 
@@ -490,6 +490,15 @@ When a manual/button-triggered OTA check (`maybeRunOtaCheck()` in `halo_sense_pr
 
 **`lcd_ota_due` is now a fallback only:** `set_lcd_ota_due_nvs()` is set based on the inline proxy outcome — **cleared on success / already-up-to-date**, **set when the proxy is skipped or fails** (query fail, manifest fetch fail, or a non-`"success"` proxy result). The boot-time `lcd_ota_due` handler in `run_maintenance_if_needed()` retries the LCD OTA on the next boot in the failure case. The post-apply code no longer unconditionally clears `lcd_ota_due`, so a transient LCD failure followed by a successful Sense apply still leaves the next-boot retry armed.
 
+**Scheduled maintenance OTA uses the same LCD-proxy-first order (`run_maintenance_if_needed()`):** The in-window dual-board sequence is **LCD proxy first, Sense self-OTA second**, for an even stronger reason than the manual path. A scheduled window wakes both boards from their own deep-sleep timers; the Sense self-OTA (download + apply + reboot, ~1–3 min) outlasts the LCD's OTA_LOCK stay-awake budget, and after a Sense reboot the Sense **cannot wake the LCD** (GPIO39 is LCD→Sense only). If the Sense rebooted first, the LCD would have idle-slept and be stranded on old firmware (`lcd_fw=unknown` / `lcd_ota_result=unknown` after the window). New order:
+1. `OTA_LOCK` (keep LCD awake/listening).
+2. LCD proxy retry loop (`run_lcd_maintenance_ota_attempt` × `LCD_MAINT_OTA_MAX_ATTEMPTS`, window-budget guarded); success tracked via `lcd_maintenance_result_successful()`.
+3. `OTA_LOCK` re-asserted; Sense self-OTA (`maybeRunOtaCheck`, which now no-ops its own inline LCD proxy because the LCD is already current). May `esp_restart()` on success — fine, the LCD is already updated.
+4. `OTA_UNLOCK` (only if the Sense did not reboot).
+5. **Conditional** `set_lcd_ota_due_nvs(!lcd_proxy_succeeded)` — clear on LCD success, set on LCD failure so the boot-time `lcd_ota_due` fallback retries next boot/window. (Was an unconditional clear before.)
+
+This eliminated the prior scheduled-window failure mode where the LCD was deferred to the post-reboot `lcd_ota_due` branch but had already idle-slept and could not be woken.
+
 ### S3 Bucket Layout
 
 ```
@@ -549,6 +558,37 @@ When Sense receives a maintenance schedule from the cloud:
 6. Sense performs OTA checks for both boards
 7. LCD receives OTA via UART COBS if update available
 8. Both boards sleep after maintenance completes
+
+#### MAINT_WINDOW carries the Sense wall clock (`now_epoch`) — LCD self-wake from the absolute window
+
+The LCD has **no NTP/RTC time source of its own** (no `settimeofday`/`configTime` anywhere
+in its firmware), so on its own `time(nullptr)≈0` and `lcd_time_valid()` is false — which
+left its absolute-epoch maintenance machinery dormant. To fix scheduled-OTA wake timing:
+
+- **Sense:** `send_maint_window()` (`halo_sense_prod.ino`) adds a `now_epoch` field carrying
+  `time(nullptr)` whenever `is_time_valid()`. Omitted (and the LCD falls back to the relative
+  `wake_in_s`/`remaining_s` offsets) when the Sense clock is invalid — fully backward
+  compatible.
+- **LCD:** the `MAINT_WINDOW` handler (`lcd_uart_rx.h`) parses `now_epoch` and calls
+  `lcd_set_clock_from_sense()` (`LCD_Minimal.ino`) which `settimeofday()`s the LCD clock
+  **before** arming the timer / persisting NVS. This makes `lcd_time_valid()` true (it just
+  checks `time(nullptr) > 1700000000`), and ESP-IDF carries the set time across deep sleep via
+  the RTC, so subsequent partial (touch/timer) wakes keep an accurate clock. Re-applied on
+  every MAINT_WINDOW (cheap drift correction).
+- **LCD self-wake (`lcd_sleep.h`):** when maintenance is armed AND the clock is valid AND
+  `g_lcd_maintenance_start_epoch > 0`, the deep-sleep timer is computed from the **absolute
+  window** every sleep: `target = start_epoch − grace_before_sec − LCD_MAINT_WAKE_LEAD_S`
+  (15s, matching the Sense's `nextWakeEpochForSleep(now,15,5)` lead); `sleep_timer_sec =
+  target − now_epoch`. Recomputing each sleep makes intermediate pre-window wakes harmless
+  (the old code re-armed the full stale relative offset and missed the window). If already
+  at/inside the band, it clamps to a 5s safety timer instead of sleeping past the window.
+  Relative `g_lcd_maintenance_wake_in_s` is the fallback only when the clock is invalid (legacy).
+- **LCD stays awake through the window (`LCD_Minimal.ino` sleep gate):** when the clock is
+  valid and `lcd_maintenance_window_is_current(time(nullptr))`, sleep is inhibited
+  (`reason=maintenance_window`) so the Sense's LCD-first OTA proxy (queries the LCD with
+  retries over ~35s at window entry) can reach it. Bounded by `start − grace_before` ..
+  `start + duration + grace_after`, so it self-terminates; clock-gated so normal idle-sleep
+  is never affected.
 
 Key constants:
 - `MAINT_SYNC_RESEND_MS = 1500` -- Resend MAINT_WINDOW if no ACK

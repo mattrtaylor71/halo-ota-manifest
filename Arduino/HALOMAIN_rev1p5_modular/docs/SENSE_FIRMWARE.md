@@ -781,6 +781,14 @@ Observability only; does not affect OTA control flow. A failed/timed-out query d
 1. Inline (main task, blocking the loop so there is no UART-drain race): `sense_lcd_ota_query()` → `sense_lcd_ota_fetch_manifest(cfg->base_dir, cfg->channel, …)` (via `ota_get_config()`) → `ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0` → `send_ota_uart_message("OTA_LOCK")` + `sense_lcd_ota_proxy(lcd_manifest, lcd_fw)`. Logged as `[OTA_ORCH] lcd proxy result=<res>`. MQTT is already stopped (`mqtt_stop_for_ota()` earlier in the function) and camera DMA already released; the manifest-client connection is released (`g_manifest_client.releaseConnection()`) for TLS headroom. `sense_lcd_ota_proxy()` manages `g_lcd_ota_proxy_owns_uart` itself — not double-managed here. On `"success"` the cached LCD version is invalidated (`g_lcd_ota_version[0]='\0'`, `g_lcd_fw_query_ms=0`).
 2. **Then** `g_ota_applier.applyToOtaPartition(...)` + reboot (success never returns; failure keeps the existing MQTT-reconnect / `OTA_UNLOCK` / `recordOtaResult` path).
 
+**SCHEDULED maintenance OTA order — LCD proxy FIRST, then Sense self-OTA (`run_maintenance_if_needed()` in `halo_sense_prod.ino`):** The in-window section is ordered the same way as the manual path (LCD first), for the same reason but with a stronger constraint: a scheduled window wakes BOTH boards from their own deep-sleep timers, and the Sense self-OTA download+apply+reboot (~1–3 min) outlasts the LCD's OTA_LOCK/stay-awake budget. If the Sense rebooted first, the rebooted Sense **physically cannot wake the LCD** (GPIO39 is LCD→Sense only) and the LCD has idle-slept → LCD stranded on old fw (`lcd_fw=unknown` / `lcd_ota_result=unknown` after the window). Order:
+1. `send_ota_uart_message("OTA_LOCK")` — keeps the LCD awake/listening for the UART-proxied stream (extends `ota_stay_awake_until_ms`, wakes display from idle-dark, extends the maintenance deadline, blocks the LCD's own autonomous OTA check). Logged `[MAINT_RUN] LCD proxy first (pre-sense-ota)` + `OTA_LOCK sent (lcd proxy first)`.
+2. **LCD proxy phase:** the `run_lcd_maintenance_ota_attempt()` retry loop (`LCD_MAINT_OTA_MAX_ATTEMPTS`, `maintenance_window_active_for_retry`/`maintenance_wait_for_retry_slot` budget guards, `reset_lcd_maintenance_ota_state` between attempts). Success is determined by `lcd_maintenance_result_successful(g_lcd_ota_result)` (true for `"updated"` / `"noop"` / `success:*` / `no_update:*`). Recorded in `lcd_proxy_succeeded`. The proxy task sends its own `OTA_UNLOCK` at completion (which preserves the stay-awake window, never shortens it).
+3. `send_ota_uart_message("OTA_LOCK")` re-asserted before the Sense self-OTA so the LCD stay-awake window covers the Sense download+reboot.
+4. **Sense self-OTA phase:** the `maybeRunOtaCheck(maintenance_reason, true)` call + `sense_maintenance_result_retryable` retry loop. `maybeRunOtaCheck()` itself does its own inline LCD proxy first (manual-path code above), but because the LCD is already up-to-date by now, `sense_lcd_ota_proxy()`'s version check (`compareVersions(manifest.version, lcd_fw) <= 0`) makes it no-op (`"up_to_date"`) rather than re-streaming. On a successful Sense apply this `esp_restart()`s and never returns — which is fine, the LCD was already updated in phase 2.
+5. `send_ota_uart_message("OTA_UNLOCK")` (only reached when the Sense did NOT reboot) so the LCD can sleep.
+6. **Conditional `lcd_ota_due`:** `set_lcd_ota_due_nvs(!lcd_proxy_succeeded)` — CLEAR only when the LCD proxy succeeded/was up-to-date; SET when it failed/was skipped so the boot-time `get_lcd_ota_due_nvs()` branch at the top of `run_maintenance_if_needed()` re-proxies the LCD next boot/window as the fallback. (Previously this was an unconditional `set_lcd_ota_due_nvs(false)`.) In the Sense-update case the inline proxy inside `maybeRunOtaCheck()` already manages this flag before its reboot, and since the LCD is up-to-date by then it clears it — consistent with the success case here.
+
 **Persistent OTA-orchestration breadcrumbs (black box, area `ota_orch`):** `maybeRunOtaCheck()` writes concise breadcrumbs to the persistent error-log black box via `diag_record_error_persistent("ota_orch", code, detail)` (forwards to `sense_errlog_store()` + `uart_send_sense_diag_persist()`, so they survive reboots and are readable later via the LCD error log). Because the API is `(stage, code, text)` rather than printf-style, each `detail` string is built with `snprintf` into a local `char crumb[96]` and is prefixed with the event name. Events:
 - `otachk_enter` (top of `maybeRunOtaCheck`) -- `reason=<reason> manual=<override> t=<millis>`
 - `lcd_query_tx` (before the inline `sense_lcd_ota_query`) -- `t=<millis> link_recent=<halo_uart_link_recent(3000)>`
@@ -793,6 +801,20 @@ Observability only; does not affect OTA control flow. A failed/timed-out query d
 These breadcrumbs make the manual-OTA LCD-rendezvous decision/handshake trail visible in the black box even though the Sense reboots on a successful self-OTA.
 
 **`lcd_ota_due` is a fallback only.** `set_lcd_ota_due_nvs()` is set from the inline-proxy outcome: **cleared** on proxy success or already-up-to-date; **set** when the proxy was skipped or failed (`lcd_query_fail`, `manifest_fetch_fail`, or non-`"success"` result). The boot-time handler in `run_maintenance_if_needed()` (the `get_lcd_ota_due_nvs()` block) retries the LCD OTA on next boot in the failure case. The post-apply code no longer unconditionally clears `lcd_ota_due`, so a transient LCD failure followed by a successful Sense apply keeps the next-boot retry armed. This replaces the old order (Sense self-OTA + reboot first, LCD deferred to next boot) that caused intermittent `lcd_query_fail` because the LCD had gone back to sleep by the time the rebooted Sense queried it.
+
+### MAINT_WINDOW carries the Sense wall clock (`now_epoch`)
+
+`send_maint_window()` (the single sender for every `MAINT_WINDOW` TX — used by
+`keep_lcd_awake_for_maintenance()`, `sync_pending_maintenance_to_lcd()`, and the clear/
+window-delta paths) adds a **`now_epoch`** field = `time(nullptr)` whenever `is_time_valid()`
+is true (omitted otherwise). The LCD has no NTP/RTC clock of its own, so before this it could
+not run its absolute-epoch maintenance machinery; with `now_epoch` it `settimeofday()`s its
+clock on receipt and computes its maintenance self-wake from the absolute window
+(`start_epoch − grace_before − 15s` lead, matching the Sense's `nextWakeEpochForSleep(now,15,5)`)
+and stays awake through the window so the LCD-first OTA proxy can reach it. Backward
+compatible: when `now_epoch` is absent (old Sense / invalid clock) the LCD falls back to the
+relative `wake_in_s`/`remaining_s` offsets. See LCD_FIRMWARE.md ("LCD clock + absolute-window
+self-wake") and ARCHITECTURE.md. The `[MAINT_TX]` log line now includes `now_epoch=`.
 
 ### Window-Start Schedule Re-Validation (Cancel-Safety)
 

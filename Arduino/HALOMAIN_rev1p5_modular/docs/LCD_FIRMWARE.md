@@ -503,6 +503,37 @@ Only GPIO9 (touch) is in the EXT1 wake mask. Encoder pins are **excluded** becau
 
 See ARCHITECTURE.md Re-Wake System for the Hard Gate architecture that governs when GPIO39 pulses are allowed vs UART-only communication.
 
+#### LCD clock + absolute-window self-wake (scheduled maintenance OTA)
+
+The LCD has **no NTP/RTC clock of its own**, so `time(nullptr)≈0` and `lcd_time_valid()`
+(which is just `time(nullptr) > 1700000000`) used to be false — leaving the absolute-epoch
+maintenance machinery dormant and the deep-sleep timer armed with a stale relative offset
+(`g_lcd_maintenance_wake_in_s`, never decremented for elapsed time → missed the window after
+any intermediate wake). Fix:
+
+- **Clock set:** the Sense now sends `now_epoch` in `MAINT_WINDOW`; the handler
+  (`lcd_uart_rx.h`) calls `lcd_set_clock_from_sense()` (in `LCD_Minimal.ino`) which
+  `settimeofday()`s the LCD clock before arming/persisting. ESP-IDF carries the set time
+  across deep sleep via the RTC, so partial (touch/timer) wakes keep an accurate clock.
+  Re-applied on each MAINT_WINDOW (drift correction). No-op when `now_epoch<=0` (old Sense).
+- **Self-wake timer (`enterLightSleep` in `lcd_sleep.h`):** when maintenance is armed AND
+  `lcd_time_valid()` AND `g_lcd_maintenance_start_epoch>0`, the deep-sleep timer is computed
+  from the **absolute window** every sleep: `target = start_epoch − grace_before_sec −
+  LCD_MAINT_WAKE_LEAD_S` (15s lead, matching the Sense's `nextWakeEpochForSleep(now,15,5)`);
+  `sleep_timer_sec = target − now_epoch` (reasons `maintenance_abs` /
+  `maintenance_abs_imminent`). Recomputing each sleep makes intermediate pre-window wakes
+  harmless. If already at/inside the band, clamps to a 5s safety timer rather than sleeping
+  past the window. Falls back to the relative `g_lcd_maintenance_wake_in_s` (`maintenance_rel`)
+  ONLY when the clock is invalid. The `[SLEEP_TIMER]` log now shows `clock_valid`,
+  `now_epoch`, `target_epoch`, `start_epoch`.
+- **Stay awake through the window (sleep gate in `LCD_Minimal.ino` `loop()`):** when the clock
+  is valid and `lcd_maintenance_window_is_current(time(nullptr))`, sleep is inhibited
+  (`reason=maintenance_window`, logged `[LCD_MAINT] stay_awake in_window`) so the Sense's
+  LCD-first OTA proxy (queries the LCD with retries over ~35s at window entry) can reach it.
+  Bounded by `start − grace_before` .. `start + duration + grace_after` so it self-terminates;
+  clock-gated and independent of `g_lcd_maintenance_active`, so it survives stale-flag clears
+  and never affects normal (non-maintenance) idle-sleep.
+
 #### Key Constants
 
 | Constant | Value | Description |
@@ -512,6 +543,7 @@ See ARCHITECTURE.md Re-Wake System for the Hard Gate architecture that governs w
 | `SLEEP_DENY_RETRY_DEFAULT_MS` | 5000 | Default retry interval after deny |
 | `SLEEP_FALLBACK_TIMER_SEC` | 15 | Timer wake if handshake fails |
 | `LCD_SLEEP_FALLBACK_TIMER_SEC` | 30 | Fallback timer for certain paths |
+| `LCD_MAINT_WAKE_LEAD_S` | 15 | Lead before window start for absolute self-wake (matches Sense lead) |
 
 ---
 
@@ -611,7 +643,7 @@ Clears all OTA/maintenance flags, sets `provision_return_home_pending = true` so
 | `FW_INFO` | Stores Sense firmware version, updates settings screen label |
 | `RELEASE_WAKE` | Releases INT_PIN wake line on Sense request |
 | `SYNC` / `SYNC_ACK` | Link synchronization protocol |
-| `MAINT_WINDOW` | Maintenance window management -- arms timer, enters headless mode, or clears state |
+| `MAINT_WINDOW` | Maintenance window management -- arms timer, enters headless mode, or clears state. Parses the Sense's `now_epoch` and calls `lcd_set_clock_from_sense()` (sets the LCD wall clock via `settimeofday()`) BEFORE arming/persisting, so the absolute-window self-wake + window-current logic has a valid clock. See "LCD clock + absolute-window self-wake" below |
 | `OTA_LOCK` / `OTA_UNLOCK` | Sets/clears OTA lock flags. **OTA_LOCK** extends `ota_stay_awake_until_ms` by `LCD_OTA_LOCK_STAY_AWAKE_MS` (180000 ms = 3 min, only-extend like `ship_menu_send_manual_ota`) to keep the LCD awake/UART-responsive through the entire dual-board OTA: Sense self-OTA (~40s) + reboot (~15s) + boot/wifi/proxy start (~20s). It **also sets `g_ota_lock_window_until_ms = millis() + LCD_OTA_LOCK_STAY_AWAKE_MS`** (see "Dual-OTA stay-awake survives Sense reboot" below). Logs `[OTA] ota_stay_awake extended <ms>ms (ota_lock)`. It also still extends the maintenance deadline by `OTA_LOCK_TIMEOUT_MS` when maintenance is active. **OTA_UNLOCK** clears the OTA flags but **does NOT zero `ota_stay_awake_until_ms` while a live OTA_LOCK window remains** (`millis() < ota_stay_awake_until_ms`): the Sense sends OTA_UNLOCK *before* its self-OTA reboot, so clearing the window would let the LCD deep-sleep and miss the post-reboot `LCD_OTA_QUERY` (`lcd_query_fail`). UNLOCK also calls `lcd_manual_ota_override_clear("ota_unlock")` to clear the manual-OTA override (so the periodic INPUT_OTA_CHECK resend loop in `loop()` stops — without this, an already-up-to-date manual OTA leaves the override set and the resend condition `override_active() && !ota_locked` keeps firing, re-locking/unlocking the Sense and looping the "Software Update" screen with a ~1s black-flash until the override's 5-min TTL). OTA_UNLOCK is the single termination point for ALL Sense "nothing to do" exits (up_to_date, downgrade blocked, rollout skip, apply blocked) since they all go through `release_waiting_lcd_ota -> OTA_UNLOCK`. The clear is idempotent (early-returns if the override is not set). UNLOCK then sets `provision_return_home_pending = true` (logged `[OTA] return_home_pending=1 (ota_unlock)`) so the UI task on Core 1 calls `show_ship_main_menu()` — this navigates `ui_screen_state` back to `SCREEN_HOME` and `lv_scr_load(ship_menu_screen)` (a different screen object) so the OTA "Software Update" overlay (child of the old active screen) is no longer visible. Without this, an already-up-to-date / no-op manual OTA cleared the flags but left the OTA overlay as the active screen, so the LCD slept and redrew "Software Update" on wake. Cross-core-safe (plain `bool`, same pattern used after provisioning). 2-min auto-unlock timeout in `loop()` as safety net. |
 | `OTA_CHECK` | Initiates OTA check, sends ACK, respects maintenance-only policy |
 | `OTA_APPLY_REQUIRED` | Flags that Sense needs wake for OTA apply |

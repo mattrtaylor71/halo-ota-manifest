@@ -273,21 +273,64 @@ static void enterLightSleep() {
   g_lcd_schedule_timer_armed = 0;
   g_lcd_schedule_wake_in_s = 0;
   g_lcd_schedule_next_epoch = 0;
-  uint32_t sleep_timer_sec = (sleep_fallback_timer_sec > 0)
-                               ? sleep_fallback_timer_sec
-                               : (g_lcd_maintenance_timer_armed && g_lcd_maintenance_wake_in_s > 0)
-                                   ? g_lcd_maintenance_wake_in_s
-                               : LCD_OTA_WAKE_INTERVAL_SEC;
-  const char* timer_reason = (sleep_fallback_timer_sec > 0)
-                               ? "fallback"
-                               : (g_lcd_maintenance_timer_armed && g_lcd_maintenance_wake_in_s > 0)
-                                   ? "maintenance"
-                               : "periodic";
-  Serial.printf("[SLEEP_TIMER] reason=%s timer_s=%lu maint_armed=%d wake_in_s=%lu\n",
+
+  // Lead before the Sense enters the window so the LCD is booted + UART-listening
+  // when the Sense's LCD-first OTA proxy queries it. Matches the Sense's
+  // nextWakeEpochForSleep(now,15,5) 15s lead.
+  static const uint32_t LCD_MAINT_WAKE_LEAD_S = 15;
+
+  // Absolute-window self-wake: when the clock is valid we recompute the remaining
+  // time to the wake target from the absolute start_epoch on EVERY sleep, so any
+  // intermediate touch/timer wake before the window is harmless (the stale
+  // relative g_lcd_maintenance_wake_in_s would otherwise re-arm the full original
+  // offset and miss the window). Falls back to the relative offset only when the
+  // clock is invalid (preserves legacy behavior on an old Sense / no time set).
+  uint32_t sleep_timer_sec;
+  const char* timer_reason;
+  bool maint_abs = (g_lcd_maintenance_timer_armed &&
+                    lcd_time_valid() &&
+                    g_lcd_maintenance_start_epoch > 0);
+  uint64_t maint_now_epoch = 0;
+  uint64_t maint_target_epoch = 0;
+  if (sleep_fallback_timer_sec > 0) {
+    sleep_timer_sec = sleep_fallback_timer_sec;
+    timer_reason = "fallback";
+  } else if (maint_abs) {
+    maint_now_epoch = (uint64_t)time(nullptr);
+    uint64_t lead = (uint64_t)g_lcd_maintenance_grace_before_sec + (uint64_t)LCD_MAINT_WAKE_LEAD_S;
+    maint_target_epoch = (g_lcd_maintenance_start_epoch > lead)
+                           ? (g_lcd_maintenance_start_epoch - lead)
+                           : 0;
+    if (maint_target_epoch > maint_now_epoch) {
+      uint64_t delta = maint_target_epoch - maint_now_epoch;
+      if (delta > 0xFFFFFFFFULL) delta = 0xFFFFFFFFULL;
+      sleep_timer_sec = (uint32_t)delta;
+      timer_reason = "maintenance_abs";
+    } else {
+      // At/inside the wake band or window already: do not deep-sleep for the
+      // stale relative value. Part D keeps the LCD awake through the window, but
+      // if we still reach here, clamp to a short timer as a safety net so we
+      // re-evaluate quickly rather than sleeping past the window.
+      sleep_timer_sec = 5;
+      timer_reason = "maintenance_abs_imminent";
+    }
+  } else if (g_lcd_maintenance_timer_armed && g_lcd_maintenance_wake_in_s > 0) {
+    // Relative fallback (clock invalid): legacy behavior.
+    sleep_timer_sec = g_lcd_maintenance_wake_in_s;
+    timer_reason = "maintenance_rel";
+  } else {
+    sleep_timer_sec = LCD_OTA_WAKE_INTERVAL_SEC;
+    timer_reason = "periodic";
+  }
+  Serial.printf("[SLEEP_TIMER] reason=%s timer_s=%lu maint_armed=%d wake_in_s=%lu clock_valid=%d now_epoch=%llu target_epoch=%llu start_epoch=%llu\n",
                 timer_reason,
                 (unsigned long)sleep_timer_sec,
                 g_lcd_maintenance_timer_armed ? 1 : 0,
-                (unsigned long)g_lcd_maintenance_wake_in_s);
+                (unsigned long)g_lcd_maintenance_wake_in_s,
+                lcd_time_valid() ? 1 : 0,
+                (unsigned long long)maint_now_epoch,
+                (unsigned long long)maint_target_epoch,
+                (unsigned long long)g_lcd_maintenance_start_epoch);
   // Configure RTC pull-up on wake GPIO so the pin doesn't float during deep sleep.
   // Digital pull-ups are disabled when the digital GPIO controller powers off.
   rtc_gpio_init((gpio_num_t)LCD_WAKE_GPIO);

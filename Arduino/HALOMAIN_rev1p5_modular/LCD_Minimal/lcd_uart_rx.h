@@ -359,6 +359,12 @@ static void uart_process_received_message(const char* json_str) {
     uint32_t duration_sec = doc["duration_sec"] | 0;
     uint32_t grace_before_sec = doc["grace_before_sec"] | 0;
     uint32_t grace_after_sec = doc["grace_after_sec"] | 0;
+    uint64_t now_epoch = doc["now_epoch"] | 0ULL;
+    // Set the LCD's wall clock from the Sense epoch BEFORE arming the timer or
+    // persisting, so the absolute-window self-wake / window-current logic sees a
+    // valid clock. Carried across deep sleep by the RTC. No-op when absent (old
+    // Sense) — relative wake_in_s fallback then applies.
+    lcd_set_clock_from_sense(now_epoch, "maint_window");
     if (g_lcd_maintenance_boot_grace_until_ms > 0) {
       g_lcd_maintenance_boot_grace_until_ms = 0;
       Serial.println("[LCD_MAINT] boot_grace_clear (maint_window)");
