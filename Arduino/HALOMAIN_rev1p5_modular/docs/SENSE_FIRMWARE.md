@@ -816,6 +816,46 @@ compatible: when `now_epoch` is absent (old Sense / invalid clock) the LCD falls
 relative `wake_in_s`/`remaining_s` offsets. See LCD_FIRMWARE.md ("LCD clock + absolute-window
 self-wake") and ARCHITECTURE.md. The `[MAINT_TX]` log line now includes `now_epoch=`.
 
+### Arm-time keep-awake (`MAINT_KEEPALIVE`) — delivery race fix
+
+After a tap the LCD idle-sleeps at ~10s, but the Sense needs ~10–15s for WiFi+NTP+
+schedule-fetch before it can send the real `MAINT_WINDOW` (which needs `now_epoch`). The
+crucial subtlety: `set_maintenance_schedule_pending_sync_to_lcd(true)` is called **only AFTER
+the HTTPS `/ota/schedule` fetch** (`[OTA_HTTP_SCHED] saved`), and that fetch already requires
+valid time for TLS — so by the time the pending-sync flag is set, `is_time_valid()` is
+**already true** and the LCD has **already idle-slept during the fetch**. A
+"pending && !time_valid" trigger therefore never fires on a fresh arm, and the window (and
+hence the absolute self-wake) never lands. The Sense cannot wake a sleeping LCD (GPIO39 is
+LCD→Sense only).
+
+Fix — keep the LCD awake through the **entire post-wake connect/fetch phase**, before the
+pending flag is even set (arm-time only — untouched: the at-window proxy, self-OTA,
+`esp_restart`, `run_maintenance_if_needed()`). New function `keep_lcd_awake_during_maint_arm()`
+runs every awake loop, **just before** `sync_pending_maintenance_to_lcd("awake")`, and sends a
+lightweight **`MAINT_KEEPALIVE`** (`send_maint_keepalive()`) on a `MAINT_KEEPALIVE_RESEND_MS =
+2000` cadence while **both**:
+- we are still early in the wake — `(millis() − last_wake_ms) < KEEPALIVE_ARM_WINDOW_MS`
+  (25s). `last_wake_ms` is reset in `setup()` on every wake (the Sense reboots on deep-sleep
+  wake, so `millis()` and this static reset to ~0), giving a reliable per-wake start reference.
+- **AND** `( !g_ota_check_done  ||  (pending && !acked) )`. `g_ota_check_done` is `false` from
+  wake until `maybeRunOtaCheck()` begins (it sets it `true`), so `!g_ota_check_done` spans the
+  WiFi+NTP+schedule-fetch phase; the `pending && !acked` part then covers delivery until the
+  LCD acks. "acked" mirrors the `ack_ok` logic (`g_lcd_maint_ack_received` matched against
+  `g_maint_pending_request_id`).
+
+It is **NOT** gated on `halo_uart_link_recent()`: that measures LCD→Sense traffic, which goes
+stale a few seconds after the tap even while the LCD is still awake, so it would cut keepalives
+off too early. Sending a keepalive to an already-asleep LCD is a harmless no-op; the 25s
+wake-window + the gate conditions are the bound. The keepalive carries only `request_id`
+(empty until the window is loaded); the LCD just resets its activity timer + nudges stay-awake
+on receipt. Stops naturally once acked (the `pending && !acked` gate goes false) and the OTA
+check has run, or when the 25s wake window elapses. The cadence timer
+`g_maint_keepalive_last_tx_ms` is owned solely by this function and is per-wake-fresh (static,
+zero at boot) — `sync_pending_maintenance_to_lcd()` no longer touches it. New statics/constants:
+`g_maint_keepalive_last_tx_ms`, `MAINT_KEEPALIVE_RESEND_MS`, `KEEPALIVE_ARM_WINDOW_MS`. New
+senders: `send_maint_keepalive()`, `keep_lcd_awake_during_maint_arm()`. The
+`deferred_time_invalid` branch of `sync_pending_maintenance_to_lcd()` is restored to log-only.
+
 ### Window-Start Schedule Re-Validation (Cancel-Safety)
 
 `ota_sched_revalidate(const MaintenanceWindow& cached, uint64_t now_epoch, uint32_t timeout_ms)` returns a `SchedRevalidate` enum (`REVAL_VALID` / `REVAL_CANCELLED` / `REVAL_REPLACED` / `REVAL_FETCH_FAILED`). It performs a dedicated GET of `ota_sched_http_build_url()` (`/ota/schedule`) using the same HTTPS/TLS setup as `ota_sched_http_fetch_window()`, but inspects the response directly:

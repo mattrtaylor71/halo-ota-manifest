@@ -350,6 +350,27 @@ static void uart_process_received_message(const char* json_str) {
     return;
   }
 
+  // Arm-time delivery race fix: lightweight keep-awake the Sense sends while a
+  // maintenance schedule is pending but its clock isn't valid yet (so it can't
+  // send the real MAINT_WINDOW with now_epoch). Just hold the LCD awake — do NOT
+  // touch maintenance state here. Without this the LCD idle-sleeps before NTP
+  // completes and never receives the real window (Sense can't wake a sleeping LCD).
+  if (strcmp(type, "MAINT_KEEPALIVE") == 0) {
+    const char* request_id = doc["request_id"] | "";
+    resetActivityTimer();
+    unsigned long until = millis() + 8000UL;  // bridge to next keepalive / real window
+    if (until > ota_stay_awake_until_ms) {
+      ota_stay_awake_until_ms = until;
+    }
+    if (g_sleep_transition) {
+      g_sleep_transition = false;
+      Serial.println("[LCD_MAINT] abort sleep transition (maint_keepalive)");
+    }
+    Serial.printf("[UART][MAINT_KEEPALIVE] rx request_id=%s -> stay_awake\n",
+                  (request_id && request_id[0]) ? request_id : "-");
+    return;
+  }
+
   if (strcmp(type, "MAINT_WINDOW") == 0) {
     uint32_t remaining_s = doc["remaining_s"] | 0;
     uint32_t wake_in_s = doc["wake_in_s"] | 0;
@@ -365,6 +386,10 @@ static void uart_process_received_message(const char* json_str) {
     // valid clock. Carried across deep sleep by the RTC. No-op when absent (old
     // Sense) — relative wake_in_s fallback then applies.
     lcd_set_clock_from_sense(now_epoch, "maint_window");
+    // Arm-time delivery race fix (breadcrumb): capture whether now_epoch arrived
+    // and the clock became valid when the window was received. value=clock_valid.
+    lcd_errlog_store_with_context("lcd", "maint", "MW_RX", (int)lcd_time_valid(),
+                                  request_id);
     if (g_lcd_maintenance_boot_grace_until_ms > 0) {
       g_lcd_maintenance_boot_grace_until_ms = 0;
       Serial.println("[LCD_MAINT] boot_grace_clear (maint_window)");
@@ -438,6 +463,17 @@ static void uart_process_received_message(const char* json_str) {
     if (wake_in_s > 0) {
       g_lcd_maintenance_timer_armed = 1;
       g_lcd_maintenance_wake_in_s = wake_in_s;
+      // Arm-time delivery race fix: this is the future-window arm (the LCD will
+      // deep-sleep self-wake later). Reset the activity timer + nudge stay-awake
+      // a few seconds so the Sense's repeated arm-syncs / keepalives actually
+      // hold the LCD awake until now_epoch lands — without this, receiving the
+      // arm does NOT keep the LCD awake and it idle-sleeps mid-handshake. Do NOT
+      // enter maintenance-active/headless here (that is the at-window path below).
+      resetActivityTimer();
+      unsigned long arm_until = millis() + 8000UL;
+      if (arm_until > ota_stay_awake_until_ms) {
+        ota_stay_awake_until_ms = arm_until;
+      }
     }
     // Persist to NVS BEFORE headless entry so timer survives touch exit
     lcd_persist_maintenance_state("maint_window_store");

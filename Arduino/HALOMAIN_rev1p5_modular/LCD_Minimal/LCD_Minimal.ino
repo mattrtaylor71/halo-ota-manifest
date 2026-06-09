@@ -395,6 +395,13 @@ static bool lcd_time_valid() {
 // remaining-s / self-wake target) run. ESP-IDF carries the set time across
 // deep sleep via the RTC, so subsequent partial wakes keep an accurate clock.
 // Cheap to re-apply on every MAINT_WINDOW (corrects drift). No-op for epoch<=0.
+// Forward declaration (defined after lcd_activity.h). Declared early so the
+// maintenance restore/sleep paths above the definition can emit diagnostic
+// breadcrumbs (arm-time delivery race fix).
+static void lcd_errlog_store_with_context(const char* board, const char* area,
+                                           const char* event, int32_t code,
+                                           const char* detail);
+
 static void lcd_set_clock_from_sense(uint64_t now_epoch, const char* reason) {
   if (now_epoch <= 1700000000ULL) {
     return;  // invalid / absent (old Sense) — keep relative fallback behavior
@@ -559,6 +566,17 @@ static bool lcd_restore_persisted_maintenance_state(const char* reason) {
                 (unsigned long)g_lcd_maintenance_remaining_s,
                 (unsigned long)g_lcd_maintenance_start_epoch,
                 g_lcd_maintenance_request_id[0] ? g_lcd_maintenance_request_id : "-");
+  // Arm-time delivery race fix (breadcrumb): capture the post-deep-sleep restore
+  // of the maintenance timer + whether the clock was valid then. value=armed,
+  // detail encodes clock_valid + request_id (clk=<0/1> rid=<...>).
+  {
+    char restore_detail[80];
+    snprintf(restore_detail, sizeof(restore_detail), "clk=%d rid=%s",
+             lcd_time_valid() ? 1 : 0,
+             g_lcd_maintenance_request_id[0] ? g_lcd_maintenance_request_id : "-");
+    lcd_errlog_store_with_context("lcd", "maint", "RESTORE",
+                                  (int)g_lcd_maintenance_timer_armed, restore_detail);
+  }
   return true;
 }
 

@@ -331,6 +331,14 @@ static void enterLightSleep() {
                 (unsigned long long)maint_now_epoch,
                 (unsigned long long)maint_target_epoch,
                 (unsigned long long)g_lcd_maintenance_start_epoch);
+  // Arm-time delivery race fix (breadcrumb): when a maintenance timer is armed,
+  // record what self-wake timer we chose (maintenance_abs vs maintenance_rel vs
+  // periodic). value=sleep_timer_sec, detail=timer_reason. Gated on armed to
+  // avoid noise on ordinary periodic sleeps.
+  if (g_lcd_maintenance_timer_armed) {
+    lcd_errlog_store_with_context("lcd", "maint", "SLEEP",
+                                  (int)sleep_timer_sec, timer_reason);
+  }
   // Configure RTC pull-up on wake GPIO so the pin doesn't float during deep sleep.
   // Digital pull-ups are disabled when the digital GPIO controller powers off.
   rtc_gpio_init((gpio_num_t)LCD_WAKE_GPIO);

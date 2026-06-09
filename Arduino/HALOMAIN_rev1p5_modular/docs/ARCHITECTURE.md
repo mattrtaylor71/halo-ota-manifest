@@ -164,6 +164,7 @@ Maximum line length: 4096 bytes (allows rich voice response payloads).
 | `WIFI_CREDS` | Send WiFi credentials to LCD for NVS storage |
 | `WIFI_ON` | Request LCD enable WiFi (legacy, now no-op) |
 | `MAINT_WINDOW` | Maintenance window schedule from cloud API. Fields: `remaining_s`, `wake_in_s`, `start_epoch`, `duration_sec`, `grace_before_sec`, `grace_after_sec`, `request_id`, `clear`, and `now_epoch` (Sense wall clock, present only when the Sense clock is valid — LCD uses it to set its own clock) |
+| `MAINT_KEEPALIVE` | Arm-time keep-awake (race fix). Sent throughout the post-wake WiFi+NTP+schedule-fetch phase (bounded ~25s after wake, gated by `!g_ota_check_done` or pending-unacked) so the tapped LCD doesn't idle-sleep before the real `MAINT_WINDOW` (with `now_epoch`) can be delivered. Carries only `request_id`; LCD just resets its activity timer + nudges stay-awake |
 | `PROVISION_QR` | QR code data for provisioning display |
 | `FW_INFO` | Real running firmware of BOTH boards + LCD partition/state: `sense_fw`, `lcd_fw` (freshly queried, not cached manifest), `lcd_running_part`, `lcd_running_state`, `lcd_boot_part`, `lcd_fw_age_s`. `lcd_fw="unknown"` if the fresh LCD query fails |
 
@@ -590,8 +591,43 @@ left its absolute-epoch maintenance machinery dormant. To fix scheduled-OTA wake
   `start + duration + grace_after`, so it self-terminates; clock-gated so normal idle-sleep
   is never affected.
 
+#### Arm-time delivery race fix — keep the LCD awake until the window lands (`MAINT_KEEPALIVE`)
+
+The `now_epoch` self-wake above only works if the LCD actually **receives** the
+`MAINT_WINDOW` (with `now_epoch`) before it idle-sleeps. After a tap wakes both boards
+the LCD idle-sleeps at ~10s, but the Sense needs ~10–15s for WiFi+NTP+schedule-fetch
+before it can send the real window. Critically, the pending-sync flag is set **only AFTER**
+the HTTPS `/ota/schedule` fetch (which already needs valid time), so by then the clock is
+valid AND the LCD has already idle-slept during the fetch — a "pending && !time_valid"
+trigger never fires on a fresh arm. The Sense **cannot wake a sleeping LCD** (GPIO39 is
+LCD→Sense only), so the absolute self-wake never armed and the LCD missed the window.
+
+Fix (three parts, arm-time only — does NOT touch the at-window proxy / self-OTA / `esp_restart`):
+- **Sense (`keep_lcd_awake_during_maint_arm()`, run every awake loop just before
+  `sync_pending_maintenance_to_lcd("awake")`):** keep the LCD awake through the **whole
+  post-wake connect/fetch phase**, before pending is even set. Sends `MAINT_KEEPALIVE`
+  (`send_maint_keepalive()`) on a `MAINT_KEEPALIVE_RESEND_MS = 2000` cadence while early in the
+  wake (`millis() − last_wake_ms < KEEPALIVE_ARM_WINDOW_MS` = 25s; `last_wake_ms` is reset in
+  `setup()` each wake) AND (`!g_ota_check_done` — spans the fetch — OR `pending && !acked` —
+  spans delivery). Carries only `request_id`. **Not** gated on `halo_uart_link_recent()` (that
+  tracks LCD→Sense traffic, which goes stale seconds after the tap even while the LCD is awake,
+  cutting keepalives too early); sending to an already-asleep LCD is a harmless no-op, and the
+  25s window + gates bound it. The `deferred_time_invalid` branch is now log-only.
+- **LCD (`lcd_uart_rx.h`):** a `MAINT_KEEPALIVE` handler calls `resetActivityTimer()` and
+  nudges `ota_stay_awake_until_ms` (+8s) — it does **not** touch maintenance state. The
+  future-window arm branch (`wake_in_s>0`) of the `MAINT_WINDOW` handler now also calls
+  `resetActivityTimer()` + nudges stay-awake so repeated arm-syncs hold the LCD awake.
+  (Since the Sense is awake during arm-time, `ota_stay_awake_until_ms` is honored.)
+- **Breadcrumbs (LCD error-log black box, area `maint`):** `MW_RX` (value=`lcd_time_valid()`,
+  detail=request_id) on window receipt; `SLEEP` (value=`sleep_timer_sec`, detail=`timer_reason`,
+  emitted only when a maintenance timer is armed) at sleep; `RESTORE` (value=`armed`,
+  detail=`clk=<0/1> rid=<...>`) on post-deep-sleep NVS restore. These make the next on-site
+  scheduled-OTA test self-diagnosing.
+
 Key constants:
 - `MAINT_SYNC_RESEND_MS = 1500` -- Resend MAINT_WINDOW if no ACK
+- `MAINT_KEEPALIVE_RESEND_MS = 2000` -- Arm-time keep-awake cadence during post-wake connect/fetch
+- `KEEPALIVE_ARM_WINDOW_MS = 25000` -- Bounds the arm-time keep-awake to early in a wake
 - `MAINT_SYNC_MAX_SENDS = 3` -- Max retransmissions
 - `LCD_OTA_SCHED_START_MIN = 120` -- Default schedule: 2:00 AM local
 - `LCD_OTA_SCHED_WINDOW_MIN = 30` -- 30-minute window

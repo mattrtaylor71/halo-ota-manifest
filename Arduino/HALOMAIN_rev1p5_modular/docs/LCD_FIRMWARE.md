@@ -533,6 +533,25 @@ any intermediate wake). Fix:
   Bounded by `start − grace_before` .. `start + duration + grace_after` so it self-terminates;
   clock-gated and independent of `g_lcd_maintenance_active`, so it survives stale-flag clears
   and never affects normal (non-maintenance) idle-sleep.
+- **Arm-time keep-awake (delivery race fix):** the clock-set above only works if the LCD
+  actually receives the `MAINT_WINDOW` before idle-sleeping. After a tap the LCD sleeps at
+  ~10s but the Sense needs ~10–15s for WiFi+NTP+schedule-fetch (and only sets its pending-sync
+  flag AFTER that fetch), so the Sense sends a lightweight **`MAINT_KEEPALIVE`** throughout the
+  post-wake connect/fetch phase (driven by `keep_lcd_awake_during_maint_arm()` on the Sense,
+  bounded ~25s after wake, gated by `!g_ota_check_done` / pending-unacked) instead of the
+  not-yet-sendable window. The `MAINT_KEEPALIVE`
+  handler (`lcd_uart_rx.h`) just calls `resetActivityTimer()` + nudges `ota_stay_awake_until_ms`
+  (+8s) — no maintenance state touched. Additionally, the future-window arm branch
+  (`wake_in_s>0`) of the `MAINT_WINDOW` handler now also calls `resetActivityTimer()` + nudges
+  stay-awake so repeated arm-syncs hold the LCD awake until `now_epoch` lands. Because the
+  Sense is awake during arm-time, `ota_stay_awake_until_ms` is honored by the sleep gate.
+- **Diagnostic breadcrumbs (error-log black box, area `maint`):** `MW_RX` (value=`lcd_time_valid()`,
+  detail=request_id) on window receipt in `lcd_uart_rx.h`; `SLEEP` (value=`sleep_timer_sec`,
+  detail=`timer_reason`, only when `g_lcd_maintenance_timer_armed`) in `lcd_sleep.h`; `RESTORE`
+  (value=`g_lcd_maintenance_timer_armed`, detail=`clk=<0/1> rid=<...>`) in
+  `lcd_restore_persisted_maintenance_state()`. Viewable via Debug screen / USB `errors`. The
+  errlog forward declaration was moved earlier in `LCD_Minimal.ino` so the restore/sleep paths
+  (above its definition) can emit these.
 
 #### Key Constants
 

@@ -48,6 +48,19 @@ static uint8_t g_maint_sync_send_count = 0;
 static bool g_maint_sync_no_ack_logged = false;
 static const unsigned long MAINT_SYNC_RESEND_MS = 1500;
 static const uint8_t MAINT_SYNC_MAX_SENDS = 3;
+// Arm-time delivery race fix: after a tap wakes both boards the LCD idle-sleeps at
+// ~10s, but the Sense needs ~10-15s for WiFi+NTP+schedule-fetch before it can send
+// the real MAINT_WINDOW (which needs now_epoch). The pending-sync flag is only set
+// AFTER the HTTPS schedule fetch (which already requires valid time), so a
+// "pending && !time_valid" trigger never fires on a fresh arm. Instead we send a
+// lightweight MAINT_KEEPALIVE throughout the post-wake connect/fetch phase so the
+// freshly-tapped LCD does NOT idle-sleep before the real window can be delivered.
+static unsigned long g_maint_keepalive_last_tx_ms = 0;
+static const unsigned long MAINT_KEEPALIVE_RESEND_MS = 2000;
+// Bound the arm-time keepalive to the early part of a wake. last_wake_ms (set in
+// setup() every wake, since the Sense reboots on deep-sleep wake and millis()
+// resets) is the wake-start reference.
+static const unsigned long KEEPALIVE_ARM_WINDOW_MS = 25000;
 static const unsigned long MAINT_SYNC_BLOCK_SLEEP_MS = 5000;
 static const unsigned long LCD_OTA_ACK_TIMEOUT_MS = 15000;
 static const unsigned long LCD_OTA_RESULT_TIMEOUT_MS = 600000;
@@ -2274,6 +2287,69 @@ static void send_maint_window(const MaintenanceWindow* mw,
            (unsigned long long)(is_time_valid() ? (uint64_t)time(nullptr) : 0ULL));
 }
 
+// Arm-time delivery race fix: lightweight Sense->LCD keep-awake used ONLY while a
+// maintenance schedule is pending-sync but our clock is not yet valid (so we can't
+// yet send the real MAINT_WINDOW with now_epoch). The LCD handler for this type
+// just resets its activity timer + nudges stay-awake (see lcd_uart_rx.h), so the
+// freshly-tapped LCD does not idle-sleep before NTP completes and the real window
+// (with now_epoch) is delivered and acked. Carries the request_id for traceability.
+static void send_maint_keepalive(const char* request_id) {
+  StaticJsonDocument<128> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = "MAINT_KEEPALIVE";
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  if (request_id && request_id[0]) {
+    doc["request_id"] = request_id;
+  }
+  String output;
+  serializeJson(doc, output);
+  uart_send_json(output.c_str());
+  LOG_INFO("[MAINT_TX] keepalive_to_lcd request_id=%s",
+           (request_id && request_id[0]) ? request_id : "-");
+}
+
+// Arm-time delivery race fix: keep the LCD awake during the post-wake
+// WiFi+NTP+schedule-fetch phase. The pending-sync flag is only set AFTER the
+// HTTPS fetch (which needs valid time), so a "pending && !time_valid" trigger
+// can't catch the early window — by then the LCD has already idle-slept during
+// the fetch. This runs every awake loop and sends a lightweight MAINT_KEEPALIVE
+// while we are still early in the wake AND either the OTA/schedule check hasn't
+// run yet (g_ota_check_done false — spans the fetch) OR the window is pending but
+// not yet acked (spans delivery). NOT gated on halo_uart_link_recent(): that
+// tracks LCD->Sense traffic which goes stale a few seconds after the tap even
+// while the LCD is awake, which would cut keepalives off too early. Sending to an
+// already-asleep LCD is a harmless no-op; the wake-window + gates bound it.
+static void keep_lcd_awake_during_maint_arm() {
+  unsigned long now_ms = millis();
+  // Only early in the wake. last_wake_ms is reset every wake in setup().
+  if ((now_ms - last_wake_ms) >= KEEPALIVE_ARM_WINDOW_MS) {
+    return;
+  }
+  bool pending = maintenance_schedule_pending_sync_to_lcd();
+  // "not yet acked" mirrors the ack_ok logic in sync_pending_maintenance_to_lcd().
+  bool acked = g_lcd_maint_ack_received;
+  if (acked && g_maint_pending_request_id[0]) {
+    acked = maint_sync_request_matches(g_maint_pending_request_id, g_lcd_maint_ack_request_id);
+  }
+  bool want_keepalive = (!g_ota_check_done) || (pending && !acked);
+  if (!want_keepalive) {
+    return;
+  }
+  if (g_maint_keepalive_last_tx_ms != 0 &&
+      (now_ms - g_maint_keepalive_last_tx_ms) < MAINT_KEEPALIVE_RESEND_MS) {
+    return;
+  }
+  // request_id is available once the window is loaded; "" before the fetch lands.
+  MaintenanceWindow mw;
+  const char* req_id = "";
+  if (maintenance_window_load(&mw) && mw.request_id[0]) {
+    req_id = mw.request_id;
+  }
+  send_maint_keepalive(req_id);
+  g_maint_keepalive_last_tx_ms = now_ms;
+}
+
 static void keep_lcd_awake_for_maintenance(uint32_t remaining_s, const char* reason) {
   if (remaining_s == 0) {
     return;
@@ -2314,6 +2390,10 @@ static void sync_pending_maintenance_to_lcd(const char* reason) {
     g_maint_sync_no_ack_logged = false;
     g_maint_sync_wait_until_ms = 0;
     g_maint_pending_request_id[0] = '\0';
+    // NOTE: do NOT reset g_maint_keepalive_last_tx_ms here — this not-pending path
+    // runs every loop during the pre-fetch phase (pending is set only AFTER the
+    // HTTPS fetch), and keep_lcd_awake_during_maint_arm() owns the keepalive
+    // cadence; zeroing it here would defeat the 2s rate-limit (arm-time race fix).
     return;
   }
   MaintenanceWindow mw;
@@ -2416,6 +2496,9 @@ static void sync_pending_maintenance_to_lcd(const char* reason) {
     g_maint_pending_last = false;
     g_maint_pending_request_id[0] = '\0';
     g_maint_sync_wait_until_ms = 0;
+    // keep_lcd_awake_during_maint_arm() naturally stops once acked (its
+    // pending&&!acked gate goes false) and/or the wake window elapses; the
+    // keepalive cadence timer is per-wake-fresh, so no reset needed here.
     maint_sync_note_resolution("acked", current_request_id);
     LOG_INFO("[MAINT_SYNC] sent_to_lcd window=%d clear=%d ack=1",
              sent_window ? 1 : 0,
@@ -2428,6 +2511,9 @@ static void sync_pending_maintenance_to_lcd(const char* reason) {
              link_recent ? 1 : 0,
              ack_ok ? 1 : 0);
   } else if (!time_ok) {
+    // Arm-time delivery race fix: the LCD keep-awake during this not-yet-valid
+    // phase is centralized in keep_lcd_awake_during_maint_arm() (called every
+    // awake loop, BEFORE this function), so this branch is back to log-only.
     maint_sync_note_resolution("deferred_time_invalid", current_request_id);
     LOG_INFO("[MAINT_WINDOW] time_invalid defer_sync");
   } else {
@@ -4901,6 +4987,11 @@ void halo_prod_loop() {
   maybe_cancel_manual_ota_unready();
   handle_ota_proof();
   handle_mqtt_commands();
+  // Arm-time delivery race fix: hold the LCD awake through the post-wake
+  // connect/fetch phase (before pending-sync is even set) so it doesn't
+  // idle-sleep before the real MAINT_WINDOW can be delivered. Must run BEFORE
+  // sync_pending_maintenance_to_lcd() so a keepalive precedes any window send.
+  keep_lcd_awake_during_maint_arm();
   sync_pending_maintenance_to_lcd("awake");
 
   if (!g_ota_check_done && OtaIntent::shouldUpdateNow()) {
