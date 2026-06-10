@@ -217,6 +217,45 @@ hard-reset escalation** (`LIST_FETCH_WIFI_BUDGET_MS`) so flaky WiFi fails fast (
 and `op_inflight` releases (was the ~40s hard-reset chain that pinned `SLEEP_DENY reason=op_inflight`).
 See memory `project_halo_list_feature`.
 
+**Never-silently-drop refresh (`request_list_refresh()`, Sense_Minimal.ino).** A user refresh
+(INPUT_WAKE) is never silently eaten — a silent drop left the LCD on "Refreshing..." until its 12s
+hard timeout. Behavior by gate:
+- **Cooldown hit** (`now < list_refresh_cooldown_until_ms`, cooldown = `LIST_REFRESH_COOLDOWN_MS` = 3s
+  after each refresh completes): if the cached list was fetched successfully within the cooldown window
+  (+1s jitter margin; tracked by `list_last_fetch_ok_ms`, set in `parse_and_update_shopping_list`),
+  the Sense immediately re-sends the cached list so the LCD refresh completes instantly
+  (`[LIST_REFRESH] cooldown_hit -> served_cached`). If there is no
+  fresh cache (last fetch failed), the request is **accepted despite the cooldown**
+  (`cooldown_hit -> cache_stale, accepting`).
+- **Awake-proof ordering (both paths).** The LCD's refresh state machine sits in
+  `REFRESH_WAKE_PENDING` until it sees an awake-proof message (PONG, SYNC_ACK, or UI_STATUS); a
+  UI_LIST that arrives first renders the list but leaves the SM stuck ("Refreshing" pill never
+  clears). The Sense therefore sends `UI_STATUS "IDLE"` **before** the list on both paths:
+  - **Served-cached**: `UI_STATUS "IDLE"` → `delay(40)` (lets the LCD's Core-0 RX process it) →
+    `uart_send_ui_list()` → `delay(50)` → trailing `UI_STATUS "IDLE"`. Logged
+    `[LIST_REFRESH] awake_proof_sent path=cached`.
+  - **Normal fetch**: `UI_STATUS "IDLE"` sent at OP_LIST_REFRESH dequeue in the op worker, before
+    `fetch_shopping_list_from_api()` — needed because the wake-path IDLE in setup() only fires when
+    the Sense was actually deep-sleeping, and a warm-WiFi fetch (~400ms) could land UI_LIST before
+    any PONG/SYNC_ACK. Logged `[LIST_REFRESH] awake_proof_sent path=fetch`.
+- **Already inflight**: safe debounce — the running fetch will answer the LCD with UI_LIST + IDLE.
+  **Stuck-inflight self-heal**: if `list_refresh_inflight` has been set for > `LIST_REFRESH_TIMEOUT_MS`
+  (20s, same constant as the loop() watchdog), the flag is cleared in place and the new request is
+  accepted (`stuck inflight ... -> self-heal`), so a wedged flag can't break refresh until reboot.
+  The INPUT_WAKE handler no longer early-returns on inflight; `request_list_refresh()` owns that logic.
+- **LCD OTA in progress**: still deferred (unchanged), logged clearly.
+
+**UI_LIST buffer.** `uart_send_ui_list()` uses a heap `DynamicJsonDocument(8192)` (freed on scope
+exit) instead of `StaticJsonDocument<4096>` — 50 items x 64B id + 64B text could overflow 4KB and
+silently drop items. If items still don't fit, it logs `[UI_LIST] truncated dropped=N overflowed=...`
+instead of truncating silently.
+
+**Refresh latency instrumentation.** One-line millis() deltas across the path: `[LIST_REFRESH]
+dequeued queue_wait_ms=` (enqueue→op-worker dequeue), `[NET_DIAG] list_wifi_connect_ms=` (bounded
+list-fetch WiFi connect), `[NET_DIAG] fetch_ok code=200 http_ms=... resp_len=... attempt=` (HTTP
+duration on success — was failure-only), `[LIST_REFRESH] parse_ms=`, and `[LIST_REFRESH] total_ms=...
+fetch_ms=... (request->UI_LIST)`.
+
 ---
 
 ### 2. sense_camera.h -- Camera Hardware Control
@@ -675,6 +714,7 @@ In production builds, all MQTT variables are stubbed:
 - Skips items with action="CHECKED"
 - Extracts product_name and id
 - Thread-safe via `g_list_mutex`
+- Records `list_last_fetch_ok_ms` on success (powers the cooldown served-cached path in `request_list_refresh()`)
 - Sends `UI_LIST` to LCD after update
 
 **`delete_item_from_api(const char* item_id)`** -- Removes item via POST with operation="remove".

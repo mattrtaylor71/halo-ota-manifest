@@ -65,7 +65,10 @@ struct app_state_t {
 - **`lcd_mode_t`**: LCD_MODE_UI_ACTIVE, LCD_MODE_MAINTENANCE
 - **`SenseState`**: SENSE_UNKNOWN, SENSE_AWAKE, SENSE_ASLEEP
 - **`RefreshState`**: REFRESH_IDLE, REFRESH_WAKE_PENDING, REFRESH_INFLIGHT, REFRESH_COMPLETE, REFRESH_FAILED
-  - On the shopping list, a hard 12s cap (`REFRESH_HARD_TIMEOUT_MS`) on REFRESH_INFLIGHT calls `refresh_hard_timeout_clear()` — clears all inflight flags with **no auto-retry** (unlike `refresh_soft_fail`), posts `EVT_REFRESH_TIMEOUT` so the UI task stops the glow, re-renders the cached list, and shows a brief "Couldn't refresh" title. Lets the 10s idle-sleep engage instead of spinning forever.
+  - **UI_LIST completes from WAKE_PENDING too**: the Sense can serve a cached list within ~100ms of the wake pulse, before any awake-proof (PONG/SYNC_ACK) promotes WAKE_PENDING -> INFLIGHT. The UI_LIST handler in lcd_uart_rx.h therefore transitions to REFRESH_COMPLETE from **either** INFLIGHT or WAKE_PENDING (previously INFLIGHT-only, which left the pill stuck on "Waking HALO..." and the trigger guard blocking further pulls). Any UI_LIST arrival (even unsolicited in IDLE) resets the soft-fail auto-retry budget `s_list_auto_retry_count` (file-scope in LCD_Minimal.ino) and sets `g_list_refresh_completed_once`.
+  - On the shopping list, a hard 12s cap (`REFRESH_HARD_TIMEOUT_MS`) on REFRESH_INFLIGHT calls `refresh_hard_timeout_clear()` — clears all inflight flags with **no auto-retry** (unlike `refresh_soft_fail`), posts `EVT_REFRESH_TIMEOUT` so the UI task stops the glow, re-renders the cached list, hides the refresh spinner pill, and shows a brief "Couldn't refresh" title. Lets the 10s idle-sleep engage instead of spinning forever.
+  - **Leaving the list screen abandons the SM**: `ui_show_screen()` (lcd_ship_route.h) calls `refresh_sm_abandon("leave_list")` on the list->other transition, mirroring `refresh_hard_timeout_clear`'s flag-clearing without auto-retry or UI events, and stops the glow. The SM is never left in WAKE_PENDING/INFLIGHT with no consumer; a late UI_LIST still lands in g_active + the NVS cache.
+  - On the shopping list, WAKE_PENDING/INFLIGHT are surfaced as a spinner pill with staged text ("Waking HALO..." / "Updating list...") — see the Shopping List Screen section; the UI task polls `shopping_list_refresh_indicator_sync()` each iteration since the WAKE_PENDING -> INFLIGHT transition happens on the UART task.
 - **Shopping-list keep-awake (`LIST_ACTIVE`)**: `uart_send_list_active(bool)` in lcd_uart.h tells the Sense to stay awake + keep WiFi up. Sent `true` on entering the list and re-asserted ~every 3s from `loop()`; sent `false` on leaving (both via `ui_show_screen` enter/leave detection) and on LCD idle-sleep entry (`enterLightSleep`) if still on the list.
 
 #### Sleep/Wake State Variables (RTC_DATA_ATTR -- survive deep sleep)
@@ -280,7 +283,17 @@ Multi-page card UI parsed from `UI_VOICE_RESPONSE` JSON:
 #### Shopping List Screen
 
 Scrollable card list with:
-- Pull-to-refresh (5 counter-clockwise ticks at top)
+- **Stale-while-revalidate entry**: `show_shopping_list_screen_impl()` renders whatever `g_active` holds INSTANTLY (non-empty after the first ever fetch thanks to the NVS cache), then ALWAYS auto-triggers a background refresh (`shopping_list_trigger_refresh("entry_revalidate")`) unless one is already pending/inflight. The cached list stays fully interactive (scroll/selection/delete) under the pill while the refresh runs. The old explicit wake in `SHIP_MENU_ACTION_SHOPPING_LIST` / USB `list` was removed — entry covers it.
+- **Empty-state gating**: "No items on your list" only renders when a refresh has actually completed since boot (`g_list_refresh_completed_once`) and the list is genuinely empty. A cache-miss entry (count==0, refresh running) shows the **skeleton loader** instead; count==0 with no refresh running and no completed refresh shows a neutral "Pull down to refresh" hint.
+- **Skeleton loader**: `shopping_list_render_skeleton()` — four placeholder cards (260x38, radius 10, `0xE7D9C3` darker tan) with a gentle opacity pulse (lv_anim COVER→OPA_40, 450ms + 450ms playback ≈ 900ms period, infinite repeat, 110ms stagger). The next `populate()` starts with `lv_obj_clean()`, which deletes the placeholders and kills their anims the moment real content arrives.
+- **Touch pull-to-refresh**: `shopping_list_scroll` has `LV_OBJ_FLAG_SCROLL_ELASTIC` + `LV_OBJ_FLAG_SCROLL_MOMENTUM`, and `shopping_list_scroll_event_cb()` (PRESSED/SCROLL/RELEASED/SCROLL_END) tracks elastic overscroll past the top. Pulling down >`SHOPPING_LIST_PULL_HINT_PX` (12px) shows the **progressive pull cue** — the pill with an `lv_arc` (`shopping_list_pull_arc`, rotation 270 so it sweeps from 12 o'clock) whose angle tracks pull progress (0→270° at `SHOPPING_LIST_PULL_THRESHOLD_PX` = 45px) via `shopping_list_refresh_pill_show_pull(progress_pct, armed)`. Past the threshold the text flips to "Release to refresh"; release fires `shopping_list_trigger_refresh("touch_pull")` exactly once per gesture (re-arms only after the scroll settles back to rest), at which point the SM sync swaps the arc for the spinner. Scroll gestures also set `shopping_list_touch_was_scrolled` so the raw tap path (`shopping_list_handle_touch`) doesn't treat a drag as a tap and pop the item overlay.
+- **Encoder pull-to-refresh**: `SHOPPING_LIST_REFRESH_TICKS` (3) counter-clockwise ticks while at index 0. Forgiving accumulation: ticks only reset when the selection moves off the top, on a CW (down) scroll, or when the last CCW tick is older than `SHOPPING_LIST_OVERSCROLL_WINDOW_MS` (1.5s) — re-renders no longer clear the counter.
+- **Refresh guard**: `shopping_list_trigger_refresh()` is a no-op while the refresh SM is already WAKE_PENDING/INFLIGHT, so gestures can't stack refreshes. (The UI_LIST handler now completes the SM from WAKE_PENDING too, so an instant cached reply from the Sense can no longer wedge this guard.)
+- **Refresh indicator pill**: floating card (spinner/arc + status text) at the top of the list area, built by `shopping_list_build_refresh_pill()`. `shopping_list_refresh_indicator_sync()` maps the refresh SM state to it: WAKE_PENDING -> "Waking HALO...", INFLIGHT -> "Updating list...", anything else hides it (timeout keeps the existing "Couldn't refresh" title). The pill **fades + slides** in (opa 0→cover, translate_y -12→0, 160ms via `shopping_list_pill_reveal()`) and out (reverse, 150ms, hidden flag set in the anim ready cb; `shopping_list_pill_hiding` guards double-hides) instead of popping. The UI task polls the sync every iteration on the list screen (the WAKE_PENDING -> INFLIGHT transition happens on the UART task), and `show_shopping_list_screen_impl()` syncs on entry so a refresh already in flight is visible immediately.
+- **In-place selection scroll**: knob scrolling calls `shopping_list_update_selection(old,new)` which restyles just the two affected cards via `shopping_list_style_card()` (O(1), card pointers kept in `shopping_list_items[]`) and `lv_obj_scroll_to_view(..., LV_ANIM_ON)`. The full `shopping_list_screen_populate()` rebuild runs only on content changes: screen entry, new UI_LIST, delete, refresh timeout revert.
+- **Content-signature render skip**: `shopping_list_content_sig()` (FNV-1a over count + item texts + ids) is stored in `shopping_list_rendered_sig` by every populate (0xFFFFFFFF = placeholder/skeleton sentinel that never matches). The `EVT_LIST_REPLACED` handler compares the new `g_active` sig against it and **skips the rebuild entirely** when identical — no staggered reveal, no flicker on revalidate-with-no-changes (the common case).
+- **Fresh-list reveal**: when a *changed* UI_LIST lands (`shopping_list_reveal_pending` set in the `EVT_LIST_REPLACED` handler), populate plays a quick staggered fade-in (180ms, 30ms stagger, capped at the first 10 rows; later rows appear instantly). One-shot — no continuous row animations once content settles.
+- **Animated delete**: `shopping_list_animate_card_removal(idx)` slides the removed card left (-320px) + fades it (150ms, ease-in), then collapses its height to 0 (120ms, min_height dropped to 0), then rebuilds via the anim ready cb. Data (`g_active`, INPUT_DELETE, NVS persist) is updated up front by `shopping_list_delete_index()`; the animation is purely visual. Used by both the overlay DELETE touch and USB `del N`. A concurrent UI_LIST rebuild simply deletes the card + anims (the ready cb never fires; the rebuild already happened).
 - Tap to show delete/back overlay
 - Knob scrolling with highlight
 - Item count in title
@@ -755,17 +768,19 @@ for (;;) {
 | `EVT_RENDER_ACTIVE_LIST` | new_count | Render g_active list |
 | `EVT_VOICE_ITEMS_ADDED` | new_count | Optimistic voice items |
 | `EVT_UI_STATUS_IDLE` | (none) | Clear status overlay |
-| `EVT_USB_ENTER_LIST` | (none) | USB `list`: show shopping list + arm refresh (UI task) |
-| `EVT_USB_REFRESH` | (none) | USB `refresh`: pull-to-refresh path (UI task) |
-| `EVT_USB_DELETE` | `int usb_index` | USB `del N`: delete N-th visible item (UI task) |
+| `EVT_USB_ENTER_LIST` | (none) | USB `list`: show shopping list (entry auto-revalidates) (UI task) |
+| `EVT_USB_REFRESH` | (none) | USB `refresh`: pull-to-refresh path, reason `usb_refresh` (UI task) |
+| `EVT_USB_PULL` | (none) | USB `pull`: pull-to-refresh path, reason `usb_pull` (UI task) |
+| `EVT_USB_DELETE` | `int usb_index` | USB `del N`: delete N-th visible item, animated removal (UI task) |
 | `EVT_USB_HOME` | (none) | USB `home`: return to main menu (UI task) |
+| `EVT_USB_LISTSTATE` | (none) | USB `liststate`: print one `[LISTSTATE] {...}` JSON line (UI task) |
 
 #### Scroll Routing by Screen
 
 | Screen | Scroll Behavior |
 |--------|----------------|
 | SCREEN_VOICE_JSON | Page between voice response pages |
-| SCREEN_SHOPPING_LIST | Scroll item selection; overscroll = pull-to-refresh |
+| SCREEN_SHOPPING_LIST | In-place selection restyle (`shopping_list_update_selection`, no repopulate); 3 CCW ticks at top = pull-to-refresh (ticks expire after 1.5s, reset on CW scroll or leaving the top) |
 | SCREEN_HOME (MAIN) | Ignored (touch-first UI) |
 | SCREEN_EXPIRY_CHOICE | Adjust quantity (if not discard mode) |
 | SCREEN_EXPIRY | Step month/day/year based on active segment |
@@ -802,9 +817,12 @@ for (;;) {
 |---------|--------|
 | `fw` / `ver` | Print `[FW] {json}` line (lcd_fw, running_part, running_state, boot_part, next_part) via `lcd_build_fw_status_json()`, then legacy human-readable `[FW]` lines. Case-insensitive. |
 | `ota` | Send INPUT_OTA_CHECK |
-| `list` | Emulate tapping List on the second menu. Sends INPUT_WAKE, posts `EVT_USB_ENTER_LIST` so the UI task runs `show_shopping_list_screen()` + arms a list refresh. Prints `[USB] list`. |
-| `refresh` | Emulate the pull-to-refresh gesture (5 CCW ticks at top). Posts `EVT_USB_REFRESH`; UI task calls `shopping_list_trigger_refresh()` (only on the list screen). Prints `[USB] refresh`. |
-| `del N` | Emulate the DELETE touch on the N-th visible list item (0-based). Posts `EVT_USB_DELETE` (index N); UI task calls `shopping_list_delete_index(N)` (sends INPUT_DELETE + local removal) then re-renders. Guarded against `g_active.count`. Prints `[USB] del N -> <id>`. |
+| `list` | Emulate tapping List on the second menu. Sends INPUT_WAKE, posts `EVT_USB_ENTER_LIST` so the UI task runs `show_shopping_list_screen()` (entry renders the cached list + auto-triggers the `entry_revalidate` refresh). Prints `[USB] list`. |
+| `refresh` | Emulate the pull-to-refresh gesture (touch pull-down or 3 CCW ticks at top). Posts `EVT_USB_REFRESH`; UI task calls `shopping_list_trigger_refresh("usb_refresh")` (only on the list screen; no-op if a refresh is already pending/inflight). Prints `[USB] refresh`. |
+| `pull` | Same path as `refresh` but with reason `usb_pull` (posts `EVT_USB_PULL`) — lets the e2e harness distinguish injected pulls in the logs. Prints `[USB] pull`. |
+| `scroll <±n>` | Posts `EVT_SCROLL_DELTA` with the given delta (clamped to int8). On the list screen this moves the selection; negative deltas at index 0 accumulate toward the CCW overscroll-refresh. Prints `[USB] scroll <n>`. |
+| `del N` | Emulate the DELETE touch on the N-th visible list item (0-based). Posts `EVT_USB_DELETE` (index N); UI task calls `shopping_list_delete_index(N)` (sends INPUT_DELETE + local removal + NVS persist) then plays the animated card removal. Guarded against `g_active.count`. Prints `[USB] del N -> <id>`. |
+| `liststate` | Posts `EVT_USB_LISTSTATE`; the UI task prints one machine-readable line for harness assertions: `[LISTSTATE] {"screen":N,"refresh_state":N,"pill":0\|1,"count":N,"cache_age_s":N,"auto_retry":N,"selected":N}` (`cache_age_s` = -1 when unknown — no cache or no valid wall clock; `selected` = `shopping_list_scroll_idx`). |
 | `home` | Return to the main menu. Posts `EVT_USB_HOME`; UI task calls `show_ship_main_menu()`. Prints `[USB] home`. |
 | `wake` | Force-wake Sense board |
 | `sleep` | Send INPUT_SLEEP |
@@ -920,13 +938,22 @@ NVS namespace: `shopping_list`
 | `count` | int | Number of items |
 | `selected` | int | Selected index |
 | `items` | String | JSON with items[] and ids[] arrays |
+| `fetched_at` | uint | Unix epoch at save time (0 = LCD had no valid wall clock — see `lcd_time_valid()`); mirrored into `g_list_cache_fetched_epoch`, surfaced as `cache_age_s` by the USB `liststate` command |
+
+**Save/load symmetry is load-bearing.** Both paths use `DynamicJsonDocument(LIST_PERSIST_JSON_CAPACITY)` (8KB, heap-allocated so no task-stack pressure). The historical asymmetry — 8KB `StaticJsonDocument` on save vs 4KB on load — let large lists persist fine but fail to parse back with `NoMemory`, so the user saw a blank "No items on your list" after every deep sleep (LCD deep sleep is a full reset; `g_active` is RAM-only).
+
+**Persist chain** (cache must survive deep sleep):
+1. `load_list_from_storage(&g_active)` in `setup()` on **every** boot (deep-sleep wake included), before UI init.
+2. `save_list_to_storage(&g_active)` on every UI_LIST swap (`EVT_LIST_REPLACED` handler, lcd_ui_task.h).
+3. `save_list_to_storage(&g_active)` inside `shopping_list_delete_index()` (lcd_ship_screens.h) right after the local removal — the ship-UI delete previously didn't persist (only the retired lcd_menu.h path did), so deletes could resurrect after sleep.
+4. Belt-and-braces save in `enterLightSleep()` before deep sleep (lcd_sleep.h).
 
 #### Key Functions
 
 | Function | Description |
 |----------|-------------|
-| `save_list_to_storage(s)` | Serializes `app_state_t` to JSON, saves to NVS |
-| `load_list_from_storage(s)` | Loads from NVS, parses JSON, populates `app_state_t` |
+| `save_list_to_storage(s)` | Serializes `app_state_t` to JSON, saves to NVS + `fetched_at` stamp |
+| `load_list_from_storage(s)` | Loads from NVS, parses JSON, populates `app_state_t`, restores `g_list_cache_fetched_epoch` |
 | `reset_reason_label(reason)` | Maps `esp_reset_reason_t` to human-readable string |
 | `wake_cause_label(cause)` | Maps `esp_sleep_wakeup_cause_t` to "EXT0", "EXT1", "TIMER", etc. |
 | `print_wakeup_diagnostics(board_name)` | Logs board name, reset reason, wake cause, wake pin level |

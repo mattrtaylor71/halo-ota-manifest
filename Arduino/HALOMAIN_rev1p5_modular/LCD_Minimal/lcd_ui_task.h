@@ -255,6 +255,12 @@ static void ui_task(void *arg) {
     if (ui_screen_state == SCREEN_AI_LISTENING) {
       ship_update_ai_listening_countdown();
     }
+    if (ui_screen_state == SCREEN_SHOPPING_LIST) {
+      // Poll the refresh SM state into the spinner pill. The WAKE_PENDING ->
+      // INFLIGHT transition happens on the UART task (Core 0), so the UI task
+      // picks it up here; no-op when the state hasn't changed.
+      shopping_list_refresh_indicator_sync(false);
+    }
     if (ship_error_hide_at_ms && millis() >= ship_error_hide_at_ms) {
       ship_error_hide_at_ms = 0;
       show_ship_main_menu();
@@ -391,19 +397,32 @@ static void ui_task(void *arg) {
             int new_idx = shopping_list_scroll_idx + evt.data.scroll_delta;
             if (new_idx < 0) new_idx = 0;
             if (new_idx >= g_active.count) new_idx = g_active.count - 1;
-            // Track overscroll at top for pull-to-refresh
+            // Track overscroll at top for pull-to-refresh. Forgiving: ticks
+            // only reset when the selection leaves the top, on a CW (down)
+            // scroll, or when the last CCW tick is stale (>1.5s old).
             if (shopping_list_scroll_idx == 0 && evt.data.scroll_delta < 0) {
+              unsigned long now_ticks = millis();
+              if (shopping_list_last_ccw_tick_ms > 0 &&
+                  (now_ticks - shopping_list_last_ccw_tick_ms) > SHOPPING_LIST_OVERSCROLL_WINDOW_MS) {
+                shopping_list_overscroll_ticks = 0;  // stale ticks expire
+              }
               shopping_list_overscroll_ticks -= evt.data.scroll_delta;  // delta is negative, so this adds
+              shopping_list_last_ccw_tick_ms = now_ticks;
               if (shopping_list_overscroll_ticks >= SHOPPING_LIST_REFRESH_TICKS) {
                 shopping_list_overscroll_ticks = 0;
+                shopping_list_last_ccw_tick_ms = 0;
                 shopping_list_trigger_refresh("list_refresh");
               }
-            } else {
-              shopping_list_overscroll_ticks = 0;  // reset if scrolling down or not at top
+            } else if (evt.data.scroll_delta > 0 || new_idx > 0) {
+              shopping_list_overscroll_ticks = 0;  // scrolled down or selection moved off the top
+              shopping_list_last_ccw_tick_ms = 0;
             }
             if (new_idx != shopping_list_scroll_idx && g_active.count > 0) {
+              // Lightweight in-place restyle of the two affected cards —
+              // no full repopulate, so fast knob scrolls stay smooth.
+              int old_idx = shopping_list_scroll_idx;
               shopping_list_scroll_idx = new_idx;
-              shopping_list_screen_populate();
+              shopping_list_update_selection(old_idx, new_idx);
               ui_lvgl_tick();
             }
             resetActivityTimer();
@@ -583,6 +602,7 @@ static void ui_task(void *arg) {
           if (shopping_list_title_label) {
             lv_label_set_text(shopping_list_title_label, "Couldn't refresh");
           }
+          shopping_list_refresh_indicator_sync(true);  // hide the spinner pill
         }
         ui_lvgl_tick();
         processed_anything = true;
@@ -727,11 +747,23 @@ static void ui_task(void *arg) {
           }
           xSemaphoreGive(app_state_mutex);
         }
-        // If on shopping list screen, re-populate with new data
+        // If on shopping list screen, re-populate with new data — but only
+        // when the content actually changed. A revalidate that returns the
+        // identical list (the common case) skips the rebuild entirely: no
+        // staggered reveal, no flicker, selection/scroll untouched.
         if (ui_screen_state == SCREEN_SHOPPING_LIST) {
-          shopping_list_screen_populate();
-          ui_lvgl_tick();
-          Serial.println("[UI] Shopping list screen refreshed with new data");
+          uint32_t new_sig = shopping_list_content_sig(&g_active);
+          if (new_sig == shopping_list_rendered_sig) {
+            shopping_list_refresh_indicator_sync(true);  // refresh done — hide the spinner pill
+            ui_lvgl_tick();
+            Serial.println("[UI] Shopping list unchanged — skipped re-render");
+          } else {
+            shopping_list_reveal_pending = true;  // staggered fade-in for the fresh rows
+            shopping_list_screen_populate();
+            shopping_list_refresh_indicator_sync(true);  // refresh done — hide the spinner pill
+            ui_lvgl_tick();
+            Serial.println("[UI] Shopping list screen refreshed with new data");
+          }
         }
         processed_anything = true;
       } else if (evt.type == EVT_SHOW_PROVISION_QR) {
@@ -942,22 +974,38 @@ static void ui_task(void *arg) {
         processed_anything = true;
       } else if (evt.type == EVT_USB_ENTER_LIST) {
         // USB 'list' — same path as tapping List on the second menu
-        // (SHIP_MENU_ACTION_SHOPPING_LIST in lcd_ship_action.h).
+        // (SHIP_MENU_ACTION_SHOPPING_LIST in lcd_ship_action.h). Entry renders
+        // the cached list and auto-triggers the "entry_revalidate" refresh.
         show_shopping_list_screen();
-        request_sense_wake("usb_list");
-        refresh_sm_set_wake_pending("usb_list");
         resetActivityTimer();
         Serial.println("[USB] list -> shopping list");
         processed_anything = true;
-      } else if (evt.type == EVT_USB_REFRESH) {
-        // USB 'refresh' — same path as the pull-to-refresh gesture.
+      } else if (evt.type == EVT_USB_REFRESH || evt.type == EVT_USB_PULL) {
+        // USB 'refresh' / 'pull' — same path as the pull-to-refresh gesture
+        // (distinct reasons for log/assertion clarity).
         if (ui_screen_state == SCREEN_SHOPPING_LIST) {
-          shopping_list_trigger_refresh("usb_refresh");
+          shopping_list_trigger_refresh(evt.type == EVT_USB_PULL ? "usb_pull" : "usb_refresh");
           resetActivityTimer();
-          Serial.println("[USB] refresh -> list refresh triggered");
+          Serial.println("[USB] refresh/pull -> list refresh triggered");
         } else {
-          Serial.println("[USB] refresh ignored (not on shopping list screen)");
+          Serial.println("[USB] refresh/pull ignored (not on shopping list screen)");
         }
+        processed_anything = true;
+      } else if (evt.type == EVT_USB_LISTSTATE) {
+        // USB 'liststate' — one machine-readable line for the e2e harness.
+        // Printed from the UI task so screen/pill/list state is coherent.
+        bool pill_visible = (ui_screen_state == SCREEN_SHOPPING_LIST &&
+                             shopping_list_refresh_pill != NULL &&
+                             !lv_obj_has_flag(shopping_list_refresh_pill, LV_OBJ_FLAG_HIDDEN));
+        Serial.printf("[LISTSTATE] {\"screen\":%d,\"refresh_state\":%d,\"pill\":%d,\"count\":%d,"
+                      "\"cache_age_s\":%d,\"auto_retry\":%d,\"selected\":%d}\n",
+                      (int)ui_screen_state,
+                      (int)refresh_state,
+                      pill_visible ? 1 : 0,
+                      g_active.count,
+                      list_cache_age_s(),
+                      (int)s_list_auto_retry_count,
+                      shopping_list_scroll_idx);
         processed_anything = true;
       } else if (evt.type == EVT_USB_DELETE) {
         // USB 'del N' — same path as the DELETE touch on the N-th visible item.
@@ -968,7 +1016,7 @@ static void ui_task(void *arg) {
           Serial.printf("[USB] del %d -> out of range (count=%d)\n", idx, g_active.count);
         } else {
           const char* del_id = shopping_list_delete_index(idx);
-          shopping_list_screen_populate();
+          shopping_list_animate_card_removal(idx);  // slide/fade/collapse, then rebuild
           ui_lvgl_tick();
           resetActivityTimer();
           Serial.printf("[USB] del %d -> %s\n", idx, del_id[0] ? del_id : "(no id)");

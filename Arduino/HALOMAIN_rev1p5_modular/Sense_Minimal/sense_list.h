@@ -14,7 +14,7 @@
  *   - extract_host_from_url(), ensure_dns_ready() from sense_http.h
  *   - g_list_mutex, g_shopping_list, g_list_count, g_selected_index
  *   - MAX_LIST_ITEMS, MAX_ITEM_LENGTH
- *   - g_last_refresh_reason
+ *   - g_last_refresh_reason, list_last_fetch_ok_ms
  *   - uart_send_ui_status() (forward declared)
  */
 
@@ -124,6 +124,10 @@ static bool parse_and_update_shopping_list(const String& json_response) {
   Serial.print(actual_count);
   Serial.println(" items");
 
+  // Record successful fetch time — request_list_refresh() serves this cached
+  // list when a user refresh lands inside the cooldown window.
+  list_last_fetch_ok_ms = millis();
+
   // Send updated list to LCD
   uart_send_ui_list();
 
@@ -210,12 +214,15 @@ static void fetch_shopping_list_from_api() {
     // does), so this caps the wait at LIST_FETCH_WIFI_BUDGET_MS.
     Serial.printf("[LIST_FETCH] wifi not connected; bounded connect budget_ms=%lu\n",
                   (unsigned long)LIST_FETCH_WIFI_BUDGET_MS);
+    unsigned long wifi_start_ms = millis();
     if (!ensure_wifi_connected("list_fetch", LIST_FETCH_WIFI_BUDGET_MS) ||
         WiFi.status() != WL_CONNECTED) {
       Serial.println("✗ Cannot fetch list: WiFi not connected (bounded budget exhausted)!");
       list_refresh_fail("wifi_not_connected");
       return;
     }
+    Serial.printf("[NET_DIAG] list_wifi_connect_ms=%lu\n",
+                  (unsigned long)(millis() - wifi_start_ms));
   }
 
   Serial.println("\n=== Fetching Shopping List from Trepo API ===");
@@ -315,12 +322,21 @@ static void fetch_shopping_list_from_api() {
     Serial.print("HTTP Response code: ");
     Serial.println(httpResponseCode);
     if (httpResponseCode == 200) {
+      Serial.printf("[NET_DIAG] fetch_ok code=200 http_ms=%lu resp_len=%u attempt=%d\n",
+                    request_duration_ms,
+                    (unsigned)response_json.length(),
+                    attempt);
       Serial.print("Response length: ");
       Serial.println(response_json.length());
 
       if (response_json.length() > 0 && response_json.charAt(0) == '{') {
         Serial.println("✓ Response appears to be JSON");
-        if (!parse_and_update_shopping_list(response_json)) {
+        unsigned long parse_start_ms = millis();
+        bool parse_ok = parse_and_update_shopping_list(response_json);
+        Serial.printf("[LIST_REFRESH] parse_ms=%lu ok=%d\n",
+                      (unsigned long)(millis() - parse_start_ms),
+                      parse_ok ? 1 : 0);
+        if (!parse_ok) {
           list_refresh_fail("json_parse");
         }
       } else {

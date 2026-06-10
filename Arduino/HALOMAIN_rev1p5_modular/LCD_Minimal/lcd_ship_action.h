@@ -387,10 +387,9 @@ static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
       break;
     case SHIP_MENU_ACTION_SHOPPING_LIST:
       Serial.println("[MENU] tap=SHOPPING_LIST");
+      // Entry renders the cached list instantly and auto-triggers the
+      // background refresh ("entry_revalidate") — no manual wake needed here.
       show_shopping_list_screen();
-      // Wake Sense and request list refresh
-      request_sense_wake("shopping_list");
-      refresh_sm_set_wake_pending("shopping_list");
       break;
     case SHIP_MENU_ACTION_BACK:
       show_ship_second_menu();

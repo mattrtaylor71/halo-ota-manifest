@@ -1015,10 +1015,19 @@ static void uart_process_received_message(const char* json_str) {
         // UART task must NOT call LVGL - UI task will stop_glowing and refresh_sm_set_state when it handles EVT_LIST_REPLACED
         note_sense_proof_of_life("LIST");
         refresh_note_ui_proof("UI_LIST");
-        if (refresh_state == REFRESH_INFLIGHT) {
+        // Complete from WAKE_PENDING too: the Sense can serve a cached list
+        // within ~100ms of the wake pulse — UI_LIST then arrives BEFORE any
+        // awake-proof (PONG/SYNC_ACK/UI_STATUS) promotes WAKE_PENDING ->
+        // INFLIGHT, and the pill would stick on "Waking HALO..." with the
+        // trigger guard blocking further pulls.
+        if (refresh_state == REFRESH_INFLIGHT || refresh_state == REFRESH_WAKE_PENDING) {
           refresh_sm_set_state(REFRESH_COMPLETE, "list_received");
           refresh_success_count++;
         }
+        // A list landed (solicited or not): the soft-fail auto-retry budget is
+        // moot, and an empty list is now genuinely empty (refresh completed).
+        s_list_auto_retry_count = 0;
+        g_list_refresh_completed_once = true;
         waiting_for_list_response = false;
         refresh_request_pending = false;
         refresh_input_wake_sent = false;

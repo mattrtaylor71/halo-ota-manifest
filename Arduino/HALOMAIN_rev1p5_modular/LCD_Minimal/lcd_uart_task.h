@@ -235,6 +235,42 @@ static void uart_task(void *arg) {
                 evt.type = EVT_USB_REFRESH;
                 xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
               }
+            } else if (strcmp(usb_buf, "pull") == 0) {
+              // Emulate the touch pull-to-refresh path explicitly ("usb_pull" reason).
+              Serial.println("[USB] pull");
+              if (app_event_queue != NULL) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_PULL;
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
+            } else if (strncmp(usb_buf, "scroll", 6) == 0 &&
+                       (usb_buf[6] == ' ' || usb_buf[6] == '\0')) {
+              // 'scroll <±n>' — post EVT_SCROLL_DELTA (selection moves on the
+              // list; CCW deltas at the top emulate the overscroll refresh).
+              if (usb_buf[6] != ' ') {
+                Serial.println("[USB] scroll: usage 'scroll <±n>'");
+              } else {
+                int delta = atoi(usb_buf + 7);
+                Serial.printf("[USB] scroll %d\n", delta);
+                if (delta == 0) {
+                  Serial.println("[USB] scroll: usage 'scroll <±n>' (n != 0)");
+                } else if (app_event_queue != NULL) {
+                  if (delta > 127) delta = 127;
+                  if (delta < -128) delta = -128;
+                  app_event_t evt = {};
+                  evt.type = EVT_SCROLL_DELTA;
+                  evt.data.scroll_delta = (int8_t)delta;
+                  xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+                }
+              }
+            } else if (strcmp(usb_buf, "liststate") == 0) {
+              // One-line list/refresh state dump, printed from the UI task so
+              // the harness sees a coherent snapshot.
+              if (app_event_queue != NULL) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_LISTSTATE;
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
             } else if (strncmp(usb_buf, "del", 3) == 0 &&
                        (usb_buf[3] == ' ' || usb_buf[3] == '\0')) {
               // 'del N' — emulate the DELETE touch on the N-th visible item.
@@ -413,6 +449,13 @@ static void uart_task(void *arg) {
               Serial.println("  testmode    - disable sleep for 1 hour (NVS persisted, survives OTA)");
               Serial.println("  testmodeoff - disable test mode, clear NVS flag");
               Serial.println("  ui         - dump UI state (screen, OTA flags, panel, task)");
+              Serial.println("  list       - enter the shopping list screen (auto-revalidates)");
+              Serial.println("  refresh    - trigger a list refresh (usb_refresh)");
+              Serial.println("  pull       - trigger the pull-to-refresh path (usb_pull)");
+              Serial.println("  scroll <±n> - post a scroll delta (selection move / CCW overscroll)");
+              Serial.println("  del N      - delete the N-th visible list item (0-based)");
+              Serial.println("  liststate  - one-line [LISTSTATE] JSON dump (e2e harness)");
+              Serial.println("  home       - return to the main menu");
               Serial.println("  help     - show this help");
               Serial.println("  {\"type\":\"INPUT_*\",...} - send JSON command");
 

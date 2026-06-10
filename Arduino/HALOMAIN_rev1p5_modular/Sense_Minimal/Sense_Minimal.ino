@@ -598,6 +598,10 @@ static unsigned long last_list_active_ms = 0;
 static const unsigned long LIST_ACTIVE_STALE_MS = 30000;
 static unsigned long list_refresh_start_ms = 0;
 static unsigned long list_refresh_cooldown_until_ms = 0;
+// Last SUCCESSFUL list fetch (set in parse_and_update_shopping_list). Used by
+// request_list_refresh() to serve the cached list instantly when a user
+// refresh lands inside the cooldown window instead of silently dropping it.
+static unsigned long list_last_fetch_ok_ms = 0;
 static const unsigned long LIST_REFRESH_TIMEOUT_MS = 20000;
 // Max time an in-flight list refresh may block idle sleep in sense_can_sleep_now().
 // After this the gate stops pinning the device awake so a stuck refresh (flaky
@@ -750,20 +754,63 @@ static void request_list_refresh(const char* reason, bool send_status) {
   // GET on the single net stack starves the LCD OTA S3 download and can
   // stall it to abort. Deferred refreshes resume after OTA completes.
   if (lcd_ota_in_progress()) {
-    Serial.printf("[LIST_REFRESH] deferred (lcd_ota_in_progress) reason=%s\n",
-                  reason ? reason : "unknown");
-    return;
-  }
-  if (list_refresh_inflight) {
-    Serial.printf("[LIST_REFRESH] already inflight, skipping reason=%s\n",
+    Serial.printf("[LIST_REFRESH] deferred (lcd_ota_in_progress) reason=%s — will resume after OTA\n",
                   reason ? reason : "unknown");
     return;
   }
   unsigned long now = millis();
+  if (list_refresh_inflight) {
+    unsigned long inflight_ms =
+        (list_refresh_start_ms > 0) ? (now - list_refresh_start_ms) : 0;
+    if (inflight_ms > LIST_REFRESH_TIMEOUT_MS) {
+      // Self-heal: a wedged inflight flag (fetch path died without reaching
+      // list_refresh_mark_complete) would otherwise block every refresh until
+      // reboot. Clear it and accept this request.
+      Serial.printf("[LIST_REFRESH] stuck inflight elapsed_ms=%lu -> self-heal, accepting reason=%s\n",
+                    inflight_ms,
+                    reason ? reason : "unknown");
+      list_refresh_inflight = false;
+      list_refresh_start_ms = 0;
+    } else {
+      // Safe debounce: a fetch is genuinely running and will answer the LCD
+      // with UI_LIST + IDLE when it completes, so the LCD's refresh state
+      // machine still terminates — nothing is silently dropped here.
+      Serial.printf("[LIST_REFRESH] already inflight elapsed_ms=%lu, skipping reason=%s\n",
+                    inflight_ms,
+                    reason ? reason : "unknown");
+      return;
+    }
+  }
   if (now < list_refresh_cooldown_until_ms) {
-    Serial.printf("[LIST_REFRESH] cooldown active, skipping reason=%s\n",
+    // A user refresh must never be silently eaten by the cooldown — the LCD
+    // would sit on "Refreshing..." until its 12s hard timeout. If the cached
+    // list was fetched recently (within the cooldown window, +1s jitter
+    // margin), re-send it so the LCD refresh completes instantly.
+    unsigned long cache_age_ms =
+        (list_last_fetch_ok_ms > 0) ? (now - list_last_fetch_ok_ms) : 0;
+    if (list_last_fetch_ok_ms > 0 &&
+        cache_age_ms <= LIST_REFRESH_COOLDOWN_MS + 1000) {
+      Serial.printf("[LIST_REFRESH] cooldown_hit -> served_cached cache_age_ms=%lu reason=%s\n",
+                    cache_age_ms,
+                    reason ? reason : "unknown");
+      // Awake-proof FIRST: the LCD refresh SM sits in REFRESH_WAKE_PENDING
+      // until it sees PONG/SYNC_ACK/UI_STATUS. The cached UI_LIST lands
+      // ~100ms after the wake pulse — before any of those — so the LCD
+      // rendered the list but its SM never completed (stuck "Refreshing"
+      // pill). Send a UI_STATUS first, give the LCD's Core-0 RX a beat to
+      // process it, then the list, so the SM is INFLIGHT when UI_LIST lands.
+      uart_send_ui_status("IDLE");
+      Serial.println("[LIST_REFRESH] awake_proof_sent path=cached");
+      delay(40);
+      uart_send_ui_list();
+      delay(50);
+      uart_send_ui_status("IDLE");
+      return;
+    }
+    // No fresh cache (last fetch failed or never ran) — accept the request
+    // despite the cooldown rather than silently dropping a user refresh.
+    Serial.printf("[LIST_REFRESH] cooldown_hit -> cache_stale, accepting reason=%s\n",
                   reason ? reason : "unknown");
-    return;
   }
   list_refresh_inflight = true;
   list_refresh_start_ms = now;
@@ -850,23 +897,38 @@ static bool sleep_deny_sent_for_request = false;
 // append_camera_meta_json, log_camera_meta_for_presign → sense_camera.h
 
 static void uart_send_ui_list() {
-  StaticJsonDocument<4096> doc;
+  // Heap-allocated doc (freed on scope exit): 50 items x up to 64B id + 64B
+  // text + per-object overhead can exceed the old StaticJsonDocument<4096>,
+  // which silently dropped items. This runs on a task with WiFi up; a brief
+  // ~8KB heap allocation is fine.
+  DynamicJsonDocument doc(8192);
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = "UI_LIST";
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   doc["selected_index"] = g_selected_index;
-  
+
+  int dropped = 0;
+  int total = 0;
   JsonArray items = doc.createNestedArray("items");
   if (g_list_mutex != NULL && xSemaphoreTake(g_list_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    total = g_list_count;
     for (int i = 0; i < g_list_count; i++) {
       JsonObject item = items.createNestedObject();
+      if (item.isNull()) {  // doc out of memory — stop instead of silent drop
+        dropped = g_list_count - i;
+        break;
+      }
       item["id"] = g_shopping_list[i].id;
       item["text"] = g_shopping_list[i].text;
     }
     xSemaphoreGive(g_list_mutex);
   }
-  
+  if (dropped > 0 || doc.overflowed()) {
+    Serial.printf("[UI_LIST] truncated dropped=%d overflowed=%d total=%d\n",
+                  dropped, doc.overflowed() ? 1 : 0, total);
+  }
+
   String output;
   serializeJson(doc, output);
   uart_send_json(output.c_str());
@@ -1970,10 +2032,10 @@ static bool parse_input_message(const char* json_str) {
     sleep_grace_until_ms = now_ms + MIN_AWAKE_BEFORE_SLEEP_MS;
     wake_requested = true;
     Serial.printf("[WAKE_GRACE] set until=%lu reason=input_wake\n", sleep_grace_until_ms);
-    if (list_refresh_inflight) {
-      Serial.println("[INPUT_WAKE] ignored inflight");
-      return true;
-    }
+    // Inflight handling lives in request_list_refresh(): it debounces a
+    // genuinely-running fetch (which will answer the LCD when it completes)
+    // and self-heals a stuck inflight flag instead of silently ignoring the
+    // wake until reboot.
     Serial.println("[INPUT_WAKE] accepted");
     if (lcd_ota_in_progress()) {
       Serial.println("[INPUT_WAKE] list refresh deferred (lcd_ota_in_progress)");
@@ -3131,9 +3193,21 @@ scan_exit:
         // Sense_Minimal/Sense_Minimal.ino: op_worker_task (SCAN exit)
         Serial.println("[OP_WORKER] SCAN operation complete");
       } else if (job.type == OP_LIST_REFRESH) {
-        Serial.println("[OP_WORKER] LIST_REFRESH starting");
+        unsigned long deq_ms = millis();
+        Serial.printf("[LIST_REFRESH] dequeued queue_wait_ms=%lu\n",
+                      (unsigned long)(deq_ms - job.created_ts));
+        // Awake-proof before the fetch: the wake-path IDLE in setup() only
+        // fires when the Sense was actually deep-sleeping, and PONG/SYNC_ACK
+        // timing is LCD-dependent — nothing guarantees the LCD's refresh SM
+        // left REFRESH_WAKE_PENDING before a warm-WiFi fetch (~400ms) lands
+        // UI_LIST. One cheap UART line makes the ordering deterministic.
+        uart_send_ui_status("IDLE");
+        Serial.println("[LIST_REFRESH] awake_proof_sent path=fetch");
         fetch_shopping_list_from_api();
         uart_send_ui_list();
+        Serial.printf("[LIST_REFRESH] total_ms=%lu fetch_ms=%lu (request->UI_LIST)\n",
+                      (unsigned long)(millis() - job.created_ts),
+                      (unsigned long)(millis() - deq_ms));
         list_refresh_mark_complete("done");
       }
       

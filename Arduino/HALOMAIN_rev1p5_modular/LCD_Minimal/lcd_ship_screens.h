@@ -1341,17 +1341,234 @@ static lv_obj_t* shopping_list_scroll = NULL;
 static lv_obj_t* shopping_list_title_label = NULL;
 static int shopping_list_scroll_idx = 0;
 static int shopping_list_overscroll_ticks = 0;  // counts CCW ticks at top for pull-to-refresh
-static const int SHOPPING_LIST_REFRESH_TICKS = 5;
+static const int SHOPPING_LIST_REFRESH_TICKS = 3;
+static unsigned long shopping_list_last_ccw_tick_ms = 0;  // last CCW overscroll tick (for stale-tick expiry)
+static const unsigned long SHOPPING_LIST_OVERSCROLL_WINDOW_MS = 1500;  // CCW ticks older than this don't count toward refresh
 static lv_obj_t* shopping_list_items[50] = {NULL};
 static int shopping_list_rendered_count = 0;
 static lv_obj_t* shopping_list_overlay = NULL;  // Delete/Back overlay
 static bool shopping_list_overlay_visible = false;
 static lv_obj_t* shopping_list_back_btn_obj = NULL;  // Bottom back button
 
+// Refresh indicator pill (spinner + staged status text) floating at the top of the list area
+static lv_obj_t* shopping_list_refresh_pill = NULL;
+static lv_obj_t* shopping_list_spinner = NULL;
+static lv_obj_t* shopping_list_pull_arc = NULL;  // progress arc for the pull-to-refresh drag cue
+static lv_obj_t* shopping_list_status_label = NULL;
+static int shopping_list_refresh_ui_state = -1;  // last refresh SM state synced to the pill (-1 = force re-sync)
+static bool shopping_list_pill_hiding = false;   // pill hide animation in progress
+
+// Signature of the list content currently rendered in shopping_list_scroll.
+// 0xFFFFFFFF = placeholder content (skeleton / hint label) that never matches
+// real content, so the next real list always triggers a render.
+static uint32_t shopping_list_rendered_sig = 0xFFFFFFFFu;
+
+// Touch pull-to-refresh state (LVGL scroll events on shopping_list_scroll)
+static bool shopping_list_touch_pull_armed = false;     // pull passed threshold while pressed
+static bool shopping_list_touch_pull_consumed = false;  // refresh already fired for this gesture
+static bool shopping_list_touch_in_press = false;       // finger currently down on the scroll container
+static bool shopping_list_touch_was_scrolled = false;   // gesture scrolled — suppress the tap-overlay on release
+static const int SHOPPING_LIST_PULL_THRESHOLD_PX = 45;  // pull-down distance past top to arm refresh
+static const int SHOPPING_LIST_PULL_HINT_PX = 12;       // pull distance at which the hint cue appears
+
+static bool shopping_list_reveal_pending = false;  // staggered fade-in on next populate (fresh UI_LIST)
+
 // Forward declarations
 static void show_shopping_list_screen();
 static void shopping_list_screen_populate();
 static void shopping_list_dismiss_overlay();
+static void shopping_list_trigger_refresh(const char* reason);
+static void shopping_list_animate_card_removal(int idx);
+
+// ── Refresh indicator pill helpers ───────────────────────────────────
+// Small floating card at the top of the list area: spinner + status text.
+// Visible during REFRESH_WAKE_PENDING / REFRESH_INFLIGHT and as the
+// pull-to-refresh cue during a touch drag (progress arc tracks the pull).
+// Fades + slides in/out (~150-180ms one-shots) instead of popping.
+// All LVGL — UI-task only.
+
+static void shopping_list_pill_anim_opa_cb(void* var, int32_t value) {
+  lv_obj_set_style_opa((lv_obj_t*)var, (lv_opa_t)value, 0);
+}
+
+static void shopping_list_pill_anim_y_cb(void* var, int32_t value) {
+  lv_obj_set_style_translate_y((lv_obj_t*)var, (lv_coord_t)value, 0);
+}
+
+static void shopping_list_pill_hide_anim_ready(lv_anim_t* a) {
+  lv_obj_add_flag((lv_obj_t*)a->var, LV_OBJ_FLAG_HIDDEN);
+  shopping_list_pill_hiding = false;
+}
+
+// Reveal the pill: fade (opa 0→cover) + slide (translate_y -12→0) over ~160ms
+// when it was hidden (or mid-hide); instant style reset when already visible.
+static void shopping_list_pill_reveal() {
+  lv_obj_t* pill = shopping_list_refresh_pill;
+  if (!pill) return;
+  lv_anim_del(pill, shopping_list_pill_anim_opa_cb);
+  lv_anim_del(pill, shopping_list_pill_anim_y_cb);
+  bool was_hidden = lv_obj_has_flag(pill, LV_OBJ_FLAG_HIDDEN) || shopping_list_pill_hiding;
+  shopping_list_pill_hiding = false;
+  lv_obj_clear_flag(pill, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(pill);
+  if (!was_hidden) {
+    lv_obj_set_style_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_translate_y(pill, 0, 0);
+    return;
+  }
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, pill);
+  lv_anim_set_exec_cb(&a, shopping_list_pill_anim_opa_cb);
+  lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
+  lv_anim_set_time(&a, 160);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_start(&a);
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, pill);
+  lv_anim_set_exec_cb(&a, shopping_list_pill_anim_y_cb);
+  lv_anim_set_values(&a, -12, 0);
+  lv_anim_set_time(&a, 160);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_start(&a);
+}
+
+static void shopping_list_refresh_pill_show(const char* text, bool with_spinner) {
+  if (!shopping_list_refresh_pill || !shopping_list_status_label) return;
+  lv_label_set_text(shopping_list_status_label, text);
+  if (shopping_list_spinner) {
+    if (with_spinner) {
+      lv_obj_clear_flag(shopping_list_spinner, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(shopping_list_spinner, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  if (shopping_list_pull_arc) {
+    lv_obj_add_flag(shopping_list_pull_arc, LV_OBJ_FLAG_HIDDEN);  // SM states never show the pull arc
+  }
+  shopping_list_pill_reveal();
+}
+
+// Pull-to-refresh drag cue: progress arc sweeping 0→270° as the pull
+// approaches the arm threshold (progress_pct 0..100), no spinner.
+static void shopping_list_refresh_pill_show_pull(int progress_pct, bool armed) {
+  if (!shopping_list_refresh_pill || !shopping_list_status_label) return;
+  if (shopping_list_spinner) {
+    lv_obj_add_flag(shopping_list_spinner, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (shopping_list_pull_arc) {
+    if (progress_pct < 0) progress_pct = 0;
+    if (progress_pct > 100) progress_pct = 100;
+    lv_arc_set_angles(shopping_list_pull_arc, 0, (uint16_t)((270 * progress_pct) / 100));
+    lv_obj_clear_flag(shopping_list_pull_arc, LV_OBJ_FLAG_HIDDEN);
+  }
+  lv_label_set_text(shopping_list_status_label,
+                    armed ? LV_SYMBOL_REFRESH "  Release to refresh"
+                          : LV_SYMBOL_DOWN "  Pull to refresh");
+  shopping_list_pill_reveal();
+}
+
+static void shopping_list_refresh_pill_hide() {
+  lv_obj_t* pill = shopping_list_refresh_pill;
+  if (!pill) return;
+  if (lv_obj_has_flag(pill, LV_OBJ_FLAG_HIDDEN) || shopping_list_pill_hiding) return;
+  shopping_list_pill_hiding = true;
+  lv_anim_del(pill, shopping_list_pill_anim_opa_cb);
+  lv_anim_del(pill, shopping_list_pill_anim_y_cb);
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, pill);
+  lv_anim_set_exec_cb(&a, shopping_list_pill_anim_opa_cb);
+  lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+  lv_anim_set_time(&a, 150);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
+  lv_anim_start(&a);
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, pill);
+  lv_anim_set_exec_cb(&a, shopping_list_pill_anim_y_cb);
+  lv_anim_set_values(&a, 0, -12);
+  lv_anim_set_time(&a, 150);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
+  lv_anim_set_ready_cb(&a, shopping_list_pill_hide_anim_ready);
+  lv_anim_start(&a);
+}
+
+// Sync the pill with the refresh SM state. Cheap when nothing changed, so it
+// is safe to call every UI-task iteration (the WAKE_PENDING -> INFLIGHT
+// transition happens on the UART task, so the UI task polls for it here).
+static void shopping_list_refresh_indicator_sync(bool force) {
+  if (!shopping_list_refresh_pill) return;
+  int st = (int)refresh_state;
+  if (!force && st == shopping_list_refresh_ui_state) return;
+  shopping_list_refresh_ui_state = st;
+  if (st == REFRESH_WAKE_PENDING) {
+    shopping_list_refresh_pill_show("Waking HALO...", true);
+  } else if (st == REFRESH_INFLIGHT) {
+    shopping_list_refresh_pill_show("Updating list...", true);
+  } else {
+    shopping_list_refresh_pill_hide();
+  }
+}
+
+// Build the pill (called from show_shopping_list_screen_impl; the screen is
+// rebuilt fresh on each entry so the pill is too). Styled like the small
+// list cards: off-white card, tan shadow, green spinner accent.
+static void shopping_list_build_refresh_pill(lv_obj_t* parent) {
+  shopping_list_refresh_pill = lv_obj_create(parent);
+  lv_obj_set_size(shopping_list_refresh_pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_align(shopping_list_refresh_pill, LV_ALIGN_TOP_MID, 0, 52);
+  lv_obj_set_style_bg_color(shopping_list_refresh_pill, lv_color_hex(0xFAF6F0), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(shopping_list_refresh_pill, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_radius(shopping_list_refresh_pill, 14, LV_PART_MAIN);
+  lv_obj_set_style_border_width(shopping_list_refresh_pill, 0, LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(shopping_list_refresh_pill, 6, LV_PART_MAIN);
+  lv_obj_set_style_shadow_color(shopping_list_refresh_pill, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
+  lv_obj_set_style_shadow_opa(shopping_list_refresh_pill, LV_OPA_30, LV_PART_MAIN);
+  lv_obj_set_style_pad_left(shopping_list_refresh_pill, 12, LV_PART_MAIN);
+  lv_obj_set_style_pad_right(shopping_list_refresh_pill, 12, LV_PART_MAIN);
+  lv_obj_set_style_pad_top(shopping_list_refresh_pill, 5, LV_PART_MAIN);
+  lv_obj_set_style_pad_bottom(shopping_list_refresh_pill, 5, LV_PART_MAIN);
+  lv_obj_set_style_pad_column(shopping_list_refresh_pill, 8, LV_PART_MAIN);
+  lv_obj_set_flex_flow(shopping_list_refresh_pill, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(shopping_list_refresh_pill, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(shopping_list_refresh_pill, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(shopping_list_refresh_pill, LV_OBJ_FLAG_CLICKABLE);
+
+  // Spinner — green indicator on tan track (list-screen accent colors)
+  shopping_list_spinner = lv_spinner_create(shopping_list_refresh_pill, 1000, 60);
+  lv_obj_set_size(shopping_list_spinner, 20, 20);
+  lv_obj_set_style_arc_width(shopping_list_spinner, 3, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(shopping_list_spinner, 3, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(shopping_list_spinner, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(shopping_list_spinner, lv_color_hex(0x1F4D2B), LV_PART_INDICATOR);
+  lv_obj_clear_flag(shopping_list_spinner, LV_OBJ_FLAG_CLICKABLE);
+
+  // Pull progress arc — tracks the drag (0→270° at the arm threshold). Same
+  // palette as the spinner; rotated so the sweep starts at 12 o'clock.
+  // Hidden except during the pull gesture (spinner and arc swap places).
+  shopping_list_pull_arc = lv_arc_create(shopping_list_refresh_pill);
+  lv_obj_set_size(shopping_list_pull_arc, 20, 20);
+  lv_arc_set_rotation(shopping_list_pull_arc, 270);
+  lv_arc_set_bg_angles(shopping_list_pull_arc, 0, 360);
+  lv_arc_set_angles(shopping_list_pull_arc, 0, 0);
+  lv_obj_set_style_arc_width(shopping_list_pull_arc, 3, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(shopping_list_pull_arc, 3, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(shopping_list_pull_arc, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(shopping_list_pull_arc, lv_color_hex(0x1F4D2B), LV_PART_INDICATOR);
+  lv_obj_remove_style(shopping_list_pull_arc, NULL, LV_PART_KNOB);
+  lv_obj_clear_flag(shopping_list_pull_arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(shopping_list_pull_arc, LV_OBJ_FLAG_HIDDEN);
+
+  // Status text
+  shopping_list_status_label = lv_label_create(shopping_list_refresh_pill);
+  lv_label_set_text(shopping_list_status_label, "");
+  lv_obj_set_style_text_font(shopping_list_status_label, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_color(shopping_list_status_label, lv_color_hex(0x444444), LV_PART_MAIN);
+
+  lv_obj_add_flag(shopping_list_refresh_pill, LV_OBJ_FLAG_HIDDEN);
+  shopping_list_refresh_ui_state = -1;  // force first sync
+  shopping_list_pill_hiding = false;
+}
 
 static void shopping_list_show_overlay() {
   if (!shopping_list_screen || shopping_list_overlay_visible) return;
@@ -1494,6 +1711,9 @@ static const char* shopping_list_delete_index(int idx) {
       g_active.item_ids[g_active.count - 1][0] = '\0';
       g_active.count--;
     }
+    // Persist the deletion immediately — LCD deep sleep is a full reset, so an
+    // unsaved delete would resurrect the item from the NVS cache on next boot.
+    save_list_to_storage(&g_active);
     xSemaphoreGive(app_state_mutex);
   }
 
@@ -1508,17 +1728,89 @@ static const char* shopping_list_delete_index(int idx) {
 }
 
 // Kick the list-refresh state machine exactly like the pull-to-refresh gesture
-// (5 CCW knob ticks at top): wake Sense, arm the refresh, and show "Refreshing..."
-// in the title. Touches LVGL — UI-task only. `reason` is for logging/wake tagging.
+// (touch pull-down past the top, or 3 CCW knob ticks at top): wake Sense, arm
+// the refresh, and show the spinner pill ("Waking HALO...").
+// Touches LVGL — UI-task only. `reason` is for logging/wake tagging.
 static void shopping_list_trigger_refresh(const char* reason) {
   const char* r = reason ? reason : "list_refresh";
+  // Guard: never stack a second refresh while one is pending/inflight
+  if (refresh_state == REFRESH_WAKE_PENDING || refresh_state == REFRESH_INFLIGHT) {
+    Serial.printf("[SHOPPING_LIST] refresh ignored (%s) — already %s\n",
+                  r, refresh_state == REFRESH_INFLIGHT ? "inflight" : "wake_pending");
+    return;
+  }
   Serial.printf("[SHOPPING_LIST] refresh triggered (%s)\n", r);
   request_sense_wake(r);
   refresh_sm_set_wake_pending(r);
-  // Show refreshing feedback in title
-  if (shopping_list_title_label) {
-    lv_label_set_text(shopping_list_title_label, "Refreshing...");
-    ui_lvgl_tick();
+  // Show refreshing feedback (spinner + "Waking HALO...")
+  shopping_list_refresh_indicator_sync(true);
+  ui_lvgl_tick();
+}
+
+// LVGL scroll-event callback on shopping_list_scroll: touch pull-to-refresh.
+// Runs inside lv_timer_handler on the UI task, so direct LVGL calls are fine
+// (do NOT call ui_lvgl_tick here — we're already inside the timer handler).
+// Pull DOWN past the top (scroll_y < 0 thanks to LV_OBJ_FLAG_SCROLL_ELASTIC):
+// past SHOPPING_LIST_PULL_HINT_PX a hint cue appears, past
+// SHOPPING_LIST_PULL_THRESHOLD_PX the gesture is armed, and the refresh fires
+// exactly once on release. Re-arms only after the scroll settles back to rest.
+static void shopping_list_scroll_event_cb(lv_event_t* e) {
+  lv_event_code_t code = lv_event_get_code(e);
+  lv_obj_t* obj = lv_event_get_target(e);
+  if (obj != shopping_list_scroll || ui_screen_state != SCREEN_SHOPPING_LIST) return;
+  if (shopping_list_overlay_visible) return;
+
+  bool refresh_busy = (refresh_state == REFRESH_WAKE_PENDING || refresh_state == REFRESH_INFLIGHT);
+  lv_coord_t sy = lv_obj_get_scroll_y(obj);  // negative = pulled below the top edge
+
+  if (code == LV_EVENT_PRESSED) {
+    // New gesture begins
+    shopping_list_touch_pull_armed = false;
+    shopping_list_touch_in_press = true;
+    shopping_list_touch_was_scrolled = false;
+    return;
+  }
+
+  if (code == LV_EVENT_SCROLL) {
+    if (shopping_list_touch_in_press) {
+      shopping_list_touch_was_scrolled = true;  // drag, not a tap — see shopping_list_handle_touch
+    }
+    if (refresh_busy || shopping_list_touch_pull_consumed) return;  // one fire per gesture, never stack
+    if (sy <= -SHOPPING_LIST_PULL_HINT_PX) {
+      // Progressive cue: the pill's arc sweeps 0→270° as the pull approaches
+      // the arm threshold, then the text flips to "Release to refresh".
+      int progress = (int)(((-sy) * 100) / SHOPPING_LIST_PULL_THRESHOLD_PX);
+      shopping_list_touch_pull_armed = (sy <= -SHOPPING_LIST_PULL_THRESHOLD_PX);
+      shopping_list_refresh_pill_show_pull(progress, shopping_list_touch_pull_armed);
+      shopping_list_refresh_ui_state = -1;  // force re-sync once the SM takes over
+    } else if (sy >= 0) {
+      // Back at/above rest with no pull — drop the cue (no-op if none shown)
+      shopping_list_touch_pull_armed = false;
+      shopping_list_refresh_indicator_sync(false);
+    }
+    return;
+  }
+
+  if (code == LV_EVENT_RELEASED) {
+    shopping_list_touch_in_press = false;
+    if (shopping_list_touch_pull_armed && !shopping_list_touch_pull_consumed) {
+      shopping_list_touch_pull_armed = false;
+      shopping_list_touch_pull_consumed = true;  // until the scroll settles back to rest
+      shopping_list_trigger_refresh("touch_pull");
+    } else {
+      shopping_list_refresh_indicator_sync(false);  // hide a stale cue (no-op otherwise)
+    }
+    return;
+  }
+
+  if (code == LV_EVENT_SCROLL_END) {
+    if (sy >= 0) {
+      // Gesture fully settled — re-arm for the next pull
+      shopping_list_touch_pull_consumed = false;
+      shopping_list_touch_pull_armed = false;
+      shopping_list_refresh_indicator_sync(false);  // restores SM text or hides cue
+    }
+    return;
   }
 }
 
@@ -1526,6 +1818,16 @@ static void shopping_list_trigger_refresh(const char* reason) {
 // x, y are screen coordinates (0-359).
 static bool shopping_list_handle_touch(int x, int y) {
   if (ui_screen_state != SCREEN_SHOPPING_LIST) return false;
+
+  // The touch path has no drag filter — a quick scroll/pull would otherwise be
+  // treated as a tap at the press point and pop the item overlay (or hit the
+  // back button). If LVGL scrolled the list during this press, consume the
+  // "tap" without acting on it.
+  if (!shopping_list_overlay_visible && shopping_list_touch_was_scrolled) {
+    shopping_list_touch_was_scrolled = false;
+    Serial.println("[SHOP_LIST] touch consumed (scroll gesture, not a tap)");
+    return true;
+  }
 
   // Check back button at bottom (y=318..350, x=130..230)
   if (!shopping_list_overlay_visible && y >= 310 && y <= 355 && x >= 120 && x <= 240) {
@@ -1549,11 +1851,12 @@ static bool shopping_list_handle_touch(int x, int y) {
         if (x < btn_mid) {
           // DELETE tapped
           Serial.printf("[SHOP_LIST] DELETE tapped for item %d\n", shopping_list_scroll_idx);
-          shopping_list_delete_index(shopping_list_scroll_idx);
+          int del_idx = shopping_list_scroll_idx;
+          shopping_list_delete_index(del_idx);
 
-          // Dismiss overlay and re-render
+          // Dismiss overlay, animate the card out, rebuild when it lands
           shopping_list_dismiss_overlay();
-          shopping_list_screen_populate();
+          shopping_list_animate_card_removal(del_idx);
           return true;
 
         } else {
@@ -1581,12 +1884,176 @@ static bool shopping_list_handle_touch(int x, int y) {
   return true;
 }
 
+// Restyle a single list card as selected/unselected — O(1), no rebuild.
+// Selected = green left border + white bg + arrow; unselected = light tan + bullet.
+static void shopping_list_style_card(lv_obj_t* card, int idx, bool selected) {
+  if (!card) return;
+
+  if (selected) {
+    lv_obj_set_style_bg_color(card, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_border_width(card, 3, LV_PART_MAIN);
+    lv_obj_set_style_border_color(card, lv_color_hex(0x1F4D2B), LV_PART_MAIN);
+    lv_obj_set_style_border_side(card, LV_BORDER_SIDE_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(card, 10, LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(card, LV_OPA_50, LV_PART_MAIN);
+  } else {
+    lv_obj_set_style_bg_color(card, lv_color_hex(0xFAF6F0), LV_PART_MAIN);
+    lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(card, 3, LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(card, LV_OPA_20, LV_PART_MAIN);
+  }
+
+  // Bullet + text (label is the card's only child)
+  lv_obj_t* label = lv_obj_get_child(card, 0);
+  if (label && idx >= 0 && idx < g_active.count) {
+    char item_text[80];
+    snprintf(item_text, sizeof(item_text), "%s %s", selected ? LV_SYMBOL_RIGHT : "\xE2\x80\xA2", g_active.items[idx]);
+    lv_label_set_text(label, item_text);
+    lv_obj_set_style_text_font(label, selected ? &lv_font_montserrat_16 : &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_hex(selected ? 0x1A1A1A : 0x444444), LV_PART_MAIN);
+  }
+}
+
+// Lightweight scroll path: restyle just the two affected cards and keep the
+// selection visible. Used by the encoder EVT_SCROLL_DELTA handler instead of
+// a full repopulate (the rebuild-everything path made scrolling laggy).
+static void shopping_list_update_selection(int old_idx, int new_idx) {
+  if (!shopping_list_scroll) return;
+  if (old_idx >= 0 && old_idx < shopping_list_rendered_count && shopping_list_items[old_idx]) {
+    shopping_list_style_card(shopping_list_items[old_idx], old_idx, false);
+  }
+  if (new_idx >= 0 && new_idx < shopping_list_rendered_count && shopping_list_items[new_idx]) {
+    shopping_list_style_card(shopping_list_items[new_idx], new_idx, true);
+    lv_obj_scroll_to_view(shopping_list_items[new_idx], LV_ANIM_ON);
+  }
+}
+
+// lv_anim exec callback for the staggered row fade-in reveal
+static void shopping_list_card_opa_anim_cb(void* var, int32_t value) {
+  lv_obj_set_style_opa((lv_obj_t*)var, (lv_opa_t)value, 0);
+}
+
+// ── Content signature ────────────────────────────────────────────────
+// FNV-1a over count + item texts + ids. Used to skip the rebuild (and the
+// staggered reveal) entirely when a revalidate returns identical content —
+// the common case — which also kills the flicker it used to cause.
+static uint32_t shopping_list_content_sig(const app_state_t* s) {
+  uint32_t h = 2166136261u;
+  h = (h ^ (uint32_t)s->count) * 16777619u;
+  for (int i = 0; i < s->count && i < MAX_LIST_ITEMS; i++) {
+    for (const char* p = s->items[i]; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+    h = (h ^ 0x1Fu) * 16777619u;  // field separator
+    for (const char* p = s->item_ids[i]; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+    h = (h ^ 0x1Eu) * 16777619u;  // record separator
+  }
+  if (h == 0xFFFFFFFFu) h = 0xFFFFFFFEu;  // 0xFFFFFFFF is the placeholder sentinel
+  return h;
+}
+
+// ── Skeleton loader ──────────────────────────────────────────────────
+// Four placeholder cards with a gentle opacity pulse, shown while the very
+// first fetch runs and there is no cached data yet (never "No items" before
+// a refresh has actually completed). The next populate() starts with
+// lv_obj_clean(), which deletes the placeholders and kills their anims.
+static void shopping_list_render_skeleton() {
+  for (int i = 0; i < 4; i++) {
+    lv_obj_t* ph = lv_obj_create(shopping_list_scroll);
+    lv_obj_set_size(ph, 260, 38);
+    lv_obj_set_style_radius(ph, 10, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ph, lv_color_hex(0xE7D9C3), LV_PART_MAIN);  // slightly darker tan than the 0xFAF6F0 cards
+    lv_obj_set_style_bg_opa(ph, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ph, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(ph, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(ph, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(ph, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, ph);
+    lv_anim_set_exec_cb(&a, shopping_list_card_opa_anim_cb);
+    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_40);
+    lv_anim_set_time(&a, 450);
+    lv_anim_set_playback_time(&a, 450);  // ~900ms full pulse
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_delay(&a, i * 110);  // soft stagger down the column
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    lv_anim_start(&a);
+  }
+}
+
+// ── Delete animation ─────────────────────────────────────────────────
+// Slide the removed card left + fade (~150ms), then collapse its height
+// (~120ms), then rebuild the list — deletion feels physical instead of an
+// instant rebuild. The data (g_active) is already updated by the caller; this
+// is purely the visual exit. If a fresh UI_LIST rebuilds the list mid-
+// animation, lv_obj_clean() deletes the card and its anims (the ready
+// callback simply never fires — the rebuild already happened).
+static void shopping_list_card_x_anim_cb(void* var, int32_t value) {
+  lv_obj_set_style_translate_x((lv_obj_t*)var, (lv_coord_t)value, 0);
+}
+
+static void shopping_list_card_h_anim_cb(void* var, int32_t value) {
+  lv_obj_set_height((lv_obj_t*)var, (lv_coord_t)value);
+}
+
+static void shopping_list_delete_anim_done(lv_anim_t* a) {
+  (void)a;
+  shopping_list_screen_populate();
+}
+
+static void shopping_list_animate_card_removal(int idx) {
+  lv_obj_t* card = (idx >= 0 && idx < shopping_list_rendered_count)
+                       ? shopping_list_items[idx]
+                       : NULL;
+  if (!card) {
+    shopping_list_screen_populate();  // nothing to animate — rebuild now
+    return;
+  }
+  shopping_list_items[idx] = NULL;  // selection restyle must not touch it anymore
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+  lv_coord_t h = lv_obj_get_height(card);
+  lv_obj_set_style_min_height(card, 0, LV_PART_MAIN);  // allow the collapse below 38px
+
+  lv_anim_t a;
+  // Phase 1: slide left + fade (simultaneous, ~150ms)
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, card);
+  lv_anim_set_exec_cb(&a, shopping_list_card_x_anim_cb);
+  lv_anim_set_values(&a, 0, -320);
+  lv_anim_set_time(&a, 150);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
+  lv_anim_start(&a);
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, card);
+  lv_anim_set_exec_cb(&a, shopping_list_card_opa_anim_cb);
+  lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+  lv_anim_set_time(&a, 150);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
+  lv_anim_start(&a);
+  // Phase 2: collapse the row height, then rebuild from g_active
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, card);
+  lv_anim_set_exec_cb(&a, shopping_list_card_h_anim_cb);
+  lv_anim_set_values(&a, h, 0);
+  lv_anim_set_time(&a, 120);
+  lv_anim_set_delay(&a, 150);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_set_ready_cb(&a, shopping_list_delete_anim_done);
+  lv_anim_start(&a);
+}
+
+// Full rebuild path — used ONLY when content changes (new UI_LIST arrived,
+// delete, screen entry, refresh timeout revert). Scroll-only selection moves
+// go through shopping_list_update_selection() instead.
 static void shopping_list_screen_populate() {
   if (!shopping_list_scroll) return;
 
   // Clear existing items
   lv_obj_clean(shopping_list_scroll);
   shopping_list_rendered_count = 0;
+  for (int i = 0; i < 50; i++) shopping_list_items[i] = NULL;  // no stale card pointers
+  bool reveal = shopping_list_reveal_pending;
+  shopping_list_reveal_pending = false;
 
   // Update title with count
   if (shopping_list_title_label) {
@@ -1600,14 +2067,28 @@ static void shopping_list_screen_populate() {
   }
 
   if (g_active.count == 0) {
-    // Empty state
+    bool refresh_running = (refresh_state == REFRESH_WAKE_PENDING ||
+                            refresh_state == REFRESH_INFLIGHT);
+    if (!g_list_refresh_completed_once && refresh_running) {
+      // No data yet (first boot / cache miss) and a refresh is underway —
+      // show the pulsing skeleton instead of a premature "No items".
+      shopping_list_render_skeleton();
+      shopping_list_rendered_sig = 0xFFFFFFFFu;  // placeholder, never matches real content
+      return;
+    }
+    // Empty state. "No items on your list" only when a refresh has actually
+    // completed (the emptiness is genuine); otherwise a neutral hint.
     lv_obj_t* empty = lv_label_create(shopping_list_scroll);
-    lv_label_set_text(empty, "No items on your list");
+    lv_label_set_text(empty, g_list_refresh_completed_once ? "No items on your list"
+                                                           : "Pull down to refresh");
     lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(empty, lv_color_hex(0x888888), LV_PART_MAIN);
     lv_obj_set_style_pad_top(empty, 80, LV_PART_MAIN);
     lv_obj_set_width(empty, 240);
     lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    shopping_list_rendered_sig = g_list_refresh_completed_once
+                                     ? shopping_list_content_sig(&g_active)
+                                     : 0xFFFFFFFFu;
     return;
   }
 
@@ -1626,37 +2107,17 @@ static void shopping_list_screen_populate() {
     lv_obj_set_style_pad_top(card, 8, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(card, 8, LV_PART_MAIN);
     lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(card, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
-    bool selected = (i == shopping_list_scroll_idx);
-
-    if (selected) {
-      lv_obj_set_style_bg_color(card, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-      lv_obj_set_style_bg_opa(card, LV_OPA_COVER, LV_PART_MAIN);
-      lv_obj_set_style_border_width(card, 3, LV_PART_MAIN);
-      lv_obj_set_style_border_color(card, lv_color_hex(0x1F4D2B), LV_PART_MAIN);
-      lv_obj_set_style_border_side(card, LV_BORDER_SIDE_LEFT, LV_PART_MAIN);
-      lv_obj_set_style_shadow_width(card, 10, LV_PART_MAIN);
-      lv_obj_set_style_shadow_color(card, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
-      lv_obj_set_style_shadow_opa(card, LV_OPA_50, LV_PART_MAIN);
-    } else {
-      lv_obj_set_style_bg_color(card, lv_color_hex(0xFAF6F0), LV_PART_MAIN);
-      lv_obj_set_style_bg_opa(card, LV_OPA_COVER, LV_PART_MAIN);
-      lv_obj_set_style_shadow_width(card, 3, LV_PART_MAIN);
-      lv_obj_set_style_shadow_color(card, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
-      lv_obj_set_style_shadow_opa(card, LV_OPA_20, LV_PART_MAIN);
-    }
-
-    // Bullet + text
+    // Label first (style_card rewrites its text/font/color)
     lv_obj_t* label = lv_label_create(card);
-    char item_text[80];
-    snprintf(item_text, sizeof(item_text), "%s %s", selected ? LV_SYMBOL_RIGHT : "\xE2\x80\xA2", g_active.items[i]);
-    lv_label_set_text(label, item_text);
-    lv_obj_set_style_text_font(label, selected ? &lv_font_montserrat_16 : &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, lv_color_hex(selected ? 0x1A1A1A : 0x444444), LV_PART_MAIN);
     lv_obj_set_width(label, 230);
     lv_obj_set_style_text_line_space(label, 2, LV_PART_MAIN);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+
+    shopping_list_style_card(card, i, i == shopping_list_scroll_idx);
 
     shopping_list_items[i] = card;
     shopping_list_rendered_count++;
@@ -1665,6 +2126,32 @@ static void shopping_list_screen_populate() {
   // Scroll selected item into view
   if (shopping_list_scroll_idx < shopping_list_rendered_count && shopping_list_items[shopping_list_scroll_idx]) {
     lv_obj_scroll_to_view(shopping_list_items[shopping_list_scroll_idx], LV_ANIM_OFF);
+  }
+
+  // Remember what's rendered so a revalidate with identical content can skip
+  // the rebuild (and its reveal/flicker) entirely.
+  shopping_list_rendered_sig = shopping_list_content_sig(&g_active);
+
+  // Fresh-list reveal: quick staggered fade-in of the first rows so a new
+  // UI_LIST landing feels alive. One-shot — no continuous animations after.
+  if (reveal && shopping_list_rendered_count > 0) {
+    int reveal_n = shopping_list_rendered_count < 10 ? shopping_list_rendered_count : 10;
+    for (int i = 0; i < reveal_n; i++) {
+      lv_obj_t* card = shopping_list_items[i];
+      if (!card) continue;
+      lv_anim_del(card, shopping_list_card_opa_anim_cb);
+      lv_obj_set_style_opa(card, LV_OPA_TRANSP, 0);
+      lv_anim_t a;
+      lv_anim_init(&a);
+      lv_anim_set_var(&a, card);
+      lv_anim_set_exec_cb(&a, shopping_list_card_opa_anim_cb);
+      lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
+      lv_anim_set_time(&a, 180);
+      lv_anim_set_delay(&a, i * 30);
+      lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+      lv_anim_start(&a);
+    }
+    // Rows beyond the first ~10 appear instantly (created at full opacity)
   }
 }
 
@@ -1676,6 +2163,12 @@ static void show_shopping_list_screen_impl() {
   }
   shopping_list_overlay = NULL;
   shopping_list_overlay_visible = false;
+  shopping_list_refresh_pill = NULL;  // children of the deleted screen
+  shopping_list_spinner = NULL;
+  shopping_list_pull_arc = NULL;
+  shopping_list_status_label = NULL;
+  shopping_list_pill_hiding = false;
+  shopping_list_rendered_sig = 0xFFFFFFFFu;  // fresh screen — force a real render
 
   shopping_list_screen = lv_obj_create(NULL);
   lv_obj_set_size(shopping_list_screen, LV_PCT(100), LV_PCT(100));
@@ -1727,6 +2220,14 @@ static void show_shopping_list_screen_impl() {
   lv_obj_set_flex_align(shopping_list_scroll, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_scrollbar_mode(shopping_list_scroll, LV_SCROLLBAR_MODE_AUTO);
   lv_obj_set_scroll_dir(shopping_list_scroll, LV_DIR_VER);
+  // Touch pull-to-refresh: elastic overscroll past the top + momentum flicks,
+  // with scroll events driving the pull gesture detector.
+  lv_obj_add_flag(shopping_list_scroll, LV_OBJ_FLAG_SCROLL_ELASTIC);
+  lv_obj_add_flag(shopping_list_scroll, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+  lv_obj_add_event_cb(shopping_list_scroll, shopping_list_scroll_event_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_add_event_cb(shopping_list_scroll, shopping_list_scroll_event_cb, LV_EVENT_SCROLL, NULL);
+  lv_obj_add_event_cb(shopping_list_scroll, shopping_list_scroll_event_cb, LV_EVENT_RELEASED, NULL);
+  lv_obj_add_event_cb(shopping_list_scroll, shopping_list_scroll_event_cb, LV_EVENT_SCROLL_END, NULL);
 
   // ── Back button at bottom ──
   shopping_list_back_btn_obj = lv_obj_create(shopping_list_screen);
@@ -1748,9 +2249,31 @@ static void show_shopping_list_screen_impl() {
   lv_obj_set_style_text_color(back_lbl, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_center(back_lbl);
 
+  // ── Refresh indicator pill (spinner + status text, hidden until needed) ──
+  shopping_list_build_refresh_pill(shopping_list_screen);
+
   // Populate
   shopping_list_scroll_idx = 0;
+  shopping_list_overscroll_ticks = 0;
+  shopping_list_last_ccw_tick_ms = 0;
+  shopping_list_touch_pull_armed = false;
+  shopping_list_touch_pull_consumed = false;
+  shopping_list_touch_in_press = false;
+  shopping_list_touch_was_scrolled = false;
+
+  // Stale-while-revalidate: the cached list renders instantly below and stays
+  // fully interactive; ALWAYS kick a background refresh on entry unless one
+  // is already pending/inflight (the trigger guard handles that). Triggered
+  // BEFORE populate so a cache-miss entry shows the skeleton, not "No items".
+  if (refresh_state != REFRESH_WAKE_PENDING && refresh_state != REFRESH_INFLIGHT) {
+    shopping_list_trigger_refresh("entry_revalidate");
+  }
+
   shopping_list_screen_populate();
+
+  // If a refresh is already pending/inflight when the user enters the list,
+  // surface the spinner immediately (previously they saw only the cached list).
+  shopping_list_refresh_indicator_sync(true);
 
   ui_screen_state = SCREEN_SHOPPING_LIST;
   ui_busy = false;

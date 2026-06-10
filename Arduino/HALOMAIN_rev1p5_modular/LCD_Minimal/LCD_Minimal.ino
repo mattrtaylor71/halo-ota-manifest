@@ -416,6 +416,28 @@ static void lcd_set_clock_from_sense(uint64_t now_epoch, const char* reason) {
                 lcd_time_valid() ? 1 : 0);
 }
 
+// ── Shopping-list cache metadata ─────────────────────────────────────
+// Epoch (seconds) when the list cache was last saved to NVS. 0 = unknown
+// (no cache yet, or the LCD had no valid wall clock at save time). Written
+// by save_list_to_storage()/load_list_from_storage() in lcd_persist.h.
+static volatile uint32_t g_list_cache_fetched_epoch = 0;
+// True once a UI_LIST has landed since boot. Gates the "No items on your
+// list" empty state: an empty g_active is only genuinely empty after a
+// refresh actually completed (otherwise it's just a cache miss).
+static volatile bool g_list_refresh_completed_once = false;
+
+// Age of the persisted list cache in seconds; -1 when unknown (no cache,
+// or no valid wall clock at save or query time).
+static int list_cache_age_s() {
+  if (g_list_cache_fetched_epoch == 0 || !lcd_time_valid()) {
+    return -1;
+  }
+  uint32_t now_epoch = (uint32_t)time(nullptr);
+  return (now_epoch >= g_list_cache_fetched_epoch)
+             ? (int)(now_epoch - g_list_cache_fetched_epoch)
+             : -1;
+}
+
 static bool lcd_maintenance_context_present() {
   return g_lcd_maintenance_timer_armed ||
          g_lcd_maintenance_wake_in_s > 0 ||
@@ -809,6 +831,10 @@ static bool refresh_retry_pending = false;
 static uint32_t refresh_success_count = 0;
 static uint32_t refresh_timeout_count = 0;
 static uint32_t refresh_retry_count = 0;
+// Soft-fail auto-retry budget (max 3 while the user is on the shopping list).
+// File-scope (not local to refresh_soft_fail) so the UI_LIST handler in
+// lcd_uart_rx.h can reset it whenever a fresh list actually lands.
+static uint8_t s_list_auto_retry_count = 0;
 static const unsigned long REFRESH_TOTAL_TIMEOUT_MS = 25000;    // 25s — Sense WiFi connect (~10s) + API (~3s) + margin
 static const unsigned long REFRESH_PROOF_OF_LIFE_TIMEOUT_MS = 20000; // 20s — generous window for proof after INFLIGHT
 static const unsigned long REFRESH_TOTAL_MAX_MS = 35000;        // 35s hard max
@@ -1648,8 +1674,10 @@ typedef enum {
   // real screen/list actions run on the UI task (Core 1) — never LVGL from Core 0.
   EVT_USB_ENTER_LIST,   // emulate tapping List on the second menu
   EVT_USB_REFRESH,      // emulate pull-to-refresh gesture on the list
+  EVT_USB_PULL,         // emulate the touch pull-to-refresh path ("usb_pull" reason)
   EVT_USB_DELETE,       // emulate delete-touch on N-th visible item (data.usb_index)
   EVT_USB_HOME,         // emulate returning to the main menu
+  EVT_USB_LISTSTATE,    // print one [LISTSTATE] JSON line from the UI task (e2e harness)
 } app_event_type_t;
 
 typedef struct app_event_t {
@@ -2830,8 +2858,8 @@ static void refresh_soft_fail(const char* reason) {
   // Auto-retry if user is still on the shopping list screen.
   // The Sense WiFi may take 15-25s to connect on cold boot — the first
   // refresh attempt times out before WiFi is ready. Re-trigger so the
-  // user doesn't have to manually retry.
-  static uint8_t s_list_auto_retry_count = 0;
+  // user doesn't have to manually retry. (s_list_auto_retry_count is
+  // file-scope; the UI_LIST handler resets it when a list lands.)
   if (ui_screen_state == SCREEN_SHOPPING_LIST && s_list_auto_retry_count < 3) {
     s_list_auto_retry_count++;
     Serial.printf("[REFRESH] auto-retry %d/3 (user on shopping list)\n", s_list_auto_retry_count);
@@ -2880,6 +2908,47 @@ static void refresh_hard_timeout_clear(const char* reason) {
     app_event_t evt = {EVT_REFRESH_TIMEOUT, {0}};
     xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
   }
+}
+
+// Abandon any pending/inflight refresh with no UI side effects. Used when the
+// user leaves the shopping list screen (or any other moment the refresh SM
+// would be left running with no consumer — the pill lives on the list screen).
+// Mirrors the flag-clearing of refresh_hard_timeout_clear but never auto-
+// retries and never posts a UI event. No LVGL — safe from any task.
+static void refresh_sm_abandon(const char* reason) {
+  if (refresh_state == REFRESH_IDLE &&
+      !lcd_refresh_inflight && !waiting_for_list_response && !refresh_request_pending) {
+    return;  // nothing running
+  }
+  Serial.printf("[REFRESH_SM] abandon reason=%s state=%s\n",
+                reason ? reason : "unknown",
+                refresh_state_name(refresh_state));
+
+  refresh_state = REFRESH_IDLE;
+  lcd_refresh_inflight = false;
+  waiting_for_list_response = false;
+  refresh_request_pending = false;
+  refresh_request_needs_send = false;
+  refresh_input_wake_sent = false;
+  refresh_request_retry_count = 0;
+  refresh_grace_extended = false;
+  lcd_refresh_ack_seen = false;
+  lcd_refresh_retry_count = 0;
+  lcd_refresh_sent_ms = 0;
+  refresh_retry_pending = false;
+  refresh_requested_again = false;
+  refresh_wake_pending_attempts = 0;
+  refresh_wake_pending_last_ping_ms = 0;
+  refresh_wake_pending_next_pulse_ms = 0;
+  refresh_wake_pending_start_ms = 0;
+  refresh_wake_sent = false;
+  refresh_last_ui_pol_ms = 0;
+  refresh_last_proof_ms = 0;
+  refresh_pulse_count = 0;
+  refresh_last_pulse_ms = 0;
+  refresh_last_wake_send_ms = 0;
+  refresh_done_ms = 0;
+  s_list_auto_retry_count = 0;
 }
 
 static void refresh_sm_set_wake_pending(const char* reason) {

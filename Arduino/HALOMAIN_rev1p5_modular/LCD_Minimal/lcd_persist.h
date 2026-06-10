@@ -22,6 +22,14 @@ static const char* PREF_KEY_COUNT = "count";
 static const char* PREF_KEY_SELECTED = "selected";
 static const char* PREF_KEY_ITEMS = "items";  // JSON string of items
 static const char* PREF_KEY_IDS = "ids";      // JSON string of item IDs
+static const char* PREF_KEY_FETCHED = "fetched_at";  // unix epoch at save time (0 = clock unknown)
+
+// JSON doc capacity for the persisted list. MUST be the same for save and
+// load: an asymmetric pair (8KB save / 4KB load) let large lists persist
+// fine but fail to parse back (NoMemory) — the user then saw a blank
+// "No items on your list" after every deep sleep. Heap-allocated
+// (DynamicJsonDocument) so neither path risks a task stack overflow.
+#define LIST_PERSIST_JSON_CAPACITY 8192
 
 // Save shopping list to persistent storage
 static void save_list_to_storage(const app_state_t *s) {
@@ -29,37 +37,44 @@ static void save_list_to_storage(const app_state_t *s) {
     Serial.println("✗ Cannot save list: app_state_t is NULL");
     return;
   }
-  
+
   if (!preferences.begin(PREF_NAMESPACE, false)) {
     Serial.println("✗ Failed to open preferences for saving");
     return;
   }
-  
+
   // Create JSON document to store items and IDs
-  StaticJsonDocument<8192> doc;  // 8KB should be enough
+  DynamicJsonDocument doc(LIST_PERSIST_JSON_CAPACITY);
   JsonArray items_array = doc.createNestedArray("items");
   JsonArray ids_array = doc.createNestedArray("ids");
-  
+
   for (int i = 0; i < s->count && i < MAX_LIST_ITEMS; i++) {
     items_array.add(s->items[i]);
     ids_array.add(s->item_ids[i]);
   }
-  
+
   // Serialize to string
   String json_str;
   serializeJson(doc, json_str);
-  
-  // Save count, selected index, and JSON string
+
+  // Cache age stamp: store the wall-clock epoch when the LCD has valid time
+  // (synced from the Sense), else 0 = age unknown.
+  uint32_t fetched_epoch = lcd_time_valid() ? (uint32_t)time(nullptr) : 0;
+
+  // Save count, selected index, JSON string, and fetch timestamp
   bool count_saved = preferences.putInt(PREF_KEY_COUNT, s->count);
   bool selected_saved = preferences.putInt(PREF_KEY_SELECTED, s->selected_index);
   bool items_saved = preferences.putString(PREF_KEY_ITEMS, json_str.c_str());
-  
+  preferences.putUInt(PREF_KEY_FETCHED, fetched_epoch);
+
   preferences.end();
-  
+
   if (count_saved && selected_saved && items_saved) {
-    Serial.printf("✓ Saved %d items (selected_index=%d) to persistent storage\n", s->count, s->selected_index);
+    g_list_cache_fetched_epoch = fetched_epoch;
+    Serial.printf("✓ Saved %d items (selected_index=%d, fetched_at=%lu) to persistent storage\n",
+                  s->count, s->selected_index, (unsigned long)fetched_epoch);
   } else {
-    Serial.printf("✗ Failed to save list! count=%d, selected=%d, items=%d\n", 
+    Serial.printf("✗ Failed to save list! count=%d, selected=%d, items=%d\n",
                   count_saved, selected_saved, items_saved);
   }
 }
@@ -80,16 +95,17 @@ static int load_list_from_storage(app_state_t *s) {
   
   int selected = preferences.getInt(PREF_KEY_SELECTED, 0);
   String json_str = preferences.getString(PREF_KEY_ITEMS, "");
+  g_list_cache_fetched_epoch = preferences.getUInt(PREF_KEY_FETCHED, 0);
   preferences.end();
-  
+
   if (json_str.length() == 0) {
     Serial.println("✗ Saved list JSON is empty");
     return -1;
   }
-  
-  // Parse JSON (reduced size to prevent stack overflow)
-  // Note: 4096 should be enough for most shopping lists (typically < 50 items)
-  StaticJsonDocument<4096> doc;
+
+  // Parse JSON — capacity MUST match the save path (see LIST_PERSIST_JSON_CAPACITY).
+  // Heap-allocated so the boot/wake task stacks are untouched.
+  DynamicJsonDocument doc(LIST_PERSIST_JSON_CAPACITY);
   DeserializationError error = deserializeJson(doc, json_str);
   
   if (error) {

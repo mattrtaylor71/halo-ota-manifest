@@ -41,6 +41,13 @@ static void ui_show_screen(ScreenId next, const char* reason, const char* file, 
     uart_send_list_active(true);
   } else if (was_list && !now_list) {
     uart_send_list_active(false);
+    // Never leave the refresh SM in WAKE_PENDING/INFLIGHT with no consumer —
+    // the pill lives on the list screen. A late UI_LIST still renders into
+    // g_active + the NVS cache via the normal UART path.
+    refresh_sm_abandon("leave_list");
+    if (is_glowing_animation) {
+      stop_glowing_animation();  // UI task context — LVGL is safe here
+    }
   }
 }
 
