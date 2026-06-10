@@ -31,23 +31,28 @@ SCENARIOS (run all by default; --only NAME for one)
                              refresh_state IDLE/COMPLETE within 25s AND no
                              snapshot ever shows auto_retry>=3 with pill stuck
                              (regression test for the stuck-"Refreshing" bug).
-  5. encoder_overscroll_refresh  `scroll -1` x3 @300ms (3 CCW ticks at top =
+  5. double_refresh          `pull` -> completion -> ASSERT latch==0 -> 1s ->
+                             `pull` -> completion -> ASSERT latch==0 again.
+                             Regression guard for the gesture-latch wedge
+                             (fast refresh rebuild eats SCROLL_END; latch
+                             never re-arms). FAIL detail "latch_wedged".
+  6. encoder_overscroll_refresh  `scroll -1` x3 @300ms (3 CCW ticks at top =
                              refresh trigger, SHOPPING_LIST_REFRESH_TICKS=3);
                              PASS like scenario 3.
-  6. scroll_responsiveness   `scroll 1` x10 @150ms; PASS if selected index
+  7. scroll_responsiveness   `scroll 1` x10 @150ms; PASS if selected index
                              advanced and the port stayed alive (liveness
                              only — render timing isn't measurable over USB).
-  7. delete_item             `del 0` when count>0; PASS if count decreased by
+  8. delete_item             `del 0` when count>0; PASS if count decreased by
                              exactly 1 after 3s (exercises delete + animation
                              path without asserting visuals).
-  8. sleep_wake_cache        `home`, wait for port to vanish (deep sleep),
+  9. sleep_wake_cache        `home`, wait for port to vanish (deep sleep),
                              tap-wake, reopen, `list`+`liststate`; PASS if
                              count survives (validates persist-on-update,
                              not just boot-load).
 
 FLAGS
   --only NAME          Run a single scenario.
-  --keep-awake         Skip the sleep-dependent scenarios (1, 8).
+  --keep-awake         Skip the sleep-dependent scenarios (1, 9).
   --jsonl PATH         Machine log (default /tmp/list_e2e.jsonl), one record
                        per scenario + a final summary record.
   --lcd-port / --tap-port / --tap-command   Hardware overrides.
@@ -65,7 +70,7 @@ ASSUMPTIONS TO VERIFY ONCE THE FIRMWARE LANDS (search "ASSUMPTION" below):
   - `[LISTSTATE]` is printed as exactly one line of JSON after the tag.
   - The `screen` field's enum mapping is unknown, so it is logged but never
     asserted on.
-  - Scenarios 2/3/5 soft-pass if the pill=1 phase was too fast to observe
+  - Scenarios 2/3/6 soft-pass if the pill=1 phase was too fast to observe
     but refresh_state was seen/ended COMPLETE (detail notes it).
 """
 
@@ -107,10 +112,10 @@ REFRESH_NAMES = {0: "IDLE", 1: "WAKE_PENDING", 2: "INFLIGHT", 3: "COMPLETE", 4: 
 # Timing knobs (seconds unless noted)
 PORT_APPEAR_AFTER_TAP_S = 8.0   # spec: ~5-7s for port 101 to appear post-tap
 SLEEP_VANISH_TIMEOUT_S = 50.0   # scenario 1: wait for port to vanish (home-screen idle->sleep takes ~32s)
-SLEEP_VANISH_TIMEOUT_LONG_S = 40.0  # scenario 8
+SLEEP_VANISH_TIMEOUT_LONG_S = 40.0  # scenario 9
 COLD_CACHE_WINDOW_S = 2.0       # scenario 1: count>0 within 2s of `list`
 REVALIDATE_TIMEOUT_S = 20.0     # scenario 2
-PULL_CLEAR_TIMEOUT_S = 15.0     # scenarios 3, 5
+PULL_CLEAR_TIMEOUT_S = 15.0     # scenarios 3, 5, 6
 SPAM_SETTLE_TIMEOUT_S = 25.0    # scenario 4
 LISTSTATE_POLL_S = 0.5
 LISTSTATE_REPLY_TIMEOUT_S = 2.0
@@ -289,7 +294,8 @@ class LcdLink:
         """Send `liststate`, parse the one-line [LISTSTATE] {...} reply.
 
         Returns the parsed dict (keys: screen, refresh_state, pill, count,
-        cache_age_s, auto_retry, selected) or None on timeout/parse failure.
+        cache_age_s, auto_retry, selected, latch, armed, scroll_y,
+        pill_hiding) or None on timeout/parse failure.
         """
         m = self.mark()
         self.send("liststate")
@@ -578,6 +584,74 @@ def scen_refresh_spam(h):
             "timings": timings, "serial": h.link.interesting_since(mark)}
 
 
+def scen_double_refresh(h):
+    """Two back-to-back refresh cycles with a latch assertion after each.
+
+    Regression guard for the gesture-latch wedge: a fast refresh completion
+    rebuilds the list (lv_obj_clean) mid-elastic-snap-back, LVGL 8.4 never
+    delivers SCROLL_END to the emptied container, and the once-per-gesture
+    latch (liststate "latch") stays consumed — every later touch pull is
+    silently rejected. NOTE: the harness `pull` is the USB path, which
+    bypasses the touch gesture (and the latch) entirely, so the second pull
+    completing proves little by itself — the REAL regression guard here is
+    the latch==0 assertion after each completed refresh cycle.
+    """
+    name = "double_refresh"
+    timings = {}
+    h.wake_and_open()
+    mark = h.link.mark()
+
+    def latch_after_cycle(which):
+        """Returns (ok, detail_or_None). Reads liststate post-cycle and
+        asserts the gesture latch re-armed (latch==0)."""
+        st = h.link.liststate()
+        if st is None:
+            return False, "no_liststate_after_%s_refresh" % which
+        if int(st.get("latch", 0)) == 1:
+            return False, ("latch_wedged after %s refresh (liststate=%s)" %
+                           (which, json.dumps(st)))
+        return True, None
+
+    # 1) first pull -> completion -> latch must be re-armed
+    h.link.send("pull")
+    t0 = time.time()
+    cyc1 = h.poll_refresh_cycle(PULL_CLEAR_TIMEOUT_S)
+    timings["first_time_to_clear_s"] = cyc1["time_to_clear_s"]
+    if not cyc1["ok"]:
+        return {"name": name, "pass": False,
+                "detail": "first_refresh_did_not_clear (%s)" %
+                          (",".join(cyc1["notes"]) or cyc1["final_refresh_name"]),
+                "timings": timings, "serial": h.link.interesting_since(mark)}
+    ok, fail_detail = latch_after_cycle("first")
+    if not ok:
+        return {"name": name, "pass": False, "detail": fail_detail,
+                "timings": timings, "serial": h.link.interesting_since(mark)}
+
+    # 2) brief gap, then second pull -> completion -> latch re-armed again
+    time.sleep(1.0)
+    h.link.send("pull")
+    cyc2 = h.poll_refresh_cycle(PULL_CLEAR_TIMEOUT_S)
+    timings["second_time_to_clear_s"] = cyc2["time_to_clear_s"]
+    timings["total_s"] = round(time.time() - t0, 1)
+    if not cyc2["ok"]:
+        return {"name": name, "pass": False,
+                "detail": "second_refresh_did_not_clear (%s)" %
+                          (",".join(cyc2["notes"]) or cyc2["final_refresh_name"]),
+                "timings": timings, "serial": h.link.interesting_since(mark)}
+    ok, fail_detail = latch_after_cycle("second")
+    if not ok:
+        return {"name": name, "pass": False, "detail": fail_detail,
+                "timings": timings, "serial": h.link.interesting_since(mark)}
+
+    detail = ("both cycles clean, latch re-armed after each "
+              "(ttc1=%s ttc2=%s final=%s %s)" %
+              (cyc1["time_to_clear_s"], cyc2["time_to_clear_s"],
+               cyc2["final_refresh_name"],
+               ",".join(cyc1["notes"] + cyc2["notes"]) or "clean"))
+    return {"name": name, "pass": True, "detail": detail,
+            "timings": timings, "serial": h.link.interesting_since(mark)}
+
+
 def scen_encoder_overscroll_refresh(h):
     name = "encoder_overscroll_refresh"
     timings = {}
@@ -688,7 +762,7 @@ def scen_sleep_wake_cache(h):
     detail = "count_after_wake=%d" % count
     if expected is not None:
         detail += " (pre-sleep=%s)" % expected
-        # informational only: count may legitimately differ if scenario 7
+        # informational only: count may legitimately differ if scenario 8
         # deleted an item and the backend re-synced during revalidate
     return {"name": name, "pass": ok, "detail": detail,
             "timings": timings, "serial": h.link.interesting_since(mark)}
@@ -699,6 +773,7 @@ SCENARIOS = [
     ("entry_revalidate", scen_entry_revalidate, False),
     ("pull_refresh", scen_pull_refresh, False),
     ("refresh_spam", scen_refresh_spam, False),
+    ("double_refresh", scen_double_refresh, False),
     ("encoder_overscroll_refresh", scen_encoder_overscroll_refresh, False),
     ("scroll_responsiveness", scen_scroll_responsiveness, False),
     ("delete_item", scen_delete_item, False),

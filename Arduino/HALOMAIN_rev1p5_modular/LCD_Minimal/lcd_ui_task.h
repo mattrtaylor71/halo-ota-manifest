@@ -998,14 +998,19 @@ static void ui_task(void *arg) {
                              shopping_list_refresh_pill != NULL &&
                              !lv_obj_has_flag(shopping_list_refresh_pill, LV_OBJ_FLAG_HIDDEN));
         Serial.printf("[LISTSTATE] {\"screen\":%d,\"refresh_state\":%d,\"pill\":%d,\"count\":%d,"
-                      "\"cache_age_s\":%d,\"auto_retry\":%d,\"selected\":%d}\n",
+                      "\"cache_age_s\":%d,\"auto_retry\":%d,\"selected\":%d,"
+                      "\"latch\":%d,\"armed\":%d,\"scroll_y\":%d,\"pill_hiding\":%d}\n",
                       (int)ui_screen_state,
                       (int)refresh_state,
                       pill_visible ? 1 : 0,
                       g_active.count,
                       list_cache_age_s(),
                       (int)s_list_auto_retry_count,
-                      shopping_list_scroll_idx);
+                      shopping_list_scroll_idx,
+                      shopping_list_touch_pull_consumed ? 1 : 0,
+                      shopping_list_touch_pull_armed ? 1 : 0,
+                      shopping_list_scroll ? (int)lv_obj_get_scroll_y(shopping_list_scroll) : 0,
+                      shopping_list_pill_hiding ? 1 : 0);
         processed_anything = true;
       } else if (evt.type == EVT_USB_DELETE) {
         // USB 'del N' — same path as the DELETE touch on the N-th visible item.

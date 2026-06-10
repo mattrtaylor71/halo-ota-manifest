@@ -2050,6 +2050,18 @@ static void shopping_list_screen_populate() {
 
   // Clear existing items
   lv_obj_clean(shopping_list_scroll);
+  // Re-arm the touch pull-to-refresh latch. lv_obj_clean() can interrupt
+  // LVGL's scroll-end delivery: when a fast refresh completes mid-elastic-
+  // snap-back, the emptied container never receives LV_EVENT_SCROLL_END,
+  // so the once-per-gesture latch in shopping_list_scroll_event_cb would
+  // stay consumed forever and silently reject every subsequent pull.
+  shopping_list_touch_pull_consumed = false;
+  shopping_list_touch_pull_armed = false;
+  // Belt-and-braces: if the rebuild lands mid-pull the container's scroll_y
+  // can still be negative with no snap-back coming — force it to rest BEFORE
+  // rows are re-added (the scroll_to_view selection logic below then starts
+  // from a clean origin).
+  lv_obj_scroll_to_y(shopping_list_scroll, 0, LV_ANIM_OFF);
   shopping_list_rendered_count = 0;
   for (int i = 0; i < 50; i++) shopping_list_items[i] = NULL;  // no stale card pointers
   bool reveal = shopping_list_reveal_pending;
