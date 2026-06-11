@@ -185,8 +185,8 @@ REFRESH_NAMES = {0: "IDLE", 1: "WAKE_PENDING", 2: "INFLIGHT", 3: "COMPLETE", 4: 
 
 # Timing knobs (seconds unless noted)
 PORT_APPEAR_AFTER_TAP_S = 8.0   # spec: ~5-7s for port 101 to appear post-tap
-SLEEP_VANISH_TIMEOUT_S = 50.0   # scenario 1: wait for port to vanish (home-screen idle->sleep takes ~32s)
-SLEEP_VANISH_TIMEOUT_LONG_S = 40.0  # scenario 9
+SLEEP_VANISH_TIMEOUT_S = 60.0   # scenario 1: wait for port to vanish (home-screen idle->sleep takes ~32s)
+SLEEP_VANISH_TIMEOUT_LONG_S = 60.0  # scenario 9 (post-OTA ota_stay_awake delays sleep past the ~32s norm)
 COLD_CACHE_WINDOW_S = 2.0       # scenario 1: count>0 within 2s of `list`
 REVALIDATE_TIMEOUT_S = 20.0     # scenario 2
 PULL_CLEAR_TIMEOUT_S = 15.0     # scenarios 3, 5, 6

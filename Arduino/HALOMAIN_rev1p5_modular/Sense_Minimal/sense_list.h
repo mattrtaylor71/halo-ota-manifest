@@ -112,6 +112,20 @@ static bool parse_and_update_shopping_list(const String& json_response) {
       g_shopping_list[actual_count].id[0] = '\0';
     }
 
+    // Extract household_item_uuid — the key the backend deletes by (same as
+    // the iOS app's swipe-delete). Fallback empty if the field is missing.
+    const char* huuid_str = item["household_item_uuid"] | "";
+    if (huuid_str != NULL && strlen(huuid_str) > 0) {
+      size_t huuid_len = strlen(huuid_str);
+      if (huuid_len >= sizeof(g_shopping_list[actual_count].huuid)) {
+        huuid_len = sizeof(g_shopping_list[actual_count].huuid) - 1;
+      }
+      strncpy(g_shopping_list[actual_count].huuid, huuid_str, huuid_len);
+      g_shopping_list[actual_count].huuid[huuid_len] = '\0';
+    } else {
+      g_shopping_list[actual_count].huuid[0] = '\0';
+    }
+
     actual_count++;
   }
 
@@ -139,6 +153,25 @@ static bool parse_and_update_shopping_list(const String& json_response) {
 
 // ── Delete item from API ───────────────────────────────────────────
 
+// Remove the item at list_index from g_shopping_list (caller must hold
+// g_list_mutex). Compacts the array and fixes g_list_count/g_selected_index
+// so a subsequent cached serve (request_list_refresh cooldown path) can't
+// resurrect the deleted item.
+static void remove_item_from_ram_list_locked(int list_index) {
+  if (list_index < 0 || list_index >= g_list_count) return;
+  for (int i = list_index; i < g_list_count - 1; i++) {
+    g_shopping_list[i] = g_shopping_list[i + 1];
+  }
+  g_list_count--;
+  if (g_list_count <= 0) {
+    g_list_count = 0;
+    g_selected_index = -1;
+  } else {
+    if (g_selected_index > list_index) g_selected_index--;
+    if (g_selected_index >= g_list_count) g_selected_index = g_list_count - 1;
+  }
+}
+
 static void delete_item_from_api(const char* item_id) {
   if (item_id == NULL || strlen(item_id) == 0) {
     Serial.println("✗ Cannot delete item: invalid ID!");
@@ -147,13 +180,38 @@ static void delete_item_from_api(const char* item_id) {
 
   Serial.printf("\n=== Deleting Item ID: %s ===\n", item_id);
 
-  // Build JSON request body for remove operation
+  // Look up the item's household_item_uuid in the RAM list. The backend
+  // (and the iOS app's swipe-delete) delete by itemUUID — the household-wide
+  // key — NOT the per-table row id.
+  char item_huuid[64] = {0};
+  if (g_list_mutex != NULL && xSemaphoreTake(g_list_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+    for (int i = 0; i < g_list_count; i++) {
+      if (strcmp(g_shopping_list[i].id, item_id) == 0) {
+        strncpy(item_huuid, g_shopping_list[i].huuid, sizeof(item_huuid) - 1);
+        item_huuid[sizeof(item_huuid) - 1] = '\0';
+        break;
+      }
+    }
+    xSemaphoreGive(g_list_mutex);
+  }
+
+  // Build JSON request body for remove operation. Mirrors the iOS app:
+  // {"operation":"remove","ownerId":...,"device":...,"itemUUID":<huuid>}.
+  // Legacy {"id":...} body only if we have no huuid for this item.
   char owner_id[64] = {0};
   load_owner_id_or_default(owner_id, sizeof(owner_id));
+  bool have_huuid = (item_huuid[0] != '\0');
   String request_body = "{";
   request_body += "\"operation\":\"remove\",";
   request_body += "\"ownerId\":\"" + String(owner_id) + "\",";
-  request_body += "\"id\":\"" + String(item_id) + "\"";
+  request_body += "\"device\":\"" + String(TREPO_DEVICE_ID) + "\",";
+  if (have_huuid) {
+    request_body += "\"itemUUID\":\"" + String(item_huuid) + "\"";
+  } else {
+    Serial.printf("[DELETE] warn no household_item_uuid for id=%s — using legacy id body\n",
+                  item_id);
+    request_body += "\"id\":\"" + String(item_id) + "\"";
+  }
   request_body += "}";
 
   // Create HTTPS client
@@ -187,11 +245,33 @@ static void delete_item_from_api(const char* item_id) {
   client.stop();
 
   if (httpResponseCode == 200) {
-    Serial.println("✓ Item deleted successfully from backend");
+    Serial.printf("[DELETE] ok itemUUID=%s id=%s\n",
+                  have_huuid ? item_huuid : "(none)", item_id);
+    // Remove from the RAM cache too so a cached serve can't resurrect the
+    // deleted item. No UI_LIST push — the LCD already removed it locally.
+    if (g_list_mutex != NULL && xSemaphoreTake(g_list_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+      int found_index = -1;
+      for (int i = 0; i < g_list_count; i++) {
+        if (strcmp(g_shopping_list[i].id, item_id) == 0) {
+          found_index = i;
+          break;
+        }
+      }
+      if (found_index >= 0) {
+        remove_item_from_ram_list_locked(found_index);
+        Serial.printf("[DELETE] ram list updated count=%d selected=%d\n",
+                      g_list_count, g_selected_index);
+      }
+      xSemaphoreGive(g_list_mutex);
+    }
     uart_send_ui_status("Item deleted");
   } else {
-    Serial.printf("✗ Delete failed with HTTP code: %d\n", httpResponseCode);
-    Serial.println("[DELETE] fail -> UI idle");
+    Serial.printf("[DELETE] fail code=%d id=%s\n", httpResponseCode, item_id);
+    // RAM list left unchanged. Re-send the list so the LCD's optimistic
+    // removal reconverges with reality. Note: the LCD's deleted_item_ids RAM
+    // filter may still hide the item this boot — acceptable; logged here.
+    Serial.println("[DELETE] resending UI_LIST to reconverge LCD (may be filtered by LCD deleted_item_ids this boot)");
+    uart_send_ui_list();
     uart_send_ui_status("IDLE");
   }
 }

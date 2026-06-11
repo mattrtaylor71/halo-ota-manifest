@@ -1676,6 +1676,7 @@ typedef enum {
   EVT_USB_REFRESH,      // emulate pull-to-refresh gesture on the list
   EVT_USB_PULL,         // emulate the touch pull-to-refresh path ("usb_pull" reason)
   EVT_USB_DELETE,       // emulate delete-touch on N-th visible item (data.usb_index)
+  EVT_USB_DELTOUCH,     // full touch-path delete: open overlay, then tap the real Delete button
   EVT_USB_HOME,         // emulate returning to the main menu
   EVT_USB_LISTSTATE,    // print one [LISTSTATE] JSON line from the UI task (e2e harness)
 } app_event_type_t;

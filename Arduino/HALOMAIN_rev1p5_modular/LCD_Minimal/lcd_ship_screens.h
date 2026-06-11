@@ -1348,6 +1348,12 @@ static lv_obj_t* shopping_list_items[50] = {NULL};
 static int shopping_list_rendered_count = 0;
 static lv_obj_t* shopping_list_overlay = NULL;  // Delete/Back overlay
 static bool shopping_list_overlay_visible = false;
+// Overlay hitbox sources — the touch handler derives its hit areas from these
+// rendered objects (lv_obj_get_coords + slop) instead of magic coordinates,
+// so layout tweaks can never desync the hitboxes from the pixels.
+static lv_obj_t* shopping_list_overlay_card = NULL;        // center card
+static lv_obj_t* shopping_list_overlay_delete_btn = NULL;  // red Delete button
+static lv_obj_t* shopping_list_overlay_back_btn = NULL;    // green Back button
 static lv_obj_t* shopping_list_back_btn_obj = NULL;  // Bottom back button
 
 // Border refresh ring — a full-screen lv_arc hugging the display edge.
@@ -1400,6 +1406,15 @@ static void shopping_list_screen_populate();
 static void shopping_list_dismiss_overlay();
 static void shopping_list_trigger_refresh(const char* reason);
 static void shopping_list_animate_card_removal(int idx);
+
+// Keep the Delete/Back overlay above everything else on the list screen.
+// The refresh ring and error toast call lv_obj_move_foreground on themselves
+// while animating — without this they'd stack over a visible overlay.
+static void shopping_list_keep_overlay_on_top() {
+  if (shopping_list_overlay_visible && shopping_list_overlay) {
+    lv_obj_move_foreground(shopping_list_overlay);
+  }
+}
 
 // ── Border refresh ring helpers ──────────────────────────────────────
 // One lv_arc hugging the screen edge, input-transparent, on top of all list
@@ -1497,6 +1512,7 @@ static void shopping_list_toast_show(const char* text) {
   lv_obj_set_style_opa(toast, LV_OPA_COVER, 0);
   lv_obj_clear_flag(toast, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(toast);
+  shopping_list_keep_overlay_on_top();
   lv_anim_t a;
   lv_anim_init(&a);
   lv_anim_set_var(&a, toast);
@@ -1527,6 +1543,7 @@ static void shopping_list_ring_show_pull(int progress_pct, bool armed) {
   }
   lv_obj_clear_flag(ring, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(ring);
+  shopping_list_keep_overlay_on_top();
 }
 
 // Refreshing (WAKE_PENDING + INFLIGHT): ~70° segment sweeping continuously
@@ -1541,6 +1558,7 @@ static void shopping_list_ring_show_sweep() {
   shopping_list_ring_set_style(ring, 0x1F4D2B, SHOPPING_LIST_RING_WIDTH);
   lv_obj_clear_flag(ring, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(ring);
+  shopping_list_keep_overlay_on_top();
   shopping_list_ring_sweeping = true;
   lv_anim_t a;
   lv_anim_init(&a);
@@ -1585,6 +1603,7 @@ static void shopping_list_ring_show_error() {
   lv_arc_set_angles(ring, 0, 360);
   lv_obj_clear_flag(ring, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(ring);
+  shopping_list_keep_overlay_on_top();
   lv_anim_t a;  // two ~250ms flashes (fade down + playback up), then fade out
   lv_anim_init(&a);
   lv_anim_set_var(&a, ring);
@@ -1713,7 +1732,8 @@ static void shopping_list_show_overlay() {
   lv_obj_set_style_shadow_width(card, 20, LV_PART_MAIN);
   lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), LV_PART_MAIN);
   lv_obj_set_style_shadow_opa(card, LV_OPA_30, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(card, 20, LV_PART_MAIN);
+  lv_obj_set_style_pad_hor(card, 12, LV_PART_MAIN);   // 256px inner width — fits the 120+14+120 button row
+  lv_obj_set_style_pad_ver(card, 20, LV_PART_MAIN);
   lv_obj_set_style_pad_row(card, 12, LV_PART_MAIN);
   lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1728,20 +1748,22 @@ static void shopping_list_show_overlay() {
   lv_obj_set_style_text_align(name_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_label_set_long_mode(name_label, LV_LABEL_LONG_WRAP);
 
-  // Button row container
+  // Button row container — 120px buttons with a 14px gap (finger-friendly on
+  // the round screen). The touch hitboxes follow these objects automatically.
   lv_obj_t* btn_row = lv_obj_create(card);
-  lv_obj_set_size(btn_row, 240, 44);
+  lv_obj_set_size(btn_row, 254, 48);
   lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(btn_row, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(btn_row, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(btn_row, 0, LV_PART_MAIN);
+  lv_obj_set_style_pad_column(btn_row, 14, LV_PART_MAIN);
   lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
 
   // Delete button — red
   lv_obj_t* del_btn = lv_btn_create(btn_row);
-  lv_obj_set_size(del_btn, 110, 40);
+  lv_obj_set_size(del_btn, 120, 48);
   lv_obj_set_style_bg_color(del_btn, lv_color_hex(0xE53935), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(del_btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_radius(del_btn, 10, LV_PART_MAIN);
@@ -1749,13 +1771,13 @@ static void shopping_list_show_overlay() {
   lv_obj_set_style_shadow_width(del_btn, 0, LV_PART_MAIN);
   lv_obj_t* del_label = lv_label_create(del_btn);
   lv_label_set_text(del_label, "Delete");
-  lv_obj_set_style_text_font(del_label, &lv_font_montserrat_16, LV_PART_MAIN);
+  lv_obj_set_style_text_font(del_label, &lv_font_montserrat_18, LV_PART_MAIN);
   lv_obj_set_style_text_color(del_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_center(del_label);
 
   // Back button — green
   lv_obj_t* back_btn = lv_btn_create(btn_row);
-  lv_obj_set_size(back_btn, 110, 40);
+  lv_obj_set_size(back_btn, 120, 48);
   lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x1F4D2B), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_radius(back_btn, 10, LV_PART_MAIN);
@@ -1763,9 +1785,29 @@ static void shopping_list_show_overlay() {
   lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
   lv_obj_t* back_label = lv_label_create(back_btn);
   lv_label_set_text(back_label, "Back");
-  lv_obj_set_style_text_font(back_label, &lv_font_montserrat_16, LV_PART_MAIN);
+  lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
   lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_center(back_label);
+
+  // Hitbox sources for shopping_list_handle_touch
+  shopping_list_overlay_card = card;
+  shopping_list_overlay_delete_btn = del_btn;
+  shopping_list_overlay_back_btn = back_btn;
+
+  // Resolve flex/content layout NOW so lv_obj_get_coords() returns final
+  // positions before the first tap (LVGL otherwise defers layout to the next
+  // refresh, which would leave the hitboxes at 0,0).
+  lv_obj_update_layout(shopping_list_overlay);
+
+  // Created last so it's already topmost, but be explicit — the refresh ring
+  // and error toast self-foreground while animating and must never cover it.
+  lv_obj_move_foreground(shopping_list_overlay);
+
+  // A stale drag flag must never eat the first tap on the overlay. It's only
+  // consumed by the no-overlay branch of shopping_list_handle_touch, so an
+  // overlay opened programmatically (USB 'deltouch') could otherwise carry an
+  // unconsumed flag from the last gesture into the first overlay tap.
+  shopping_list_touch_was_scrolled = false;
 
   Serial.printf("[SHOP_LIST] overlay shown for item %d: %s\n",
                 shopping_list_scroll_idx, g_active.items[shopping_list_scroll_idx]);
@@ -1775,6 +1817,9 @@ static void shopping_list_dismiss_overlay() {
   if (!shopping_list_overlay_visible || !shopping_list_overlay) return;
   lv_obj_del(shopping_list_overlay);
   shopping_list_overlay = NULL;
+  shopping_list_overlay_card = NULL;
+  shopping_list_overlay_delete_btn = NULL;
+  shopping_list_overlay_back_btn = NULL;
   shopping_list_overlay_visible = false;
   Serial.println("[SHOP_LIST] overlay dismissed");
 }
@@ -1952,39 +1997,51 @@ static bool shopping_list_handle_touch(int x, int y) {
   }
 
   if (shopping_list_overlay_visible) {
-    // Check if tap is on the center card area (roughly 40..320 x, 90..270 y)
-    // The card is 280px wide centered at 180, so x=[40..320], and vertically centered around 170
-    int card_x1 = 40, card_x2 = 320;
-    int card_y1 = 80, card_y2 = 270;
+    // Hitboxes derived from the RENDERED objects (lv_obj_get_coords on the
+    // actual buttons/card, inflated by a few px of touch slop) — correct by
+    // construction, regardless of label wrap or future layout tweaks.
+    // Priority: delete btn -> back btn -> inside card (no-op) -> outside
+    // card (dismiss). show_overlay calls lv_obj_update_layout so coords are
+    // final before the first tap.
+    const int SLOP = 8;  // px of forgiveness around each button
+    lv_area_t a;
 
-    if (x >= card_x1 && x <= card_x2 && y >= card_y1 && y <= card_y2) {
-      // Check which button was tapped
-      // Button row is at the bottom of the card, roughly y=210..250
-      // Delete button: left half (~55..165), Back button: right half (~175..285)
-      if (y >= 195) {
-        int btn_mid = 180;
-        if (x < btn_mid) {
-          // DELETE tapped
-          Serial.printf("[SHOP_LIST] DELETE tapped for item %d\n", shopping_list_scroll_idx);
-          int del_idx = shopping_list_scroll_idx;
-          shopping_list_delete_index(del_idx);
+    if (shopping_list_overlay_delete_btn) {
+      lv_obj_get_coords(shopping_list_overlay_delete_btn, &a);
+      if (x >= a.x1 - SLOP && x <= a.x2 + SLOP && y >= a.y1 - SLOP && y <= a.y2 + SLOP) {
+        Serial.printf("[SHOPPING_LIST] overlay tap (%d,%d) -> delete\n", x, y);
+        int del_idx = shopping_list_scroll_idx;
+        shopping_list_delete_index(del_idx);
 
-          // Dismiss overlay, animate the card out, rebuild when it lands
-          shopping_list_dismiss_overlay();
-          shopping_list_animate_card_removal(del_idx);
-          return true;
+        // Dismiss overlay, animate the card out, rebuild when it lands
+        shopping_list_dismiss_overlay();
+        shopping_list_animate_card_removal(del_idx);
+        return true;
+      }
+    }
 
-        } else {
-          // BACK tapped
-          Serial.println("[SHOP_LIST] BACK tapped from overlay");
-          shopping_list_dismiss_overlay();
-          show_ship_second_menu();
-          return true;
-        }
+    if (shopping_list_overlay_back_btn) {
+      lv_obj_get_coords(shopping_list_overlay_back_btn, &a);
+      if (x >= a.x1 - SLOP && x <= a.x2 + SLOP && y >= a.y1 - SLOP && y <= a.y2 + SLOP) {
+        Serial.printf("[SHOPPING_LIST] overlay tap (%d,%d) -> back\n", x, y);
+        shopping_list_dismiss_overlay();
+        show_ship_second_menu();
+        return true;
+      }
+    }
+
+    if (shopping_list_overlay_card) {
+      lv_obj_get_coords(shopping_list_overlay_card, &a);
+      if (x >= a.x1 && x <= a.x2 && y >= a.y1 && y <= a.y2) {
+        // Card body (item name / dead space) — deliberate no-op so a slightly
+        // missed button never dismisses the overlay out from under the user.
+        Serial.printf("[SHOPPING_LIST] overlay tap (%d,%d) -> card\n", x, y);
+        return true;
       }
     }
 
     // Tap outside card — dismiss overlay
+    Serial.printf("[SHOPPING_LIST] overlay tap (%d,%d) -> dismiss\n", x, y);
     shopping_list_dismiss_overlay();
     return true;
   }
@@ -2340,6 +2397,9 @@ static void show_shopping_list_screen_impl() {
     shopping_list_screen = NULL;
   }
   shopping_list_overlay = NULL;
+  shopping_list_overlay_card = NULL;
+  shopping_list_overlay_delete_btn = NULL;
+  shopping_list_overlay_back_btn = NULL;
   shopping_list_overlay_visible = false;
   shopping_list_refresh_ring = NULL;  // children of the deleted screen
   shopping_list_error_toast = NULL;

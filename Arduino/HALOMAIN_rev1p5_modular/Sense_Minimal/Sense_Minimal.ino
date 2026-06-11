@@ -633,6 +633,9 @@ static char last_uart_rx_type[24] = "";
 struct shopping_list_item_t {
   char text[MAX_ITEM_LENGTH];
   char id[MAX_ITEM_LENGTH];
+  // household_item_uuid from the list API — required for delete: the iOS app
+  // deletes by itemUUID (household-wide), not row id. 50x64B = +3.2KB RAM.
+  char huuid[64];
 };
 
 static shopping_list_item_t g_shopping_list[MAX_LIST_ITEMS];

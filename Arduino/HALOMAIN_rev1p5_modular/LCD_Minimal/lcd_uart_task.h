@@ -271,6 +271,18 @@ static void uart_task(void *arg) {
                 evt.type = EVT_USB_LISTSTATE;
                 xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
               }
+            } else if (strcmp(usb_buf, "deltouch") == 0) {
+              // 'deltouch' — full touch-path delete for the e2e harness:
+              // opens the Delete/Back overlay for the current selection, then
+              // (~300ms later, on the UI task) synthesizes a tap at the center
+              // of the REAL Delete button via shopping_list_handle_touch, so
+              // the derived hitboxes are exercised exactly like a finger.
+              Serial.println("[USB] deltouch");
+              if (app_event_queue != NULL) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_DELTOUCH;
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
             } else if (strncmp(usb_buf, "del", 3) == 0 &&
                        (usb_buf[3] == ' ' || usb_buf[3] == '\0')) {
               // 'del N' — emulate the DELETE touch on the N-th visible item.
@@ -454,6 +466,7 @@ static void uart_task(void *arg) {
               Serial.println("  pull       - trigger the pull-to-refresh path (usb_pull)");
               Serial.println("  scroll <±n> - post a scroll delta (selection move / CCW overscroll)");
               Serial.println("  del N      - delete the N-th visible list item (0-based)");
+              Serial.println("  deltouch   - full touch-path delete: open overlay, tap real Delete button");
               Serial.println("  liststate  - one-line [LISTSTATE] JSON dump (e2e harness)");
               Serial.println("  home       - return to the main menu");
               Serial.println("  help     - show this help");

@@ -16,6 +16,12 @@
 #ifndef LCD_UI_TASK_H
 #define LCD_UI_TASK_H
 
+// USB 'deltouch' deferred tap: after the overlay opens, the synthesized tap at
+// the center of the real Delete button runs on a LATER UI-task iteration
+// (~300ms) so the overlay is fully laid out/rendered first — same two-step
+// cadence as a finger. 0 = no tap pending.
+static unsigned long usb_deltouch_tap_due_ms = 0;
+
 static void ui_task(void *arg) {
   Serial.println("[UI] UI task started");
   
@@ -203,6 +209,26 @@ static void ui_task(void *arg) {
       provision_return_home_pending = false;
       Serial.println("[PROVISION] return_home -> show_main_menu");
       show_ship_main_menu();
+    }
+    if (usb_deltouch_tap_due_ms != 0 && millis() >= usb_deltouch_tap_due_ms) {
+      // USB 'deltouch' step 2: synthesize the tap at the CENTER of the real
+      // Delete button through the normal touch handler, so the derived
+      // hitboxes (lv_obj_get_coords) are exercised exactly like a finger.
+      usb_deltouch_tap_due_ms = 0;
+      if (ui_screen_state == SCREEN_SHOPPING_LIST && shopping_list_overlay_visible &&
+          shopping_list_overlay_delete_btn != NULL) {
+        lv_area_t btn_area;
+        lv_obj_get_coords(shopping_list_overlay_delete_btn, &btn_area);
+        int cx = (btn_area.x1 + btn_area.x2) / 2;
+        int cy = (btn_area.y1 + btn_area.y2) / 2;
+        Serial.printf("[USB] deltouch tap at center of Delete (%d,%d)\n", cx, cy);
+        shopping_list_handle_touch(cx, cy);
+        ui_lvgl_tick();
+        resetActivityTimer();
+      } else {
+        Serial.println("[USB] deltouch tap skipped (overlay gone)");
+      }
+      processed_anything = true;
     }
     if (ship_voice_ack_hide_at_ms) {
       if (ui_screen_state != SCREEN_VOICE_ACK) {
@@ -1038,6 +1064,27 @@ static void ui_task(void *arg) {
           ui_lvgl_tick();
           resetActivityTimer();
           Serial.printf("[USB] del %d -> %s\n", idx, del_id[0] ? del_id : "(no id)");
+        }
+        processed_anything = true;
+      } else if (evt.type == EVT_USB_DELTOUCH) {
+        // USB 'deltouch' — full touch-path delete. Open the overlay for the
+        // current selection (the same call the tap path makes), then schedule
+        // the synthesized tap at the center of the real Delete button for a
+        // later iteration (deferred check above), exercising the derived
+        // hitboxes end-to-end. Assertions key off the
+        // "[SHOPPING_LIST] overlay tap ... -> delete" classification log.
+        if (ui_screen_state != SCREEN_SHOPPING_LIST) {
+          Serial.println("[USB] deltouch ignored (not on shopping list screen)");
+        } else if (g_active.count == 0) {
+          Serial.println("[USB] deltouch ignored (empty list)");
+        } else {
+          if (!shopping_list_overlay_visible) {
+            shopping_list_show_overlay();
+          }
+          Serial.printf("[USB] deltouch -> overlay@%d\n", shopping_list_scroll_idx);
+          usb_deltouch_tap_due_ms = millis() + 300;
+          ui_lvgl_tick();
+          resetActivityTimer();
         }
         processed_anything = true;
       } else if (evt.type == EVT_USB_HOME) {

@@ -248,7 +248,8 @@ hard timeout. Behavior by gate:
 **UI_LIST buffer.** `uart_send_ui_list()` uses a heap `DynamicJsonDocument(8192)` (freed on scope
 exit) instead of `StaticJsonDocument<4096>` — 50 items x 64B id + 64B text could overflow 4KB and
 silently drop items. If items still don't fit, it logs `[UI_LIST] truncated dropped=N overflowed=...`
-instead of truncating silently.
+instead of truncating silently. The `huuid` field added to `shopping_list_item_t` is **not**
+serialized into UI_LIST (the LCD doesn't need it), so the 8192B doc capacity is unaffected.
 
 **Refresh latency instrumentation.** One-line millis() deltas across the path: `[LIST_REFRESH]
 dequeued queue_wait_ms=` (enqueue→op-worker dequeue), `[NET_DIAG] list_wifi_connect_ms=` (bounded
@@ -712,12 +713,28 @@ In production builds, all MQTT variables are stubbed:
 
 **`parse_and_update_shopping_list(const String& json)`** -- Parses JSON items:
 - Skips items with action="CHECKED"
-- Extracts product_name and id
+- Extracts product_name, id, and household_item_uuid (stored in `huuid[64]`, empty if missing)
 - Thread-safe via `g_list_mutex`
 - Records `list_last_fetch_ok_ms` on success (powers the cooldown served-cached path in `request_list_refresh()`)
 - Sends `UI_LIST` to LCD after update
 
-**`delete_item_from_api(const char* item_id)`** -- Removes item via POST with operation="remove".
+**`delete_item_from_api(const char* item_id)`** -- Removes item via POST with operation="remove",
+matching the iOS app's swipe-delete exactly:
+- Looks up the item's `household_item_uuid` by id in `g_shopping_list[]` (under `g_list_mutex`) and
+  sends `{"operation":"remove","ownerId":...,"device":TREPO_DEVICE_ID,"itemUUID":<huuid>}`. The
+  backend deletes by **itemUUID** (the household-wide key, propagates to ALL household members'
+  tables) — NOT the per-table row id.
+- If no huuid is cached (empty), falls back to the legacy `{"id":...}` body and logs a warning.
+- **On HTTP 200**: also removes the item from the RAM cache `g_shopping_list[]` (under mutex via
+  `remove_item_from_ram_list_locked()` — compacts array, fixes `g_list_count`/`g_selected_index`)
+  so a cached serve (`request_list_refresh()` cooldown path) can't resurrect the deleted item. No
+  `UI_LIST` push — the LCD already removed it locally. Logs `[DELETE] ok itemUUID=...`.
+- **On failure**: RAM list is left unchanged; sends `uart_send_ui_list()` so the LCD's optimistic
+  removal reconverges with reality (the LCD's `deleted_item_ids` RAM filter may still hide the item
+  this boot — acceptable, logged). Logs `[DELETE] fail code=...`.
+
+**`remove_item_from_ram_list_locked(int list_index)`** -- Compacting removal helper; caller must
+hold `g_list_mutex`.
 
 ---
 
