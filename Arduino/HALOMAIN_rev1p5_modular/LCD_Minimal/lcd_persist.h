@@ -9,6 +9,7 @@
  * Prerequisites (must be declared before #include "lcd_persist.h"):
  *   - Preferences.h, ArduinoJson.h, esp_sleep.h
  *   - app_state_t, MAX_LIST_ITEMS
+ *   - g_list_refresh_completed_once (empty-save guard)
  *   - HALO_WAKE_GPIO, HALO_BOARD_NAME
  *   - log_ext1_wakeup_status()
  */
@@ -35,6 +36,16 @@ static const char* PREF_KEY_FETCHED = "fetched_at";  // unix epoch at save time 
 static void save_list_to_storage(const app_state_t *s) {
   if (s == NULL) {
     Serial.println("✗ Cannot save list: app_state_t is NULL");
+    return;
+  }
+
+  // Cache-clobber guard: an empty g_active (boot race, transient empty
+  // UI_LIST, pre-sleep belt-and-braces save before any load) must not
+  // overwrite a good non-empty NVS cache — that produced "No items on your
+  // list" after the next deep sleep. An empty save IS allowed once a refresh
+  // genuinely completed this boot (the list may truly be empty).
+  if (s->count == 0 && !g_list_refresh_completed_once) {
+    Serial.println("[LIST_PERSIST] skip empty save (no completed refresh this boot)");
     return;
   }
 

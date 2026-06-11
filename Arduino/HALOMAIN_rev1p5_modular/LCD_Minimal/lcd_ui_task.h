@@ -1001,9 +1001,17 @@ static void ui_task(void *arg) {
         bool ring_active = (ui_screen_state == SCREEN_SHOPPING_LIST &&
                             shopping_list_refresh_ring != NULL &&
                             !lv_obj_has_flag(shopping_list_refresh_ring, LV_OBJ_FLAG_HIDDEN));
+        // dedupe_age_ms: ms since the last UI_LIST completion (capped at
+        // 99999, -1 if never) — makes the UI_LIST dedup window observable.
+        long dedupe_age_ms = -1;
+        if (lcd_last_ui_list_complete_ms > 0) {
+          unsigned long age = millis() - lcd_last_ui_list_complete_ms;
+          dedupe_age_ms = (age > 99999UL) ? 99999L : (long)age;
+        }
         Serial.printf("[LISTSTATE] {\"screen\":%d,\"refresh_state\":%d,\"pill\":%d,\"count\":%d,"
                       "\"cache_age_s\":%d,\"auto_retry\":%d,\"selected\":%d,"
-                      "\"latch\":%d,\"armed\":%d,\"scroll_y\":%d,\"pill_hiding\":%d}\n",
+                      "\"latch\":%d,\"armed\":%d,\"scroll_y\":%d,\"pill_hiding\":%d,"
+                      "\"dedupe_age_ms\":%ld}\n",
                       (int)ui_screen_state,
                       (int)refresh_state,
                       ring_active ? 1 : 0,
@@ -1014,7 +1022,8 @@ static void ui_task(void *arg) {
                       shopping_list_touch_pull_consumed ? 1 : 0,
                       shopping_list_touch_pull_armed ? 1 : 0,
                       shopping_list_scroll ? (int)lv_obj_get_scroll_y(shopping_list_scroll) : 0,
-                      shopping_list_ring_hiding ? 1 : 0);
+                      shopping_list_ring_hiding ? 1 : 0,
+                      dedupe_age_ms);
         processed_anything = true;
       } else if (evt.type == EVT_USB_DELETE) {
         // USB 'del N' — same path as the DELETE touch on the N-th visible item.

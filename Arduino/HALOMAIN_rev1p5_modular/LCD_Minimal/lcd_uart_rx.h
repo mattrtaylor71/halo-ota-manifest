@@ -899,10 +899,19 @@ static void uart_process_received_message(const char* json_str) {
 
   if (strcmp(type, "UI_LIST") == 0) {
     unsigned long now_ms = millis();
-    if (!lcd_refresh_inflight &&
+    // Dedup must NOT fire while the refresh SM is expecting a list. The Sense's
+    // cached-serve can answer a new refresh in ~100-300ms — BEFORE
+    // lcd_refresh_inflight is set for the new cycle — so checking
+    // lcd_refresh_inflight alone discards refresh N+1's answer as a duplicate
+    // of refresh N's, and the SM spins to its 12s hard timeout. The refresh SM
+    // state is the authoritative "we are expecting a list" signal.
+    bool refresh_expecting_list =
+        (refresh_state == REFRESH_WAKE_PENDING || refresh_state == REFRESH_INFLIGHT) ||
+        lcd_refresh_inflight || waiting_for_list_response;
+    if (!refresh_expecting_list &&
         lcd_last_ui_list_complete_ms > 0 &&
         (now_ms - lcd_last_ui_list_complete_ms) < LCD_UI_LIST_DEDUPE_MS) {
-      Serial.println("[UART] UI_LIST deduped (recent completion)");
+      Serial.println("[UART] UI_LIST deduped (recent completion, no refresh expecting)");
       return;
     }
     // Phase 0: UI_LIST (full list replacement)
