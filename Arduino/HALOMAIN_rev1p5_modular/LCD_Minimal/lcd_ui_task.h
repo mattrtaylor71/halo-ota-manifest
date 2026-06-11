@@ -256,9 +256,9 @@ static void ui_task(void *arg) {
       ship_update_ai_listening_countdown();
     }
     if (ui_screen_state == SCREEN_SHOPPING_LIST) {
-      // Poll the refresh SM state into the spinner pill. The WAKE_PENDING ->
-      // INFLIGHT transition happens on the UART task (Core 0), so the UI task
-      // picks it up here; no-op when the state hasn't changed.
+      // Poll the refresh SM state into the border refresh ring. The
+      // WAKE_PENDING -> INFLIGHT transition happens on the UART task (Core 0),
+      // so the UI task picks it up here; no-op when the state hasn't changed.
       shopping_list_refresh_indicator_sync(false);
     }
     if (ship_error_hide_at_ms && millis() >= ship_error_hide_at_ms) {
@@ -597,12 +597,13 @@ static void ui_task(void *arg) {
           stop_glowing_animation();
         }
         if (ui_screen_state == SCREEN_SHOPPING_LIST) {
-          // Revert to the existing list, then overwrite the title with the notice.
+          // Revert to the existing (cached) list, then flash the border ring
+          // in the error red + transient "Couldn't refresh" toast.
           shopping_list_screen_populate();
-          if (shopping_list_title_label) {
-            lv_label_set_text(shopping_list_title_label, "Couldn't refresh");
-          }
-          shopping_list_refresh_indicator_sync(true);  // hide the spinner pill
+          shopping_list_ring_show_error();
+          // The SM already cleared itself to IDLE — keep the sync cache
+          // coherent so the UI-task poll doesn't cut the error flash short.
+          shopping_list_refresh_ui_state = (int)refresh_state;
         }
         ui_lvgl_tick();
         processed_anything = true;
@@ -754,13 +755,13 @@ static void ui_task(void *arg) {
         if (ui_screen_state == SCREEN_SHOPPING_LIST) {
           uint32_t new_sig = shopping_list_content_sig(&g_active);
           if (new_sig == shopping_list_rendered_sig) {
-            shopping_list_refresh_indicator_sync(true);  // refresh done — hide the spinner pill
+            shopping_list_refresh_indicator_sync(true);  // refresh done — ring closes to full + fades (REFRESH_COMPLETE)
             ui_lvgl_tick();
             Serial.println("[UI] Shopping list unchanged — skipped re-render");
           } else {
             shopping_list_reveal_pending = true;  // staggered fade-in for the fresh rows
             shopping_list_screen_populate();
-            shopping_list_refresh_indicator_sync(true);  // refresh done — hide the spinner pill
+            shopping_list_refresh_indicator_sync(true);  // refresh done — ring closes to full + fades (REFRESH_COMPLETE)
             ui_lvgl_tick();
             Serial.println("[UI] Shopping list screen refreshed with new data");
           }
@@ -993,16 +994,19 @@ static void ui_task(void *arg) {
         processed_anything = true;
       } else if (evt.type == EVT_USB_LISTSTATE) {
         // USB 'liststate' — one machine-readable line for the e2e harness.
-        // Printed from the UI task so screen/pill/list state is coherent.
-        bool pill_visible = (ui_screen_state == SCREEN_SHOPPING_LIST &&
-                             shopping_list_refresh_pill != NULL &&
-                             !lv_obj_has_flag(shopping_list_refresh_pill, LV_OBJ_FLAG_HIDDEN));
+        // Printed from the UI task so screen/refresh/list state is coherent.
+        // The "pill"/"pill_hiding" field NAMES are kept for harness
+        // compatibility but now report the border refresh ring (ring active /
+        // ring fade-out in progress).
+        bool ring_active = (ui_screen_state == SCREEN_SHOPPING_LIST &&
+                            shopping_list_refresh_ring != NULL &&
+                            !lv_obj_has_flag(shopping_list_refresh_ring, LV_OBJ_FLAG_HIDDEN));
         Serial.printf("[LISTSTATE] {\"screen\":%d,\"refresh_state\":%d,\"pill\":%d,\"count\":%d,"
                       "\"cache_age_s\":%d,\"auto_retry\":%d,\"selected\":%d,"
                       "\"latch\":%d,\"armed\":%d,\"scroll_y\":%d,\"pill_hiding\":%d}\n",
                       (int)ui_screen_state,
                       (int)refresh_state,
-                      pill_visible ? 1 : 0,
+                      ring_active ? 1 : 0,
                       g_active.count,
                       list_cache_age_s(),
                       (int)s_list_auto_retry_count,
@@ -1010,7 +1014,7 @@ static void ui_task(void *arg) {
                       shopping_list_touch_pull_consumed ? 1 : 0,
                       shopping_list_touch_pull_armed ? 1 : 0,
                       shopping_list_scroll ? (int)lv_obj_get_scroll_y(shopping_list_scroll) : 0,
-                      shopping_list_pill_hiding ? 1 : 0);
+                      shopping_list_ring_hiding ? 1 : 0);
         processed_anything = true;
       } else if (evt.type == EVT_USB_DELETE) {
         // USB 'del N' — same path as the DELETE touch on the N-th visible item.
