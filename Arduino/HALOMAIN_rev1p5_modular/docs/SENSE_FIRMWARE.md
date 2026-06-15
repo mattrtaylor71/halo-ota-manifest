@@ -933,6 +933,23 @@ senders: `send_maint_keepalive()`, `keep_lcd_awake_during_maint_arm()`. The
 
 This fixes the case where an early wake (clock skew corrected by NTP) burned all followup retries and abandoned the scheduled OTA. The separate `ota_sched_in_window` outside-window branch (the `else`/no-`has_mw` schedule path) is independent and was not changed.
 
+### Awake-Path Schedule Fetch (Sustained-Activity Arm-Flake Fix)
+
+The schedule fetch (`ota_sched_http_fetch_window()`) historically ran **only** in `halo_prod_pre_sleep()`. A device kept continuously active (never reaching a clean idle-sleep) therefore never fetched a freshly-posted maintenance window before that window's `start_epoch` passed — and because the `/ota/schedule` GET is **future-only** (it returns 204 once `start_epoch` is in the past), the window could never be captured into NVS afterward. With no NVS window, the sleep-entry timer-arm (`sense_config_deep_sleep_wakeup` → `ota_configure_timer_wakeup`, in `sense_sleep.h`) had nothing to arm, and the device slept through the window.
+
+To fix this, `halo_prod_loop()` now performs a **throttled awake-path schedule fetch**, inserted immediately after `keep_lcd_awake_during_maint_arm()` / `sync_pending_maintenance_to_lcd("awake")` and before the OTA-intent / `maybeRunOtaCheck()` logic. The timer-arm itself was **not** changed — it still runs at sleep entry — so once the awake-path fetch populates the NVS window while the window is still future, the existing sleep-entry arm handles delivery.
+
+**Gates (all must hold to fetch):**
+- `awake_long_enough` — current wake has lasted `>= AWAKE_SCHED_MIN_AWAKE_MS` (20s), measured against `last_wake_ms` (so only sustained wakes, not brief tap-and-sleep cycles, pay the HTTPS cost).
+- `attempt_throttle_ok` — at least `AWAKE_SCHED_RETRY_MS` (30s) since the last awake-path attempt (per-`millis()` static `s_last_awake_sched_attempt_ms`, set on every attempt).
+- `fetch_overdue` — `truth_get_sched_fetch_age_s()` is `< 0` (never fetched) or `>= AWAKE_SCHED_AGE_S` (90s since last successful fetch); keeps the NVS window fresh without re-fetching every loop.
+- `ota_sched_http_configured() && wifi_is_connected() && is_time_valid()` — schedule endpoint usable and clock valid (the GET needs valid time).
+- `!sense_action_inflight() && !g_lcd_ota_task_running && !g_maintenance_mode` — don't contend with a live capture/upload, an in-progress LCD OTA proxy, or maintenance handling.
+
+On fire it stamps the throttle, computes `to_ms = min(OTA_SCHED_HTTP_TIMEOUT_MS, 5000)` (a tighter awake-path budget than the pre-sleep path), logs `[AWAKE_SCHED] fetch awake_ms=… fetch_age_s=…`, calls `ota_sched_http_fetch_window(to_ms)` (same call style as pre-sleep — no caller-side `http_inflight` pre-set), and if `maintenance_schedule_pending_sync_to_lcd()` then went true, immediately pushes the new window to the LCD via `sync_pending_maintenance_to_lcd("awake_sched_fetch")`.
+
+**Constants/statics (all function-local to `halo_prod_loop()`):** `s_last_awake_sched_attempt_ms`, `AWAKE_SCHED_MIN_AWAKE_MS = 20000`, `AWAKE_SCHED_RETRY_MS = 30000`, `AWAKE_SCHED_AGE_S = 90`.
+
 ---
 
 ## Cross-Module Dependencies

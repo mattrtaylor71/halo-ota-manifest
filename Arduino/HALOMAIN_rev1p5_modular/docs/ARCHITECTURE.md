@@ -523,6 +523,8 @@ The OTA schedule is managed via a cloud API:
 - **Response**: Maintenance window with `start_epoch`, `duration_sec`, `grace_before/after_sec`, `request_id`
 - **Report**: POST to `/ota/report` with result status
 
+The schedule is fetched on **two** paths: the original pre-sleep fetch (in `halo_prod_pre_sleep()`), and — to survive sustained activity — a **throttled awake-path fetch in `halo_prod_loop()`**. Because the schedule GET is **future-only** (it returns 204 once `start_epoch` has passed), a device kept continuously active never reached a clean idle-sleep and so never captured a freshly-posted window before its start passed → no NVS window → the sleep-entry timer-arm had nothing to arm → it slept through the window. The awake-path fetch refreshes the NVS window **while the window is still future** (gated: only after ~20s sustained awake, throttled to ~30s between attempts, re-fetching when the last fetch is >90s old, and only when WiFi+time are valid and no capture/LCD-OTA/maintenance is in flight). The sleep-entry arm (`sense_config_deep_sleep_wakeup`) is unchanged and still does the actual arming once the window is in NVS. See `docs/SENSE_FIRMWARE.md` → "Awake-Path Schedule Fetch".
+
 ### Window-Start Cancel-Safety (Schedule Re-Validation)
 
 A scheduled window is fetched and armed (RTC timer + NVS) hours before it fires. If the operator **disables or replaces** the schedule in the cloud after the device has armed it, the device would otherwise act on its stale cached copy. To prevent this, `run_maintenance_if_needed()` re-GETs `/ota/schedule` at window-start — after the in-window and idle checks pass, but **before** sending `OTA_LOCK` — via `ota_sched_revalidate()`.

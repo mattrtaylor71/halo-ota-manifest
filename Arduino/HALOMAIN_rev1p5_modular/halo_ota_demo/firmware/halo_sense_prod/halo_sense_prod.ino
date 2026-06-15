@@ -4994,6 +4994,38 @@ void halo_prod_loop() {
   keep_lcd_awake_during_maint_arm();
   sync_pending_maintenance_to_lcd("awake");
 
+  // --- Awake-path schedule fetch (arm-flake fix) ---------------------------
+  // The schedule fetch otherwise lives only in pre_sleep, so a continuously
+  // active device never picks up a freshly-posted window before its start_epoch
+  // passes (the schedule GET is future-only). Refresh while awake (only after
+  // we've been awake a while, throttled) so the NVS window is current; the
+  // existing sleep-entry arm (sense_config_deep_sleep_wakeup) then arms it.
+  {
+    static unsigned long s_last_awake_sched_attempt_ms = 0;
+    const unsigned long AWAKE_SCHED_MIN_AWAKE_MS = 20000UL;   // only sustained wakes
+    const unsigned long AWAKE_SCHED_RETRY_MS     = 30000UL;   // backstop between attempts
+    const int32_t       AWAKE_SCHED_AGE_S        = 90;        // refetch if last fetch >90s
+    unsigned long now_ms = millis();
+    bool awake_long_enough = (now_ms - last_wake_ms) >= AWAKE_SCHED_MIN_AWAKE_MS;
+    bool attempt_throttle_ok = (s_last_awake_sched_attempt_ms == 0) ||
+                               ((now_ms - s_last_awake_sched_attempt_ms) >= AWAKE_SCHED_RETRY_MS);
+    int32_t fetch_age = truth_get_sched_fetch_age_s();
+    bool fetch_overdue = (fetch_age < 0) || (fetch_age >= AWAKE_SCHED_AGE_S);
+    if (awake_long_enough && attempt_throttle_ok && fetch_overdue &&
+        ota_sched_http_configured() && wifi_is_connected() && is_time_valid() &&
+        !sense_action_inflight() && !g_lcd_ota_task_running && !g_maintenance_mode) {
+      s_last_awake_sched_attempt_ms = now_ms;
+      uint32_t to_ms = OTA_SCHED_HTTP_TIMEOUT_MS < 5000UL ? OTA_SCHED_HTTP_TIMEOUT_MS : 5000UL;
+      LOG_INFO("[AWAKE_SCHED] fetch awake_ms=%lu fetch_age_s=%ld",
+               (unsigned long)(now_ms - last_wake_ms), (long)fetch_age);
+      ota_sched_http_fetch_window(to_ms);
+      if (maintenance_schedule_pending_sync_to_lcd()) {
+        sync_pending_maintenance_to_lcd("awake_sched_fetch");
+      }
+    }
+  }
+  // ------------------------------------------------------------------------
+
   if (!g_ota_check_done && OtaIntent::shouldUpdateNow()) {
     MqttMetrics metrics = {};
     mqtt_get_metrics(&metrics);
