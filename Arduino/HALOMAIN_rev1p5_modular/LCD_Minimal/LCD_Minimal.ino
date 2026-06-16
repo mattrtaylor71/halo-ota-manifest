@@ -840,7 +840,8 @@ static const unsigned long REFRESH_PROOF_OF_LIFE_TIMEOUT_MS = 20000; // 20s — 
 static const unsigned long REFRESH_TOTAL_MAX_MS = 35000;        // 35s hard max
 static const unsigned long REFRESH_NO_UI_POL_TIMEOUT_MS = 25000; // 25s — no UI poll timeout
 static const unsigned long REFRESH_MAX_MS = 30000;  // 30s — Sense needs boot (~5s) + WiFi connect (~15s) + API call (~3s)
-static const unsigned long REFRESH_HARD_TIMEOUT_MS = 12000;    // 12s hard cap on a single inflight refresh (recover from stuck "Refreshing")
+static const unsigned long REFRESH_HARD_TIMEOUT_MS = 20000;    // 20s unified hard cap on a refresh (WAKE_PENDING+INFLIGHT) — recover from stuck "Refreshing" without killing legit slow-WiFi fetches
+static const unsigned long REFRESH_KEEPAWAKE_MAX_MS = 30000;    // 30s — keep the device awake while a refresh is in flight, capped from the refresh start
 static const unsigned long REFRESH_FAILED_SHOW_MS = 2000;
 static const unsigned long REFRESH_COMPLETE_SHOW_MS = 500;
 static const unsigned long REFRESH_PULSE_COOLDOWN_MS = 1500;
@@ -4860,7 +4861,12 @@ void loop() {
     // Re-send the CURRENT desired state every ~3s (robust to a dropped UART message;
     // the Sense also auto-clears after ~30s as a backstop).
     if (last_list_active_tx_ms == 0 || (now_la - last_list_active_tx_ms) >= 3000) {
-      uart_send_list_active(idle_age < INACTIVITY_TIMEOUT_MS);
+      // Also keep the Sense awake while a refresh is in flight so it doesn't
+      // sleep mid-fetch (the user may be idle while the list refreshes).
+      bool keep = (idle_age < INACTIVITY_TIMEOUT_MS) ||
+                  refresh_state == REFRESH_WAKE_PENDING ||
+                  refresh_state == REFRESH_INFLIGHT;
+      uart_send_list_active(keep);
       last_list_active_tx_ms = now_la;
     }
   }
@@ -4906,6 +4912,17 @@ void loop() {
   // Refresh state machine: proof-of-life, pulses, timeout
   if (!g_in_light_sleep && refresh_state == REFRESH_WAKE_PENDING) {
     unsigned long now = millis();
+    // Unified 20s hard watchdog: a stuck WAKE_PENDING (Sense never woke) is
+    // cleared to IDLE just like a stuck INFLIGHT, so ANY non-IDLE refresh
+    // resolves by REFRESH_HARD_TIMEOUT_MS and the 10s idle-sleep can engage.
+    if (ui_screen_state == SCREEN_SHOPPING_LIST &&
+        refresh_wake_pending_start_ms > 0 &&
+        (now - refresh_wake_pending_start_ms) > REFRESH_HARD_TIMEOUT_MS) {
+      refresh_timeout_count++;
+      refresh_hard_timeout_clear("wake_pending_hard_timeout");
+      example_lvgl_unlock();
+      return;
+    }
     if (refresh_wake_pending_start_ms > 0 &&
         (now - refresh_wake_pending_start_ms) > REFRESH_MAX_MS) {
       Serial.println("[REFRESH_SM] max_ms exceeded in WAKE_PENDING -> soft_fail");

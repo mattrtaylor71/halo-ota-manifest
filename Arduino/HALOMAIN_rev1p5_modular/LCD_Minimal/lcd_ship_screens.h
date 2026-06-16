@@ -1400,6 +1400,16 @@ static const int SHOPPING_LIST_PULL_HINT_PX = 12;       // pull distance at whic
 
 static bool shopping_list_reveal_pending = false;  // staggered fade-in on next populate (fresh UI_LIST)
 
+// Re-arm the touch pull-to-refresh latch. shopping_list_screen_populate()
+// already does this after lv_obj_clean(), but a refresh that RESOLVES without
+// repopulating (hard-timeout, or an unchanged list that skips the rebuild)
+// must still re-arm so the next pull-to-refresh gesture can fire. LVGL-safe:
+// call only from the UI task / LVGL-locked context.
+static inline void shopping_list_reset_pull_latch() {
+  shopping_list_touch_pull_consumed = false;
+  shopping_list_touch_pull_armed = false;
+}
+
 // Forward declarations
 static void show_shopping_list_screen();
 static void shopping_list_screen_populate();

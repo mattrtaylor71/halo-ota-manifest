@@ -101,6 +101,20 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
     if (reason_out) *reason_out = "processing";
     return false;
   }
+  // Keep the device awake while a shopping-list refresh is in flight so it
+  // can complete (otherwise the 10s idle-sleep fires ~10s into a fetch that
+  // takes longer on slow WiFi). Capped at REFRESH_KEEPAWAKE_MAX_MS from the
+  // refresh start so a wedged refresh can't pin the device awake forever.
+  if (refresh_state == REFRESH_WAKE_PENDING || refresh_state == REFRESH_INFLIGHT) {
+    unsigned long refresh_start_ms = refresh_wake_pending_start_ms != 0
+                                         ? refresh_wake_pending_start_ms
+                                         : lcd_refresh_start_ms;
+    if (refresh_start_ms == 0 ||
+        (now_ms - refresh_start_ms) <= REFRESH_KEEPAWAKE_MAX_MS) {
+      if (reason_out) *reason_out = "refresh_inflight";
+      return false;
+    }
+  }
   if (wifi_phase == WIFI_PHASE_CONNECTING || wifi_on_pending || lcd_wifi_connecting()) {
     if (reason_out) *reason_out = "wifi_connecting";
     return false;

@@ -622,6 +622,10 @@ static void ui_task(void *arg) {
         if (is_glowing_animation) {
           stop_glowing_animation();
         }
+        // Refresh RESOLVED (timed out). Re-arm the pull latch even if we don't
+        // repopulate below — a timed-out refresh that never populates must not
+        // leave the latch consumed, or the next pull-to-refresh won't fire.
+        shopping_list_reset_pull_latch();
         if (ui_screen_state == SCREEN_SHOPPING_LIST) {
           // Revert to the existing (cached) list, then flash the border ring
           // in the error red + transient "Couldn't refresh" toast.
@@ -779,6 +783,10 @@ static void ui_task(void *arg) {
         // identical list (the common case) skips the rebuild entirely: no
         // staggered reveal, no flicker, selection/scroll untouched.
         if (ui_screen_state == SCREEN_SHOPPING_LIST) {
+          // Refresh RESOLVED (list landed). Re-arm the pull latch covering BOTH
+          // branches below — the unchanged-list branch skips the populate (and
+          // thus its built-in latch reset), so do it here unconditionally.
+          shopping_list_reset_pull_latch();
           uint32_t new_sig = shopping_list_content_sig(&g_active);
           if (new_sig == shopping_list_rendered_sig) {
             shopping_list_refresh_indicator_sync(true);  // refresh done — ring closes to full + fades (REFRESH_COMPLETE)
