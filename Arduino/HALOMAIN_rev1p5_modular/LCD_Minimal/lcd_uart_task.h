@@ -217,6 +217,18 @@ static void uart_task(void *arg) {
             } else if (strcmp(usb_buf, "ota") == 0) {
               Serial.println("[USB_CMD] shortcut 'ota' -> INPUT_OTA_CHECK");
               uart_send_input_message("INPUT_OTA_CHECK");
+            } else if (strcmp(usb_buf, "fwinfo") == 0) {
+              // Print the cached Sense fw, then fire a FAST version request.
+              // INPUT_SENSE_FW is the same fast type the Settings screen now
+              // uses; Sense replies with a FW_INFO message, so the round-trip
+              // is observable via the "[UART] FW_INFO received sense_fw=...
+              // age_ms=..." log in lcd_uart_rx.h. We send via
+              // uart_send_input_message (mirroring the 'ota' command) rather
+              // than ship_menu_request_fw_info() to avoid touching the
+              // Settings-screen retry/UI state from the UART task context.
+              Serial.printf("[USB_CMD] fwinfo cached_sense_fw=%s\n", g_sense_fw_version);
+              Serial.println("[USB_CMD] shortcut 'fwinfo' -> INPUT_SENSE_FW");
+              uart_send_input_message("INPUT_SENSE_FW");
             } else if (strcmp(usb_buf, "list") == 0) {
               // Emulate tapping List on the second menu. LVGL/screen work MUST run
               // on the UI task (Core 1), so post an event — never call LVGL here.
@@ -447,6 +459,7 @@ static void uart_task(void *arg) {
             } else if (strcmp(usb_buf, "help") == 0) {
               Serial.println("[USB_CMD] Available commands:");
               Serial.println("  ota   - trigger OTA check");
+              Serial.println("  fwinfo - print cached Sense fw + fast version request (INPUT_SENSE_FW)");
               Serial.println("  wake  - send INPUT_WAKE");
               Serial.println("  sleep - send INPUT_SLEEP");
               Serial.println("  ping  - send INPUT_PING");

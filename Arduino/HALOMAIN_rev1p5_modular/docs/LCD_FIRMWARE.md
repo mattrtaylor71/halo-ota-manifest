@@ -152,7 +152,7 @@ The LCD uses GPIO39 (INT_PIN) to wake the Sense board. Pin mode tracking (`lcd_w
 
 Messages are queued via `uart_tx_queue` (FreeRTOS queue of `tx_msg_t`) from ISR context (knob callbacks) or UI task. The `uart_task` drains the queue.
 
-**Deferred TX:** Messages requiring awake proof (INPUT_MENU_SELECT, INPUT_FW_INFO) are held in `deferred_awake_tx_msg` until `sense_ready_for_control_tx()` returns true. The deferred service pings Sense periodically to wake it.
+**Deferred TX:** Messages requiring awake proof (INPUT_MENU_SELECT, INPUT_FW_INFO, INPUT_SENSE_FW) are held in `deferred_awake_tx_msg` until `sense_ready_for_control_tx()` returns true. The deferred service pings Sense periodically to wake it. The Settings version request now uses INPUT_SENSE_FW (the fast type), so `tx_msg_requires_awake_proof()` and `input_requires_sense()` recognize both INPUT_FW_INFO and INPUT_SENSE_FW.
 
 #### Important Flag
 
@@ -433,8 +433,8 @@ Logs caller file/line for every screen transition for debugging.
 | `ship_menu_begin_local_scan_request(menu_item)` | Sets up local UI state for SCAN operation before Sense confirms |
 | `ship_cancel_local_scan_request(reason, message)` | Cancels a pending scan if rejected by toast |
 | `ui_apply_ship_meal_result(doc)` | Processes nutrition result (calories, protein, carbs, fat, recommendation) |
-| `ship_menu_request_fw_info()` | Sends INPUT_FW_INFO to get Sense firmware version |
-| `ship_menu_service_fw_info_request(now_ms)` | Retries fw info requests with backoff |
+| `ship_menu_request_fw_info()` | Sends **INPUT_SENSE_FW** (the FAST request) to get the Sense firmware version for the Settings version line. Sense answers immediately with its cached sense_fw + lcd_fw and replies via the same `FW_INFO` message type (so the FW_INFO RX handler is unchanged). INPUT_FW_INFO remains the slow path (Sense runs a blocking LCD-OTA query first) reserved for diagnostics needing live lcd_fw/running_state. |
+| `ship_menu_service_fw_info_request(now_ms)` | Retries the fw-info request (also INPUT_SENSE_FW) with backoff; the deferred-awake bookkeeping keys on `deferred_awake_tx_msg.type == "INPUT_SENSE_FW"`. |
 | `ship_menu_send_manual_ota(reason)` | Sends INPUT_OTA_CHECK, sets manual override, shows status |
 | `ship_menu_handle_ui_status(doc)` | Parses UI_STATUS from Sense, updates g_ship_ui_* globals, posts EVT_SHIP_UI_STATUS |
 
@@ -682,7 +682,7 @@ Clears all OTA/maintenance flags, sets `provision_return_home_pending = true` so
 | `UI_TOAST` | Posts `EVT_SHIP_UI_TOAST` to event queue |
 | `UI_VOICE_RESPONSE` | Stores JSON text, posts `EVT_SHIP_VOICE_JSON` to event queue |
 | `UI_LIST` | Full list replacement into `g_pending` (deleted-item filtering, optimistic voice-item preservation), posts `EVT_LIST_REPLACED`. **Dedup gate**: a UI_LIST arriving within `LCD_UI_LIST_DEDUPE_MS` (1000ms) of the last completion is dropped **only when no refresh is expecting a list** — `refresh_expecting_list = (refresh_state == REFRESH_WAKE_PENDING \|\| refresh_state == REFRESH_INFLIGHT) \|\| lcd_refresh_inflight \|\| waiting_for_list_response`. The SM state is checked because the Sense's cached-serve can answer a new refresh in ~100-300ms — before `lcd_refresh_inflight` is set for the new cycle — so an `lcd_refresh_inflight`-only gate discarded refresh N+1's answer as a duplicate of refresh N's and the SM spun to its 12s hard timeout. Logs `[UART] UI_LIST deduped (recent completion, no refresh expecting)` on drop. Completes the refresh SM from WAKE_PENDING or INFLIGHT, sets `g_list_refresh_completed_once`, stamps `lcd_last_ui_list_complete_ms` |
-| `FW_INFO` | Stores Sense firmware version, updates settings screen label |
+| `FW_INFO` | Stores Sense firmware version (`g_sense_fw_version`), updates settings screen label. Sent by Sense in reply to either INPUT_FW_INFO (slow) or INPUT_SENSE_FW (fast) — the handler is identical for both. |
 | `RELEASE_WAKE` | Releases INT_PIN wake line on Sense request |
 | `SYNC` / `SYNC_ACK` | Link synchronization protocol |
 | `MAINT_WINDOW` | Maintenance window management -- arms timer, enters headless mode, or clears state. Parses the Sense's `now_epoch` and calls `lcd_set_clock_from_sense()` (sets the LCD wall clock via `settimeofday()`) BEFORE arming/persisting, so the absolute-window self-wake + window-current logic has a valid clock. See "LCD clock + absolute-window self-wake" below |
@@ -828,6 +828,7 @@ for (;;) {
 |---------|--------|
 | `fw` / `ver` | Print `[FW] {json}` line (lcd_fw, running_part, running_state, boot_part, next_part) via `lcd_build_fw_status_json()`, then legacy human-readable `[FW]` lines. Case-insensitive. |
 | `ota` | Send INPUT_OTA_CHECK |
+| `fwinfo` | Print `[USB_CMD] fwinfo cached_sense_fw=<g_sense_fw_version>`, then send `INPUT_SENSE_FW` (the FAST version request — Sense answers immediately with cached sense_fw + lcd_fw, replying via the existing `FW_INFO` message type). Sent via `uart_send_input_message("INPUT_SENSE_FW")` (mirrors the `ota` command) rather than `ship_menu_request_fw_info()` so it doesn't touch the Settings-screen retry/UI state from the UART task. Round-trip is observable via the `[UART] FW_INFO received sense_fw=... age_ms=...` log in lcd_uart_rx.h. |
 | `list` | Emulate tapping List on the second menu. Sends INPUT_WAKE, posts `EVT_USB_ENTER_LIST` so the UI task runs `show_shopping_list_screen()` (entry renders the cached list + auto-triggers the `entry_revalidate` refresh). Prints `[USB] list`. |
 | `refresh` | Emulate the pull-to-refresh gesture (touch pull-down or 3 CCW ticks at top). Posts `EVT_USB_REFRESH`; UI task calls `shopping_list_trigger_refresh("usb_refresh")` (only on the list screen; no-op if a refresh is already pending/inflight). Prints `[USB] refresh`. |
 | `pull` | Same path as `refresh` but with reason `usb_pull` (posts `EVT_USB_PULL`) — lets the e2e harness distinguish injected pulls in the logs. Prints `[USB] pull`. |

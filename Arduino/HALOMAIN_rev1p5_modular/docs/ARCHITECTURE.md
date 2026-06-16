@@ -133,6 +133,8 @@ Maximum line length: 4096 bytes (allows rich voice response payloads).
 | `INPUT_LONG_PRESS_END` | Long press released (stop voice recording) |
 | `INPUT_EXPIRY` | Expiry date response for check-in flow |
 | `INPUT_DISCARD_CHOICE` | User chose discard options (add to shopping list?) |
+| `INPUT_FW_INFO` | Request `FW_INFO` via the **BLOCKING diagnostic path**: Sense runs a fresh `sense_lcd_ota_query()` (up to 7000ms × 5) so the reply carries the REAL running LCD fw + partition/state. Used by automation/diagnostics that need fresh `lcd_fw` |
+| `INPUT_SENSE_FW` | Request `FW_INFO` via the **FAST path**: Sense replies IMMEDIATELY with live `sense_fw` + CACHED `lcd_fw` (`g_lcd_ota_version`), with NO blocking LCD query. Used by the LCD Settings screen to display the Sense version instantly. The Settings handler reads only `sense_fw` (it ignores `lcd_fw`), so the multi-second diagnostic query is wasted there — hence this fast path |
 | `LINK_HB` | Heartbeat (sent every 4s, confirms LCD is alive) |
 | `SYNC` | Request link synchronization |
 | `PONG` | Response to PING |
@@ -166,7 +168,7 @@ Maximum line length: 4096 bytes (allows rich voice response payloads).
 | `MAINT_WINDOW` | Maintenance window schedule from cloud API. Fields: `remaining_s`, `wake_in_s`, `start_epoch`, `duration_sec`, `grace_before_sec`, `grace_after_sec`, `request_id`, `clear`, and `now_epoch` (Sense wall clock, present only when the Sense clock is valid — LCD uses it to set its own clock) |
 | `MAINT_KEEPALIVE` | Arm-time keep-awake (race fix). Sent throughout the post-wake WiFi+NTP+schedule-fetch phase (bounded ~25s after wake, gated by `!g_ota_check_done` or pending-unacked) so the tapped LCD doesn't idle-sleep before the real `MAINT_WINDOW` (with `now_epoch`) can be delivered. Carries only `request_id`; LCD just resets its activity timer + nudges stay-awake |
 | `PROVISION_QR` | QR code data for provisioning display |
-| `FW_INFO` | Real running firmware of BOTH boards + LCD partition/state: `sense_fw`, `lcd_fw` (freshly queried, not cached manifest), `lcd_running_part`, `lcd_running_state`, `lcd_boot_part`, `lcd_fw_age_s`. `lcd_fw="unknown"` if the fresh LCD query fails |
+| `FW_INFO` | Firmware versions reply to `INPUT_FW_INFO` or `INPUT_SENSE_FW`. **Diagnostic reply (INPUT_FW_INFO):** real running firmware of BOTH boards + LCD partition/state: `sense_fw`, `lcd_fw` (freshly queried, not cached manifest), `lcd_running_part`, `lcd_running_state`, `lcd_boot_part`, `lcd_fw_age_s`; `lcd_fw="unknown"` if the fresh LCD query fails. **Fast reply (INPUT_SENSE_FW):** `sense_fw` (live) + `lcd_fw` (CACHED `g_lcd_ota_version`, or `"unknown"`); partition/state fields omitted, no blocking query |
 
 ### COBS Binary Protocol (OTA Only)
 

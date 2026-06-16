@@ -182,7 +182,8 @@ static void uart_send_input_message(const char* type, int delta = 0, const char*
            strcmp(msg_type, "INPUT_MENU_SELECT") == 0 ||
            strcmp(msg_type, "INPUT_RETRY") == 0 ||
            strcmp(msg_type, "INPUT_RESET_WIFI") == 0 ||
-           strcmp(msg_type, "INPUT_FW_INFO") == 0;
+           strcmp(msg_type, "INPUT_FW_INFO") == 0 ||
+           strcmp(msg_type, "INPUT_SENSE_FW") == 0;
   };
   if (input_requires_sense(type)) {
     request_sense_wake(type);
@@ -342,7 +343,8 @@ static bool tx_msg_requires_awake_proof(const tx_msg_t* tx_msg) {
   if (strcmp(tx_msg->type, "INPUT_MENU_SELECT") == 0) {
     return true;
   }
-  return strcmp(tx_msg->type, "INPUT_FW_INFO") == 0;
+  return strcmp(tx_msg->type, "INPUT_FW_INFO") == 0 ||
+         strcmp(tx_msg->type, "INPUT_SENSE_FW") == 0;
 }
 
 static void tx_msg_send_now(const tx_msg_t* tx_msg) {

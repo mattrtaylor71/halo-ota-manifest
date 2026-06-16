@@ -272,7 +272,12 @@ static void ship_menu_request_fw_info() {
                 link_synced ? 1 : 0,
                 sense_recently_heard(1500) ? 1 : 0);
   tx_msg_t tx_msg = {};
-  strncpy(tx_msg.type, "INPUT_FW_INFO", sizeof(tx_msg.type) - 1);
+  // Fast version request: Sense answers INPUT_SENSE_FW immediately with its
+  // cached sense_fw + lcd_fw (replies with the same FW_INFO message type, so
+  // the existing FW_INFO RX handler needs no change). INPUT_FW_INFO is the
+  // slow path (Sense does a blocking LCD-OTA query first) and is reserved for
+  // diagnostics that need the live lcd_fw/running_state.
+  strncpy(tx_msg.type, "INPUT_SENSE_FW", sizeof(tx_msg.type) - 1);
   if (uart_tx_queue != NULL) {
     xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
   }
@@ -281,7 +286,7 @@ static void ship_menu_request_fw_info() {
 static void ship_menu_service_fw_info_request(unsigned long now_ms) {
   if (ui_screen_state != SCREEN_SETTINGS) {
     if (deferred_awake_tx_valid &&
-        strcmp(deferred_awake_tx_msg.type, "INPUT_FW_INFO") == 0) {
+        strcmp(deferred_awake_tx_msg.type, "INPUT_SENSE_FW") == 0) {
       deferred_awake_tx_valid = false;
       deferred_awake_tx_last_ping_ms = 0;
     }
@@ -303,13 +308,13 @@ static void ship_menu_service_fw_info_request(unsigned long now_ms) {
     return;
   }
   if (deferred_awake_tx_valid &&
-      strcmp(deferred_awake_tx_msg.type, "INPUT_FW_INFO") == 0) {
+      strcmp(deferred_awake_tx_msg.type, "INPUT_SENSE_FW") == 0) {
     deferred_awake_tx_last_ping_ms = 0;
     user_activity_bump("fw_info_retry");
     deferred_awake_tx_service();
   } else {
     tx_msg_t tx_msg = {};
-    strncpy(tx_msg.type, "INPUT_FW_INFO", sizeof(tx_msg.type) - 1);
+    strncpy(tx_msg.type, "INPUT_SENSE_FW", sizeof(tx_msg.type) - 1);
     if (uart_tx_queue != NULL) {
       user_activity_bump("fw_info_retry");
       xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
@@ -324,7 +329,7 @@ static void ship_menu_service_fw_info_request(unsigned long now_ms) {
                 link_synced ? 1 : 0,
                 sense_recently_heard(1500) ? 1 : 0,
                 (deferred_awake_tx_valid &&
-                 strcmp(deferred_awake_tx_msg.type, "INPUT_FW_INFO") == 0) ? 1 : 0);
+                 strcmp(deferred_awake_tx_msg.type, "INPUT_SENSE_FW") == 0) ? 1 : 0);
 }
 
 static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {

@@ -156,7 +156,8 @@ Central UART message dispatcher. Parses JSON, validates protocol fields, routes 
 | `LIST_ACTIVE` | `state=1`: user on the list screen → set `g_list_screen_active` (keep awake + WiFi up), extend grace, ensure WiFi **on the rising edge only**; `state=0`: clear it (allow sleep). 30s staleness auto-clear watchdog in `loop()` |
 | `INPUT_PING` | Reply with PONG, update heartbeat timestamp |
 | `INPUT_RESET_WIFI` | Flag WiFi credential reset |
-| `INPUT_FW_INFO` | Trigger fresh LCD query, then reply with `FW_INFO` carrying BOTH board versions + LCD partition/state |
+| `INPUT_FW_INFO` | Trigger fresh LCD query (BLOCKING), then reply with `FW_INFO` carrying BOTH board versions + LCD partition/state. Diagnostic/automation path |
+| `INPUT_SENSE_FW` | **Fast path** for the LCD Settings screen: reply IMMEDIATELY with `FW_INFO` carrying live `sense_fw` + CACHED `lcd_fw` (`g_lcd_ota_version`, or `"unknown"`). Calls `uart_send_fw_info(false)` — NO blocking `sense_lcd_ota_query()`. Settings only reads `sense_fw` |
 | `INPUT_OTA_CHECK` | Trigger manual OTA check |
 | `INPUT_WIFI_SCAN` | Scan and report visible APs |
 | `INPUT_WIFI_TEST` | Full WiFi cold-start diagnostic |
@@ -818,7 +819,9 @@ During binary streaming, `g_lcd_ota_proxy_owns_uart = true` prevents the main lo
 
 **Stale-RX flush (hardening):** Inside the per-attempt loop, immediately after clearing the mailbox (`g_lcd_ota_query_resp_ready = false`) and before sending the query JSON, the function drains the hardware FIFO (`while (lcdSerial.available() > 0) lcdSerial.read();`) and resets the RX ring / partial-frame state (`uart_reset_rx_state()`). During the Sense's HTTPS-blocking self-OTA window the main-loop UART drain is starved, so a backlog/overflow can accumulate on `lcdSerial` and desync parsing of the fresh `LCD_OTA_QUERY_RESP` (the no-response failure mode). Ordering is mailbox-clear → raw-flush → send fresh query, so an already-parsed response cannot be dropped.
 
-**`uart_send_fw_info()`** -- Triggers a FRESH `sense_lcd_ota_query()` round-trip, then emits a `FW_INFO` JSON reporting the REAL running firmware of BOTH boards plus LCD partition/state. Fields:
+**`uart_send_fw_info(bool do_lcd_query = true)`** -- Emits a `FW_INFO` JSON reporting the Sense firmware version plus the LCD firmware. The `do_lcd_query` parameter selects between two paths:
+
+**`do_lcd_query = true` (default; INPUT_FW_INFO / diagnostic path):** Triggers a FRESH `sense_lcd_ota_query()` round-trip (BLOCKING — up to 7000ms × 5 attempts), then reports the REAL running firmware of BOTH boards plus LCD partition/state. Fields:
 - `sense_fw` -- live running Sense version (`kFirmwareVersion`)
 - `lcd_fw` -- freshly queried LCD running version (NOT the cached OTA manifest value); `"unknown"` if the query fails/times out
 - `lcd_running_part` -- LCD running partition label (omitted on query failure)
@@ -826,7 +829,15 @@ During binary streaming, `g_lcd_ota_proxy_owns_uart = true` prevents the main lo
 - `lcd_boot_part` -- LCD boot partition label (omitted on query failure)
 - `lcd_fw_age_s` -- seconds since the query completed (omitted on query failure)
 
-Observability only; does not affect OTA control flow. A failed/timed-out query does not block: `sense_fw` is always emitted.
+A failed/timed-out query does not block: `sense_fw` is always emitted. This is the behavior automation depends on (fresh `lcd_fw` / `running_state`).
+
+**`do_lcd_query = false` (INPUT_SENSE_FW / fast Settings path):** Skips `sense_lcd_ota_query()` entirely and replies IMMEDIATELY. Fields:
+- `sense_fw` -- live running Sense version (`kFirmwareVersion`), known instantly
+- `lcd_fw` -- CACHED LCD version (`g_lcd_ota_version`, populated by the pre_sleep LCD query); `"unknown"` if the cache is empty
+
+The partition/state fields are omitted. The LCD Settings screen uses this path because it only reads `sense_fw` and must not be held hostage for seconds by the blocking LCD query.
+
+Observability only; does not affect OTA control flow.
 
 **`sense_lcd_ota_fetch_manifest()`** -- Fetch and parse LCD manifest JSON from S3.
 

@@ -960,15 +960,32 @@ static const char* get_sense_fw_version() {
 #endif
 }
 
-static void uart_send_fw_info() {
-  // Trigger a FRESH LCD query round-trip so FW_INFO reports the REAL running
-  // LCD firmware + partition/state (not the cached OTA manifest value).
+static void uart_send_fw_info(bool do_lcd_query = true) {
+  // FW_INFO carries the Sense fw version (known instantly) and the LCD fw.
+  //
+  // do_lcd_query == true  (INPUT_FW_INFO / diagnostic path, UNCHANGED):
+  //   Trigger a FRESH LCD query round-trip so FW_INFO reports the REAL running
+  //   LCD firmware + partition/state (not the cached OTA manifest value).
+  //   This BLOCKS for up to several seconds. Automation depends on the fresh
+  //   lcd_fw / running_state, so this behavior must not change.
+  //
+  // do_lcd_query == false (INPUT_SENSE_FW / fast Settings path):
+  //   Skip the blocking sense_lcd_ota_query() entirely. Report sense_fw
+  //   immediately and fill lcd_fw from the cached LCD version
+  //   (g_lcd_ota_version, populated by the pre_sleep LCD query), or "unknown"
+  //   if the cache is empty. Used by the LCD Settings screen, which only reads
+  //   sense_fw and must not be held hostage for seconds.
   // Observability only — does not affect OTA control flow.
   char     lcd_fw_buf[32] = {0};
   uint32_t lcd_part_size  = 0;
-  unsigned long query_start_ms = millis();
-  bool lcd_ok = sense_lcd_ota_query(lcd_fw_buf, sizeof(lcd_fw_buf), &lcd_part_size);
-  unsigned long lcd_fw_age_s = (millis() - query_start_ms) / 1000UL;
+  bool          lcd_ok        = false;
+  unsigned long lcd_fw_age_s  = 0;
+
+  if (do_lcd_query) {
+    unsigned long query_start_ms = millis();
+    lcd_ok = sense_lcd_ota_query(lcd_fw_buf, sizeof(lcd_fw_buf), &lcd_part_size);
+    lcd_fw_age_s = (millis() - query_start_ms) / 1000UL;
+  }
 
   StaticJsonDocument<320> doc;
   doc["ver"] = PROTOCOL_VERSION;
@@ -976,24 +993,34 @@ static void uart_send_fw_info() {
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   doc["sense_fw"] = get_sense_fw_version();
-  if (lcd_ok && lcd_fw_buf[0] != '\0') {
-    doc["lcd_fw"]            = lcd_fw_buf;
-    doc["lcd_running_part"]  = sense_lcd_last_running_part();
-    doc["lcd_running_state"] = sense_lcd_last_running_state();
-    doc["lcd_boot_part"]     = sense_lcd_last_boot_part();
-    doc["lcd_fw_age_s"]      = (uint32_t)lcd_fw_age_s;
+  if (do_lcd_query) {
+    if (lcd_ok && lcd_fw_buf[0] != '\0') {
+      doc["lcd_fw"]            = lcd_fw_buf;
+      doc["lcd_running_part"]  = sense_lcd_last_running_part();
+      doc["lcd_running_state"] = sense_lcd_last_running_state();
+      doc["lcd_boot_part"]     = sense_lcd_last_boot_part();
+      doc["lcd_fw_age_s"]      = (uint32_t)lcd_fw_age_s;
+    } else {
+      // Fresh query failed/timed out — still emit sense_fw, mark LCD unknown.
+      doc["lcd_fw"] = "unknown";
+    }
   } else {
-    // Fresh query failed/timed out — still emit sense_fw, mark LCD unknown.
-    doc["lcd_fw"] = "unknown";
+    // Fast path: no query. Use the cached LCD version (from pre_sleep query).
+    doc["lcd_fw"] = (g_lcd_ota_version[0] != '\0') ? g_lcd_ota_version : "unknown";
   }
 
   String output;
   serializeJson(doc, output);
   uart_send_json(output.c_str());
-  Serial.printf("[UART_TX] FW_INFO sent (lcd_ok=%d lcd_fw=%s state=%s)\n",
-                lcd_ok ? 1 : 0,
-                lcd_ok ? lcd_fw_buf : "unknown",
-                lcd_ok ? sense_lcd_last_running_state() : "-");
+  if (do_lcd_query) {
+    Serial.printf("[UART_TX] FW_INFO sent (lcd_ok=%d lcd_fw=%s state=%s)\n",
+                  lcd_ok ? 1 : 0,
+                  lcd_ok ? lcd_fw_buf : "unknown",
+                  lcd_ok ? sense_lcd_last_running_state() : "-");
+  } else {
+    Serial.printf("[UART_TX] FW_INFO sent (fast, cached lcd_fw=%s)\n",
+                  (g_lcd_ota_version[0] != '\0') ? g_lcd_ota_version : "unknown");
+  }
 }
 
 static void uart_send_ui_status_extended(const char* op, const char* phase, const char* text, const char* mode = NULL, uint32_t job_id = 0, const char* ui_policy = NULL, const char* screen_hint = NULL) {
@@ -2225,6 +2252,15 @@ static bool parse_input_message(const char* json_str) {
                   wifi_connect_inflight ? 1 : 0,
                   foreground_active ? 1 : 0);
     uart_send_fw_info();
+  } else if (strcmp(type, "INPUT_SENSE_FW") == 0) {
+    // Fast path for the LCD Settings screen: it only needs the Sense fw version
+    // (known instantly) and ignores lcd_fw. Reply IMMEDIATELY with the cached
+    // LCD version — do NOT run the blocking sense_lcd_ota_query() that
+    // INPUT_FW_INFO uses (which can stall for several seconds).
+    const char* cached_lcd_fw = (g_lcd_ota_version[0] != '\0') ? g_lcd_ota_version : "unknown";
+    Serial.printf("[UART] INPUT_SENSE_FW received - fast FW_INFO (cached lcd_fw=%s)\n",
+                  cached_lcd_fw);
+    uart_send_fw_info(false);
   } else if (strcmp(type, "INPUT_OTA_CHECK") == 0) {
     const char* reason = doc["reason"] | "manual";
     Serial.printf("[UART] INPUT_OTA_CHECK received reason=%s\n", reason);
