@@ -244,6 +244,13 @@ hard timeout. Behavior by gate:
   (20s, same constant as the loop() watchdog), the flag is cleared in place and the new request is
   accepted (`stuck inflight ... -> self-heal`), so a wedged flag can't break refresh until reboot.
   The INPUT_WAKE handler no longer early-returns on inflight; `request_list_refresh()` owns that logic.
+- **Rapid-refresh debounce still services the list (2026-06-17).** The INPUT_WAKE 1.5s debounce
+  now only suppresses the wake/holdoff/grace churn — it no longer `return true`s before requesting a
+  refresh. The debounced path calls `request_list_refresh("input_wake_debounce", false)` (gated by
+  `lcd_ota_in_progress()`, same as the accepted path), which answers safely (cached during cooldown /
+  skips a live inflight that will answer / enqueues otherwise) and never re-wakes. Previously the
+  debounce silently dropped the request, so the LCD's INFLIGHT refresh hung until its 20s watchdog
+  on back-to-back pulls (log: `[INPUT_WAKE] ignored debounce age_ms=...` with no following UI_LIST).
 - **LCD OTA in progress**: still deferred (unchanged), logged clearly.
 
 **UI_LIST buffer.** `uart_send_ui_list()` uses a heap `DynamicJsonDocument(8192)` (freed on scope

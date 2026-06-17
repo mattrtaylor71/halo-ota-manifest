@@ -2054,6 +2054,13 @@ static bool parse_input_message(const char* json_str) {
     if (last_input_wake_ms > 0 && (now_ms - last_input_wake_ms) < 1500) {
       Serial.printf("[INPUT_WAKE] ignored debounce age_ms=%lu\n",
                     (unsigned long)(now_ms - last_input_wake_ms));
+      // Debounce only the wake/holdoff churn -- DO NOT drop the list-refresh
+      // request, or the LCD's INFLIGHT refresh hangs until its 20s watchdog.
+      // request_list_refresh() answers safely (cached during cooldown / skips a
+      // live inflight that will answer / enqueues otherwise) and never re-wakes.
+      if (!lcd_ota_in_progress()) {
+        request_list_refresh("input_wake_debounce", false);
+      }
       return true;
     }
     last_input_wake_ms = now_ms;
