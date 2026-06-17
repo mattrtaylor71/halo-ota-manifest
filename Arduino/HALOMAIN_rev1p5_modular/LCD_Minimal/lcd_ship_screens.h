@@ -1372,6 +1372,10 @@ static int shopping_list_refresh_ui_state = -1;   // last refresh SM state synce
 static bool shopping_list_ring_hiding = false;    // ring fade-out in progress (liststate "pill_hiding")
 static bool shopping_list_ring_sweeping = false;  // sweep anim currently running
 static bool shopping_list_ring_autohide = false;  // finish/error sequence owns the hide — plain hide() must not interrupt
+// Whether the current refresh should show the spinning ring. TRUE for a user
+// pull-to-refresh; FALSE for the silent auto entry-revalidate on list open
+// (so opening the list is clean — no spinner unless the user pulls).
+static bool shopping_list_refresh_show_ring = false;
 static int32_t shopping_list_ring_sweep_base = 0; // current sweep start angle (deg from 12 o'clock)
 static const int SHOPPING_LIST_RING_SIZE = 352;          // hugs the 360px round edge (4px margin)
 static const int SHOPPING_LIST_RING_WIDTH = 5;           // indicator arc width
@@ -1650,11 +1654,17 @@ static void shopping_list_refresh_indicator_sync(bool force) {
   if (!force && st == shopping_list_refresh_ui_state) return;
   shopping_list_refresh_ui_state = st;
   if (st == REFRESH_WAKE_PENDING || st == REFRESH_INFLIGHT) {
-    shopping_list_ring_show_sweep();
+    if (shopping_list_refresh_show_ring) {
+      shopping_list_ring_show_sweep();
+    }
+    // entry-revalidate (flag false): silent background refresh, ring stays hidden
   } else if (st == REFRESH_COMPLETE) {
     shopping_list_ring_finish();
   } else if (st == REFRESH_FAILED) {
-    shopping_list_ring_show_error();
+    // show_error() does NOT early-return on a hidden ring (it force-clears the
+    // hidden flag), so gate it too — a silent entry-revalidate that fails must
+    // not surface a ring flash / toast.
+    if (shopping_list_refresh_show_ring) shopping_list_ring_show_error();
   } else if (shopping_list_touch_in_press) {
     // IDLE mid-press: the gesture events own the ring during a pull drag
     // (the UI-task poll would otherwise fight the pull-progress fill with
@@ -1909,6 +1919,10 @@ static void shopping_list_trigger_refresh(const char* reason) {
     return;
   }
   Serial.printf("[SHOPPING_LIST] refresh triggered (%s)\n", r);
+  // Gate the spinning ring on the trigger reason: entry-revalidate is the only
+  // silent one (clean list-open); touch_pull / encoder / usb all show the ring.
+  // Set fresh on EVERY trigger so each refresh's ring visibility is correct.
+  shopping_list_refresh_show_ring = !(reason && strcmp(reason, "entry_revalidate") == 0);
   request_sense_wake(r);
   refresh_sm_set_wake_pending(r);
   // Show refreshing feedback (border-ring sweep)

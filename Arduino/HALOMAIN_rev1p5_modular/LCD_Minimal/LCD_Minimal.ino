@@ -761,6 +761,10 @@ static const unsigned long SENSE_UNKNOWN_STALE_EXTENDED_MS = 30000;
 static const unsigned long SENSE_PING_MIN_INTERVAL_MS = 5000;
 static uint32_t sense_awake_grace_until_ms = 0;
 static const uint32_t SENSE_AWAKE_GRACE_MS = 10000;
+// A set sense_awake_confirmed is only trustworthy if we've actually heard from the
+// Sense within this window. Past it, the flag is treated as stale (the Sense deep-slept
+// and a post-SLEEP_READY drained message re-confirmed "awake") and a wake pulse is allowed.
+static const uint32_t SENSE_AWAKE_TRUST_MS = 1500;
 static const uint32_t SENSE_RECENT_RX_FOR_SLEEP_MS = 10000;
 static const uint32_t SLEEP_LINK_RETRY_MS = 5000;
 static bool wake_ext0_enabled = false;
@@ -1183,7 +1187,7 @@ static unsigned long g_fw_info_retry_deadline_ms = 0;
 static uint8_t g_fw_info_retry_count = 0;
 static bool g_fw_info_response_received = false;
 static const unsigned long FW_INFO_RETRY_INTERVAL_MS = 800;
-static const unsigned long FW_INFO_RETRY_TIMEOUT_MS = 5000;
+static const unsigned long FW_INFO_RETRY_TIMEOUT_MS = 8000;
 static lv_obj_t *ship_hold_screen = NULL;
 static lv_obj_t *ship_processing_screen = NULL;
 static lv_obj_t *ship_ai_listening_screen = NULL;
@@ -3199,10 +3203,16 @@ static bool wake_sense_for_request(const char* reason) {
   if (g_in_light_sleep || g_sleep_transition) {
     return false;
   }
-  // HARD GATE: No GPIO pulse when Sense is confirmed awake. UART only.
+  // Only skip when GENUINELY awake (recent RX). Stale awake flag -> clear + allow pulse.
   if (sense_awake_confirmed) {
-    send_sense_ping();
-    return false;
+    if (sense_recently_heard(SENSE_AWAKE_TRUST_MS)) {
+      send_sense_ping();
+      return false;
+    }
+    Serial.printf("[LCD] stale sense_awake_confirmed (no rx within %lums) reason=%s -> allow wake\n",
+                  (unsigned long)SENSE_AWAKE_TRUST_MS, reason ? reason : "unknown");
+    sense_awake_confirmed = false;
+    sense_state_set(SENSE_ASLEEP, "stale_awake_no_rx");
   }
   if (sleep_ready_received) {
     if (!(immediate_user_pulse || sense_state == SENSE_ASLEEP)) {
@@ -3237,10 +3247,19 @@ static bool lcd_maybe_pulse_sense_int(const char* reason) {
   if (g_in_light_sleep || g_sleep_transition) {
     return false;
   }
-  // HARD GATE: No GPIO pulse when Sense is confirmed awake. UART only.
+  // HARD GATE: No GPIO pulse when the Sense is GENUINELY awake (confirmed AND heard
+  // from recently). If the awake flag is stale -- the Sense deep-slept and a
+  // post-SLEEP_READY drained PONG/UI_STATUS/SYNC_ACK re-confirmed "awake" -- a UART
+  // ping cannot wake it; clear the stale flag so the wake pulse below fires.
   if (sense_awake_confirmed) {
-    send_sense_ping();
-    return false;
+    if (sense_recently_heard(SENSE_AWAKE_TRUST_MS)) {
+      send_sense_ping();
+      return false;
+    }
+    Serial.printf("[LCD] stale sense_awake_confirmed (no rx within %lums) reason=%s -> force wake pulse\n",
+                  (unsigned long)SENSE_AWAKE_TRUST_MS, reason ? reason : "unknown");
+    sense_awake_confirmed = false;
+    sense_state_set(SENSE_ASLEEP, "stale_awake_no_rx");
   }
   bool immediate_user_pulse = wake_reason_requires_immediate_pulse(reason);
   if (sleep_ready_received) {
@@ -3276,8 +3295,9 @@ static bool lcd_maybe_pulse_sense_int(const char* reason) {
 }
 
 static void request_sense_wake(const char* reason) {
-  // HARD GATE: No GPIO pulse when Sense is confirmed awake. UART only.
-  if (sense_awake_confirmed) {
+  // Only skip the wake path when the Sense is GENUINELY awake (recent RX). A stale
+  // awake flag falls through to lcd_maybe_pulse_sense_int(), which clears it and pulses.
+  if (sense_awake_confirmed && sense_recently_heard(SENSE_AWAKE_TRUST_MS)) {
     send_sense_ping();
     return;
   }

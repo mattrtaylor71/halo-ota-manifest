@@ -271,16 +271,17 @@ static void ship_menu_request_fw_info() {
                 sense_awake_confirmed ? 1 : 0,
                 link_synced ? 1 : 0,
                 sense_recently_heard(1500) ? 1 : 0);
-  tx_msg_t tx_msg = {};
   // Fast version request: Sense answers INPUT_SENSE_FW immediately with its
   // cached sense_fw + lcd_fw (replies with the same FW_INFO message type, so
   // the existing FW_INFO RX handler needs no change). INPUT_FW_INFO is the
   // slow path (Sense does a blocking LCD-OTA query first) and is reserved for
   // diagnostics that need the live lcd_fw/running_state.
-  strncpy(tx_msg.type, "INPUT_SENSE_FW", sizeof(tx_msg.type) - 1);
-  if (uart_tx_queue != NULL) {
-    xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
-  }
+  //
+  // Send via the proven direct path (same as the `fwinfo` USB command): this
+  // pulses the Sense (request_sense_wake inside uart_send_input_message) and
+  // writes INPUT_SENSE_FW straight to senseSerial, instead of queueing where it
+  // gets deferred behind awake-proof and dead-ends. Fixes Settings "Sense --".
+  uart_send_input_message("INPUT_SENSE_FW");
 }
 
 static void ship_menu_service_fw_info_request(unsigned long now_ms) {
@@ -307,19 +308,16 @@ static void ship_menu_service_fw_info_request(unsigned long now_ms) {
       (now_ms - g_fw_info_last_attempt_ms) < FW_INFO_RETRY_INTERVAL_MS) {
     return;
   }
+  // Clear any stale deferred INPUT_SENSE_FW so the awake-proof deferral path
+  // can't interfere with the direct re-send below.
   if (deferred_awake_tx_valid &&
       strcmp(deferred_awake_tx_msg.type, "INPUT_SENSE_FW") == 0) {
+    deferred_awake_tx_valid = false;
     deferred_awake_tx_last_ping_ms = 0;
-    user_activity_bump("fw_info_retry");
-    deferred_awake_tx_service();
-  } else {
-    tx_msg_t tx_msg = {};
-    strncpy(tx_msg.type, "INPUT_SENSE_FW", sizeof(tx_msg.type) - 1);
-    if (uart_tx_queue != NULL) {
-      user_activity_bump("fw_info_retry");
-      xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
-    }
   }
+  // Re-send via the proven direct path each retry (pulses + writes directly).
+  user_activity_bump("fw_info_retry");
+  uart_send_input_message("INPUT_SENSE_FW");
   g_fw_info_last_attempt_ms = now_ms;
   g_fw_info_retry_count++;
   Serial.printf("[MENU] retry_fw_info attempt=%u age_ms=%lu awake=%d sync=%d recent=%d deferred=%d\n",
