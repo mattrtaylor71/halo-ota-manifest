@@ -34,6 +34,18 @@ static void list_refresh_fail(const char* reason) {
 
 // ── Parse and update shopping list ─────────────────────────────────
 
+// Sort comparator: group items by store name (empty store sorts last) so the
+// LCD can render store-group headers from a contiguous run of like-stored items.
+static int shopping_list_cmp_by_store(const void* a, const void* b) {
+  const shopping_list_item_t* ia = (const shopping_list_item_t*)a;
+  const shopping_list_item_t* ib = (const shopping_list_item_t*)b;
+  bool ae = (ia->store[0] == '\0'), be = (ib->store[0] == '\0');
+  if (ae && be) return 0;
+  if (ae) return 1;          // empty store sorts last
+  if (be) return -1;
+  return strcmp(ia->store, ib->store);
+}
+
 static bool parse_and_update_shopping_list(const String& json_response) {
   Serial.println("\n=== Parsing Shopping List from JSON ===");
 
@@ -126,10 +138,29 @@ static bool parse_and_update_shopping_list(const String& json_response) {
       g_shopping_list[actual_count].huuid[0] = '\0';
     }
 
+    // Store name (e.g. "Whole Foods", "Costco") — for LCD store-group headers.
+    const char* store_str = item["store"] | "";
+    if (store_str != NULL && strlen(store_str) > 0) {
+      size_t store_len = strlen(store_str);
+      if (store_len >= sizeof(g_shopping_list[actual_count].store)) {
+        store_len = sizeof(g_shopping_list[actual_count].store) - 1;
+      }
+      strncpy(g_shopping_list[actual_count].store, store_str, store_len);
+      g_shopping_list[actual_count].store[store_len] = '\0';
+    } else {
+      g_shopping_list[actual_count].store[0] = '\0';
+    }
+
     actual_count++;
   }
 
   g_list_count = actual_count;
+
+  // Group items by store so the LCD can render store-group headers. Safe to
+  // reorder: delete is by id (not index), and g_selected_index is reset to 0
+  // below (not preserved by position; the LCD re-syncs selection from UI_LIST).
+  qsort(g_shopping_list, g_list_count, sizeof(shopping_list_item_t), shopping_list_cmp_by_store);
+
   g_selected_index = (actual_count > 0) ? 0 : -1;
 
   xSemaphoreGive(g_list_mutex);

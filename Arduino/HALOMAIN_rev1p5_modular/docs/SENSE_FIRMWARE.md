@@ -253,11 +253,13 @@ hard timeout. Behavior by gate:
   on back-to-back pulls (log: `[INPUT_WAKE] ignored debounce age_ms=...` with no following UI_LIST).
 - **LCD OTA in progress**: still deferred (unchanged), logged clearly.
 
-**UI_LIST buffer.** `uart_send_ui_list()` uses a heap `DynamicJsonDocument(8192)` (freed on scope
-exit) instead of `StaticJsonDocument<4096>` — 50 items x 64B id + 64B text could overflow 4KB and
-silently drop items. If items still don't fit, it logs `[UI_LIST] truncated dropped=N overflowed=...`
-instead of truncating silently. The `huuid` field added to `shopping_list_item_t` is **not**
-serialized into UI_LIST (the LCD doesn't need it), so the 8192B doc capacity is unaffected.
+**UI_LIST buffer.** `uart_send_ui_list()` uses a heap `DynamicJsonDocument(12288)` (freed on scope
+exit) instead of `StaticJsonDocument<4096>` — 50 items x 64B id + 64B text + 48B store could overflow
+a smaller doc and silently drop items. If items still don't fit, it logs `[UI_LIST] truncated
+dropped=N overflowed=...` instead of truncating silently. The `huuid` field added to
+`shopping_list_item_t` is **not** serialized into UI_LIST (the LCD doesn't need it). The `store`
+field **is** serialized (`item["store"]`) so the LCD can render store-group headers; the doc was
+bumped 8192→12288 to absorb the extra ~48B/item.
 
 **Refresh latency instrumentation.** One-line millis() deltas across the path: `[LIST_REFRESH]
 dequeued queue_wait_ms=` (enqueue→op-worker dequeue), `[NET_DIAG] list_wifi_connect_ms=` (bounded
@@ -721,7 +723,8 @@ In production builds, all MQTT variables are stubbed:
 
 **`parse_and_update_shopping_list(const String& json)`** -- Parses JSON items:
 - Skips items with action="CHECKED"
-- Extracts product_name, id, and household_item_uuid (stored in `huuid[64]`, empty if missing)
+- Extracts product_name, id, household_item_uuid (stored in `huuid[64]`, empty if missing), and `store` (stored in `store[48]`, empty if missing/null)
+- After the final count is set, `qsort`s the in-RAM list via `shopping_list_cmp_by_store()` to group items by store name (empty store sorts last) so the LCD can render store-group headers. Safe to reorder: delete is by id, and `g_selected_index` is reset to 0 afterward (not preserved by position)
 - Thread-safe via `g_list_mutex`
 - Records `list_last_fetch_ok_ms` on success (powers the cooldown served-cached path in `request_list_refresh()`)
 - Sends `UI_LIST` to LCD after update

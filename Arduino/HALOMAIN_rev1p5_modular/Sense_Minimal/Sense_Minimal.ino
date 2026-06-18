@@ -636,6 +636,7 @@ struct shopping_list_item_t {
   // household_item_uuid from the list API — required for delete: the iOS app
   // deletes by itemUUID (household-wide), not row id. 50x64B = +3.2KB RAM.
   char huuid[64];
+  char store[48];   // store name e.g. "Whole Foods" (empty = no store)
 };
 
 static shopping_list_item_t g_shopping_list[MAX_LIST_ITEMS];
@@ -901,10 +902,10 @@ static bool sleep_deny_sent_for_request = false;
 
 static void uart_send_ui_list() {
   // Heap-allocated doc (freed on scope exit): 50 items x up to 64B id + 64B
-  // text + per-object overhead can exceed the old StaticJsonDocument<4096>,
-  // which silently dropped items. This runs on a task with WiFi up; a brief
-  // ~8KB heap allocation is fine.
-  DynamicJsonDocument doc(8192);
+  // text + 48B store + per-object overhead can exceed a 8KB doc, which silently
+  // dropped items. Bumped to 12KB after adding the per-item store field. This
+  // runs on a task with WiFi up; a brief ~12KB heap allocation is fine.
+  DynamicJsonDocument doc(12288);
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = "UI_LIST";
   doc["msg_id"] = get_next_msg_id();
@@ -924,6 +925,7 @@ static void uart_send_ui_list() {
       }
       item["id"] = g_shopping_list[i].id;
       item["text"] = g_shopping_list[i].text;
+      item["store"] = g_shopping_list[i].store;
     }
     xSemaphoreGive(g_list_mutex);
   }
