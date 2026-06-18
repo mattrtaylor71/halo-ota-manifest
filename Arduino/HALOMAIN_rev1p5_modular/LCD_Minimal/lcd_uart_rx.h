@@ -945,6 +945,8 @@ static void uart_process_received_message(const char* json_str) {
             g_pending.items[g_pending.count][63] = '\0';
             strncpy(g_pending.item_ids[g_pending.count], g_active.item_ids[i], 63);
             g_pending.item_ids[g_pending.count][63] = '\0';
+            strncpy(g_pending.stores[g_pending.count], g_active.stores[i], 47);
+            g_pending.stores[g_pending.count][47] = '\0';
             g_pending.count++;
           }
         }
@@ -956,7 +958,8 @@ static void uart_process_received_message(const char* json_str) {
         for (JsonObject item : items) {
           const char* text = item["text"] | "";
           const char* id = item["id"] | "";
-          
+          const char* store = item["store"] | "";
+
           // CRITICAL: Filter out deleted items - if this item's ID is in deleted_item_ids, skip it
           bool is_deleted = false;
           if (id != NULL && strlen(id) > 0) {
@@ -985,6 +988,8 @@ static void uart_process_received_message(const char* json_str) {
                 g_pending.items[i][63] = '\0';
                 strncpy(g_pending.item_ids[i], id, 63);
                 g_pending.item_ids[i][63] = '\0';
+                strncpy(g_pending.stores[i], store, 47);
+                g_pending.stores[i][47] = '\0';
                 found_in_optimistic = true;
                 Serial.printf("[UART] Replaced optimistic item with real item: %s (ID: %s)\n", text, id);
                 break;
@@ -998,6 +1003,8 @@ static void uart_process_received_message(const char* json_str) {
             g_pending.items[g_pending.count][63] = '\0';
             strncpy(g_pending.item_ids[g_pending.count], id, 63);
             g_pending.item_ids[g_pending.count][63] = '\0';
+            strncpy(g_pending.stores[g_pending.count], store, 47);
+            g_pending.stores[g_pending.count][47] = '\0';
             g_pending.count++;
           }
           
@@ -1286,6 +1293,8 @@ static void uart_process_received_message(const char* json_str) {
               g_active.items[i + items_to_add][63] = '\0';
               strncpy(g_active.item_ids[i + items_to_add], g_active.item_ids[i], 63);
               g_active.item_ids[i + items_to_add][63] = '\0';
+              strncpy(g_active.stores[i + items_to_add], g_active.stores[i], 47);
+              g_active.stores[i + items_to_add][47] = '\0';
             }
           }
           
@@ -1300,6 +1309,7 @@ static void uart_process_received_message(const char* json_str) {
               g_active.items[added][63] = '\0';
               // Temporary ID (empty or placeholder) - will be replaced when full list refresh comes
               g_active.item_ids[added][0] = '\0';
+              g_active.stores[added][0] = '\0';  // store unknown until backend refresh
               added++;
               Serial.printf("[UART] Added voice item to top: %s\n", text);
             }

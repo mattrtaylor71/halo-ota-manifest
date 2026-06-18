@@ -364,10 +364,13 @@ static void delete_item_btn_handler(lv_event_t * e) {
           g_active.items[i][63] = '\0';
           strncpy(g_active.item_ids[i], g_active.item_ids[i + 1], 64);
           g_active.item_ids[i][63] = '\0';
+          strncpy(g_active.stores[i], g_active.stores[i + 1], 48);
+          g_active.stores[i][47] = '\0';
         }
         // Clear last item
         g_active.items[g_active.count - 1][0] = '\0';
         g_active.item_ids[g_active.count - 1][0] = '\0';
+        g_active.stores[g_active.count - 1][0] = '\0';
         g_active.count--;
         
         // Adjust selected index if needed

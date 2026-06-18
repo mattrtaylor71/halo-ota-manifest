@@ -35,6 +35,7 @@ typedef struct app_event_t app_event_t;
 #include "esp_mac.h"
 #include "Preferences.h"
 #include <string.h>
+#include <ctype.h>   // toupper() for shopping-list store-group headers
 #include <time.h>
 #include <sys/time.h>  // settimeofday() for syncing clock from Sense MAINT_WINDOW now_epoch
 #include "src/provisioning/qr_display.h"
@@ -125,6 +126,7 @@ static const uint16_t LCD_OTA_SCHED_WINDOW_MIN = 30;
 struct app_state_t {
   char items[MAX_LIST_ITEMS][64];
   char item_ids[MAX_LIST_ITEMS][64];
+  char stores[MAX_LIST_ITEMS][48];   // store name per item ("" = none); index-aligned with items[]
   int  count;
   int  selected_index;
 };
@@ -5203,6 +5205,19 @@ void loop() {
       goto loop_continue;
     }
     bool eligible = home_age_ms >= HOME_SLEEP_DELAY_MS;
+    // List idle -> return Home before sleeping, so the device sleeps on Home and
+    // wakes on Home (rather than re-showing the list). Fires once per idle period:
+    // when the UI task switches to SCREEN_HOME, subsequent iterations see HOME and
+    // fall through to the normal home-sleep path below. Cross-core safe: we only
+    // set a flag (provision_return_home_pending); the UI task (Core 1) consumes it
+    // and calls show_ship_main_menu() -> ui_screen_state = SCREEN_HOME.
+    if (ui_screen_state == SCREEN_SHOPPING_LIST && eligible) {
+      Serial.println("[LIST] idle timeout -> return home before sleep");
+      uart_send_list_active(false);      // tell Sense the list closed
+      provision_return_home_pending = true;
+      home_shown_ms = 0;                 // reset idle clock so Home gets its own delay
+      goto loop_continue;
+    }
     const char* decision_reason = eligible ? "eligible" : "home_age_lt_timeout";
     if (!eligible) {
       if (g_idle_screen_dark && !sleep_deny_active) {

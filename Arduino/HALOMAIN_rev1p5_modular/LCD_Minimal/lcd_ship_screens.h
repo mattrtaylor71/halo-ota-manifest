@@ -1345,6 +1345,12 @@ static const int SHOPPING_LIST_REFRESH_TICKS = 3;
 static unsigned long shopping_list_last_ccw_tick_ms = 0;  // last CCW overscroll tick (for stale-tick expiry)
 static const unsigned long SHOPPING_LIST_OVERSCROLL_WINDOW_MS = 1500;  // CCW ticks older than this don't count toward refresh
 static lv_obj_t* shopping_list_items[50] = {NULL};
+// Parallel to shopping_list_items[]: for each item that is first-in-its-store-
+// group, holds the store-header label object positioned directly above its
+// card (NULL otherwise). Selection scroll targets this header instead of the
+// card so scrolling onto a group's first item reveals the header rather than
+// clipping it off the top. NOT an item — never counted, never deleted.
+static lv_obj_t* shopping_list_item_headers[50] = {NULL};
 static int shopping_list_rendered_count = 0;
 static lv_obj_t* shopping_list_overlay = NULL;  // Delete/Back overlay
 static bool shopping_list_overlay_visible = false;
@@ -1884,10 +1890,13 @@ static const char* shopping_list_delete_index(int idx) {
       g_active.items[j][63] = '\0';
       strncpy(g_active.item_ids[j], g_active.item_ids[j+1], 63);
       g_active.item_ids[j][63] = '\0';
+      strncpy(g_active.stores[j], g_active.stores[j+1], 47);
+      g_active.stores[j][47] = '\0';
     }
     if (g_active.count > 0) {
       g_active.items[g_active.count - 1][0] = '\0';
       g_active.item_ids[g_active.count - 1][0] = '\0';
+      g_active.stores[g_active.count - 1][0] = '\0';
       g_active.count--;
     }
     // Persist the deletion immediately — LCD deep sleep is a full reset, so an
@@ -2047,9 +2056,8 @@ static bool shopping_list_handle_touch(int x, int y) {
     if (shopping_list_overlay_back_btn) {
       lv_obj_get_coords(shopping_list_overlay_back_btn, &a);
       if (x >= a.x1 - SLOP && x <= a.x2 + SLOP && y >= a.y1 - SLOP && y <= a.y2 + SLOP) {
-        Serial.printf("[SHOPPING_LIST] overlay tap (%d,%d) -> back\n", x, y);
+        Serial.printf("[SHOPPING_LIST] overlay tap (%d,%d) -> dismiss (stay on list)\n", x, y);
         shopping_list_dismiss_overlay();
-        show_ship_second_menu();
         return true;
       }
     }
@@ -2123,7 +2131,12 @@ static void shopping_list_update_selection(int old_idx, int new_idx) {
   }
   if (new_idx >= 0 && new_idx < shopping_list_rendered_count && shopping_list_items[new_idx]) {
     shopping_list_style_card(shopping_list_items[new_idx], new_idx, true);
-    lv_obj_scroll_to_view(shopping_list_items[new_idx], LV_ANIM_ON);
+    // If the selected item is first-in-group it has a header directly above it;
+    // scroll to the header so it isn't pushed off the top by aligning the card.
+    lv_obj_t* target = (new_idx >= 0 && new_idx < 50 && shopping_list_item_headers[new_idx])
+                         ? shopping_list_item_headers[new_idx]
+                         : shopping_list_items[new_idx];
+    if (target) lv_obj_scroll_to_view(target, LV_ANIM_ON);
   }
 }
 
@@ -2143,6 +2156,8 @@ static uint32_t shopping_list_content_sig(const app_state_t* s) {
     for (const char* p = s->items[i]; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
     h = (h ^ 0x1Fu) * 16777619u;  // field separator
     for (const char* p = s->item_ids[i]; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+    h = (h ^ 0x1Du) * 16777619u;  // field separator (store)
+    for (const char* p = s->stores[i]; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
     h = (h ^ 0x1Eu) * 16777619u;  // record separator
   }
   if (h == 0xFFFFFFFFu) h = 0xFFFFFFFEu;  // 0xFFFFFFFF is the placeholder sentinel
@@ -2241,6 +2256,36 @@ static void shopping_list_animate_card_removal(int idx) {
   lv_anim_start(&a);
 }
 
+// Store-group header row — a small, dim, NON-selectable label inserted above
+// each contiguous group of same-store items. It is a separate LVGL object and
+// is deliberately NOT stored in shopping_list_items[] nor counted as an item:
+// selection/delete stay index-based on items only. The flex column auto-
+// positions it between groups. Input-transparent so touches pass through.
+// Returns the created header label so the populate loop can track it in
+// shopping_list_item_headers[] (parallel to the item it precedes) for
+// header-aware selection scrolling.
+static lv_obj_t* shopping_list_add_store_header(const char* store) {
+  lv_obj_t* hdr = lv_label_create(shopping_list_scroll);
+  // Uppercase the store name into a small buffer for a quieter, "section" look.
+  char up[48];
+  size_t n = 0;
+  for (; store[n] != '\0' && n < sizeof(up) - 1; n++) {
+    up[n] = (char)toupper((unsigned char)store[n]);
+  }
+  up[n] = '\0';
+  lv_label_set_text(hdr, up);
+  lv_obj_set_width(hdr, SHOPPING_LIST_CARD_W - 8);
+  lv_obj_set_style_text_font(hdr, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_color(hdr, lv_color_hex(0x9A8C76), LV_PART_MAIN);  // dim tan, lighter than cards
+  lv_obj_set_style_text_align(hdr, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+  lv_obj_set_style_pad_left(hdr, 14, LV_PART_MAIN);
+  lv_obj_set_style_pad_top(hdr, 4, LV_PART_MAIN);
+  lv_obj_set_style_pad_bottom(hdr, 0, LV_PART_MAIN);
+  // Not tappable / not selectable — never participates in touch hit-testing.
+  lv_obj_clear_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
+  return hdr;
+}
+
 // Full rebuild path — used ONLY when content changes (new UI_LIST arrived,
 // delete, screen entry, refresh timeout revert). Scroll-only selection moves
 // go through shopping_list_update_selection() instead.
@@ -2263,6 +2308,7 @@ static void shopping_list_screen_populate() {
   lv_obj_scroll_to_y(shopping_list_scroll, 0, LV_ANIM_OFF);
   shopping_list_rendered_count = 0;
   for (int i = 0; i < 50; i++) shopping_list_items[i] = NULL;  // no stale card pointers
+  for (int k = 0; k < 50; k++) shopping_list_item_headers[k] = NULL;  // no stale header pointers
   bool reveal = shopping_list_reveal_pending;
   shopping_list_reveal_pending = false;
 
@@ -2336,6 +2382,17 @@ static void shopping_list_screen_populate() {
   // Create item cards — fixed-height rounded rows sized for the round
   // display (272px clears the circle at every height the cards reach)
   for (int i = 0; i < g_active.count && i < 50; i++) {
+    // Store-group header: items arrive pre-sorted by store (empty store last),
+    // so a store change from the previous item starts a new group. The header
+    // is a separate, non-selectable object — it does NOT consume an item index.
+    if (i == 0 || strcmp(g_active.stores[i], g_active.stores[i - 1]) != 0) {
+      const char* store = g_active.stores[i];
+      // Empty-store items sort last; label that trailing group "Other".
+      // Track the header parallel to its item so selection scroll can reveal it.
+      shopping_list_item_headers[i] =
+          shopping_list_add_store_header((store && store[0] != '\0') ? store : "Other");
+    }
+
     lv_obj_t* card = lv_obj_create(shopping_list_scroll);
     lv_obj_set_size(card, SHOPPING_LIST_CARD_W, SHOPPING_LIST_CARD_H);
     lv_obj_set_style_radius(card, SHOPPING_LIST_CARD_RADIUS, LV_PART_MAIN);
@@ -2361,9 +2418,15 @@ static void shopping_list_screen_populate() {
     shopping_list_rendered_count++;
   }
 
-  // Scroll selected item into view
+  // Scroll selected item into view. If it's first-in-group, target its header
+  // (above the card) so a rebuild that rests on a group's first item reveals
+  // the header instead of clipping it off the top.
   if (shopping_list_scroll_idx < shopping_list_rendered_count && shopping_list_items[shopping_list_scroll_idx]) {
-    lv_obj_scroll_to_view(shopping_list_items[shopping_list_scroll_idx], LV_ANIM_OFF);
+    int si = shopping_list_scroll_idx;
+    lv_obj_t* init_target = (si >= 0 && si < 50 && shopping_list_item_headers[si])
+                              ? shopping_list_item_headers[si]
+                              : shopping_list_items[si];
+    if (init_target) lv_obj_scroll_to_view(init_target, LV_ANIM_OFF);
   }
 
   // Remember what's rendered so a revalidate with identical content can skip

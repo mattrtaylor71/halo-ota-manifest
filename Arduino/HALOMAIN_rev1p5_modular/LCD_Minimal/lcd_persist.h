@@ -30,7 +30,20 @@ static const char* PREF_KEY_FETCHED = "fetched_at";  // unix epoch at save time 
 // fine but fail to parse back (NoMemory) — the user then saw a blank
 // "No items on your list" after every deep sleep. Heap-allocated
 // (DynamicJsonDocument) so neither path risks a task stack overflow.
-#define LIST_PERSIST_JSON_CAPACITY 8192
+//
+// Bumped 8192 → 16384 (2026-06-17): adding the stores[] array (items[] +
+// ids[] + stores[]) pushed worst-case 50-item lists past 8192, so
+// deserializeJson failed on load (NoMemory) → load returned -1 → count
+// stayed 0 → "No items on your list" on entry until a manual pull. 16384
+// comfortably fits the worst case for both serialize and deserialize.
+// Capacity math (50 items, ArduinoJson v6 DynamicJsonDocument):
+//   3 arrays × JSON_ARRAY_SIZE(50) ≈ 3 × 808  = 2424 B
+//   strings copied into the doc (worst case, all unique):
+//     items   50 × up to 64 B (incl NUL) = 3200 B
+//     ids     50 × up to 64 B            = 3200 B
+//     stores  50 × up to 48 B            = 2400 B
+//   ≈ 2424 + 3200 + 3200 + 2400 = 11224 B  → fits in 16384 with headroom.
+#define LIST_PERSIST_JSON_CAPACITY 16384
 
 // Save shopping list to persistent storage
 static void save_list_to_storage(const app_state_t *s) {
@@ -58,10 +71,12 @@ static void save_list_to_storage(const app_state_t *s) {
   DynamicJsonDocument doc(LIST_PERSIST_JSON_CAPACITY);
   JsonArray items_array = doc.createNestedArray("items");
   JsonArray ids_array = doc.createNestedArray("ids");
+  JsonArray stores_array = doc.createNestedArray("stores");
 
   for (int i = 0; i < s->count && i < MAX_LIST_ITEMS; i++) {
     items_array.add(s->items[i]);
     ids_array.add(s->item_ids[i]);
+    stores_array.add(s->stores[i]);
   }
 
   // Serialize to string
@@ -132,24 +147,35 @@ static int load_list_from_storage(app_state_t *s) {
   
   JsonArray items_array = doc["items"].as<JsonArray>();
   JsonArray ids_array = doc["ids"].as<JsonArray>();
-  
+  // "stores" may be absent on caches written before store grouping existed.
+  // An absent key must NOT fail the whole load — fall back to an empty array
+  // so every store cleanly resolves to "" (the per-index size guard below
+  // already defends against a short/missing stores array).
+  JsonArray stores_array = doc.containsKey("stores")
+                               ? doc["stores"].as<JsonArray>()
+                               : JsonArray();
+
   // Clear old items
   for (int i = 0; i < MAX_LIST_ITEMS; i++) {
     s->items[i][0] = '\0';
     s->item_ids[i][0] = '\0';
+    s->stores[i][0] = '\0';
   }
-  
+
   // Copy items from JSON
   int actual_count = 0;
   for (int i = 0; i < count && i < MAX_LIST_ITEMS && i < (int)items_array.size(); i++) {
     const char* item_text = items_array[i] | "";
     const char* item_id = ids_array[i] | "";
-    
+    const char* item_store = (i < (int)stores_array.size()) ? (stores_array[i] | "") : "";
+
     if (item_text != NULL && strlen(item_text) > 0) {
       strncpy(s->items[actual_count], item_text, 63);
       s->items[actual_count][63] = '\0';
       strncpy(s->item_ids[actual_count], item_id, 63);
       s->item_ids[actual_count][63] = '\0';
+      strncpy(s->stores[actual_count], item_store, 47);
+      s->stores[actual_count][47] = '\0';
       actual_count++;
     }
   }
@@ -162,8 +188,9 @@ static int load_list_from_storage(app_state_t *s) {
     s->selected_index = (actual_count > 0) ? 0 : -1;
   }
   
-  Serial.printf("✓ Loaded %d items (selected_index=%d) from persistent storage\n", 
+  Serial.printf("✓ Loaded %d items (selected_index=%d) from persistent storage\n",
                 actual_count, s->selected_index);
+  Serial.printf("[LIST_CACHE] loaded %d items from NVS\n", actual_count);
   return actual_count;
 }
 
