@@ -254,7 +254,7 @@ static void ship_menu_update_versions_label() {
   char buf[64];
   // Compact single-line version string for the bottom of the round settings
   // screen (kept narrow so it stays within the 360x360 circle).
-  snprintf(buf, sizeof(buf), "LCD %s \xC2\xB7 Sense %s", lcd_fw, sense_fw);
+  snprintf(buf, sizeof(buf), "LCD %s \xE2\x80\xA2 Sense %s", lcd_fw, sense_fw);
   lv_label_set_text(ship_menu_settings_versions, buf);
 }
 

@@ -1,5 +1,7 @@
 # HALO LCD Board Firmware Documentation
 
+> **2026-06-22 (v6.1.803):** Tofu fix — middle-dot `·` (U+00B7, not in montserrat fonts) swapped for bullet `•` (U+2022) on the Settings version line and the Backlight hint; the Settings "Back" button now shows a green `LV_SYMBOL_LEFT` arrow (0x1F4D2B, montserrat_20) instead of the word "Back".
+
 ## Hardware Overview
 
 - **MCU:** ESP32-S3 with 8MB flash, OPI PSRAM

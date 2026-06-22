@@ -3045,7 +3045,11 @@ static void show_ship_settings_screen_impl() {
     ship_menu_settings_btn_back = lv_obj_create(ship_menu_settings_screen);
     lv_obj_set_pos(ship_menu_settings_btn_back, SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACK_Y);
     ship_menu_settings_label_back = lv_label_create(ship_menu_settings_btn_back);
-    ship_settings_style_button(ship_menu_settings_btn_back, ship_menu_settings_label_back, "Back");
+    ship_settings_style_button(ship_menu_settings_btn_back, ship_menu_settings_label_back, LV_SYMBOL_LEFT);
+    // Green left-arrow back glyph (matches shopping-list back arrow). Font must
+    // be montserrat_20 (LV_SYMBOL_LEFT glyph coverage) so it renders, not tofu.
+    lv_obj_set_style_text_color(ship_menu_settings_label_back, lv_color_hex(0x1F4D2B), LV_PART_MAIN);
+    lv_obj_set_style_text_font(ship_menu_settings_label_back, &lv_font_montserrat_20, LV_PART_MAIN);
 
     // Firmware version (compact, very bottom, inside the circle)
     ship_menu_settings_versions = lv_label_create(ship_menu_settings_screen);
@@ -3132,7 +3136,7 @@ static void show_ship_backlight_screen_impl() {
 
     // Hint below the ring
     lv_obj_t* hint = lv_label_create(ship_backlight_screen);
-    lv_label_set_text(hint, "Scroll to adjust \xC2\xB7 Tap to save");
+    lv_label_set_text(hint, "Scroll to adjust \xE2\x80\xA2 Tap to save");
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(hint, lv_color_hex(0x4A4A4A), LV_PART_MAIN);
     lv_obj_align(hint, LV_ALIGN_CENTER, 0, 110);
