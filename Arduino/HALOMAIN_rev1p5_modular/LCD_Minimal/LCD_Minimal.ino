@@ -2364,6 +2364,14 @@ static void expiry_prepare_picker_for_entry() {
   strcpy(expiry_date_buffer, "__-__-____");
   expiry_screen_visible = true;
   expiry_screen_shown_time = millis();
+  // The Sense has responded and we're now on the expiry picker with its own 30s
+  // timeout. Clear the capture/processing watchdogs so the scan-no-response timer
+  // can't race this screen's graceful timeout into an error screen (covers the
+  // legacy check-in path that shows the picker directly, not via SCREEN_EXPIRY).
+  waiting_for_scan_response = false;
+  scan_request_sent_ms = 0;
+  dish_processing_active = false;
+  dish_processing_start_ms = 0;
   expiry_update_timeout_ring();
   expiry_refresh_picker_ui();
 }
