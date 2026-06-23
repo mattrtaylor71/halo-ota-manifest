@@ -3688,12 +3688,23 @@ void loop() {
 
   if (!guardian_force_sleep && GUARDIAN_FORCE_SLEEP_MS > 0) {
     unsigned long now_ms = millis();
-    unsigned long awake_ms = now_ms - guardian_awake_start_ms;
-    if (awake_ms >= GUARDIAN_FORCE_SLEEP_MS) {
-      guardian_force_sleep = true;
-      Serial.printf("[GUARDIAN] force_sleep elapsed_ms=%lu\n", awake_ms);
-      sense_enter_sleep(SENSE_SLEEP_DEEP_IDLE);
-      return;
+#ifdef HALO_SENSE_PROD_WRAPPER
+    if (halo_provisioning_active()) {
+      // Never guardian-force-sleep while provisioning/SoftAP setup is active --
+      // it tears down the SoftAP + QR mid-setup. Pause the guardian clock so it
+      // also doesn't fire the instant provisioning ends after a long setup. The
+      // idle + coordinated sleep paths already guard provisioning the same way.
+      guardian_awake_start_ms = now_ms;
+    } else
+#endif
+    {
+      unsigned long awake_ms = now_ms - guardian_awake_start_ms;
+      if (awake_ms >= GUARDIAN_FORCE_SLEEP_MS) {
+        guardian_force_sleep = true;
+        Serial.printf("[GUARDIAN] force_sleep elapsed_ms=%lu\n", awake_ms);
+        sense_enter_sleep(SENSE_SLEEP_DEEP_IDLE);
+        return;
+      }
     }
   }
   
@@ -4047,6 +4058,14 @@ void loop() {
       }
       
       if (can_sleep) {
+#ifdef HALO_SENSE_PROD_WRAPPER
+        if (halo_provisioning_active()) {
+          // Never idle-sleep while provisioning/SoftAP setup is active -- sleeping
+          // tears down the SoftAP + QR and blocks the user from provisioning.
+          // (The coordinated-sleep path already guards this; the idle path was missed.)
+          goto loop_end;
+        }
+#endif
         sleep_background_force_reset();
         bool allow_lcd_fallback_sleep = !link_synced || rx_age > 30000UL;
         if (!allow_lcd_fallback_sleep) {

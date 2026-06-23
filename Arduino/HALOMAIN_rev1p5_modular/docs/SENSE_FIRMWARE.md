@@ -55,7 +55,7 @@ This is the main compilation unit. All `.h` modules are `#include`d from here in
 | `WAKE_PIN_FAILSAFE_TIMER_S` | 15 | Timer wake fallback when wake pin stuck |
 | `SENSE_MAX_SLEEP_TIMER_S` | 0 | Disabled (was 300s/5-min safety net; disabled after hard gate cleanup made the safety timer unnecessary) |
 | `MIN_AWAKE_BEFORE_SLEEP_MS` | 2000 | Grace period before allowing sleep |
-| `GUARDIAN_FORCE_SLEEP_MS` | 300000 | 5-min max awake time (guardian force sleep) |
+| `GUARDIAN_FORCE_SLEEP_MS` | 300000 | 5-min max awake time (guardian force sleep); clock is paused (reset each loop) while `halo_provisioning_active()` so it never tears down SoftAP/QR mid-setup |
 | `ACTION_AWAKE_BUDGET_MS` | 60000 | Per-action time budget (1 min) |
 | `ACTION_MIN_REMAINING_MS` | 1000 | Minimum budget remaining to start a step |
 | `LCD_INACTIVITY_TIMEOUT_MS` | 10000 | Sleep if no LCD message for 10s |

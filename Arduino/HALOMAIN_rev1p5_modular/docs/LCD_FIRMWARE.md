@@ -225,6 +225,10 @@ awake -> idle_dark -> sleep_transition -> deep_sleep
 7. Sense sends PROVISION_STATUS state="connected"
 8. LCD hides QR, shows main menu
 
+**Sense-wake during provisioning (2026-06-23):** Two gaps closed so a sleeping Sense still gets provisioned:
+- The **Status-screen** "Reset Wi-Fi" button handler (LCD_Minimal.ino, `[STATUS] Reset Wi-Fi button pressed`) now calls `request_sense_wake("reset_wifi")` immediately before queuing the `INPUT_RESET_WIFI` tx_msg — mirroring the menu-path Reset-WiFi handlers. Previously a sleeping Sense never received the queued message.
+- The main loop now **periodically keeps the Sense awake while `provision_qr_waiting` is true**: a throttled `request_sense_wake("provision_qr")` fires ~every 3s (static `last_provision_wake_ms` throttle), so the Sense SoftAP stays up and the QR can arrive. Gated strictly on `provision_qr_waiting` so it never fires once provisioned or outside the QR-wait flow. `request_sense_wake` pulses GPIO39 if asleep, pings over UART if awake.
+
 ---
 
 ### 5. lcd_ship_screens.h -- Screen Builders (~1500 lines)

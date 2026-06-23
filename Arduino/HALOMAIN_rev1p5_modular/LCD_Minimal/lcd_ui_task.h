@@ -892,7 +892,7 @@ static void ui_task(void *arg) {
               example_lvgl_unlock();
               continue;
             } else if (strcmp(selected_item, "Reset Wi-Fi") == 0) {
-              request_sense_wake("reset_wifi");
+              lcd_force_wake_sense("reset_wifi");
               provision_user_requested = true;
               StaticJsonDocument<128> doc;
               doc["ver"] = PROTOCOL_VERSION;

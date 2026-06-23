@@ -361,7 +361,7 @@ static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
       show_ship_settings_screen();
       break;
     case SHIP_MENU_ACTION_RESET_WIFI: {
-      request_sense_wake("reset_wifi");
+      lcd_force_wake_sense("reset_wifi");
       provision_user_requested = true;
       StaticJsonDocument<128> doc;
       doc["ver"] = PROTOCOL_VERSION;

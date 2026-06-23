@@ -27,6 +27,10 @@
 
 // Forward declarations for .ino functions called by UART helpers
 static void request_sense_wake(const char* reason);
+// Unconditional GPIO39 wake pulse for user-initiated wakes (reset-wifi,
+// provisioning) where the Sense may have silently deep-slept and the awake flag
+// is stale. Bypasses the request_sense_wake recently-heard early-out.
+static void lcd_force_wake_sense(const char* reason);
 
 // When true, suppress all JSON TX on senseSerial to avoid corrupting
 // binary COBS frames during LCD OTA.  Set by lcd_ota_uart.h.

@@ -3316,6 +3316,43 @@ static void request_sense_wake(const char* reason) {
   lcd_maybe_pulse_sense_int(reason);
 }
 
+// Force a GPIO39 wake pulse regardless of sense_awake_confirmed. For USER-INITIATED
+// wakes (reset-wifi, provisioning) where the Sense may have silently/uncoordinated
+// deep-slept (e.g. guardian force-sleep, no SLEEP_READY sent) so the awake flag is
+// stale and a UART ping alone cannot wake it. A redundant pulse to an already-awake
+// Sense is a harmless edge. An EXT0 pulse reboots a sleeping Sense, which auto-
+// re-enters SoftAP when unprovisioned -- guaranteeing provisioning recovery.
+// Mirrors the post-gate body of lcd_maybe_pulse_sense_int but skips the
+// sense_awake_confirmed && sense_recently_heard early-out.
+static void lcd_force_wake_sense(const char* reason) {
+  if (g_in_light_sleep || g_sleep_transition) {
+    return;
+  }
+  // Treat the Sense as asleep: clear the (possibly stale) awake flag so the rest of
+  // the wake machinery (handshake/retry) engages, then pulse unconditionally.
+  if (sense_awake_confirmed) {
+    sense_awake_confirmed = false;
+    sense_state_set(SENSE_ASLEEP, "force_wake");
+  }
+  sense_wake_explicit_request = true;
+  unsigned long now = millis();
+  if (wake_retry_until_ms == 0) {
+    start_sense_wake_handshake();
+  }
+  maybe_extend_sense_awake_grace(reason);
+  last_int_pulse_ms = now;
+  Serial.printf("[LCD_INT] FORCE pulse_sense reason=%s len_ms=%lu\n",
+                reason ? reason : "unknown",
+                (unsigned long)WAKE_PULSE_DURATION_MS);
+  Serial.println("[LCD] FORCE waking Sense");
+  pulseWakeSense();
+  send_sense_ping();
+  last_wake_retry_ms = now;
+  sense_status_sync_requested = false;
+  sense_ota_apply_required = false;
+  sense_wake_explicit_request = false;
+}
+
 static void deferred_awake_tx_service() {
   if (!deferred_awake_tx_valid || g_in_light_sleep || sense_ready_for_control_tx()) {
     return;
@@ -4317,6 +4354,10 @@ void loop() {
           status_screen_shown_time = millis();
           lv_timer_handler();
           provision_qr_wait_begin("status_button");
+          // Wake the (possibly sleeping) Sense before sending the reset request,
+          // mirroring the menu-path Reset-WiFi handlers. A sleeping Sense never
+          // receives the queued INPUT_RESET_WIFI otherwise.
+          lcd_force_wake_sense("reset_wifi");
           tx_msg_t tx_msg = {};
           strncpy(tx_msg.type, "INPUT_RESET_WIFI", sizeof(tx_msg.type) - 1);
           if (uart_tx_queue != NULL) {
@@ -4747,6 +4788,21 @@ void loop() {
     meal_result_shown_time = 0;  // Reset timeout
     show_ship_main_menu();
     enterLightSleep();
+  }
+
+  // While waiting for the provisioning QR, periodically keep the Sense awake so
+  // its SoftAP stays up and the QR can actually arrive. lcd_force_wake_sense()
+  // pulses GPIO39 UNCONDITIONALLY -- even if sense_awake_confirmed is stale (the
+  // Sense silently/uncoordinated deep-slept) -- so a UART-only ping can't strand
+  // provisioning. Throttle to ~every 3s; gate strictly on the QR-wait state so we
+  // never fire this once provisioned or outside the provisioning/QR-wait flow.
+  if (provision_qr_waiting) {
+    static unsigned long last_provision_wake_ms = 0;
+    unsigned long now_pw = millis();
+    if (last_provision_wake_ms == 0 || (now_pw - last_provision_wake_ms) >= 3000) {
+      last_provision_wake_ms = now_pw;
+      lcd_force_wake_sense("provision_qr");
+    }
   }
 
   // If reset Wi-Fi was requested but QR never arrived, show error after timeout.
