@@ -334,7 +334,16 @@ static void ui_task(void *arg) {
     // show an error and return to menu.  This catches sleep/wake races,
     // Sense memory exhaustion, and deferred-TX stalls.
     if (waiting_for_scan_response && scan_request_sent_ms > 0 &&
-        !dish_processing_active) {  // dish has its own timeout
+        !dish_processing_active &&  // dish has its own timeout
+        // Only fire while genuinely awaiting Sense's FIRST response on a
+        // capture/processing screen.  Once a user-choice/expiry/terminal
+        // screen is up, the Sense has already responded and that screen
+        // owns its own graceful countdown -- this watchdog must not race it
+        // into an error screen.  (SCREEN_RESULT is the error-screen state.)
+        ui_screen_state != SCREEN_EXPIRY_CHOICE &&
+        ui_screen_state != SCREEN_EXPIRY &&
+        ui_screen_state != SCREEN_LOGGED &&
+        ui_screen_state != SCREEN_RESULT) {
       unsigned long now_ms = millis();
       unsigned long age_ms = now_ms - scan_request_sent_ms;
       if (age_ms > SCAN_NO_RESPONSE_TIMEOUT_MS) {

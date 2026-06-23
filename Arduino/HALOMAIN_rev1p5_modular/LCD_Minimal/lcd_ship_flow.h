@@ -1166,6 +1166,13 @@ static void ship_show_expiry_choice_impl() {
   ui_busy = true;
   ship_logged_hide_at_ms = 0;
   ship_error_hide_at_ms = 0;
+  // Sense has responded; we're on a user-choice screen with its own 30s timeout.
+  // Clear the capture/processing watchdogs so they can't race this screen's
+  // graceful timeout and throw an error screen.
+  waiting_for_scan_response = false;
+  scan_request_sent_ms = 0;
+  dish_processing_active = false;
+  dish_processing_start_ms = 0;
   expiry_submitted = false;
   ship_expiry_choice_shown_time = millis();
   ship_update_expiry_choice_timeout_ring();
@@ -1202,6 +1209,13 @@ static void ship_show_expiry_screen_impl() {
   ui_busy = true;
   ship_logged_hide_at_ms = 0;
   ship_error_hide_at_ms = 0;
+  // Sense has responded; we're on a user-choice screen with its own 30s timeout.
+  // Clear the capture/processing watchdogs so they can't race this screen's
+  // graceful timeout and throw an error screen.
+  waiting_for_scan_response = false;
+  scan_request_sent_ms = 0;
+  dish_processing_active = false;
+  dish_processing_start_ms = 0;
   expiry_submitted = false;
   Serial.println("[STATUS] Showing expiration date entry screen (ship)");
   lv_timer_handler();

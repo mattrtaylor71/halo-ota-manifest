@@ -1,5 +1,7 @@
 # HALO LCD Board Firmware Documentation
 
+> **2026-06-23 (v6.1.804):** Discard/expiry-choice countdown no longer races the scan-no-response watchdog into an error screen. Two-part fix: (A) `ship_show_expiry_choice_impl()` and `ship_show_expiry_screen_impl()` now clear the capture/processing watchdogs (`waiting_for_scan_response=false`, `scan_request_sent_ms=0`, `dish_processing_active=false`, `dish_processing_start_ms=0`) when the user-choice / expiry screen takes over — the Sense has already responded and that screen owns its own 30s graceful countdown. (B) the scan-no-response watchdog in `lcd_ui_task.h` is now screen-gated: it never fires when `ui_screen_state` is `SCREEN_EXPIRY_CHOICE`, `SCREEN_EXPIRY`, `SCREEN_LOGGED`, or `SCREEN_RESULT` (the error-screen state). The choice/expiry-choice (discard skip + check-in empty-date), expiry date picker, hold-still, AI-listening, and logged countdowns all end gracefully (skip→LOGGED→Home), never an error.
+
 > **2026-06-22 (v6.1.803):** Tofu fix — middle-dot `·` (U+00B7, not in montserrat fonts) swapped for bullet `•` (U+2022) on the Settings version line and the Backlight hint; the Settings "Back" button now shows a green `LV_SYMBOL_LEFT` arrow (0x1F4D2B, montserrat_20) instead of the word "Back".
 
 ## Hardware Overview
