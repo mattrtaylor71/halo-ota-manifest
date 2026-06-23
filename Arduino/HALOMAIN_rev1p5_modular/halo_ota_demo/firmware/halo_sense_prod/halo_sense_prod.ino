@@ -560,7 +560,13 @@ static const unsigned long OTA_PROOF_TIMEOUT_MS = 15000;
 
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay);
 static bool is_time_valid();
+void halo_prod_kick_time_sync(const char* reason);  // Start SNTP immediately on STA-connect (idempotent, non-blocking)
 static void ota_sched_save();
+
+// Tracks whether configTime()/SNTP has been started this boot. File-scope so the
+// provisioning STATE_CONNECTED path can kick SNTP early (halo_prod_kick_time_sync)
+// and the main-loop SNTP block stays idempotent with it.
+static bool g_prod_sntp_started = false;
 static bool maintenance_window_load(MaintenanceWindow* mw);
 
 static const char* reset_reason_to_str(esp_reset_reason_t reason) {
@@ -2957,6 +2963,22 @@ static void ensure_timezone_pt(const char* reason) {
   LOG_INFO("[TZ] set=PT reason=%s", reason ? reason : "unknown");
 }
 
+// Start SNTP/NTP the instant WiFi (STA) connects, so the owner-claim TLS and OTA
+// schedule calls have valid time on the first attempt rather than failing http=-1
+// while time is still invalid right after connect. Idempotent (only starts once per
+// boot) and non-blocking (does NOT wait for sync). Called from the provisioning
+// STATE_CONNECTED transition (ProvisioningManager) and shared with the main-loop
+// SNTP block via g_prod_sntp_started so they never double-init.
+void halo_prod_kick_time_sync(const char* reason) {
+  if (g_prod_sntp_started) {
+    return;
+  }
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+  ensure_timezone_pt(reason ? reason : "kick_time_sync");
+  g_prod_sntp_started = true;
+  LOG_INFO("[TLS_GUARD] SNTP init (early on connect) reason=%s", reason ? reason : "unknown");
+}
+
 static int clamp_int(int value, int min_value, int max_value) {
   if (value < min_value) return min_value;
   if (value > max_value) return max_value;
@@ -4845,7 +4867,6 @@ void halo_prod_loop() {
   }
   bool wifi_connected = wifi_is_connected();
   static bool last_wifi_connected = false;
-  static bool sntp_started = false;
   static unsigned long s_mqtt_awake_failover_ms = 0;
   static bool s_last_setup_mode_active = true;
 
@@ -4956,12 +4977,8 @@ void halo_prod_loop() {
   }
 
   if (wifi_connected) {
-    if (!sntp_started) {
-      configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-      ensure_timezone_pt("sntp_start");
-      sntp_started = true;
-      LOG_INFO("[TLS_GUARD] SNTP init");
-    }
+    // Idempotent: no-op if the provisioning STATE_CONNECTED path already kicked SNTP.
+    halo_prod_kick_time_sync("sntp_start");
     if (is_time_valid()) {
       time_t now = time(nullptr);
       ota_sched_update_next_epoch(now);
