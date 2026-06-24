@@ -291,29 +291,33 @@ def do_voice(lcd, drainer=None):
     return False
 
 
-def verify_s3(bucket, device_id, since_epoch, timeout_s=60):
-    """Check for new S3 objects from this device after since_epoch.
-    Searches ALL owner paths for this device_id (handles fresh provisioning)."""
+def s3_device_keys(bucket, top_prefix, owner_id, device_id):
+    """Return the set of S3 object keys for this device (backend, no serial).
+    Targets the device's own prefix when owner_id is known (fast + precise),
+    else scans top_prefix and substring-matches device_id. NOTE buckets differ:
+    uploads use 'images/', discards use 'resized-images/'."""
+    prefix = (f"{top_prefix}{owner_id}/{device_id}/"
+              if owner_id and owner_id != "unknown" else top_prefix)
+    result = subprocess.run(
+        ["aws", "s3", "ls", f"s3://{bucket}/{prefix}", "--recursive",
+         "--profile", "trepo-dev", "--region", "us-east-1"],
+        capture_output=True, text=True,
+    )
+    keys = set()
+    for line in result.stdout.strip().split("\n"):
+        if line.strip() and device_id in line:
+            keys.add(line.split()[-1])
+    return keys
+
+
+def wait_for_new_s3(bucket, top_prefix, owner_id, device_id, before_keys, timeout_s=120):
+    """Poll S3 until a NEW object (key not in before_keys) appears for this
+    device. Compares KEY SETS, not timestamps, so it is timezone-independent
+    and immune to upload-latency windows. Backend only — no serial, no reset."""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        result = subprocess.run(
-            ["aws", "s3", "ls", f"s3://{bucket}/images/",
-             "--recursive", "--profile", "trepo-dev", "--region", "us-east-1"],
-            capture_output=True, text=True,
-        )
-        for line in result.stdout.strip().split("\n"):
-            if not line.strip():
-                continue
-            if device_id not in line:
-                continue
-            parts = line.split()
-            if len(parts) >= 2:
-                try:
-                    ts = datetime.strptime(f"{parts[0]} {parts[1]}", "%Y-%m-%d %H:%M:%S")
-                    if ts.timestamp() > since_epoch - 60:
-                        return True
-                except ValueError:
-                    pass
+        if s3_device_keys(bucket, top_prefix, owner_id, device_id) - before_keys:
+            return True
         time.sleep(8)
     return False
 
@@ -325,6 +329,40 @@ def get_fw_version():
             if m:
                 return m.group(1)
     return "unknown"
+
+
+OTA_REPORT_BASE = "https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com"
+OTA_MANIFEST_BASE = "https://halo-ota-dev.s3.us-east-1.amazonaws.com/halo/ota/dev"
+
+
+def get_manifest_version(board="sense"):
+    """Published OTA target version from manifest_latest (backend, no serial)."""
+    import urllib.request
+    sub = "" if board == "sense" else "lcd/"
+    try:
+        with urllib.request.urlopen(f"{OTA_MANIFEST_BASE}/{sub}manifest_latest.json", timeout=10) as r:
+            return json.load(r).get("version")
+    except Exception:
+        return None
+
+
+def get_device_cloud_fw(device_id):
+    """(sense_fw, lcd_fw) from the OTA report backend — no serial, no reset.
+    This is the non-destructive way to check OTA state vs reading device logs."""
+    if not device_id or device_id == "unknown":
+        return None, None
+    import urllib.request, urllib.parse
+    url = f"{OTA_REPORT_BASE}/ota/report/latest?device_id={urllib.parse.quote(device_id)}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            d = json.load(r)
+        items = d.get("items") or []   # report wraps the record in items[0]
+        if not items:
+            return None, None
+        it = items[0]
+        return it.get("last_fw"), it.get("last_lcd_fw")
+    except Exception:
+        return None, None
 
 
 def pre_compile():
@@ -1335,16 +1373,15 @@ def run_test_suite(config):
                 warmup_lcd.write(b"wake\n")
                 time.sleep(5)
                 warmup_drainer.flush()
+                # Snapshot S3 before the capture so we can detect a NEW object.
+                warmup_before = s3_device_keys(S3_UPLOAD_BUCKET, "images/", owner_id, device_id)
                 # Do a dish capture — don't care if S3 upload works yet
                 warmup_timing, _ = do_capture(warmup_lcd, "Dish", 0, drainer=warmup_drainer)
                 if warmup_timing:
                     emit_step(step, "Post-Provision Warmup", "running",
                               f"Capture OK ({warmup_timing}ms), waiting for backend sync...")
-                # Wait for the upload to attempt (and potentially register the device)
-                time.sleep(15)
-                # Check if upload landed
-                warmup_ts = time.time() - 30
-                if verify_s3(S3_UPLOAD_BUCKET, device_id, warmup_ts, timeout_s=30):
+                # Check if a new upload landed (backend, no serial)
+                if wait_for_new_s3(S3_UPLOAD_BUCKET, "images/", owner_id, device_id, warmup_before, timeout_s=60):
                     emit_step(step, "Post-Provision Warmup", "pass", "Device registered, uploads working")
                 else:
                     emit_step(step, "Post-Provision Warmup", "pass",
@@ -1407,29 +1444,29 @@ def run_test_suite(config):
         # ── Step: Dish Capture ──
         step += 1
         emit_step(step, "Dish Capture", "running", "Capturing dish...")
-        before_ts = time.time()
+        dish_before = s3_device_keys(S3_UPLOAD_BUCKET, "images/", owner_id, device_id)
         timing, img_len = do_capture(lcd, "Dish", 0, drainer=drainer)
         if timing:
             emit_step(step, "Dish Capture", "pass", f"{timing}ms, {img_len} bytes")
         else:
             emit_step(step, "Dish Capture", "fail", "No timing received")
 
-        # ── Step: Dish S3 Upload ──
+        # ── Step: Dish S3 Upload (backend verify — new object appears) ──
         if timing:
             step += 1
-            emit_step(step, "Dish S3 Upload", "running", "Verifying S3...")
-            time.sleep(10)
-            if verify_s3(S3_UPLOAD_BUCKET, device_id, before_ts):
-                emit_step(step, "Dish S3 Upload", "pass", "Upload verified in S3")
+            emit_step(step, "Dish S3 Upload", "running", "Verifying new image in S3 (backend)...")
+            if wait_for_new_s3(S3_UPLOAD_BUCKET, "images/", owner_id, device_id, dish_before, timeout_s=120):
+                emit_step(step, "Dish S3 Upload", "pass", "New image object landed in S3")
             else:
-                emit_step(step, "Dish S3 Upload", "fail", "Upload not found in S3")
+                emit_step(step, "Dish S3 Upload", "fail", "No new S3 object within 120s")
 
         time.sleep(3)
 
         # ── Step: Discard Capture ──
         step += 1
         emit_step(step, "Discard Capture", "running", "Capturing discard...")
-        before_ts = time.time()
+        # NOTE: discards live under 'resized-images/', not 'images/'.
+        disc_before = s3_device_keys(S3_DISCARD_BUCKET, "resized-images/", owner_id, device_id)
         dismiss = '{"ver":1,"type":"INPUT_DISCARD_OPTIONS","msg_id":10,"ts":1000,"add_to_shopping_list":false}'
         timing, img_len = do_capture(lcd, "Discard", 1, dismiss, drainer=drainer)
         if timing:
@@ -1437,15 +1474,14 @@ def run_test_suite(config):
         else:
             emit_step(step, "Discard Capture", "fail", "No timing received")
 
-        # ── Step: Discard S3 Upload ──
+        # ── Step: Discard S3 Upload (backend verify) ──
         if timing:
             step += 1
-            emit_step(step, "Discard S3 Upload", "running", "Verifying S3...")
-            time.sleep(10)
-            if verify_s3(S3_DISCARD_BUCKET, device_id, before_ts):
-                emit_step(step, "Discard S3 Upload", "pass", "Upload verified in S3")
+            emit_step(step, "Discard S3 Upload", "running", "Verifying new discard image in S3 (backend)...")
+            if wait_for_new_s3(S3_DISCARD_BUCKET, "resized-images/", owner_id, device_id, disc_before, timeout_s=120):
+                emit_step(step, "Discard S3 Upload", "pass", "New discard object landed in S3")
             else:
-                emit_step(step, "Discard S3 Upload", "fail", "Upload not found in S3")
+                emit_step(step, "Discard S3 Upload", "fail", "No new S3 object within 120s")
 
         time.sleep(3)
 
@@ -1505,44 +1541,53 @@ def run_test_suite(config):
             return
 
         time.sleep(1)
-        lcd = open_lcd(lcd_port)
-        drainer = SerialDrainer(lcd)
-        lcd.write(b"testmode\n")
-        time.sleep(1)
 
-        # ── Step: OTA Test ──
+        # ── Step: OTA Test (backend-verified; SKIP if already on latest) ──
+        # The old version sent `ota` over serial and waited 360s for the LCD
+        # port to vanish (= reboot). A device already on the latest firmware
+        # never reboots -> false timeout FAIL. And reading serial during OTA can
+        # reset the board. Now: compare device fw vs manifest_latest via the
+        # cloud report (no serial); skip if current; if behind, trigger once and
+        # verify completion via the cloud report.
         step += 1
-        emit_step(step, "OTA Update", "running", "Triggering OTA check...")
-        lcd.write(b"ota\n")
+        emit_step(step, "OTA Update", "running", "Checking published target vs device firmware (backend)...")
+        target = get_manifest_version("sense")
+        s_fw, l_fw = get_device_cloud_fw(device_id)
         ota_ok = False
-        ota_progress = ""
-        deadline = time.time() + 360
-        while time.time() < deadline:
-            if not os.path.exists(lcd_port):
-                ota_ok = True
-                emit_step(step, "OTA Update", "pass", f"OTA completed, device rebooted. {ota_progress}")
-                break
+        if not target:
+            emit_step(step, "OTA Update", "fail", "Could not read manifest_latest target (network?)")
+        elif s_fw == target and (l_fw == target or l_fw in (None, "unknown")):
+            emit_step(step, "OTA Update", "pass",
+                      f"Already on latest {target} (sense={s_fw} lcd={l_fw}) — nothing to update, OTA skipped.")
+        else:
+            # Device is behind — trigger OTA once over serial, then verify via the
+            # cloud report (manual OTA updates the LCD; Sense self-updates via a
+            # maintenance window).
+            emit_step(step, "OTA Update", "running",
+                      f"Behind target {target} (sense={s_fw} lcd={l_fw}); triggering OTA...")
             try:
-                line = drainer.get_line(timeout=0.5)
-                if line:
-                    if "STATUS" in line and "%" in line:
-                        ota_progress = line.split("]")[-1].strip() if "]" in line else line
-                        emit_step(step, "OTA Update", "running", ota_progress)
-                    elif "Restarting" in line:
-                        ota_ok = True
-                        emit_step(step, "OTA Update", "pass", "OTA completed, restarting")
-                        break
-            except Exception:
-                ota_ok = True
-                emit_step(step, "OTA Update", "pass", "OTA completed (serial lost during reboot)")
-                break
-        if not ota_ok:
-            emit_step(step, "OTA Update", "fail", "OTA timed out")
-        drainer.stop()
-        try:
-            lcd.close()
-        except Exception:
-            pass
+                otalcd = open_lcd(lcd_port)
+                otalcd.write(b"testmode\n"); time.sleep(1)
+                otalcd.write(b"ota\n"); time.sleep(1)
+                otalcd.close()   # release the port; verify via cloud, not serial
+            except Exception as e:
+                emit("log", f"OTA trigger error: {e}")
+            deadline = time.time() + 360
+            while time.time() < deadline:
+                time.sleep(15)
+                s2, l2 = get_device_cloud_fw(device_id)
+                emit_step(step, "OTA Update", "running",
+                          f"OTA in progress… cloud: sense={s2} lcd={l2} (target {target})")
+                if l2 == target:
+                    ota_ok = True
+                    note = "both boards" if s2 == target else "LCD (Sense updates via maintenance window)"
+                    emit_step(step, "OTA Update", "pass",
+                              f"OTA verified via cloud report: {note} reached {target}")
+                    break
+            if not ota_ok:
+                s3v, l3v = get_device_cloud_fw(device_id)
+                emit_step(step, "OTA Update", "fail",
+                          f"OTA not confirmed at {target} within 6min (cloud: sense={s3v} lcd={l3v})")
 
         # ── Step: Post-OTA Wake ──
         if ota_ok:
