@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HALO Upload Viewer</title>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3; --dim: #8b949e; --green: #3fb950; --blue: #58a6ff; --purple: #bc8cff; --yellow: #d29922; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+  h1 { font-size: 1.4em; margin-bottom: 4px; }
+  .subtitle { color: var(--dim); font-size: 0.85em; margin-bottom: 20px; }
+  a.back { color: var(--blue); text-decoration: none; font-size: 0.85em; }
+
+  .search-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  .search-bar input { flex: 1; min-width: 250px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 0.95em; }
+  .search-bar input:focus { outline: none; border-color: var(--blue); }
+  .search-bar select { padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 0.9em; }
+  .search-btn { padding: 10px 20px; border: none; border-radius: 8px; background: var(--blue); color: #fff; font-weight: 600; cursor: pointer; font-size: 0.95em; }
+  .search-btn:hover { filter: brightness(1.1); }
+  .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .stats { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 0.85em; }
+  .stat strong { color: var(--green); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .img-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; cursor: pointer; transition: border-color 0.2s; }
+  .img-card:hover { border-color: var(--blue); }
+  .img-card img { width: 100%; height: 180px; object-fit: cover; background: #000; }
+  .img-card .info { padding: 8px 10px; }
+  .img-card .ts { font-size: 0.8em; color: var(--dim); }
+  .img-card .device { font-size: 0.75em; color: var(--blue); margin-top: 2px; }
+  .img-card .size { font-size: 0.75em; color: var(--dim); float: right; margin-top: -14px; }
+
+  .lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); z-index: 100; justify-content: center; align-items: center; flex-direction: column; }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 90vw; max-height: 80vh; border-radius: 8px; }
+  .lightbox .lb-info { color: var(--text); margin-top: 12px; text-align: center; font-size: 0.85em; }
+  .lb-close { position: absolute; top: 20px; right: 30px; font-size: 2em; color: white; cursor: pointer; }
+  .lb-nav { position: absolute; top: 50%; font-size: 3em; color: white; cursor: pointer; padding: 20px; user-select: none; }
+  .lb-nav:hover { color: var(--blue); }
+  .lb-prev { left: 20px; }
+  .lb-next { right: 20px; }
+
+  .empty { text-align: center; padding: 60px; color: var(--dim); }
+  .loading { text-align: center; padding: 40px; color: var(--yellow); }
+</style>
+</head>
+<body>
+<div class="container">
+  <a class="back" href="/">&larr; Factory Test</a>
+  <h1>Upload Viewer</h1>
+  <div class="subtitle">View S3 uploads by owner or device</div>
+
+  <div class="search-bar">
+    <input type="text" id="owner-input" placeholder="Owner ID (e.g. 7d7df434-d942-4037-b054-2d3005ea6abc)">
+    <input type="text" id="device-input" placeholder="Device ID (optional, e.g. halo-5bd4-db1c)">
+    <select id="bucket-select">
+      <option value="trepo-grocery-uploads-dev">Uploads</option>
+      <option value="trepo-grocery-discards-dev">Discards</option>
+    </select>
+    <button class="search-btn" id="search-btn" onclick="search()">Search</button>
+  </div>
+
+  <div class="stats" id="stats" style="display:none"></div>
+  <div id="content"></div>
+</div>
+
+<div class="lightbox" id="lightbox">
+  <span class="lb-close" onclick="closeLB()">&times;</span>
+  <span class="lb-nav lb-prev" onclick="navLB(-1)">&lsaquo;</span>
+  <span class="lb-nav lb-next" onclick="navLB(1)">&rsaquo;</span>
+  <img id="lb-img" src="">
+  <div class="lb-info" id="lb-info"></div>
+</div>
+
+<script>
+let images = [];
+let lbIdx = 0;
+
+async function search() {
+  const owner = document.getElementById('owner-input').value.trim();
+  const device = document.getElementById('device-input').value.trim();
+  const bucket = document.getElementById('bucket-select').value;
+
+  if (!owner && !device) {
+    document.getElementById('content').innerHTML = '<div class="empty">Enter an owner ID or device ID</div>';
+    return;
+  }
+
+  const btn = document.getElementById('search-btn');
+  btn.disabled = true;
+  btn.textContent = 'Searching...';
+  document.getElementById('content').innerHTML = '<div class="loading">Searching S3...</div>';
+  document.getElementById('stats').style.display = 'none';
+
+  const params = new URLSearchParams();
+  if (owner) params.set('owner', owner);
+  if (device) params.set('device', device);
+  params.set('bucket', bucket);
+  params.set('limit', '200');
+
+  try {
+    const r = await fetch('/api/uploads?' + params);
+    const data = await r.json();
+    images = data.images || [];
+
+    btn.disabled = false;
+    btn.textContent = 'Search';
+
+    if (images.length === 0) {
+      document.getElementById('content').innerHTML = '<div class="empty">No uploads found</div>';
+      return;
+    }
+
+    // Stats
+    const devices = [...new Set(images.map(i => i.device_id))];
+    const totalSize = images.reduce((s, i) => s + i.size, 0);
+    const statsEl = document.getElementById('stats');
+    statsEl.style.display = 'flex';
+    statsEl.innerHTML = `
+      <div class="stat"><strong>${images.length}</strong> images</div>
+      <div class="stat"><strong>${devices.length}</strong> device${devices.length > 1 ? 's' : ''}: ${devices.join(', ')}</div>
+      <div class="stat"><strong>${(totalSize/1024/1024).toFixed(1)}</strong> MB total</div>
+      <div class="stat">Newest: <strong>${images[0]?.timestamp || '-'}</strong></div>
+    `;
+
+    // Grid
+    document.getElementById('content').innerHTML = '<div class="grid">' + images.map((img, idx) => `
+      <div class="img-card" onclick="openLB(${idx})">
+        <img src="${img.url}" loading="lazy" onerror="this.style.display='none'">
+        <div class="info">
+          <div class="ts">${img.timestamp}</div>
+          <div class="device">${img.device_id}</div>
+          <span class="size">${(img.size/1024).toFixed(0)}KB</span>
+        </div>
+      </div>
+    `).join('') + '</div>';
+  } catch(e) {
+    document.getElementById('content').innerHTML = `<div class="empty">Error: ${e.message}</div>`;
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+function openLB(idx) { lbIdx = idx; showLB(); }
+function showLB() {
+  const img = images[lbIdx];
+  document.getElementById('lb-img').src = img.url;
+  document.getElementById('lb-info').textContent = `${img.device_id} | ${img.timestamp} | ${(img.size/1024).toFixed(0)}KB | ${img.owner_id}`;
+  document.getElementById('lightbox').classList.add('open');
+}
+function closeLB() { document.getElementById('lightbox').classList.remove('open'); }
+function navLB(dir) { lbIdx = (lbIdx + dir + images.length) % images.length; showLB(); }
+document.addEventListener('keydown', e => {
+  if (!document.getElementById('lightbox').classList.contains('open')) return;
+  if (e.key === 'ArrowLeft') navLB(-1);
+  if (e.key === 'ArrowRight') navLB(1);
+  if (e.key === 'Escape') closeLB();
+});
+
+// Auto-fill from URL params
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('owner')) { document.getElementById('owner-input').value = urlParams.get('owner'); search(); }
+if (urlParams.get('device')) { document.getElementById('device-input').value = urlParams.get('device'); search(); }
+</script>
+</body>
+</html>

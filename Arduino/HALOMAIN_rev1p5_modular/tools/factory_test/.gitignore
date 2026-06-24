@@ -1,0 +1,5 @@
+# EOL/factory test runtime artifacts — not source
+captures/
+__pycache__/
+*.pyc
+.DS_Store

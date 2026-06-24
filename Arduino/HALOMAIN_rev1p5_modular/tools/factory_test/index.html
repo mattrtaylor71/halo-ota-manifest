@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HALO Factory Acceptance Test</title>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3; --dim: #8b949e; --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #58a6ff; --purple: #bc8cff; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .container { max-width: 900px; margin: 0 auto; padding: 30px 20px; }
+  h1 { font-size: 1.6em; margin-bottom: 4px; }
+  .subtitle { color: var(--dim); font-size: 0.9em; margin-bottom: 24px; }
+
+  /* Config panel */
+  .config { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+  .config h2 { font-size: 1em; margin-bottom: 16px; color: var(--blue); }
+  .form-row { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+  .form-group { flex: 1; min-width: 200px; }
+  .form-group label { display: block; font-size: 0.8em; color: var(--dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .form-group select, .form-group input { width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.9em; }
+  .form-group select:focus, .form-group input:focus { outline: none; border-color: var(--blue); }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .checkbox-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--blue); }
+
+  /* Run button */
+  .run-btn { width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 1.1em; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .run-btn.ready { background: var(--green); color: #000; }
+  .run-btn.ready:hover { filter: brightness(1.1); }
+  .run-btn.running { background: var(--yellow); color: #000; cursor: not-allowed; }
+  .run-btn.done-pass { background: var(--green); color: #000; }
+  .run-btn.done-fail { background: var(--red); color: #fff; }
+  .run-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  /* Progress bar */
+  .progress-container { margin: 20px 0; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; transition: width 0.3s; border-radius: 4px; }
+  .progress-fill.green { background: var(--green); }
+  .progress-fill.red { background: var(--red); }
+  .progress-fill.yellow { background: var(--yellow); }
+  .progress-text { font-size: 0.8em; color: var(--dim); margin-top: 6px; text-align: center; }
+
+  /* Results */
+  .results { margin-top: 20px; }
+  .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .result-header h2 { font-size: 1em; }
+  .score { font-size: 1.2em; font-weight: 700; }
+  .score.pass { color: var(--green); }
+  .score.fail { color: var(--red); }
+
+  .step { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; transition: border-color 0.3s; }
+  .step.pass { border-left: 3px solid var(--green); }
+  .step.fail { border-left: 3px solid var(--red); }
+  .step.running { border-left: 3px solid var(--yellow); animation: pulse 1.5s infinite; }
+  .step.pending { border-left: 3px solid var(--border); opacity: 0.5; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+  .step-icon { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9em; flex-shrink: 0; }
+  .step-icon.pass { background: rgba(63,185,80,0.15); color: var(--green); }
+  .step-icon.fail { background: rgba(248,81,73,0.15); color: var(--red); }
+  .step-icon.running { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .step-icon.pending { background: rgba(139,148,158,0.1); color: var(--dim); }
+
+  .step-info { flex: 1; }
+  .step-name { font-weight: 600; font-size: 0.9em; }
+  .step-detail { font-size: 0.8em; color: var(--dim); margin-top: 2px; }
+  .step-time { font-size: 0.75em; color: var(--dim); }
+
+  /* Summary banner */
+  .summary { padding: 20px; border-radius: 12px; margin-top: 20px; text-align: center; display: none; }
+  .summary.pass { background: rgba(63,185,80,0.1); border: 2px solid var(--green); display: block; }
+  .summary.fail { background: rgba(248,81,73,0.1); border: 2px solid var(--red); display: block; }
+  .summary h2 { font-size: 1.4em; margin-bottom: 8px; }
+  .summary.pass h2 { color: var(--green); }
+  .summary.fail h2 { color: var(--red); }
+  .summary p { color: var(--dim); }
+
+  .refresh-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85em; }
+  .refresh-btn:hover { border-color: var(--blue); }
+
+  /* Provision banner */
+  .provision-banner { display: flex; align-items: center; gap: 20px; padding: 20px 24px; background: rgba(88,166,255,0.08); border: 2px solid var(--blue); border-radius: 12px; margin-bottom: 20px; animation: glow 2s infinite; }
+  @keyframes glow { 0%,100% { border-color: var(--blue); } 50% { border-color: rgba(88,166,255,0.4); } }
+  .provision-icon { font-size: 2.5em; }
+  .provision-text { flex: 1; }
+  .provision-text h3 { font-size: 1.1em; color: var(--blue); margin-bottom: 6px; }
+  .provision-text p { font-size: 0.9em; color: var(--dim); line-height: 1.5; }
+  .provision-timer { color: var(--yellow) !important; font-weight: 600; margin-top: 4px; }
+  .provision-btn { padding: 12px 24px; border: none; border-radius: 8px; background: var(--blue); color: #fff; font-size: 1em; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all 0.2s; }
+  .provision-btn:hover { filter: brightness(1.15); transform: scale(1.02); }
+
+  /* Waiting status */
+  .step.waiting { border-left: 3px solid var(--blue); animation: glow-step 2s infinite; }
+  @keyframes glow-step { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+  .step-icon.waiting { background: rgba(88,166,255,0.15); color: var(--blue); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>HALO Factory Acceptance Test</h1>
+  <div class="subtitle">Flash, test, and validate HALO devices before shipping</div>
+
+  <div class="config">
+    <h2>Device Configuration</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Sense Port</label>
+        <input type="text" id="sense-port" value="/dev/cu.usbmodem1101" placeholder="/dev/cu.usbmodem1101">
+      </div>
+      <div class="form-group">
+        <label>LCD (main) Port</label>
+        <input type="text" id="lcd-port" value="/dev/cu.usbmodem21201" placeholder="/dev/cu.usbmodem21201">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>U4WDH Port (deep-sleep, cable flipped)</label>
+        <input type="text" id="u4wdh-port" value="/dev/cu.usbserial-2120" placeholder="/dev/cu.usbserial-2120 (port may vary)">
+      </div>
+      <div class="form-group">
+        <label>Stylus Port</label>
+        <input type="text" id="stylus-port" placeholder="/dev/cu.usbmodem21101">
+      </div>
+    </div>
+    <div style="font-size:0.8em; color:var(--red); margin-bottom:12px;">
+      Port usbmodem101 is reserved for another process and is blocked.
+    </div>
+    <details style="margin-bottom:12px;">
+      <summary style="font-size:0.8em; color:var(--dim); cursor:pointer;">Detected ports</summary>
+      <div id="detected-ports" style="font-size:0.8em; color:var(--dim); margin-top:6px;"></div>
+    </details>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Device ID</label>
+        <input type="text" id="device-id" placeholder="e.g. halo-5cd4-db1c (auto-detected)">
+      </div>
+      <div class="form-group">
+        <label>Owner ID</label>
+        <input type="text" id="owner-id" placeholder="e.g. ac04093d-2ebd-403a-8918-8ce6d03d42a7">
+      </div>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="do-flash">
+      <label for="do-flash" style="font-size:0.9em">Flash firmware before testing</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="do-provision" checked>
+      <label for="do-provision" style="font-size:0.9em">Provision device (pair with phone app for WiFi + owner)</label>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+      <button class="refresh-btn" onclick="loadPorts()">Refresh Ports</button>
+      <button class="refresh-btn" id="compile-btn" onclick="recompile()">Recompile Firmware</button>
+      <span id="fw-version" style="color:var(--dim);font-size:0.85em"></span>
+      <span id="compile-status" style="font-size:0.8em"></span>
+    </div>
+  </div>
+
+  <div style="font-size:0.85em; color:var(--dim); margin-bottom:8px;">
+    Step 1: flip the LCD USB cable to the U4WDH orientation, sleep it, then flip back and run the EOL test.
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+    <button class="run-btn ready" id="sleep-u4wdh-btn" onclick="sleepU4wdh()" style="flex:1; min-width:240px; background:var(--blue); color:#fff;">Sleep U4WDH (flip cable to this chip first)</button>
+  </div>
+
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <button class="run-btn ready" id="run-btn" onclick="runTest()" style="flex:1; min-width:240px;">Run Factory Test</button>
+    <button class="run-btn ready" id="run-eol-btn" onclick="runEol()" style="flex:1; min-width:240px; background:var(--purple); color:#000;">Run EOL Hardware Test</button>
+  </div>
+
+  <div class="progress-container" id="progress-container" style="display:none">
+    <div class="progress-bar"><div class="progress-fill green" id="progress-fill" style="width:0%"></div></div>
+    <div class="progress-text" id="progress-text">Starting...</div>
+  </div>
+
+  <div class="provision-banner" id="provision-banner" style="display:none">
+    <div class="provision-icon">&#128241;</div>
+    <div class="provision-text">
+      <h3>Provision This Device</h3>
+      <p>Open the <strong>Trepo app</strong> on your phone, scan/find this device, connect it to WiFi, and assign an owner.</p>
+      <p style="font-size:0.85em; color:var(--green); margin-top:6px;">Auto-detects when provisioning completes via serial.</p>
+      <p class="provision-timer" id="provision-timer"></p>
+    </div>
+    <button class="provision-btn" id="provision-btn" onclick="confirmProvision()">Skip (Manual Override)</button>
+  </div>
+
+  <div class="results" id="results"></div>
+
+  <div class="summary" id="summary">
+    <h2 id="summary-title"></h2>
+    <p id="summary-detail"></p>
+  </div>
+</div>
+
+<script>
+let eventSource = null;
+let steps = [];
+let totalExpected = 16;
+
+async function loadPorts() {
+  // Ports are entered manually (free-text). This only refreshes the
+  // informational "Detected ports" list (forbidden ports already excluded
+  // server-side) and the firmware version.
+  try {
+    const r = await fetch('/api/ports');
+    const data = await r.json();
+    const el = document.getElementById('detected-ports');
+    if (el) {
+      el.innerHTML = data.ports.length
+        ? data.ports.map(p => `<code>${p}</code>`).join('<br>')
+        : '(none detected)';
+    }
+  } catch(e) {}
+  // FW version
+  try {
+    const vr = await fetch('/api/version');
+    const vd = await vr.json();
+    document.getElementById('fw-version').textContent = `Firmware: v${vd.version}`;
+  } catch(e) {}
+}
+
+function addStep(data) {
+  steps.push(data);
+  renderSteps();
+}
+
+function updateStep(data) {
+  const idx = steps.findIndex(s => s.step === data.step);
+  if (idx >= 0) steps[idx] = data;
+  else steps.push(data);
+  renderSteps();
+}
+
+function renderSteps() {
+  const el = document.getElementById('results');
+  const passed = steps.filter(s => s.status === 'pass').length;
+  const failed = steps.filter(s => s.status === 'fail').length;
+  const total = steps.length;
+  const pct = Math.round((passed + failed) / Math.max(totalExpected, total) * 100);
+
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-fill').className = 'progress-fill ' + (failed > 0 ? 'red' : 'green');
+  document.getElementById('progress-text').textContent = `${passed + failed}/${Math.max(totalExpected, total)} tests completed (${passed} passed, ${failed} failed)`;
+
+  el.innerHTML = `
+    <div class="result-header">
+      <h2>Test Steps</h2>
+      <span class="score ${failed > 0 ? 'fail' : 'pass'}">${passed}/${total}</span>
+    </div>
+  ` + steps.map(s => `
+    <div class="step ${s.status}">
+      <div class="step-icon ${s.status}">${s.status === 'pass' ? '\u2713' : s.status === 'fail' ? '\u2717' : s.status === 'running' ? '\u25CB' : '\u2022'}</div>
+      <div class="step-info">
+        <div class="step-name">${s.name}</div>
+        <div class="step-detail">${s.detail || ''}</div>
+        ${s.image ? `<img src="${s.image}" style="max-width:240px;border-radius:8px;margin-top:6px">` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function runTest() {
+  const btn = document.getElementById('run-btn');
+  if (btn.classList.contains('running')) return;
+  if (document.getElementById('run-eol-btn').classList.contains('running')) return;
+
+  steps = [];
+  totalExpected = 16;
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('summary').className = 'summary';
+  document.getElementById('progress-container').style.display = 'block';
+  btn.textContent = 'Running...';
+  btn.className = 'run-btn running';
+  btn.disabled = true;
+
+  document.getElementById('provision-banner').style.display = 'none';
+
+  const config = {
+    lcd_port: document.getElementById('lcd-port').value,
+    stylus_port: document.getElementById('stylus-port').value,
+    device_id: document.getElementById('device-id').value || 'unknown',
+    owner_id: document.getElementById('owner-id').value || 'unknown',
+    flash: document.getElementById('do-flash').checked,
+    provision: document.getElementById('do-provision').checked,
+    sense_port: document.getElementById('sense-port').value,
+  };
+
+  fetch('/api/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+
+  attachEventSource(btn);
+}
+
+function runEol() {
+  const btn = document.getElementById('run-eol-btn');
+  if (btn.classList.contains('running')) return;
+  // Don't start if the other suite is mid-run
+  if (document.getElementById('run-btn').classList.contains('running')) return;
+
+  steps = [];
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('summary').className = 'summary';
+  document.getElementById('progress-container').style.display = 'block';
+  document.getElementById('provision-banner').style.display = 'none';
+  totalExpected = 13;
+
+  btn.textContent = 'Running EOL...';
+  btn.className = 'run-btn running';
+  btn.disabled = true;
+
+  const config = {
+    lcd_port: document.getElementById('lcd-port').value,
+    sense_port: document.getElementById('sense-port').value,
+    device_id: document.getElementById('device-id').value || 'unknown',
+    owner_id: document.getElementById('owner-id').value || 'unknown',
+  };
+
+  fetch('/api/run-eol', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+
+  attachEventSource(btn);
+}
+
+function sleepU4wdh() {
+  const btn = document.getElementById('sleep-u4wdh-btn');
+  if (btn.classList.contains('running')) return;
+  // Don't start if a suite is mid-run
+  if (document.getElementById('run-btn').classList.contains('running')) return;
+  if (document.getElementById('run-eol-btn').classList.contains('running')) return;
+
+  steps = [];
+  totalExpected = 2;
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('summary').className = 'summary';
+  document.getElementById('progress-container').style.display = 'block';
+  document.getElementById('provision-banner').style.display = 'none';
+
+  btn.textContent = 'Sleeping U4WDH...';
+  btn.className = 'run-btn running';
+  btn.disabled = true;
+
+  const config = {
+    u4wdh_port: document.getElementById('u4wdh-port').value || '/dev/cu.usbserial-2120',
+  };
+
+  fetch('/api/sleep-u4wdh', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+
+  attachEventSource(btn);
+}
+
+function attachEventSource(btn) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/api/events');
+  eventSource.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'step') {
+      updateStep(msg.data);
+    } else if (msg.type === 'provision_wait') {
+      document.getElementById('provision-banner').style.display = 'flex';
+      // Start countdown
+      let remaining = 300;
+      const timer = setInterval(() => {
+        remaining--;
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        document.getElementById('provision-timer').textContent = `Time remaining: ${m}:${String(s).padStart(2,'0')}`;
+        if (remaining <= 0) {
+          clearInterval(timer);
+          document.getElementById('provision-banner').style.display = 'none';
+        }
+      }, 1000);
+      window._provisionTimer = timer;
+    } else if (msg.type === 'done') {
+      const d = msg.data;
+      const summary = document.getElementById('summary');
+      if (d.result === 'pass') {
+        summary.className = 'summary pass';
+        document.getElementById('summary-title').textContent = 'ALL TESTS PASSED';
+        document.getElementById('summary-detail').textContent = `${d.passed}/${d.total} tests passed. Device is ready for shipping.`;
+        btn.textContent = 'ALL PASSED \u2713';
+        btn.className = 'run-btn done-pass';
+      } else {
+        summary.className = 'summary fail';
+        document.getElementById('summary-title').textContent = 'TESTS FAILED';
+        document.getElementById('summary-detail').textContent = `${d.passed || 0}/${d.total || 0} passed, ${d.failed || 0} failed. ${d.reason || ''}`;
+        btn.textContent = 'FAILED \u2717 — Click to Retry';
+        btn.className = 'run-btn done-fail';
+      }
+      btn.disabled = false;
+      eventSource.close();
+    } else if (msg.type === 'log') {
+      console.log('LOG:', msg.data);
+    }
+  };
+}
+
+// Check compile status
+async function checkCompileStatus() {
+  try {
+    const r = await fetch('/api/compile-status');
+    const d = await r.json();
+    const el = document.getElementById('compile-status');
+    if (d.ready) {
+      const age = Math.max(d.sense.age_seconds, d.lcd.age_seconds);
+      const mins = Math.floor(age / 60);
+      el.innerHTML = `<span style="color:var(--green)">&#9679;</span> Firmware compiled (${mins}m ago)`;
+    } else {
+      el.innerHTML = `<span style="color:var(--yellow)">&#9679;</span> Compiling...`;
+    }
+  } catch(e) {}
+}
+checkCompileStatus();
+setInterval(checkCompileStatus, 5000);
+
+async function recompile() {
+  const btn = document.getElementById('compile-btn');
+  btn.textContent = 'Compiling...';
+  btn.disabled = true;
+  document.getElementById('compile-status').innerHTML = '<span style="color:var(--yellow)">&#9679;</span> Compiling both boards...';
+  await fetch('/api/compile', { method: 'POST' });
+  // Poll until done
+  const poll = setInterval(async () => {
+    const r = await fetch('/api/compile-status');
+    const d = await r.json();
+    if (d.ready) {
+      clearInterval(poll);
+      btn.textContent = 'Recompile Firmware';
+      btn.disabled = false;
+      checkCompileStatus();
+    }
+  }, 3000);
+}
+
+// Auto-refresh the informational detected-ports list every 2 seconds.
+// Port fields are manual free-text — we never overwrite what the user typed.
+let lastPorts = '';
+setInterval(async () => {
+  try {
+    const r = await fetch('/api/ports');
+    const data = await r.json();
+    const key = data.ports.join(',');
+    if (key !== lastPorts) {
+      lastPorts = key;
+      const el = document.getElementById('detected-ports');
+      if (el) {
+        el.innerHTML = data.ports.length
+          ? data.ports.map(p => `<code>${p}</code>`).join('<br>')
+          : '(none detected)';
+      }
+    }
+  } catch(e) {}
+}, 2000);
+
+async function confirmProvision() {
+  document.getElementById('provision-btn').textContent = 'Confirmed!';
+  document.getElementById('provision-btn').disabled = true;
+  if (window._provisionTimer) clearInterval(window._provisionTimer);
+  await fetch('/api/provision-confirm', { method: 'POST' });
+  setTimeout(() => {
+    document.getElementById('provision-banner').style.display = 'none';
+  }, 1000);
+}
+
+loadPorts();
+</script>
+</body>
+</html>
