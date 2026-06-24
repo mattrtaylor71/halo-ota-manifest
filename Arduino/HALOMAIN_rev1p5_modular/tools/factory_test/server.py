@@ -548,11 +548,25 @@ class EolLink:
 
 
 def eol_compile_one(name, fqbn, sketch, build_path):
-    """Compile one EOL/prod target if its binary is missing or stale (>1h)."""
+    """Compile one EOL/prod target. Recompiles when the binary is missing, older
+    than its source (the .ino or the sketch's Version.h), or stale (>1h). The
+    source-mtime check is what makes a firmware bump (a regenerated Version.h,
+    e.g. 6.1.814) get picked up instead of flashing a cached older build."""
     bin_path = os.path.join(build_path, os.path.basename(sketch).replace(".ino", ".ino.bin"))
     if os.path.exists(bin_path):
-        age = time.time() - os.path.getmtime(bin_path)
-        if age < 3600:
+        bin_mtime = os.path.getmtime(bin_path)
+        # If any source is newer than the built binary, the cache is stale.
+        # Version.h is regenerated on every firmware release, so its mtime is a
+        # reliable "new firmware" signal.
+        src_newer = False
+        for s in (sketch, os.path.join(os.path.dirname(sketch), "Version.h")):
+            try:
+                if os.path.exists(s) and os.path.getmtime(s) > bin_mtime:
+                    src_newer = True
+                    break
+            except Exception:
+                pass
+        if not src_newer and (time.time() - bin_mtime) < 3600:
             return True, "cached"
     result = subprocess.run(
         ["arduino-cli", "compile", "--fqbn", fqbn,
