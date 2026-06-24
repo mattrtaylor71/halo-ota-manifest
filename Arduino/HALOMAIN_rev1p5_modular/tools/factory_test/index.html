@@ -126,10 +126,14 @@
     <div style="font-size:0.8em; color:var(--red); margin-bottom:12px;">
       Port usbmodem101 is reserved for another process and is blocked.
     </div>
-    <details style="margin-bottom:12px;">
-      <summary style="font-size:0.8em; color:var(--dim); cursor:pointer;">Detected ports</summary>
-      <div id="detected-ports" style="font-size:0.8em; color:var(--dim); margin-top:6px;"></div>
-    </details>
+    <div style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-size:0.85em; font-weight:600; color:var(--blue);">Live Ports</span>
+        <span style="font-size:0.7em; color:var(--dim);">auto-refresh 1s</span>
+      </div>
+      <div id="detected-ports" style="font-size:0.82em; line-height:1.8;">scanning…</div>
+      <div id="port-hint" style="font-size:0.82em; margin-top:10px; padding:8px 10px; border-radius:6px;"></div>
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label>Device ID</label>
@@ -197,19 +201,51 @@ let eventSource = null;
 let steps = [];
 let totalExpected = 16;
 
+function renderPortsData(ports) {
+  const cfg = {
+    sense: (document.getElementById('sense-port') || {}).value || '',
+    lcd:   (document.getElementById('lcd-port')   || {}).value || '',
+    u4wdh: (document.getElementById('u4wdh-port') || {}).value || '',
+  };
+  const isU4 = p => p === cfg.u4wdh || p.indexOf('usbserial-2120') >= 0;
+  const el = document.getElementById('detected-ports');
+  if (el) {
+    el.innerHTML = ports.length ? ports.map(p => {
+      let label = 'other device (not part of this rig)', color = 'var(--dim)';
+      if (p === cfg.sense)         { label = 'Sense (XIAO ESP32-S3)'; color = 'var(--green)'; }
+      else if (p === cfg.lcd)      { label = 'LCD main (ESP32-S3)';   color = 'var(--green)'; }
+      else if (isU4(p))            { label = 'LCD U4WDH — deep-sleep chip (cable flipped)'; color = 'var(--yellow)'; }
+      else if (/usbmodem101$/.test(p)) { label = 'BLOCKED — reserved by another process'; color = 'var(--red)'; }
+      return `<div><span style="color:${color}">●</span> <code>${p}</code> <span style="color:var(--dim)">— ${label}</span></div>`;
+    }).join('') : '<span style="color:var(--red)">no devices detected</span>';
+  }
+  const has = x => x && ports.indexOf(x) >= 0;
+  const hint = document.getElementById('port-hint');
+  if (hint) {
+    let msg, bg, fg;
+    if (has(cfg.sense) && has(cfg.lcd)) {
+      msg = '✓ Sense + LCD main detected → ready to Run EOL Hardware Test';
+      bg = 'rgba(63,185,80,0.12)'; fg = 'var(--green)';
+    } else if (has(cfg.sense) && !has(cfg.lcd) && ports.some(isU4)) {
+      msg = 'LCD cable is on the U4WDH side → click Sleep U4WDH, then flip the cable to main (gives ' + cfg.lcd + ')';
+      bg = 'rgba(210,153,34,0.12)'; fg = 'var(--yellow)';
+    } else if (!has(cfg.sense)) {
+      msg = '✗ Sense (' + cfg.sense + ') not detected → reseat its USB cable';
+      bg = 'rgba(248,81,73,0.12)'; fg = 'var(--red)';
+    } else {
+      msg = '✗ LCD (' + cfg.lcd + ') not detected → connect/reseat the LCD cable';
+      bg = 'rgba(248,81,73,0.12)'; fg = 'var(--red)';
+    }
+    hint.style.background = bg; hint.style.color = fg; hint.textContent = msg;
+  }
+}
+
 async function loadPorts() {
-  // Ports are entered manually (free-text). This only refreshes the
-  // informational "Detected ports" list (forbidden ports already excluded
-  // server-side) and the firmware version.
+  // Refresh the Live Ports panel (forbidden ports excluded server-side) + fw version.
   try {
     const r = await fetch('/api/ports');
     const data = await r.json();
-    const el = document.getElementById('detected-ports');
-    if (el) {
-      el.innerHTML = data.ports.length
-        ? data.ports.map(p => `<code>${p}</code>`).join('<br>')
-        : '(none detected)';
-    }
+    renderPortsData(data.ports);
   } catch(e) {}
   // FW version
   try {
@@ -429,25 +465,18 @@ async function recompile() {
   }, 3000);
 }
 
-// Auto-refresh the informational detected-ports list every 2 seconds.
-// Port fields are manual free-text — we never overwrite what the user typed.
-let lastPorts = '';
+// Live port readout: re-scan every 1s and re-render (reflects connect/disconnect
+// and any port-field edits). Port fields stay manual — never overwritten.
 setInterval(async () => {
   try {
     const r = await fetch('/api/ports');
     const data = await r.json();
-    const key = data.ports.join(',');
-    if (key !== lastPorts) {
-      lastPorts = key;
-      const el = document.getElementById('detected-ports');
-      if (el) {
-        el.innerHTML = data.ports.length
-          ? data.ports.map(p => `<code>${p}</code>`).join('<br>')
-          : '(none detected)';
-      }
-    }
-  } catch(e) {}
-}, 2000);
+    renderPortsData(data.ports);
+  } catch(e) {
+    const hint = document.getElementById('port-hint');
+    if (hint) { hint.textContent = 'server not reachable on :9095'; hint.style.color = 'var(--red)'; }
+  }
+}, 1000);
 
 async function confirmProvision() {
   document.getElementById('provision-btn').textContent = 'Confirmed!';

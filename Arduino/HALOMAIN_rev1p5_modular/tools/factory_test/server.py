@@ -99,7 +99,9 @@ def emit_step(step_id, name, status, detail="", image=None):
 def find_ports():
     """Discover USB ports, excluding any FORBIDDEN port (owned by another process)."""
     import glob
-    ports = sorted(glob.glob("/dev/cu.usbmodem*"))
+    # usbmodem* = ESP32-S3 native USB (Sense, LCD main); usbserial* = CP2102
+    # bridge (the LCD U4WDH deep-sleep chip).
+    ports = sorted(glob.glob("/dev/cu.usbmodem*") + glob.glob("/dev/cu.usbserial*"))
     allowed = []
     for p in ports:
         try:
@@ -634,8 +636,11 @@ def sleep_u4wdh(u4wdh_port):
     board_test/web_tester/server.py: try the S3 FQBN first, then fall back
     to plain ESP32. Streams progress through the shared emit_step/emit flow.
 
-    Success = serial output contains '@@SLEEP_START' OR there is NO output at
-    all (both mean the chip is asleep). assert_port_allowed() first."""
+    Success requires the flash to ACTUALLY SUCCEED first (port present + upload
+    ok); only then does '@@SLEEP_START' OR silence count as asleep. An absent or
+    silent port with no successful flash is a FAIL, not a pass (it means the LCD
+    cable isn't in the U4WDH orientation / the chip is unreachable).
+    assert_port_allowed() first."""
     global test_running
     test_running = True
     test_results.clear()
@@ -651,10 +656,23 @@ def sleep_u4wdh(u4wdh_port):
             emit("done", {"result": "fail", "reason": "U4WDH sketch missing"})
             return
 
-        # ── Step 1: Flash deep-sleep firmware (S3 FQBN, then plain ESP32) ──
+        # ── Step 1: Flash deep-sleep firmware ──
         step += 1
         emit_step(step, "Flash U4WDH deep-sleep", "running",
-                  f"Uploading deep-sleep sketch to {u4wdh_port} (S3 FQBN)...")
+                  f"Checking {u4wdh_port} is present...")
+        # The U4WDH (CP2102) is ONLY on the bus when the LCD cable is in the
+        # flipped (U4WDH) orientation. If the port is absent we must FAIL — never
+        # interpret an absent/silent port as "asleep" (that was a false-pass bug).
+        if not _wait_for_port(u4wdh_port, 3):
+            emit_step(step, "Flash U4WDH deep-sleep", "fail",
+                      f"{u4wdh_port} is not on the bus. The U4WDH chip is only exposed "
+                      f"when the LCD USB cable is FLIPPED to the U4WDH orientation — in "
+                      f"the main orientation it isn't connected. Flip the cable and retry.")
+            emit("done", {"result": "fail",
+                          "reason": "U4WDH port not present (LCD cable not in U4WDH orientation)"})
+            return
+        emit_step(step, "Flash U4WDH deep-sleep", "running",
+                  f"Uploading deep-sleep sketch to {u4wdh_port}...")
         flashed = False
         last_err = ""
         for fqbn in (U4WDH_FQBN_PRIMARY, U4WDH_FQBN_FALLBACK):
@@ -675,6 +693,16 @@ def sleep_u4wdh(u4wdh_port):
             last_err = (result.stderr or result.stdout or "")[-250:]
             emit_step(step, "Flash U4WDH deep-sleep", "running",
                       f"FQBN {fqbn} failed, retrying with fallback...")
+
+        # MUST have flashed to proceed — silence only means "asleep" if we
+        # actually wrote the sleep firmware and the chip reset into it.
+        if not flashed:
+            emit_step(step, "Flash U4WDH deep-sleep", "fail",
+                      f"Could not flash the U4WDH on {u4wdh_port} (chip unreachable). "
+                      f"Last error: {last_err[:180]}")
+            emit("done", {"result": "fail", "reason": "U4WDH flash failed"})
+            return
+        emit_step(step, "Flash U4WDH deep-sleep", "pass", "Deep-sleep sketch flashed")
 
         # ── Step 2: Verify deep sleep ──
         step += 1
@@ -710,13 +738,9 @@ def sleep_u4wdh(u4wdh_port):
                 except Exception:
                     pass
 
+        # We only reach here after a SUCCESSFUL flash, so silence now genuinely
+        # means the freshly-written sleep firmware ran and the chip slept.
         asleep = got_sleep_marker or (not any_output)
-        if not flashed and any_output and not got_sleep_marker:
-            emit_step(step, "Verify U4WDH asleep", "fail",
-                      f"Flash failed and chip still chatty. Last error: {last_err}")
-            emit("done", {"result": "fail", "reason": "U4WDH flash failed and chip active"})
-            return
-
         if asleep:
             how = "SLEEP_START seen" if got_sleep_marker else "no serial output (asleep)"
             emit_step(step, "Verify U4WDH asleep", "pass",
