@@ -115,6 +115,27 @@ enum SchedRevalidate { REVAL_VALID, REVAL_CANCELLED, REVAL_REPLACED, REVAL_FETCH
 #include "../shared/WifiGuard.h"
 #include "../shared/Watchdog.h"
 
+// Up to this many extra string key/values can be attached to a report
+// (keeps the payload builder allocation-free / on the stack). Defined here —
+// before the FIRST function in the .ino (line ~below) and thus before Arduino's
+// auto-generated prototype block — so the generated prototypes for
+// ota_report_build_payload() / ota_report_post(), which reference
+// OtaReportExtras by type, see a complete declaration.
+#define OTA_REPORT_MAX_EXTRA 4
+struct OtaReportExtras {
+  uint8_t count;
+  const char* keys[OTA_REPORT_MAX_EXTRA];
+  const char* vals[OTA_REPORT_MAX_EXTRA];
+  OtaReportExtras() : count(0) {}
+  void add(const char* k, const char* v) {
+    if (count < OTA_REPORT_MAX_EXTRA && k && v && v[0]) {
+      keys[count] = k;
+      vals[count] = v;
+      ++count;
+    }
+  }
+};
+
 extern "C" bool halo_wifi_hard_reset_for_ota(const char* reason, uint32_t timeout_ms) {
   return wifi_hard_reset_and_reconnect(reason ? reason : "ota_http_retry", timeout_ms);
 }
@@ -1159,7 +1180,13 @@ static void ota_report_add_optional_str(JsonObject obj, const char* key, const c
   }
 }
 
-static bool ota_report_build_pre_sleep_payload(String& out) {
+// Builds the rich device-state report payload. Identical to the historical
+// pre_sleep payload except report_type is parametrized and an optional small
+// set of extra string fields can be appended (used by window_armed /
+// ota_complete). Pass report_type == nullptr to default to "pre_sleep".
+static bool ota_report_build_payload(String& out,
+                                     const char* report_type,
+                                     const OtaReportExtras* extras) {
   char device_id[32] = {0};
   load_runtime_device_id(device_id, sizeof(device_id));
   if (!device_id[0]) {
@@ -1189,7 +1216,7 @@ static bool ota_report_build_pre_sleep_payload(String& out) {
   payload["channel"] = OTA_CHANNEL;
   payload["fw"] = kFirmwareVersion;
   payload["build"] = kBuildId;
-  payload["report_type"] = "pre_sleep";
+  payload["report_type"] = (report_type && report_type[0]) ? report_type : "pre_sleep";
   payload["ts_epoch"] = static_cast<uint32_t>(now);
   if (owner_ok && owner_id[0]) {
     payload["owner_id"] = owner_id;
@@ -1298,6 +1325,14 @@ static bool ota_report_build_pre_sleep_payload(String& out) {
     payload["manifest_version"] = manifest_state.version;
   }
 
+  // Caller-supplied extras (e.g. sense_fw_target on ota_complete). Added last
+  // so they can override/augment without touching the common builder body.
+  if (extras) {
+    for (uint8_t i = 0; i < extras->count; ++i) {
+      ota_report_add_optional_str(payload, extras->keys[i], extras->vals[i]);
+    }
+  }
+
   out = "";
   serializeJson(doc, out);
   if (out.length() == 0) {
@@ -1307,16 +1342,24 @@ static bool ota_report_build_pre_sleep_payload(String& out) {
   return true;
 }
 
-static bool ota_report_post_pre_sleep(uint32_t timeout_ms) {
+// Generic device-state report POST. Builds the SAME rich payload as the
+// historical pre_sleep report but with an arbitrary report_type and an optional
+// small set of extra string fields. Non-blocking-ish: guards on wifi and uses
+// the existing bounded-timeout HTTP pattern, so it skips gracefully (no hang)
+// when WiFi is down. report_type == nullptr => "pre_sleep".
+static bool ota_report_post(const char* report_type,
+                            const OtaReportExtras* extras,
+                            uint32_t timeout_ms) {
+  const char* rt = (report_type && report_type[0]) ? report_type : "pre_sleep";
   if (!OTA_REPORT_HTTP_URL[0]) {
     return false;
   }
   if (!wifi_is_connected()) {
-    LOG_INFO("[OTA_REPORT] skip pre_sleep (wifi_down)");
+    LOG_INFO("[OTA_REPORT] skip %s (wifi_down)", rt);
     return false;
   }
   String body;
-  if (!ota_report_build_pre_sleep_payload(body)) {
+  if (!ota_report_build_payload(body, rt, extras)) {
     return false;
   }
 
@@ -1372,15 +1415,21 @@ static bool ota_report_post_pre_sleep(uint32_t timeout_ms) {
 
   bool ok = (http_code == HTTP_CODE_OK || http_code == HTTP_CODE_ACCEPTED);
   if (ok) {
-    LOG_INFO("[OTA_REPORT] pre_sleep ok code=%d body_len=%u", http_code, static_cast<unsigned>(body.length()));
+    LOG_INFO("[OTA_REPORT] %s ok code=%d body_len=%u", rt, http_code, static_cast<unsigned>(body.length()));
     return true;
   }
 
   String response_preview = response.length() ? response.substring(0, 160) : String("-");
-  LOG_WARN("[OTA_REPORT] pre_sleep failed code=%d resp=%s",
+  LOG_WARN("[OTA_REPORT] %s failed code=%d resp=%s",
+           rt,
            http_code,
            response_preview.c_str());
   return false;
+}
+
+// Thin wrapper: preserves the historical pre_sleep call site / behavior.
+static bool ota_report_post_pre_sleep(uint32_t timeout_ms) {
+  return ota_report_post("pre_sleep", nullptr, timeout_ms);
 }
 
 static JsonObject ota_sched_http_get_payload_root(DynamicJsonDocument& doc) {
@@ -3939,6 +3988,36 @@ static void run_maintenance_if_needed() {
            g_lcd_ota_result[0] ? g_lcd_ota_result : "pending",
            lcd_proxy_succeeded ? 1 : 0);
 
+  // ── Telemetry: "ota_complete" report (exactly once per maintenance run) ──
+  // Emitted AFTER the LCD proxy phase (so lcd_ota_result / lcd_fw reflect the
+  // LCD outcome — e.g. end_ack_timeout while lcd_fw is still the old version)
+  // and BEFORE the Sense self-OTA, which esp_restart()s on a successful apply
+  // and would otherwise vanish silently. Because the Sense has NOT self-updated
+  // yet here, fw == current sense fw; we attach sense_fw_target so the cloud can
+  // see the asymmetry (Sense about to move to X while LCD stayed on Y). This is
+  // the single exit point for BOTH branches: (a) Sense self-OTA will run (report
+  // then restart), and (b) Sense already up-to-date / no self-OTA (still reports
+  // the LCD outcome). It sits past the LCD retry loop, so it fires exactly once.
+  {
+    const char* sense_target = OtaIntent::getDesiredSense();
+    if (!sense_target || !sense_target[0]) {
+      TruthManifestState& ms = truth_get_manifest_state();
+      if (ms.status == TruthManifestState::OK && ms.version[0]) {
+        sense_target = ms.version;
+      }
+    }
+    OtaReportExtras extras;
+    extras.add("sense_fw_target", sense_target);
+    extras.add("lcd_ota_succeeded", lcd_proxy_succeeded ? "1" : "0");
+    uint32_t report_to_ms =
+        OTA_REPORT_HTTP_TIMEOUT_MS < 5000UL ? OTA_REPORT_HTTP_TIMEOUT_MS : 5000UL;
+    ota_report_post("ota_complete", &extras, report_to_ms);
+    LOG_INFO("[OTA_REPORT] ota_complete sent lcd_result=%s lcd_succeeded=%d sense_target=%s",
+             g_lcd_ota_result[0] ? g_lcd_ota_result : "pending",
+             lcd_proxy_succeeded ? 1 : 0,
+             (sense_target && sense_target[0]) ? sense_target : "-");
+  }
+
   // ── Phase 2: Sense self-OTA (may esp_restart on success — EXPECTED) ──
   // Re-assert OTA_LOCK so the LCD's stay-awake window covers the Sense self-OTA
   // download + reboot (the LCD proxy task above sent OTA_UNLOCK at its end;
@@ -5065,6 +5144,28 @@ void halo_prod_loop() {
       ota_sched_http_fetch_window(to_ms);
       if (maintenance_schedule_pending_sync_to_lcd()) {
         sync_pending_maintenance_to_lcd("awake_sched_fetch");
+      }
+
+      // Telemetry: emit ONE "window_armed" report per newly-armed request_id so
+      // the cloud can see the device picked up a maintenance window (the rich
+      // payload already carries request_id / maint_start_epoch / fw / lcd_fw).
+      // De-dupe on request_id so repeated awake fetches of the same window
+      // don't spam. WiFi is already up on this path.
+      {
+        static char s_last_armed_report_request_id[64] = {0};
+        MaintenanceWindow armed_mw;
+        if (maintenance_window_load(&armed_mw) && armed_mw.request_id[0] &&
+            strncmp(s_last_armed_report_request_id, armed_mw.request_id,
+                    sizeof(s_last_armed_report_request_id)) != 0) {
+          uint32_t report_to_ms =
+              OTA_REPORT_HTTP_TIMEOUT_MS < 5000UL ? OTA_REPORT_HTTP_TIMEOUT_MS : 5000UL;
+          if (ota_report_post("window_armed", nullptr, report_to_ms)) {
+            strncpy(s_last_armed_report_request_id, armed_mw.request_id,
+                    sizeof(s_last_armed_report_request_id) - 1);
+            s_last_armed_report_request_id[sizeof(s_last_armed_report_request_id) - 1] = '\0';
+            LOG_INFO("[OTA_REPORT] window_armed sent request_id=%s", armed_mw.request_id);
+          }
+        }
       }
     }
   }
