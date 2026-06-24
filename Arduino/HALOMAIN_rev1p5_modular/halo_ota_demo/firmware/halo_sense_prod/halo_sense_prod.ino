@@ -167,6 +167,25 @@ extern "C" void halo_tls_restore_dma_reserve() {
   }
 }
 
+// Shared RAII guard for outbound TLS in THIS translation unit: frees the 16KB
+// camera DMA reserve for the duration of an HTTPS handshake and ALWAYS restores
+// it on every scope exit (early returns included). Mirrors commit 809's
+// DmaReserveTlsGuard (ProvisioningManager.cpp) — the schedule-fetch and
+// report-POST TLS paths can run while the camera reserve is held (and, during
+// provisioning, while the SoftAP fragments internal RAM), which starves
+// esp_aes_process_dma and panics. The free/restore hooks are idempotent. The
+// `active` flag lets a call site arm the guard only on its HTTPS branch (so the
+// plain-HTTP branch doesn't needlessly free/restore the reserve).
+struct ScopedTlsDmaReserve {
+  bool active_;
+  explicit ScopedTlsDmaReserve(bool active) : active_(active) {
+    if (active_) halo_tls_free_dma_reserve();
+  }
+  ~ScopedTlsDmaReserve() {
+    if (active_) halo_tls_restore_dma_reserve();
+  }
+};
+
 extern "C" bool halo_uart_link_recent(unsigned long max_age_ms);
 
 static const unsigned long LCD_MAINT_LINK_RECENT_MS = 15000;
@@ -1370,11 +1389,18 @@ static bool ota_report_post(const char* report_type,
   MaintenanceWindow mw;
   bool has_mw = maintenance_window_load(&mw);
 
+  // Free the camera DMA reserve for the duration of the HTTPS handshake/POST and
+  // auto-restore on every return path. This report can fire during a maintenance
+  // window with the 16KB camera reserve held, which otherwise starves the TLS
+  // esp-aes DMA alloc and panics. Only armed on the HTTPS branch.
+  const bool report_is_https = ota_report_http_is_https(OTA_REPORT_HTTP_URL);
+  ScopedTlsDmaReserve tls_dma_guard(report_is_https);
+
   HTTPClient http;
   WiFiClient plain_client;
   WiFiClientSecure secure_client;
   bool started = false;
-  if (ota_report_http_is_https(OTA_REPORT_HTTP_URL)) {
+  if (report_is_https) {
 #if OTA_REPORT_HTTP_INSECURE
     secure_client.setInsecure();
 #else
@@ -1463,13 +1489,21 @@ static bool ota_sched_http_fetch_window(uint32_t timeout_ms) {
     uart_send_sense_diag("ota_sched", "fetch_url", "OTA_SCHED", 0, url_detail);
   }
 
+  // Free the camera DMA reserve for the duration of the HTTPS handshake/GET and
+  // auto-restore on every return path. The awake-path gate (and provisioning
+  // gate) normally keeps this off the dangerous SoftAP-up window, but defense in
+  // depth: any HTTPS fetch with the 16KB camera reserve held can starve the TLS
+  // esp-aes DMA alloc and panic. Only armed on the HTTPS branch.
+  const bool sched_is_https = ota_sched_http_is_https(url.c_str());
+  ScopedTlsDmaReserve tls_dma_guard(sched_is_https);
+
   HTTPClient http;
   WiFiClient plain_client;
   WiFiClientSecure secure_client;
   int http_code = 0;
   String body;
   bool started = false;
-  if (ota_sched_http_is_https(url.c_str())) {
+  if (sched_is_https) {
 #if OTA_SCHED_HTTP_INSECURE
     secure_client.setInsecure();
 #else
@@ -5136,7 +5170,13 @@ void halo_prod_loop() {
     bool fetch_overdue = (fetch_age < 0) || (fetch_age >= AWAKE_SCHED_AGE_S);
     if (awake_long_enough && attempt_throttle_ok && fetch_overdue &&
         ota_sched_http_configured() && wifi_is_connected() && is_time_valid() &&
-        !sense_action_inflight() && !g_lcd_ota_task_running && !g_maintenance_mode) {
+        !sense_action_inflight() && !g_lcd_ota_task_running && !g_maintenance_mode &&
+        // Never run schedule-fetch (or the window_armed report) TLS during
+        // provisioning/setup: the SoftAP is still up (AP+STA fragments internal
+        // RAM) AND the 16KB camera DMA reserve is held, so the TLS esp-aes
+        // DMA alloc panics -> ESP_RST_PANIC -> reboot before provisioned/owner
+        // -claimed. Runs normally once provisioned and out of setup mode.
+        !halo_provisioning_active()) {
       s_last_awake_sched_attempt_ms = now_ms;
       uint32_t to_ms = OTA_SCHED_HTTP_TIMEOUT_MS < 5000UL ? OTA_SCHED_HTTP_TIMEOUT_MS : 5000UL;
       LOG_INFO("[AWAKE_SCHED] fetch awake_ms=%lu fetch_age_s=%ld",
