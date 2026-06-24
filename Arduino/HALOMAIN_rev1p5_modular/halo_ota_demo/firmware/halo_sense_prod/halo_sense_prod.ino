@@ -119,6 +119,33 @@ extern "C" bool halo_wifi_hard_reset_for_ota(const char* reason, uint32_t timeou
   return wifi_hard_reset_and_reconnect(reason ? reason : "ota_http_retry", timeout_ms);
 }
 
+// ── TLS DMA-reserve hooks (used by the owner-claim in ProvisioningManager.cpp) ──
+// The owner-claim HTTPS POST runs during provisioning when internal heap is
+// fragmented (AP_STA mode); the TLS handshake needs ~25-30KB CONTIGUOUS internal
+// RAM. The 16KB g_camera_dma_reserve (held since setup(), camera idle during
+// provisioning) is freed before the handshake and re-acquired after — the same
+// proven pattern the upload + voice TLS paths use (sense_upload.h / sense_voice.h).
+// g_camera_dma_reserve and CAMERA_DMA_RESERVE_BYTES are statics in
+// Sense_Minimal.ino, which is #included into this translation unit (line above),
+// so they are in scope here. These hooks have external linkage so the shared
+// ProvisioningManager.cpp (a separate TU) can call them.
+extern "C" void halo_tls_free_dma_reserve() {
+  if (g_camera_dma_reserve != nullptr) {
+    heap_caps_free(g_camera_dma_reserve);
+    g_camera_dma_reserve = nullptr;
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    LOG_INFO("[TLS_DMA] freed reserve, largest_internal=%u", (unsigned)largest);
+  }
+}
+
+extern "C" void halo_tls_restore_dma_reserve() {
+  if (g_camera_dma_reserve == nullptr) {
+    g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+        CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    LOG_INFO("[TLS_DMA] restored reserve, ptr=%p", (void*)g_camera_dma_reserve);
+  }
+}
+
 extern "C" bool halo_uart_link_recent(unsigned long max_age_ms);
 
 static const unsigned long LCD_MAINT_LINK_RECENT_MS = 15000;

@@ -328,6 +328,7 @@ Before WiFi/TLS operations, the 16 KB DMA reservation is freed to give TLS enoug
 - `http_get_with_retries()`
 - `put_to_presigned_url()`
 - `voice_upload_and_parse()`
+- `ProvisioningManager::tryClaimOwnerId()` (owner-claim HTTPS POST) — runs during provisioning when internal heap is fragmented by AP_STA; the claim TLS handshake (-1/http fail) needs the reserve freed. Because `ProvisioningManager.cpp` is a separate translation unit that cannot see the `static g_camera_dma_reserve`, it calls the external `extern "C"` hooks `halo_tls_free_dma_reserve()` / `halo_tls_restore_dma_reserve()` (implemented in `halo_sense_prod.ino`, where the include of `Sense_Minimal.ino` puts the globals in scope) via a local RAII `DmaReserveTlsGuard`. Kept in sync across both `shared/` and `halo_sense_prod/` copies of `ProvisioningManager.cpp`.
 
 ---
 

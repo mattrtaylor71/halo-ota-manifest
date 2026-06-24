@@ -853,6 +853,11 @@ void ProvisioningManager::startHomeWifiConnect(const char* ssid, const char* pas
   LOG_INFO("[PROVISION] Wi-Fi.begin() called, status=%d mode=%d", st, (int)WiFi.getMode());
 }
 
+// Implemented in halo_sense_prod.ino (C linkage). Free/re-acquire the 16KB camera
+// DMA reserve around the claim's TLS handshake so it has contiguous internal RAM.
+extern "C" void halo_tls_free_dma_reserve();
+extern "C" void halo_tls_restore_dma_reserve();
+
 bool ProvisioningManager::tryClaimOwnerId() {
   if (claim_completed || claim_in_progress) {
     return false;
@@ -918,6 +923,17 @@ bool ProvisioningManager::tryClaimOwnerId() {
   payload["firmware"] = kFirmwareVersion ? kFirmwareVersion : "";
   String body;
   serializeJson(payload, body);
+
+  // Free the 16KB camera DMA reserve so the TLS handshake below has enough
+  // CONTIGUOUS internal RAM (the owner-claim runs during provisioning when the
+  // internal heap is fragmented by AP_STA). The RAII guard re-acquires it on
+  // EVERY exit path so the camera still has its reserve for later captures.
+  // Hooks are implemented in halo_sense_prod.ino (external "C" linkage); this is
+  // the same free+reacquire pattern the upload/voice TLS paths already use.
+  struct DmaReserveTlsGuard {
+    DmaReserveTlsGuard() { halo_tls_free_dma_reserve(); }
+    ~DmaReserveTlsGuard() { halo_tls_restore_dma_reserve(); }
+  } _dma_tls_guard;
 
   HTTPClient http;
   WiFiClientSecure secure_client;
