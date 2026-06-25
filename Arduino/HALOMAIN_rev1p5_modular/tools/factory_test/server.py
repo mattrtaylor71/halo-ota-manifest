@@ -535,40 +535,6 @@ def get_fw_version():
     return "unknown"
 
 
-OTA_REPORT_BASE = "https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com"
-OTA_MANIFEST_BASE = "https://halo-ota-dev.s3.us-east-1.amazonaws.com/halo/ota/dev"
-
-
-def get_manifest_version(board="sense"):
-    """Published OTA target version from manifest_latest (backend, no serial)."""
-    import urllib.request
-    sub = "" if board == "sense" else "lcd/"
-    try:
-        with urllib.request.urlopen(f"{OTA_MANIFEST_BASE}/{sub}manifest_latest.json", timeout=10) as r:
-            return json.load(r).get("version")
-    except Exception:
-        return None
-
-
-def get_device_cloud_fw(device_id):
-    """(sense_fw, lcd_fw) from the OTA report backend — no serial, no reset.
-    This is the non-destructive way to check OTA state vs reading device logs."""
-    if not device_id or device_id == "unknown":
-        return None, None
-    import urllib.request, urllib.parse
-    url = f"{OTA_REPORT_BASE}/ota/report/latest?device_id={urllib.parse.quote(device_id)}"
-    try:
-        with urllib.request.urlopen(url, timeout=10) as r:
-            d = json.load(r)
-        items = d.get("items") or []   # report wraps the record in items[0]
-        if not items:
-            return None, None
-        it = items[0]
-        return it.get("last_fw"), it.get("last_lcd_fw")
-    except Exception:
-        return None, None
-
-
 def pre_compile():
     """Pre-compile both boards so flash is instant. Call at startup or on demand."""
     global sense_build_path, lcd_build_path
@@ -1827,94 +1793,10 @@ def run_test_suite(config):
 
         time.sleep(1)
 
-        # ── Step: OTA Test (backend-verified; SKIP if already on latest) ──
-        # The old version sent `ota` over serial and waited 360s for the LCD
-        # port to vanish (= reboot). A device already on the latest firmware
-        # never reboots -> false timeout FAIL. And reading serial during OTA can
-        # reset the board. Now: compare device fw vs manifest_latest via the
-        # cloud report (no serial); skip if current; if behind, trigger once and
-        # verify completion via the cloud report.
-        step += 1
-        # If the form fields were left blank ("unknown"), fall back to the
-        # device_id/owner_id we sniffed off the serial stream during capture
-        # (e.g. the OTA-schedule URL) — otherwise the cloud lookup below queries
-        # "unknown" and the OTA step false-fails on a perfectly healthy device.
-        if device_id in (None, "", "unknown") and _detected_ids["device_id"]:
-            device_id = _detected_ids["device_id"]
-            emit("log", f"OTA: using auto-detected device_id={device_id}")
-        if owner_id in (None, "", "unknown") and _detected_ids["owner_id"]:
-            owner_id = _detected_ids["owner_id"]
-            emit("log", f"OTA: using auto-detected owner_id={owner_id}")
-        emit_step(step, "OTA Update", "running", "Checking published target vs device firmware (backend)...")
-        target = get_manifest_version("sense")
-        s_fw, l_fw = get_device_cloud_fw(device_id)
-        ota_ok = False
-        if not target:
-            emit_step(step, "OTA Update", "fail", "Could not read manifest_latest target (network?)")
-        elif s_fw == target and (l_fw == target or l_fw in (None, "unknown")):
-            emit_step(step, "OTA Update", "pass",
-                      f"Already on latest {target} (sense={s_fw} lcd={l_fw}) — nothing to update, OTA skipped.")
-        else:
-            # Device is behind — trigger OTA once over serial, then verify via the
-            # cloud report (manual OTA updates the LCD; Sense self-updates via a
-            # maintenance window).
-            emit_step(step, "OTA Update", "running",
-                      f"Behind target {target} (sense={s_fw} lcd={l_fw}); triggering OTA...")
-            try:
-                otalcd = open_lcd(lcd_port)
-                otalcd.write(b"testmode\n"); time.sleep(1)
-                otalcd.write(b"ota\n"); time.sleep(1)
-                otalcd.close()   # release the port; verify via cloud, not serial
-            except Exception as e:
-                emit("log", f"OTA trigger error: {e}")
-            deadline = time.time() + 360
-            while time.time() < deadline:
-                time.sleep(15)
-                s2, l2 = get_device_cloud_fw(device_id)
-                emit_step(step, "OTA Update", "running",
-                          f"OTA in progress… cloud: sense={s2} lcd={l2} (target {target})")
-                if l2 == target:
-                    ota_ok = True
-                    note = "both boards" if s2 == target else "LCD (Sense updates via maintenance window)"
-                    emit_step(step, "OTA Update", "pass",
-                              f"OTA verified via cloud report: {note} reached {target}")
-                    break
-            if not ota_ok:
-                s3v, l3v = get_device_cloud_fw(device_id)
-                emit_step(step, "OTA Update", "fail",
-                          f"OTA not confirmed at {target} within 6min (cloud: sense={s3v} lcd={l3v})")
-
-        # ── Step: Post-OTA Wake ──
-        if ota_ok:
-            time.sleep(5)
-            step += 1
-            emit_step(step, "Post-OTA Wake", "running", "Tapping after OTA reboot...")
-            if tap_wake(stylus_port, lcd_port, max_taps=3):
-                emit_step(step, "Post-OTA Wake", "pass", "Device alive after OTA")
-
-                # Quick post-OTA capture
-                time.sleep(1)
-                lcd = open_lcd(lcd_port)
-                drainer = SerialDrainer(lcd)
-                lcd.write(b"testmode\n")
-                time.sleep(1)
-                lcd.write(b"wake\n")
-                time.sleep(3)
-                drainer.flush()
-
-                step += 1
-                emit_step(step, "Post-OTA Capture", "running", "Verifying capture after OTA...")
-                timing, img_len = do_capture(lcd, "Dish", 0, drainer=drainer)
-                if timing:
-                    emit_step(step, "Post-OTA Capture", "pass", f"{timing}ms, {img_len} bytes")
-                else:
-                    emit_step(step, "Post-OTA Capture", "fail", "No timing after OTA")
-
-                drainer.stop()
-                lcd.write(b"testmodeoff\n")
-                lcd.close()
-            else:
-                emit_step(step, "Post-OTA Wake", "fail", "Device did not wake after OTA")
+        # NOTE: OTA is intentionally NOT tested here. OTA is a pure-firmware
+        # concern (cloud manifest + self-update), not a property of the physical
+        # unit on the line, so it has no place in the hardware EOL/factory test.
+        # It is validated separately by the firmware OTA test harness.
 
         # ── Step: Factory Reset (clean up test state for customer) ──
         # skip_reset keeps provisioning intact for bench iteration (a real
