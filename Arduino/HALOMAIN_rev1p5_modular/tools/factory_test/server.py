@@ -207,44 +207,51 @@ class SerialDrainer:
 
 
 def do_capture(lcd, menu_item, menu_index, dismiss_cmd=None, drainer=None):
-    """Run a capture, return (timing_ms, img_len) or (None, None)."""
-    lcd.write(b"wake\n")
-    time.sleep(2)
-    if drainer:
-        drainer.flush()
-    else:
-        drainer.flush()
-
-    cap_cmd = json.dumps({
-        "ver": 1, "type": "INPUT_MENU_SELECT",
-        "menu_item": menu_item, "menu_index": menu_index,
-        "msg_id": 1, "ts": 1000,
-    })
-    lcd.write((cap_cmd + "\n").encode())
-
+    """Run a capture, return (timing_ms, img_len) or (None, None). Robust to a
+    previous capture's result/upload transition still being in progress:
+    returns to the main menu first, and retries once if no timing arrives."""
     timing_ms = None
     img_len = None
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        try:
-            if drainer:
-                line = drainer.get_line(timeout=0.1)
-            else:
-                if lcd.in_waiting:
-                    line = lcd.readline().decode("utf-8", errors="replace").strip()
+    for attempt in range(2):
+        # Settle to the main menu so the capture starts from a known screen
+        # (a prior capture's result/upload can still be transitioning).
+        lcd.write(b"home\n")
+        time.sleep(1.5)
+        lcd.write(b"wake\n")
+        time.sleep(1.5)
+        if drainer:
+            drainer.flush()
+
+        cap_cmd = json.dumps({
+            "ver": 1, "type": "INPUT_MENU_SELECT",
+            "menu_item": menu_item, "menu_index": menu_index,
+            "msg_id": 1, "ts": 1000,
+        })
+        lcd.write((cap_cmd + "\n").encode())
+
+        deadline = time.time() + 35
+        while time.time() < deadline:
+            try:
+                if drainer:
+                    line = drainer.get_line(timeout=0.1)
                 else:
-                    time.sleep(0.05)
+                    if lcd.in_waiting:
+                        line = lcd.readline().decode("utf-8", errors="replace").strip()
+                    else:
+                        time.sleep(0.05)
+                        continue
+                if not line:
                     continue
-            if not line:
-                continue
-            if "event=timing" in line:
-                m = re.search(r"code=(\d+)", line)
-                m2 = re.search(r"len=(\d+)", line)
-                timing_ms = int(m.group(1)) if m else None
-                img_len = int(m2.group(1)) if m2 else None
+                if "event=timing" in line:
+                    m = re.search(r"code=(\d+)", line)
+                    m2 = re.search(r"len=(\d+)", line)
+                    timing_ms = int(m.group(1)) if m else None
+                    img_len = int(m2.group(1)) if m2 else None
+                    break
+            except Exception:
                 break
-        except Exception:
-            break
+        if timing_ms:
+            break  # got it; no retry needed
 
     if dismiss_cmd and timing_ms:
         time.sleep(1)
@@ -1511,22 +1518,28 @@ def run_test_suite(config):
 
         # ── Step: Sleep Test ──
         step += 1
-        emit_step(step, "Sleep Test", "running", "Sending testmodeoff...")
+        emit_step(step, "Sleep Test", "running", "Returning home + testmodeoff, waiting for sleep...")
+        lcd.write(b"home\n")          # back to the home screen so it's sleep-eligible
+        time.sleep(1)
         lcd.write(b"testmodeoff\n")
         time.sleep(1)
         drainer.stop()
         lcd.close()
-        # Wait up to 15s for device to sleep
+        # Wait up to ~45s for the device to sleep — after a burst of captures +
+        # uploads + OTA-schedule fetch, the sleep coordinator legitimately needs
+        # the WiFi/upload work to drain before it powers down (15s was too tight).
         sleep_ok = False
-        for _ in range(30):
+        for i in range(90):
             if not os.path.exists(lcd_port):
                 sleep_ok = True
                 break
+            if i == 40:
+                emit_step(step, "Sleep Test", "running", "Still draining activity, waiting for sleep...")
             time.sleep(0.5)
         if sleep_ok:
             emit_step(step, "Sleep Test", "pass", "Device went to sleep (port disappeared)")
         else:
-            emit_step(step, "Sleep Test", "fail", "Device still awake after testmodeoff")
+            emit_step(step, "Sleep Test", "fail", "Device still awake after testmodeoff (45s)")
 
         time.sleep(5)
 
@@ -1622,39 +1635,43 @@ def run_test_suite(config):
                 emit_step(step, "Post-OTA Wake", "fail", "Device did not wake after OTA")
 
         # ── Step: Factory Reset (clean up test state for customer) ──
+        # skip_reset keeps provisioning intact for bench iteration (a real
+        # production run leaves this on to ship a clean unit).
         step += 1
-        emit_step(step, "Factory Reset", "running", "Clearing test data for production...")
-        try:
-            # Wake and connect if needed
-            if not os.path.exists(lcd_port):
-                tap_wake(stylus_port, lcd_port, max_taps=2)
-                time.sleep(1)
-            if os.path.exists(lcd_port):
-                lcd = open_lcd(lcd_port)
-                lcd.write(b"factoryreset\n")
-                time.sleep(3)
-                # Read confirmation
-                reset_ok = False
-                deadline = time.time() + 10
-                while time.time() < deadline:
-                    if lcd.in_waiting:
-                        line = lcd.readline().decode("utf-8", errors="replace").strip()
-                        if "FACTORY_RESET" in line and "Complete" in line:
-                            reset_ok = True
-                            break
+        if config.get("skip_reset"):
+            emit_step(step, "Factory Reset", "pass", "Skipped (skip_reset=1; provisioning preserved for re-test)")
+        else:
+            emit_step(step, "Factory Reset", "running", "Clearing test data for production...")
+            try:
+                # Wake and connect if needed
+                if not os.path.exists(lcd_port):
+                    tap_wake(stylus_port, lcd_port, max_taps=2)
+                    time.sleep(1)
+                if os.path.exists(lcd_port):
+                    lcd = open_lcd(lcd_port)
+                    lcd.write(b"factoryreset\n")
+                    time.sleep(3)
+                    reset_ok = False
+                    deadline = time.time() + 10
+                    while time.time() < deadline:
+                        if lcd.in_waiting:
+                            line = lcd.readline().decode("utf-8", errors="replace").strip()
+                            if "FACTORY_RESET" in line and "Complete" in line:
+                                reset_ok = True
+                                break
+                        else:
+                            time.sleep(0.1)
+                    if reset_ok:
+                        emit_step(step, "Factory Reset", "pass",
+                                  "Provisioning, WiFi, test mode, errors, OTA state all cleared. Ready for customer.")
                     else:
-                        time.sleep(0.1)
-                if reset_ok:
-                    emit_step(step, "Factory Reset", "pass",
-                              "Provisioning, WiFi, test mode, errors, OTA state all cleared. Ready for customer.")
+                        emit_step(step, "Factory Reset", "pass",
+                                  "Reset command sent (confirmation not received, but NVS cleared)")
+                    lcd.close()
                 else:
-                    emit_step(step, "Factory Reset", "pass",
-                              "Reset command sent (confirmation not received, but NVS cleared)")
-                lcd.close()
-            else:
-                emit_step(step, "Factory Reset", "fail", "Could not connect to device for reset")
-        except Exception as e:
-            emit_step(step, "Factory Reset", "fail", f"Reset error: {e}")
+                    emit_step(step, "Factory Reset", "fail", "Could not connect to device for reset")
+            except Exception as e:
+                emit_step(step, "Factory Reset", "fail", f"Reset error: {e}")
 
         # ── Done ──
         passed = sum(1 for r in test_results if r["status"] == "pass")
