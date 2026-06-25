@@ -670,15 +670,41 @@ def _wait_for_port(port, timeout=25.0):
     return os.path.exists(port)
 
 
-def eol_upload(label, port, fqbn, build_path, step_id, attempts=3, port_wait=25.0):
+def tap_to_wake(stylus_port):
+    """Inject one actuator tap to wake a deep-sleeping prod device."""
+    if not stylus_port:
+        return
+    try:
+        from tap_implementation.tap import send_command
+        send_command(stylus_port, 115200, "PUSH\n", verbose=False, wait_boot=True, timeout_s=5)
+    except Exception:
+        pass
+
+
+def ensure_port(port, stylus_port=None, timeout=25.0):
+    """Wait for `port`; if it's absent (device asleep) and a stylus is wired,
+    TAP to wake and wait again. The 'tap-if-asleep, else proceed' rule: prod
+    units deep-sleep and drop their USB port, so any step that needs the device
+    must wake it on demand rather than assume it's up."""
+    if _wait_for_port(port, 2):
+        return True
+    tap_to_wake(stylus_port)
+    if _wait_for_port(port, timeout):
+        return True
+    tap_to_wake(stylus_port)            # one more, in case the first didn't land
+    return _wait_for_port(port, timeout)
+
+
+def eol_upload(label, port, fqbn, build_path, step_id, attempts=3, port_wait=25.0, stylus_port=None):
     """Flash a pre-built target via arduino-cli upload, robust to the native-USB
-    port vanishing during the auto-reset. Waits for the port and retries.
+    port vanishing during the auto-reset AND to a prod board being ASLEEP — it
+    taps the stylus to wake the device when the port is missing.
     Returns True/False."""
     assert_port_allowed(port)
     last_err = ""
     for attempt in range(1, attempts + 1):
-        if not _wait_for_port(port, port_wait):
-            last_err = f"port {port} not present (board may be asleep — wake/reseat it)"
+        if not ensure_port(port, stylus_port, port_wait):
+            last_err = f"port {port} not present even after tap-wake (board asleep/disconnected)"
             emit_step(step_id, label, "running",
                       f"Attempt {attempt}/{attempts}: {last_err}")
             continue
@@ -930,6 +956,7 @@ def run_eol_suite(config):
 
     sense_port = config.get("sense_port") or EOL_SENSE_PORT_DEFAULT
     lcd_port = config.get("lcd_port") or EOL_LCD_PORT_DEFAULT
+    stylus_port = config.get("stylus_port")   # actuator: tap-to-wake a sleepy prod board
     device_id = config.get("device_id", "unknown")
 
     emit("start", {"mode": "eol", "device_id": device_id,
@@ -977,14 +1004,14 @@ def run_eol_suite(config):
 
         # ── Step 2: Flash EOL Sense ──
         step += 1
-        if not eol_upload("Flash EOL Sense", sense_port, EOL_SENSE_FQBN, EOL_SENSE_BUILD, step):
+        if not eol_upload("Flash EOL Sense", sense_port, EOL_SENSE_FQBN, EOL_SENSE_BUILD, step, stylus_port=stylus_port):
             emit("done", {"result": "fail", "reason": "EOL Sense flash failed"})
             return
         time.sleep(4)
 
         # ── Step 3: Flash EOL LCD ──
         step += 1
-        if not eol_upload("Flash EOL LCD", lcd_port, EOL_LCD_FQBN, EOL_LCD_BUILD, step):
+        if not eol_upload("Flash EOL LCD", lcd_port, EOL_LCD_FQBN, EOL_LCD_BUILD, step, stylus_port=stylus_port):
             emit("done", {"result": "fail", "reason": "EOL LCD flash failed"})
             return
         time.sleep(4)
@@ -1167,7 +1194,7 @@ def run_eol_suite(config):
         sense.close()
         sense = None
         if not eol_upload(f"Flash Prod Sense {prod_ver}", sense_port,
-                          SENSE_FQBN, sense_build_path, step):
+                          SENSE_FQBN, sense_build_path, step, stylus_port=stylus_port):
             emit("done", {"result": "fail", "reason": "Prod Sense flash failed"})
             return
         time.sleep(4)
@@ -1177,7 +1204,7 @@ def run_eol_suite(config):
         lcd.close()
         lcd = None
         if not eol_upload(f"Flash Prod LCD {prod_ver}", lcd_port,
-                          LCD_FQBN, lcd_build_path, step):
+                          LCD_FQBN, lcd_build_path, step, stylus_port=stylus_port):
             emit("done", {"result": "fail", "reason": "Prod LCD flash failed"})
             return
         time.sleep(5)  # let prod boot
@@ -1189,10 +1216,9 @@ def run_eol_suite(config):
         smoke_lcd = None
         smoke_drainer = None
         try:
-            # Prod Sense has no USB CDC — drive everything through LCD USB
-            deadline = time.time() + 12
-            while time.time() < deadline and not os.path.exists(lcd_port):
-                time.sleep(0.5)
+            # Prod Sense has no USB CDC — drive everything through LCD USB.
+            # The fresh prod boot may already be asleep -> tap to wake.
+            ensure_port(lcd_port, stylus_port, 15)
             smoke_lcd = open_lcd(lcd_port)
             smoke_drainer = SerialDrainer(smoke_lcd)
 
