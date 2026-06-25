@@ -76,7 +76,14 @@ def assert_port_allowed(port):
         raise ValueError(f"Port {port} is FORBIDDEN (used by another process) — refusing")
 
 # ── Global state ──
-test_events = queue.Queue()
+# Each connected /api/events client gets its OWN queue (registered in
+# _subscribers); emit() fans every event out to all of them. A single shared
+# queue handed each event to only ONE consumer, so after a page refresh the
+# still-alive old SSE generator and the new one split the stream and the visible
+# page appeared to "skip steps". Per-subscriber queues mean every client sees
+# every event and a stale connection can't steal from the active one.
+_subscribers = set()
+_subscribers_lock = threading.Lock()
 test_running = False
 test_results = []
 provision_confirmed = threading.Event()
@@ -88,12 +95,15 @@ _start_lock = threading.Lock()
 
 def _try_claim_run():
     """Atomically claim the single run slot. Returns True if claimed (caller may
-    start a suite), False if a test is already running."""
+    start a suite), False if a test is already running. Also wipes any stale
+    provisioning confirmation so a NEW run never inherits a previous run's (or a
+    refreshed page's) 'I've Provisioned — Continue' click."""
     global test_running
     with _start_lock:
         if test_running:
             return False
         test_running = True
+        provision_confirmed.clear()
         return True
 
 # When a merged run (Hardware + Factory) is active, CHAIN lets the two existing
@@ -110,7 +120,13 @@ def emit(event_type, data):
         if event_type == "done":
             CHAIN["dones"].append(data)
         return
-    test_events.put({"type": event_type, "data": data, "time": datetime.now(timezone.utc).isoformat()})
+    msg = {"type": event_type, "data": data, "time": datetime.now(timezone.utc).isoformat()}
+    with _subscribers_lock:
+        for q in list(_subscribers):
+            try:
+                q.put_nowait(msg)
+            except Exception:
+                pass
 
 
 # ── Per-run log capture (serial stream + step results) for failure forensics ──
@@ -2093,12 +2109,23 @@ def api_log_file(fn):
 @app.route("/api/events")
 def api_events():
     def stream():
-        while True:
-            try:
-                event = test_events.get(timeout=30)
-                yield f"data: {json.dumps(event)}\n\n"
-            except queue.Empty:
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+        # Per-connection queue so every client (incl. a freshly-refreshed page)
+        # receives every event. The 30s heartbeat doubles as a liveness probe:
+        # when the client is gone the yield raises GeneratorExit and the finally
+        # unregisters this queue so it stops accumulating events.
+        q = queue.Queue()
+        with _subscribers_lock:
+            _subscribers.add(q)
+        try:
+            while True:
+                try:
+                    event = q.get(timeout=30)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except queue.Empty:
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+        finally:
+            with _subscribers_lock:
+                _subscribers.discard(q)
     return Response(stream(), mimetype="text/event-stream")
 
 @app.route("/api/provision-confirm", methods=["POST"])
