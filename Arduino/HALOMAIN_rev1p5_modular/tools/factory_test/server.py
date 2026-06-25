@@ -136,11 +136,18 @@ _run_log_path = None
 # Sense device_id/owner_id opportunistically detected from the serial stream
 # (e.g. the OTA-schedule URL) so checks work even with the form fields blank.
 _detected_ids = {"device_id": None, "owner_id": None}
+# Flood collapse: a firmware fault can spam the SAME line thousands of times/sec
+# (e.g. the guardian sleep-retry loop: `no_ready_timeout fail_count=1,2,3...`),
+# which ballooned a run log to 120k lines/7MB in 3 min. Collapse consecutive
+# near-duplicate lines (identical after masking digit runs) to one entry + a
+# repeat count so one bug can't bury the log.
+_log_lock = threading.Lock()
+_flood = {"key": None, "count": 0}
 
 
 def log_line(s, tag=""):
-    """Append a line to the current run's log file, and opportunistically learn
-    the Sense device_id/owner_id from any serial line."""
+    """Append a line to the current run's log file, learn device_id/owner_id from
+    any serial line, and collapse runaway near-duplicate floods."""
     if tag in ("LCD", "SENSE"):
         if _detected_ids["device_id"] is None:
             m = re.search(r"device_id=(halo-[0-9a-z-]+)", s)
@@ -152,11 +159,23 @@ def log_line(s, tag=""):
                 _detected_ids["owner_id"] = m.group(1)
     if _run_log_f is None:
         return
-    try:
-        t = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        _run_log_f.write(f"[{t}]{('[' + tag + ']') if tag else ''} {s}\n")
-    except Exception:
-        pass
+    key = re.sub(r"\d+", "#", s)   # mask counters so fail_count=1,2,3 collapse
+    with _log_lock:
+        try:
+            t = datetime.now(timezone.utc).strftime("%H:%M:%S")
+            pfx = f"[{t}]{('[' + tag + ']') if tag else ''} "
+            if key == _flood["key"]:
+                _flood["count"] += 1
+                if _flood["count"] % 5000 == 0:   # heartbeat during a long flood
+                    _run_log_f.write(f"{pfx}… (same line still repeating, {_flood['count']}× so far)\n")
+                return
+            if _flood["count"] > 1:               # pattern changed: flush the run
+                _run_log_f.write(f"{pfx}… ↑ previous line repeated {_flood['count']}× (flood collapsed)\n")
+            _flood["key"] = key
+            _flood["count"] = 1
+            _run_log_f.write(f"{pfx}{s}\n")
+        except Exception:
+            pass
 
 
 def start_run_log(mode, device_id):
@@ -167,6 +186,8 @@ def start_run_log(mode, device_id):
         return False
     _detected_ids["device_id"] = None
     _detected_ids["owner_id"] = None
+    _flood["key"] = None
+    _flood["count"] = 0
     try:
         os.makedirs(RUN_LOG_DIR, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -2026,7 +2047,8 @@ def run_full_suite(config):
                 prov_drainer = SerialDrainer(prov_lcd)
             except Exception as e:
                 emit("log", f"Provision monitor: couldn't open LCD ({e}); waiting blind")
-            wifi_seen = owner_seen = False
+            wifi_seen = owner_seen = wedge_warned = False
+            wedge_hits = 0
             wdeadline = time.time() + 1200   # 20 min for manual provisioning
             while time.time() < wdeadline and not provision_confirmed.is_set():
                 line = prov_drainer.get_line(timeout=0.5) if prov_drainer else None
@@ -2045,6 +2067,22 @@ def run_full_suite(config):
                     emit_step(1, "Provision device", "waiting",
                               "Owner claimed ✓ — provisioning looks complete; click "
                               "'I've Provisioned — Continue'.")
+                # Detect the LCD guardian sleep-retry wedge: after ~5 min idle on
+                # the provisioning screen the firmware guardian force-sleeps,
+                # provisioning suppresses it, and it re-fires in a tight loop
+                # (`no_ready_timeout` spams thousands/sec). The device is wedged;
+                # tapping won't show the QR. Surface it LOUDLY (once) so the
+                # operator reboots + re-provisions instead of waiting blind.
+                if not wedge_warned and ("no_ready_timeout" in low or
+                                         "sleep suppressed (provisioning" in low):
+                    wedge_hits += 1
+                    if wedge_hits >= 200:
+                        wedge_warned = True
+                        emit_step(1, "Provision device", "waiting",
+                                  "⚠ LCD wedged in the guardian sleep-retry loop "
+                                  "(5-min idle watchdog fired during provisioning — "
+                                  "FIRMWARE BUG). Power-cycle the device, then provision "
+                                  "within 5 min. The QR won't appear until it's rebooted.")
             if prov_drainer:
                 prov_drainer.stop()
             if prov_lcd:
