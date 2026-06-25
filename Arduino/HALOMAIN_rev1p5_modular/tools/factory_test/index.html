@@ -191,12 +191,11 @@
   <div class="provision-banner" id="provision-banner" style="display:none">
     <div class="provision-icon">&#128241;</div>
     <div class="provision-text">
-      <h3>Provision This Device</h3>
-      <p>Open the <strong>Trepo app</strong> on your phone, scan/find this device, connect it to WiFi, and assign an owner.</p>
-      <p style="font-size:0.85em; color:var(--green); margin-top:6px;">Auto-detects when provisioning completes via serial.</p>
+      <h3>Provision This Device — test paused</h3>
+      <p>Open the <strong>Trepo app</strong>, pair this device (scan the QR / connect WiFi / assign owner). The test is <strong>waiting</strong> — click Continue when it's provisioned.</p>
       <p class="provision-timer" id="provision-timer"></p>
     </div>
-    <button class="provision-btn" id="provision-btn" onclick="confirmProvision()">Skip (Manual Override)</button>
+    <button class="provision-btn" id="provision-btn" onclick="confirmProvision()">&#10003; I've Provisioned — Continue</button>
   </div>
 
   <div class="results" id="results"></div>
@@ -428,7 +427,7 @@ function attachEventSource(btn) {
     } else if (msg.type === 'provision_wait') {
       document.getElementById('provision-banner').style.display = 'flex';
       // Start countdown
-      let remaining = 300;
+      let remaining = 1200;
       const timer = setInterval(() => {
         remaining--;
         const m = Math.floor(remaining / 60);

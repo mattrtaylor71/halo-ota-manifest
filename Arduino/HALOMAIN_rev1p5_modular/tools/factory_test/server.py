@@ -1802,7 +1802,33 @@ def run_full_suite(config):
         emit("step", {"step": 0, "name": "Prepare (compile + wake)", "status": "pass",
                       "detail": "Firmware ready; device awake (testmode)."})
 
-        # ── Phase 1: Hardware (EOL) ──
+        # ── Provision (manual, user-paced) ── PAUSE at the start so you can pair
+        # the unit with the app, then click Continue. Provisioning NVS survives
+        # the later EOL reflash. Gated on the "Provision" checkbox. Unlike the
+        # factory step's auto-detect, this ALWAYS waits for your explicit click.
+        if config.get("provision", False):
+            CHAIN["offset"] = CHAIN["max"]
+            if stylus and lcd_p:
+                tap_wake(stylus, lcd_p, max_taps=3)
+            provision_confirmed.clear()
+            emit_step(1, "Provision device", "waiting",
+                      "Provision this unit with the Trepo app now (WiFi + owner), "
+                      "then click 'I've Provisioned — Continue' to run the test.")
+            emit("provision_wait", {"message": "Waiting for you to provision..."})
+            wdeadline = time.time() + 1200   # 20 min for manual provisioning
+            while time.time() < wdeadline and not provision_confirmed.is_set():
+                time.sleep(0.5)
+            if not provision_confirmed.is_set():
+                emit_step(1, "Provision device", "fail", "Provisioning not confirmed in time")
+                emit_final_done("fail", "Provisioning not confirmed")
+                return
+            emit_step(1, "Provision device", "pass", "Provisioning confirmed — continuing")
+            # The factory phase must not re-provision (handled here).
+            config = dict(config)
+            config["provision"] = False
+
+        # ── Phase 1: Hardware (EOL) ── (numbering continues after any provision step)
+        CHAIN["offset"] = CHAIN["max"]
         CHAIN["dones"] = []
         run_eol_suite(config)
         eol = CHAIN["dones"][-1] if CHAIN["dones"] else {"result": "error", "reason": "no result"}
