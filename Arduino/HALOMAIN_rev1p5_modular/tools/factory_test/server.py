@@ -80,6 +80,21 @@ test_events = queue.Queue()
 test_running = False
 test_results = []
 provision_confirmed = threading.Event()
+# Serializes the check-and-set of test_running so a fast double-click on a Run
+# button can't slip two suites past the guard (TOCTOU). Always claim via
+# _try_claim_run() in the route, never by bare-checking test_running.
+_start_lock = threading.Lock()
+
+
+def _try_claim_run():
+    """Atomically claim the single run slot. Returns True if claimed (caller may
+    start a suite), False if a test is already running."""
+    global test_running
+    with _start_lock:
+        if test_running:
+            return False
+        test_running = True
+        return True
 
 # When a merged run (Hardware + Factory) is active, CHAIN lets the two existing
 # suites run back-to-back as ONE continuous stream without rewriting them: their
@@ -1484,7 +1499,11 @@ def run_eol_suite(config):
             sense.close()
         if lcd is not None:
             lcd.close()
-        test_running = False
+        # Only release the run slot when running standalone. Inside a full run
+        # (CHAIN set) the parent run_full_suite owns test_running — clearing it
+        # here would re-open the guard mid-run and let a second run start.
+        if CHAIN is None:
+            test_running = False
         end_run_log(log_owner)
 
 
@@ -1848,7 +1867,10 @@ def run_test_suite(config):
         emit_step(step, "Error", "fail", str(e))
         emit("done", {"result": "error", "reason": str(e)})
     finally:
-        test_running = False
+        # Inside a full run (CHAIN set) the parent run_full_suite owns the run
+        # slot; only clear it when running standalone.
+        if CHAIN is None:
+            test_running = False
         end_run_log(log_owner)
 
 
@@ -2008,8 +2030,7 @@ def api_version():
 
 @app.route("/api/run", methods=["POST"])
 def api_run():
-    global test_running
-    if test_running:
+    if not _try_claim_run():
         return jsonify({"error": "Test already running"}), 409
     config = request.json
     thread = threading.Thread(target=run_test_suite, args=(config,), daemon=True)
@@ -2019,8 +2040,7 @@ def api_run():
 @app.route("/api/run-full", methods=["POST"])
 def api_run_full():
     """Merged run: Hardware (EOL) then Factory, one continuous stream."""
-    global test_running
-    if test_running:
+    if not _try_claim_run():
         return jsonify({"error": "Test already running"}), 409
     config = request.json
     thread = threading.Thread(target=run_full_suite, args=(config,), daemon=True)
@@ -2029,8 +2049,7 @@ def api_run_full():
 
 @app.route("/api/run-eol", methods=["POST"])
 def api_run_eol():
-    global test_running
-    if test_running:
+    if not _try_claim_run():
         return jsonify({"error": "Test already running"}), 409
     config = request.json
     thread = threading.Thread(target=run_eol_suite, args=(config,), daemon=True)
@@ -2039,16 +2058,15 @@ def api_run_eol():
 
 @app.route("/api/sleep-u4wdh", methods=["POST"])
 def api_sleep_u4wdh():
-    global test_running
-    if test_running:
-        return jsonify({"error": "Test already running"}), 409
     config = request.json or {}
     u4wdh_port = config.get("u4wdh_port") or EOL_U4WDH_PORT_DEFAULT
-    # Reject the forbidden port before spawning the worker.
+    # Reject the forbidden port before claiming the run slot or spawning a worker.
     try:
         assert_port_allowed(u4wdh_port)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    if not _try_claim_run():
+        return jsonify({"error": "Test already running"}), 409
     thread = threading.Thread(target=sleep_u4wdh, args=(u4wdh_port,), daemon=True)
     thread.start()
     return jsonify({"ok": True})
