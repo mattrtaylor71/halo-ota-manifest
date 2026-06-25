@@ -1185,6 +1185,30 @@ def run_eol_suite(config):
         emit_step(step, "Compile EOL+Prod firmware", "pass",
                   f"{detail} | prod target = {prod_ver}")
 
+        # ── Preflight: BOTH boards reachable BEFORE we flash anything ──
+        # Otherwise we flash the Sense with EOL test firmware, then discover the
+        # LCD is gone, and abort — leaving the unit on non-prod firmware with no
+        # recovery (exactly what run_full_20260625-183939 did). Verify both USB
+        # ports enumerate (tap-waking a sleepy board) and DON'T touch the unit if
+        # either is missing — most often a loose/flipped LCD USB-C cable.
+        step += 1
+        emit_step(step, "Preflight: both boards reachable", "running",
+                  "Verifying Sense + LCD USB ports are present (tap-waking if asleep)...")
+        missing = []
+        if not ensure_port(sense_port, stylus_port, 12):
+            missing.append(f"Sense ({sense_port})")
+        if not ensure_port(lcd_port, stylus_port, 12):
+            missing.append(f"LCD ({lcd_port})")
+        if missing:
+            hard_fail("Preflight: both boards reachable",
+                      f"Port(s) absent even after tap-wake: {', '.join(missing)}. "
+                      "Check the USB cable(s)/orientation (LCD main = usbmodem21201; "
+                      "a flipped cable shows usbserial-2120 instead). NOT flashing — "
+                      "the unit is left untouched.")
+            return
+        emit_step(step, "Preflight: both boards reachable", "pass",
+                  "Sense + LCD both enumerated; safe to flash.")
+
         # ── Step 2: Flash EOL Sense ──
         step += 1
         if not eol_upload("Flash EOL Sense", sense_port, EOL_SENSE_FQBN, EOL_SENSE_BUILD, step, stylus_port=stylus_port):
