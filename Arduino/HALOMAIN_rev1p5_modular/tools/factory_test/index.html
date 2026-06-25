@@ -119,8 +119,8 @@
         <input type="text" id="u4wdh-port" value="/dev/cu.usbserial-2120" placeholder="/dev/cu.usbserial-2120 (port may vary)">
       </div>
       <div class="form-group">
-        <label>Stylus Port</label>
-        <input type="text" id="stylus-port" placeholder="/dev/cu.usbmodem21101">
+        <label>Stylus Port (actuator)</label>
+        <input type="text" id="stylus-port" value="/dev/cu.usbmodem21301" placeholder="/dev/cu.usbmodem21301">
       </div>
     </div>
     <div style="font-size:0.8em; color:var(--red); margin-bottom:12px;">
@@ -152,6 +152,10 @@
       <input type="checkbox" id="do-provision" checked>
       <label for="do-provision" style="font-size:0.9em">Provision device (pair with phone app for WiFi + owner)</label>
     </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="skip-reset">
+      <label for="skip-reset" style="font-size:0.9em">Skip factory reset (bench iteration — keeps provisioning; leave OFF for production)</label>
+    </div>
     <div style="display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap;">
       <button class="refresh-btn" onclick="loadPorts()">Refresh Ports</button>
       <button class="refresh-btn" id="compile-btn" onclick="recompile()">Recompile Firmware</button>
@@ -167,9 +171,16 @@
     <button class="run-btn ready" id="sleep-u4wdh-btn" onclick="sleepU4wdh()" style="flex:1; min-width:240px; background:var(--blue); color:#fff;">Sleep U4WDH (flip cable to this chip first)</button>
   </div>
 
+  <div style="font-size:0.85em; color:var(--dim); margin-bottom:8px;">
+    Step 2: cable on the main orientation (Sense + LCD main detected). One button runs Hardware then Factory.
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+    <button class="run-btn ready" id="run-full-btn" onclick="runFull()" style="flex:1; min-width:240px; font-size:1.15em;">▶ Run Full Test (Hardware + Factory)</button>
+  </div>
+  <div style="font-size:0.8em; color:var(--dim); margin-bottom:6px;">…or run a single phase:</div>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
-    <button class="run-btn ready" id="run-btn" onclick="runTest()" style="flex:1; min-width:240px;">Run Factory Test</button>
-    <button class="run-btn ready" id="run-eol-btn" onclick="runEol()" style="flex:1; min-width:240px; background:var(--purple); color:#000;">Run EOL Hardware Test</button>
+    <button class="run-btn ready" id="run-btn" onclick="runTest()" style="flex:1; min-width:200px; background:var(--card); color:var(--text); border:1px solid var(--border); font-size:0.95em;">Factory only</button>
+    <button class="run-btn ready" id="run-eol-btn" onclick="runEol()" style="flex:1; min-width:200px; background:var(--card); color:var(--text); border:1px solid var(--border); font-size:0.95em;">Hardware (EOL) only</button>
   </div>
 
   <div class="progress-container" id="progress-container" style="display:none">
@@ -311,18 +322,43 @@ function runTest() {
 
   document.getElementById('provision-banner').style.display = 'none';
 
-  const config = {
+  fetch('/api/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(buildConfig()) });
+
+  attachEventSource(btn);
+}
+
+// Shared config built from the form (used by Factory, Full).
+function buildConfig() {
+  return {
     lcd_port: document.getElementById('lcd-port').value,
+    sense_port: document.getElementById('sense-port').value,
     stylus_port: document.getElementById('stylus-port').value,
     device_id: document.getElementById('device-id').value || 'unknown',
     owner_id: document.getElementById('owner-id').value || 'unknown',
     flash: document.getElementById('do-flash').checked,
     provision: document.getElementById('do-provision').checked,
-    sense_port: document.getElementById('sense-port').value,
+    skip_reset: document.getElementById('skip-reset').checked,
   };
+}
 
-  fetch('/api/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+function anyRunning() {
+  return ['run-btn','run-eol-btn','run-full-btn','sleep-u4wdh-btn']
+    .some(id => document.getElementById(id).classList.contains('running'));
+}
 
+function runFull() {
+  const btn = document.getElementById('run-full-btn');
+  if (anyRunning()) return;
+  steps = [];
+  totalExpected = 27;   // ~13 hardware + ~14 factory
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('summary').className = 'summary';
+  document.getElementById('progress-container').style.display = 'block';
+  document.getElementById('provision-banner').style.display = 'none';
+  btn.textContent = 'Running Full Test...';
+  btn.className = 'run-btn running';
+  btn.disabled = true;
+  fetch('/api/run-full', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(buildConfig()) });
   attachEventSource(btn);
 }
 

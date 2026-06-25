@@ -81,14 +81,29 @@ test_running = False
 test_results = []
 provision_confirmed = threading.Event()
 
+# When a merged run (Hardware + Factory) is active, CHAIN lets the two existing
+# suites run back-to-back as ONE continuous stream without rewriting them: their
+# per-suite start/done are captured (not streamed, so the UI doesn't end early),
+# and their step numbers are offset so the two phases don't collide.
+CHAIN = None
+
 
 def emit(event_type, data):
-    """Send an SSE event."""
+    """Send an SSE event. During a chained (merged) run, the sub-suites' own
+    start/done are captured by the wrapper instead of ending the stream."""
+    if CHAIN is not None and event_type in ("start", "done"):
+        if event_type == "done":
+            CHAIN["dones"].append(data)
+        return
     test_events.put({"type": event_type, "data": data, "time": datetime.now(timezone.utc).isoformat()})
 
 
 def emit_step(step_id, name, status, detail="", image=None):
     """Emit a test step update. Optional `image` is a URL rendered as a thumbnail."""
+    if CHAIN is not None:
+        step_id = step_id + CHAIN["offset"]
+        if step_id > CHAIN["max"]:
+            CHAIN["max"] = step_id
     entry = {"step": step_id, "name": name, "status": status, "detail": detail}
     if image:
         entry["image"] = image
@@ -212,13 +227,13 @@ def do_capture(lcd, menu_item, menu_index, dismiss_cmd=None, drainer=None):
     returns to the main menu first, and retries once if no timing arrives."""
     timing_ms = None
     img_len = None
-    for attempt in range(2):
+    for attempt in range(3):
         # Settle to the main menu so the capture starts from a known screen
         # (a prior capture's result/upload can still be transitioning).
         lcd.write(b"home\n")
-        time.sleep(1.5)
+        time.sleep(2)
         lcd.write(b"wake\n")
-        time.sleep(1.5)
+        time.sleep(2)
         if drainer:
             drainer.flush()
 
@@ -563,9 +578,11 @@ class EolLink:
                 break
         if jlen is None:
             raise RuntimeError("Timeout waiting for JPEG_START")
-        # Phase 2: read exactly jlen raw bytes
+        # Phase 2: read exactly jlen raw bytes. At 115200 baud (~11.5 KB/s) a
+        # 120 KB SXGA JPEG takes ~11s, so scale the budget with size — the old
+        # fixed 8s was shorter than the transfer time and truncated larger frames.
         buf = bytearray()
-        read_deadline = time.time() + timeout
+        read_deadline = time.time() + max(timeout, jlen / 9000.0 + 6.0)
         while len(buf) < jlen and time.time() < read_deadline:
             chunk = self.ser.read(jlen - len(buf))
             if chunk:
@@ -1054,14 +1071,33 @@ def run_eol_suite(config):
         # ── Step 8: Camera capture + coherence ──
         step += 1
         emit_step(step, "Camera capture + coherence (Sense only)", "running", "Capturing (SHOT)...")
-        # SHOT streams META + JPEG; send it then read the binary stream.
-        try:
-            sense.ser.reset_input_buffer()
-        except Exception:
-            pass
-        sense.ser.write(b"SHOT\n")
-        sense.ser.flush()
-        jpeg, meta_line = sense.read_jpeg(timeout=10.0)
+        # SHOT streams META + JPEG; retry on a truncated/garbled binary read
+        # (intermittent USB hiccup) rather than aborting the whole run.
+        jpeg = None
+        meta_line = None
+        for cam_attempt in range(3):
+            try:
+                sense.ser.reset_input_buffer()
+            except Exception:
+                pass
+            try:
+                sense.ser.write(b"SHOT\n")
+                sense.ser.flush()
+                jpeg, meta_line = sense.read_jpeg(timeout=20.0)
+                break
+            except Exception as e:
+                emit_step(step, "Camera capture + coherence (Sense only)", "running",
+                          f"SHOT attempt {cam_attempt + 1}/3 failed ({e}); retrying...")
+                try:
+                    sense.cmd("OFF", expect_prefix="OFF ok", timeout=3.0)
+                except Exception:
+                    pass
+                time.sleep(1.5)
+        if jpeg is None:
+            emit_step(step, "Camera capture + coherence (Sense only)", "fail",
+                      "Camera SHOT failed after 3 attempts (truncated/timeout)")
+            emit("done", {"result": "fail", "reason": "Camera SHOT failed"})
+            return
         ts = int(time.time())
         os.makedirs(CAPTURES_DIR, exist_ok=True)
         fn = f"eol_{ts}.jpg"
@@ -1687,6 +1723,109 @@ def run_test_suite(config):
         test_running = False
 
 
+def emit_final_done(result, reason, passed=None, failed=None, total=None):
+    """Emit the merged run's single terminal 'done' (bypasses CHAIN capture)."""
+    global CHAIN
+    saved, CHAIN = CHAIN, None
+    d = {"result": result, "reason": reason}
+    if passed is not None:
+        d.update({"passed": passed, "failed": failed, "total": total})
+    emit("done", d)
+    CHAIN = saved
+
+
+def run_full_suite(config):
+    """Merged run: Hardware (EOL) THEN Factory, as one continuous stream.
+    Hardware must PASS before Factory runs (no point testing a bad board). The
+    U4WDH sleep is intentionally NOT part of this — it needs the flipped USB-C
+    orientation and stays a separate button."""
+    global test_running, test_results, CHAIN
+    test_running = True
+    test_results = []
+    CHAIN = {"offset": 0, "max": 0, "dones": []}
+    emit("start", {"mode": "full", "device_id": config.get("device_id", "unknown")})
+    try:
+        # Phase 0: prepare so the EOL phase can flash a sleepy prod device.
+        # (1) pre-compile (slow, device-independent) so the EOL compile step is
+        #     instant and the flash happens right after the wake — not 27s later
+        #     when the prod boards have re-slept. (2) tap-wake + testmode to hold
+        #     both prod boards awake until the EOL test firmware (which never
+        #     sleeps) is on.
+        stylus = config.get("stylus_port")
+        lcd_p = config.get("lcd_port")
+        sense_p = config.get("sense_port")
+        emit("step", {"step": 0, "name": "Prepare (compile + wake)", "status": "running",
+                      "detail": "Pre-compiling firmware and waking the device..."})
+        try:
+            eol_ensure_compiled()
+        except Exception:
+            pass
+        if stylus and lcd_p:
+            tap_wake(stylus, lcd_p, max_taps=3)
+            try:
+                lw = open_lcd(lcd_p)        # resets the LCD; let it reboot
+                time.sleep(3)
+                lw.reset_input_buffer()
+                lw.write(b"testmode\n"); time.sleep(0.5)   # hold awake 1h
+                lw.write(b"wake\n"); time.sleep(2)         # wake the Sense -> 1101 appears
+                lw.close()
+            except Exception:
+                pass
+            if sense_p:
+                _wait_for_port(sense_p, 15)
+        emit("step", {"step": 0, "name": "Prepare (compile + wake)", "status": "pass",
+                      "detail": "Firmware ready; device awake (testmode)."})
+
+        # ── Phase 1: Hardware (EOL) ──
+        CHAIN["dones"] = []
+        run_eol_suite(config)
+        eol = CHAIN["dones"][-1] if CHAIN["dones"] else {"result": "error", "reason": "no result"}
+        if eol.get("result") != "pass":
+            emit_final_done("fail", f"Hardware test failed: {eol.get('reason','')}")
+            return
+        eol_pass = eol.get("passed", 0)
+        eol_fail = (eol.get("total", eol_pass) - eol_pass)
+
+        # ── Settle ── the EOL phase just re-flashed PROD, so the device is on a
+        # fresh boot: it needs to finish WiFi reconnect + the OTA-schedule fetch
+        # + mark-valid before captures, or the first captures race that startup
+        # work (observed: 1st Dish slow + next captures fail). Hold it awake and
+        # let it stabilize.
+        CHAIN["offset"] = CHAIN["max"]
+        emit_step(1, "Settle after flash", "running",
+                  "Letting the freshly-flashed device stabilize (WiFi + OTA fetch + mark-valid)...")
+        if stylus and lcd_p:
+            tap_wake(stylus, lcd_p, max_taps=3)
+            try:
+                ls = open_lcd(lcd_p)
+                time.sleep(2)
+                ls.write(b"testmode\n"); time.sleep(0.3)
+                ls.write(b"wake\n")
+                ls.close()
+            except Exception:
+                pass
+        time.sleep(28)
+        emit_step(1, "Settle after flash", "pass", "Device settled; starting factory functions")
+
+        # ── Phase 2: Factory ── (continue step numbering after the settle)
+        CHAIN["offset"] = CHAIN["max"]
+        CHAIN["dones"] = []
+        run_test_suite(config)
+        fac = CHAIN["dones"][-1] if CHAIN["dones"] else {"result": "error", "reason": "no result"}
+        fac_pass = fac.get("passed", 0)
+        fac_fail = fac.get("failed", 0)
+
+        result = "pass" if (eol.get("result") == "pass" and fac.get("result") == "pass") else "fail"
+        passed = eol_pass + fac_pass
+        failed = eol_fail + fac_fail
+        emit_final_done(result, fac.get("reason", ""), passed=passed, failed=failed, total=passed + failed)
+    except Exception as e:
+        emit_final_done("error", str(e))
+    finally:
+        CHAIN = None
+        test_running = False
+
+
 # ── Routes ──
 
 @app.route("/")
@@ -1708,6 +1847,17 @@ def api_run():
         return jsonify({"error": "Test already running"}), 409
     config = request.json
     thread = threading.Thread(target=run_test_suite, args=(config,), daemon=True)
+    thread.start()
+    return jsonify({"ok": True})
+
+@app.route("/api/run-full", methods=["POST"])
+def api_run_full():
+    """Merged run: Hardware (EOL) then Factory, one continuous stream."""
+    global test_running
+    if test_running:
+        return jsonify({"error": "Test already running"}), 409
+    config = request.json
+    thread = threading.Thread(target=run_full_suite, args=(config,), daemon=True)
     thread.start()
     return jsonify({"ok": True})
 
