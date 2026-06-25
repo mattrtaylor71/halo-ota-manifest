@@ -1,5 +1,15 @@
 # HALO LCD Sleep-Coordinator Bugs — Handoff (2026-06-25)
 
+> **DESIGN DECISION (Matt, 2026-06-25):** the 5-minute force-sleep timeout is
+> **INTENDED** — nobody uses the device awake for >5 min, so auto-sleeping is
+> desired. **Do NOT remove the timeout.** The bugs are narrower: (1) the tight
+> busy-LOOP when the force-sleep is *suppressed* during provisioning, (2) it
+> kills an **in-flight upload** (must honor `op_inflight` — let real work finish
+> first), and (3) for the **factory test only**, `testmode` must actually
+> suppress it (the test legitimately needs >5 min awake). Keep the timeout; make
+> it (a) not busy-loop, (b) defer for in-flight ops, (c) respect testmode.
+
+
 Two LCD sleep-coordinator bugs surfaced while validating provisioning + the
 factory test on device **`halo-16f8-2ca9`** (later re-flashed; provisioned as
 `Trepo-Halo-0995-5D8C`, owner OK). Both are the sleep logic being **too
