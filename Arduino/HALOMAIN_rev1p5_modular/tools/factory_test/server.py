@@ -1455,31 +1455,44 @@ def run_eol_suite(config):
                     break
             smoke_drainer.flush()
 
-            # capture via JSON INPUT_MENU_SELECT Dish (same shape as run_test_suite)
-            smoke_lcd.write(b"wake\n")
-            time.sleep(2)
-            smoke_drainer.flush()
-            cap_cmd = json.dumps({
-                "ver": 1, "type": "INPUT_MENU_SELECT",
-                "menu_item": "Dish", "menu_index": 0,
-                "msg_id": 1, "ts": 1000,
-            })
-            smoke_lcd.write((cap_cmd + "\n").encode())
-            cap_started = False
-            cdl = time.time() + 20
-            while time.time() < cdl:
-                line = smoke_drainer.get_line(timeout=0.3)
-                if not line:
-                    continue
-                low = line.lower()
-                if ("camera" in low or "scan" in low or "capturing" in low or
-                        "event=timing" in low or "capture" in low):
-                    cap_started = True
-                    break
+            # Capture smoke via INPUT_MENU_SELECT Dish — ONLY when we are NOT
+            # about to provision. On an unprovisioned unit a capture spins up the
+            # camera AND a WiFi/scan attempt that fights the SoftAP the device
+            # needs to host for provisioning (observed: camera init mid-provision
+            # -> the Trepo app can't connect to the device). The camera is already
+            # fully exercised by the EOL camera-coherence + PWDN steps above, and
+            # the factory phase runs three real captures AFTER provisioning, so
+            # this check is redundant here and actively breaks provisioning.
+            will_provision = bool(config.get("provision"))
+            if will_provision:
+                cap_started = True
+                cap_desc = "skipped (provisioning next; camera already verified in EOL steps)"
+            else:
+                smoke_lcd.write(b"wake\n")
+                time.sleep(2)
+                smoke_drainer.flush()
+                cap_cmd = json.dumps({
+                    "ver": 1, "type": "INPUT_MENU_SELECT",
+                    "menu_item": "Dish", "menu_index": 0,
+                    "msg_id": 1, "ts": 1000,
+                })
+                smoke_lcd.write((cap_cmd + "\n").encode())
+                cap_started = False
+                cdl = time.time() + 20
+                while time.time() < cdl:
+                    line = smoke_drainer.get_line(timeout=0.3)
+                    if not line:
+                        continue
+                    low = line.lower()
+                    if ("camera" in low or "scan" in low or "capturing" in low or
+                            "event=timing" in low or "capture" in low):
+                        cap_started = True
+                        break
+                cap_desc = "started" if cap_started else "NOT started"
 
             d13 = (f"version={'OK ' + prod_ver if ver_ok else 'MISMATCH (want ' + prod_ver + ')'}"
                    f" ({ver_seen.strip()[:80]}), link={'alive' if link_ok else 'DOWN'}, "
-                   f"capture={'started' if cap_started else 'NOT started'}")
+                   f"capture={cap_desc}")
             if ver_ok and link_ok and cap_started:
                 emit_step(step, "Local smoke (boot + link + capture)", "pass", d13)
             else:
@@ -1977,9 +1990,44 @@ def run_full_suite(config):
                       "Trepo app now (WiFi + owner), then click "
                       "'I've Provisioned — Continue' to run the factory tests.")
             emit("provision_wait", {"message": "Waiting for you to provision..."})
+            # Monitor the LCD serial THROUGHOUT the pause so provisioning is no
+            # longer a black box: every LCD line (incl. relayed Sense diag) is
+            # tee'd to the run log, and key milestones surface as live status.
+            # Only the LCD USB is touched (opening it resets once; passive reads
+            # never do) — NEVER the Sense USB, since opening that drops the
+            # SoftAP the device is hosting for provisioning.
+            prov_lcd = prov_drainer = None
+            try:
+                prov_lcd = open_lcd(lcd_p)
+                prov_drainer = SerialDrainer(prov_lcd)
+            except Exception as e:
+                emit("log", f"Provision monitor: couldn't open LCD ({e}); waiting blind")
+            wifi_seen = owner_seen = False
             wdeadline = time.time() + 1200   # 20 min for manual provisioning
             while time.time() < wdeadline and not provision_confirmed.is_set():
-                time.sleep(0.5)
+                line = prov_drainer.get_line(timeout=0.5) if prov_drainer else None
+                if not line:
+                    if prov_drainer is None:
+                        time.sleep(0.5)
+                    continue
+                low = line.lower()
+                if not wifi_seen and "wifi" in low and "label=connected" in low:
+                    wifi_seen = True
+                    emit_step(1, "Provision device", "waiting",
+                              "Device joined WiFi ✓ — finish owner assignment in the "
+                              "app, then click 'I've Provisioned — Continue'.")
+                if not owner_seen and "owner" in low and ("claim" in low or "owner_id=" in low):
+                    owner_seen = True
+                    emit_step(1, "Provision device", "waiting",
+                              "Owner claimed ✓ — provisioning looks complete; click "
+                              "'I've Provisioned — Continue'.")
+            if prov_drainer:
+                prov_drainer.stop()
+            if prov_lcd:
+                try:
+                    prov_lcd.close()
+                except Exception:
+                    pass
             if not provision_confirmed.is_set():
                 emit_step(1, "Provision device", "fail", "Provisioning not confirmed in time")
                 emit_final_done("fail", "Provisioning not confirmed")
