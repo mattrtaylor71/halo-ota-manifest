@@ -102,10 +102,23 @@ def emit(event_type, data):
 RUN_LOG_DIR = os.path.join(SCRIPT_DIR, "logs")
 _run_log_f = None
 _run_log_path = None
+# Sense device_id/owner_id opportunistically detected from the serial stream
+# (e.g. the OTA-schedule URL) so checks work even with the form fields blank.
+_detected_ids = {"device_id": None, "owner_id": None}
 
 
 def log_line(s, tag=""):
-    """Append a line to the current run's log file (if one is open)."""
+    """Append a line to the current run's log file, and opportunistically learn
+    the Sense device_id/owner_id from any serial line."""
+    if tag in ("LCD", "SENSE"):
+        if _detected_ids["device_id"] is None:
+            m = re.search(r"device_id=(halo-[0-9a-z-]+)", s)
+            if m:
+                _detected_ids["device_id"] = m.group(1)
+        if _detected_ids["owner_id"] is None:
+            m = re.search(r"owner_id=([0-9a-fA-F-]{36})", s)
+            if m:
+                _detected_ids["owner_id"] = m.group(1)
     if _run_log_f is None:
         return
     try:
@@ -121,6 +134,8 @@ def start_run_log(mode, device_id):
     global _run_log_f, _run_log_path
     if _run_log_f is not None:
         return False
+    _detected_ids["device_id"] = None
+    _detected_ids["owner_id"] = None
     try:
         os.makedirs(RUN_LOG_DIR, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -280,20 +295,26 @@ def do_capture(lcd, menu_item, menu_index, dismiss_cmd=None, drainer=None):
     img_len = None
     for attempt in range(3):
         # Settle to the main menu so the capture starts from a known screen
-        # (a prior capture's result/upload can still be transitioning).
-        lcd.write(b"home\n")
-        time.sleep(2)
-        lcd.write(b"wake\n")
-        time.sleep(2)
-        if drainer:
-            drainer.flush()
-
-        cap_cmd = json.dumps({
-            "ver": 1, "type": "INPUT_MENU_SELECT",
-            "menu_item": menu_item, "menu_index": menu_index,
-            "msg_id": 1, "ts": 1000,
-        })
-        lcd.write((cap_cmd + "\n").encode())
+        # (a prior capture's result/upload can still be transitioning). Guard
+        # the writes: if the LCD port dropped (device slept/rebooted), retry the
+        # attempt instead of crashing the whole suite ([Errno 6]).
+        try:
+            lcd.write(b"home\n")
+            time.sleep(2)
+            lcd.write(b"wake\n")
+            time.sleep(2)
+            if drainer:
+                drainer.flush()
+            cap_cmd = json.dumps({
+                "ver": 1, "type": "INPUT_MENU_SELECT",
+                "menu_item": menu_item, "menu_index": menu_index,
+                "msg_id": 1, "ts": 1000,
+            })
+            lcd.write((cap_cmd + "\n").encode())
+        except Exception as e:
+            log_line(f"do_capture write failed (LCD port dropped?): {e}", "WARN")
+            time.sleep(3)
+            continue
 
         deadline = time.time() + 35
         while time.time() < deadline:
@@ -393,6 +414,34 @@ def wait_for_new_s3(bucket, top_prefix, owner_id, device_id, before_keys, timeou
             return True
         time.sleep(8)
     return False
+
+
+def wait_for_upload(drainer, timeout=45):
+    """Confirm the upload from the device's OWN serial: watch the LCD-relayed
+    SENSE_DIAG for an UPLOAD_PUT success (HTTP 200). This needs no device_id and
+    no S3 query, fires within ~10s of the capture (so the device doesn't idle-
+    sleep), and is a direct device confirmation that S3 accepted the PUT.
+    Opportunistically captures the real device_id/owner_id from the OTA-sched
+    URL. Returns (ok, device_id, owner_id)."""
+    deadline = time.time() + timeout
+    dev = own = None
+    while time.time() < deadline:
+        line = drainer.get_line(timeout=0.2)
+        if not line:
+            continue
+        if dev is None:
+            m = re.search(r"device_id=(halo-[0-9a-z-]+)", line)
+            if m:
+                dev = m.group(1)
+        if own is None:
+            m = re.search(r"owner_id=([0-9a-fA-F-]{36})", line)
+            if m:
+                own = m.group(1)
+        if "UPLOAD_PUT" in line and ("code=200" in line or "event=success" in line):
+            return True, dev, own
+        if "UPLOAD_PUT" in line and ("fail" in line.lower() or "error" in line.lower()):
+            return False, dev, own
+    return False, dev, own
 
 
 def get_fw_version():
@@ -1499,16 +1548,19 @@ def run_test_suite(config):
                 warmup_lcd.write(b"wake\n")
                 time.sleep(5)
                 warmup_drainer.flush()
-                # Snapshot S3 before the capture so we can detect a NEW object.
-                warmup_before = s3_device_keys(S3_UPLOAD_BUCKET, "images/", owner_id, device_id)
                 # Do a dish capture — don't care if S3 upload works yet
                 warmup_timing, _ = do_capture(warmup_lcd, "Dish", 0, drainer=warmup_drainer)
                 if warmup_timing:
                     emit_step(step, "Post-Provision Warmup", "running",
-                              f"Capture OK ({warmup_timing}ms), waiting for backend sync...")
-                # Check if a new upload landed (backend, no serial)
-                if wait_for_new_s3(S3_UPLOAD_BUCKET, "images/", owner_id, device_id, warmup_before, timeout_s=60):
-                    emit_step(step, "Post-Provision Warmup", "pass", "Device registered, uploads working")
+                              f"Capture OK ({warmup_timing}ms), waiting for upload...")
+                # Confirm the upload from the device serial (UPLOAD_PUT 200)
+                wok, wdev, wown = wait_for_upload(warmup_drainer, 45)
+                if wdev and device_id == "unknown":
+                    device_id = wdev
+                if wown and owner_id == "unknown":
+                    owner_id = wown
+                if wok:
+                    emit_step(step, "Post-Provision Warmup", "pass", "Device registered, uploads working (PUT 200)")
                 else:
                     emit_step(step, "Post-Provision Warmup", "pass",
                               "Warmup capture sent (backend may need a moment to sync)")
@@ -1570,29 +1622,32 @@ def run_test_suite(config):
         # ── Step: Dish Capture ──
         step += 1
         emit_step(step, "Dish Capture", "running", "Capturing dish...")
-        dish_before = s3_device_keys(S3_UPLOAD_BUCKET, "images/", owner_id, device_id)
         timing, img_len = do_capture(lcd, "Dish", 0, drainer=drainer)
         if timing:
             emit_step(step, "Dish Capture", "pass", f"{timing}ms, {img_len} bytes")
         else:
             emit_step(step, "Dish Capture", "fail", "No timing received")
 
-        # ── Step: Dish S3 Upload (backend verify — new object appears) ──
+        # ── Step: Dish Upload (confirmed from the device's serial: UPLOAD_PUT 200) ──
         if timing:
             step += 1
-            emit_step(step, "Dish S3 Upload", "running", "Verifying new image in S3 (backend)...")
-            if wait_for_new_s3(S3_UPLOAD_BUCKET, "images/", owner_id, device_id, dish_before, timeout_s=120):
-                emit_step(step, "Dish S3 Upload", "pass", "New image object landed in S3")
+            emit_step(step, "Dish Upload", "running", "Confirming upload (PUT 200) from device...")
+            ok, ddev, down = wait_for_upload(drainer, 45)
+            if ddev and device_id == "unknown":
+                device_id = ddev
+            if down and owner_id == "unknown":
+                owner_id = down
+            if ok:
+                emit_step(step, "Dish Upload", "pass",
+                          f"Upload confirmed (UPLOAD_PUT 200)" + (f"; device={device_id}" if device_id != "unknown" else ""))
             else:
-                emit_step(step, "Dish S3 Upload", "fail", "No new S3 object within 120s")
+                emit_step(step, "Dish Upload", "fail", "No UPLOAD_PUT success on serial within 45s")
 
         time.sleep(3)
 
         # ── Step: Discard Capture ──
         step += 1
         emit_step(step, "Discard Capture", "running", "Capturing discard...")
-        # NOTE: discards live under 'resized-images/', not 'images/'.
-        disc_before = s3_device_keys(S3_DISCARD_BUCKET, "resized-images/", owner_id, device_id)
         dismiss = '{"ver":1,"type":"INPUT_DISCARD_OPTIONS","msg_id":10,"ts":1000,"add_to_shopping_list":false}'
         timing, img_len = do_capture(lcd, "Discard", 1, dismiss, drainer=drainer)
         if timing:
@@ -1600,14 +1655,15 @@ def run_test_suite(config):
         else:
             emit_step(step, "Discard Capture", "fail", "No timing received")
 
-        # ── Step: Discard S3 Upload (backend verify) ──
+        # ── Step: Discard Upload (serial confirm) ──
         if timing:
             step += 1
-            emit_step(step, "Discard S3 Upload", "running", "Verifying new discard image in S3 (backend)...")
-            if wait_for_new_s3(S3_DISCARD_BUCKET, "resized-images/", owner_id, device_id, disc_before, timeout_s=120):
-                emit_step(step, "Discard S3 Upload", "pass", "New discard object landed in S3")
+            emit_step(step, "Discard Upload", "running", "Confirming upload (PUT 200) from device...")
+            ok, _, _ = wait_for_upload(drainer, 45)
+            if ok:
+                emit_step(step, "Discard Upload", "pass", "Upload confirmed (UPLOAD_PUT 200)")
             else:
-                emit_step(step, "Discard S3 Upload", "fail", "No new S3 object within 120s")
+                emit_step(step, "Discard Upload", "fail", "No UPLOAD_PUT success on serial within 45s")
 
         time.sleep(3)
 
@@ -1682,6 +1738,16 @@ def run_test_suite(config):
         # cloud report (no serial); skip if current; if behind, trigger once and
         # verify completion via the cloud report.
         step += 1
+        # If the form fields were left blank ("unknown"), fall back to the
+        # device_id/owner_id we sniffed off the serial stream during capture
+        # (e.g. the OTA-schedule URL) — otherwise the cloud lookup below queries
+        # "unknown" and the OTA step false-fails on a perfectly healthy device.
+        if device_id in (None, "", "unknown") and _detected_ids["device_id"]:
+            device_id = _detected_ids["device_id"]
+            emit("log", f"OTA: using auto-detected device_id={device_id}")
+        if owner_id in (None, "", "unknown") and _detected_ids["owner_id"]:
+            owner_id = _detected_ids["owner_id"]
+            emit("log", f"OTA: using auto-detected owner_id={owner_id}")
         emit_step(step, "OTA Update", "running", "Checking published target vs device firmware (backend)...")
         target = get_manifest_version("sense")
         s_fw, l_fw = get_device_cloud_fw(device_id)
