@@ -1009,33 +1009,69 @@ def sleep_u4wdh(u4wdh_port):
             return
         emit_step(step, "Flash U4WDH deep-sleep", "pass", "Deep-sleep sketch flashed")
 
-        # ── Step 2: Verify deep sleep ──
+        # ── Step 2: Verify deep sleep (PROVE it, don't infer from silence) ──
+        # Bare silence is NOT proof of deep sleep — a hung chip, a chip that
+        # didn't boot the sketch, or one mid-reboot all look "silent" in a short
+        # window. Instead we RESET the chip into the just-flashed sketch and
+        # require the real evidence: see @@SLEEP_START (sketch ran + called
+        # esp_deep_sleep_start), NO @@ERROR (SLEEP_FAILED/UNEXPECTED_LOOP), and
+        # then SUSTAINED silence (it stayed down — no reboot loop). The sketch
+        # disables ALL wake sources, so a confirmed sleep can't wake from
+        # touch/encoder — which is exactly what the EOL line tests require.
         step += 1
         emit_step(step, "Verify U4WDH asleep", "running",
-                  "Reading serial — '@@SLEEP_START' or silence means asleep...")
-        time.sleep(2)
-        got_sleep_marker = False
-        any_output = False
+                  "Resetting chip and watching for @@SLEEP_START then sustained silence...")
+        saw_sleep = False
+        saw_error = ""
+        reboot_after_sleep = False
+        boot_markers = []
         ser = None
         try:
-            ser = serial.Serial(u4wdh_port, 115200, timeout=1)
-            deadline = time.time() + 3
-            while time.time() < deadline:
+            ser = serial.Serial(u4wdh_port, 115200, timeout=0.3)
+            # esptool-style reset INTO THE APP (not download): IO0 high (DTR
+            # de-asserted), pulse EN via RTS low->high. Forces a fresh setup() so
+            # we deterministically catch the boot markers + @@SLEEP_START.
+            try:
+                ser.setDTR(False)   # IO0 = HIGH (run mode)
+                ser.setRTS(True)    # EN  = LOW  (assert reset)
+                time.sleep(0.12)
+                ser.reset_input_buffer()
+                ser.setRTS(False)   # EN  = HIGH (release) -> boots the sketch
+            except Exception:
+                pass
+            # Phase 1: up to 8s to see the sketch boot + @@SLEEP_START.
+            deadline = time.time() + 8
+            while time.time() < deadline and not saw_sleep:
                 try:
-                    if ser.in_waiting:
-                        line = ser.readline().decode("utf-8", errors="replace").strip()
-                        if line:
-                            any_output = True
-                            if "@@SLEEP_START" in line:
-                                got_sleep_marker = True
-                                break
-                    else:
-                        time.sleep(0.05)
+                    line = ser.readline().decode("utf-8", errors="replace").strip()
                 except Exception:
                     break
-        except Exception:
-            # Port likely gone/asleep → no output → treat as asleep
-            any_output = False
+                if not line:
+                    continue
+                if line.startswith("@@"):
+                    boot_markers.append(line)
+                if "@@ERROR" in line:
+                    saw_error = line
+                    break
+                if "@@SLEEP_START" in line:
+                    saw_sleep = True
+            # Phase 2: after @@SLEEP_START, require ~4s of TOTAL silence — any
+            # further output (esp. a repeated @@TEST_START or an @@ERROR) means
+            # it rebooted / didn't actually stay asleep.
+            if saw_sleep and not saw_error:
+                quiet_deadline = time.time() + 4
+                while time.time() < quiet_deadline:
+                    try:
+                        line = ser.readline().decode("utf-8", errors="replace").strip()
+                    except Exception:
+                        break
+                    if line:
+                        reboot_after_sleep = True
+                        boot_markers.append(f"(post-sleep) {line}")
+                        break
+                    time.sleep(0.05)
+        except Exception as e:
+            saw_error = f"serial error: {e}"
         finally:
             if ser is not None:
                 try:
@@ -1043,19 +1079,28 @@ def sleep_u4wdh(u4wdh_port):
                 except Exception:
                     pass
 
-        # We only reach here after a SUCCESSFUL flash, so silence now genuinely
-        # means the freshly-written sleep firmware ran and the chip slept.
-        asleep = got_sleep_marker or (not any_output)
-        if asleep:
-            how = "SLEEP_START seen" if got_sleep_marker else "no serial output (asleep)"
+        confirmed = saw_sleep and not saw_error and not reboot_after_sleep
+        seen = ", ".join(boot_markers[-6:]) if boot_markers else "(no output at all)"
+        if confirmed:
             emit_step(step, "Verify U4WDH asleep", "pass",
-                      f"U4WDH is in deep sleep ({how}). Now flip the cable back to "
-                      "the LCD main orientation and run the EOL test.")
+                      f"U4WDH CONFIRMED in deep sleep: saw @@SLEEP_START + 4s sustained "
+                      f"silence, no errors [{seen}]. All wake sources disabled — it will "
+                      "stay asleep. Flip the cable back to LCD main orientation and run the EOL test.")
             emit("done", {"result": "pass", "passed": step, "failed": 0, "total": step})
         else:
+            if saw_error:
+                why = f"chip reported {saw_error} — esp_deep_sleep_start did not hold"
+            elif reboot_after_sleep:
+                why = "chip kept printing AFTER @@SLEEP_START — it rebooted, not asleep"
+            elif not saw_sleep:
+                why = ("never saw @@SLEEP_START after reset — the sleep sketch isn't running "
+                       "(wrong firmware / chip unreachable / not the U4WDH port)")
+            else:
+                why = "could not confirm deep sleep"
             emit_step(step, "Verify U4WDH asleep", "fail",
-                      "Chip still responding after flash — not asleep")
-            emit("done", {"result": "fail", "reason": "U4WDH not asleep"})
+                      f"U4WDH NOT confirmed asleep: {why} [{seen}]. Re-run the sleep test; "
+                      "if it keeps failing the U4WDH chip is suspect.")
+            emit("done", {"result": "fail", "reason": f"U4WDH not asleep: {why}"})
 
     except ValueError as e:
         emit_step(step + 1, "Forbidden port", "fail", str(e))
