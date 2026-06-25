@@ -105,6 +105,25 @@ it too. (Today they don't, which is why the device also "stayed awake" after a
 *failed* run — the test's `testmodeoff` cleanup never ran — and then still
 force-slept despite testmode being nominally active.)
 
+## Update 2026-06-25 (run_full_20260625-200932, good signal RSSI -57..-71)
+
+Bug 1's guardian force-sleep **also fires during the normal testmode/operating
+phase**, not just provisioning — confirming it ignores `testmode`. At a healthy
+RSSI of -64 (WiFi connected first try, `UPLOAD_PUT code=200` succeeded twice,
+incl. the Discard upload), the factory phase still failed the Dish upload + a
+`[Errno 6]` at Voice because the 5-min guardian fired mid-phase:
+```
+[20:16:06] [GUARDIAN] force_sleep elapsed_ms=300002          ← ~5 min awake, mid-factory-phase
+[20:16:06] Preparing for DEEP SLEEP...
+[20:16:06] [SLEEP_PROTO] rx SLEEP_DENY reason=op_inflight    ← upload in flight, denied
+[20:16:07] Preparing for DEEP SLEEP... (loops)               ← Bug 1 + Bug 2 together
+```
+**Takeaway:** any ~5-minute continuous-awake window force-sleeps the device
+regardless of `testmode` or in-flight uploads. This will bite real users mid-
+operation, not just the factory test. Both bugs need the same core fix: the
+force-sleep backstops (guardian + deny_max_exceeded) must honor `testmode` and
+`op_inflight` instead of overriding them.
+
 ## What's NOT broken
 - Camera (clean EOL capture, `captures/eol_1782414539.jpg`), PWDN/heat, all
   inter-board wiring (INT/UART/HB), flashing, provisioning (WiFi join + creds
