@@ -287,6 +287,72 @@ class SerialDrainer:
         self.stop_flag.set()
 
 
+def parse_camera_timeline(line):
+    """Parse a Sense `[SENSE_DIAG][camera] event=timeline ... events=a|el|x;b|el|x;...`
+    line into a per-phase breakdown. The firmware reports each phase as
+    `name|elapsed_ms_from_start|extra`; the per-phase cost is the delta between
+    consecutive elapsed values. Returns a dict or None:
+        {total_ms, mode, len, size, phases:[(name, elapsed_ms, delta_ms)],
+         slowest:(name, delta_ms)}  — or None if the line has no events= block."""
+    m = re.search(r"events=([^\s]+)", line)
+    if not m:
+        return None
+    total = re.search(r"total_ms=(\d+)", line)
+    mode = re.search(r"mode=([^\s]+)", line)
+    ln = re.search(r"len=(\d+)", line)
+    size = re.search(r"size=(\d+x\d+)", line)
+    phases, prev = [], 0
+    for tok in m.group(1).split(";"):
+        parts = tok.split("|")
+        if len(parts) < 2:
+            continue
+        name = parts[0]
+        try:
+            el = int(parts[1])
+        except ValueError:
+            continue
+        phases.append((name, el, el - prev))
+        prev = el
+    if not phases:
+        return None
+    # Ignore the implicit start at 0 when picking the slowest real phase.
+    real = [(n, d) for (n, el, d) in phases if n != "start"]
+    slowest = max(real, key=lambda x: x[1]) if real else (None, 0)
+    return {
+        "total_ms": int(total.group(1)) if total else (phases[-1][1] if phases else None),
+        "mode": mode.group(1) if mode else None,
+        "len": int(ln.group(1)) if ln else None,
+        "size": size.group(1) if size else None,
+        "phases": phases,
+        "slowest": slowest,
+    }
+
+
+def log_capture_timing(label, tl, preroll_ms, cmd_to_done_ms):
+    """Write a human-readable per-capture timing analysis to the run log (and the
+    live event stream). `tl` is parse_camera_timeline() output (may be None);
+    preroll_ms = harness home+wake settle before the command went out;
+    cmd_to_done_ms = wall-clock from sending the capture command to the device
+    reporting done (includes UART relay latency on top of the camera's own time)."""
+    head = (f"[CAPTURE_TIMING] {label}: preroll={preroll_ms}ms "
+            f"cmd→done={cmd_to_done_ms}ms")
+    if tl:
+        head += (f" cam_total={tl['total_ms']}ms"
+                 f" (slowest: {tl['slowest'][0]}={tl['slowest'][1]}ms)"
+                 f" size={tl.get('size')} len={tl.get('len')}")
+        relay = cmd_to_done_ms - (tl["total_ms"] or 0)
+        head += f" uart_relay≈{relay}ms"
+    log_line(head, "TIMING")
+    emit("log", head)
+    if tl:
+        # Per-phase deltas, biggest first, so a future stall is obvious at a glance.
+        ranked = sorted([p for p in tl["phases"] if p[0] != "start"],
+                        key=lambda x: x[2], reverse=True)
+        for name, el, delta in ranked[:6]:
+            row = f"[CAPTURE_TIMING]   {label} phase {name}: +{delta}ms (at {el}ms)"
+            log_line(row, "TIMING")
+
+
 def do_capture(lcd, menu_item, menu_index, dismiss_cmd=None, drainer=None):
     """Run a capture, return (timing_ms, img_len) or (None, None). Robust to a
     previous capture's result/upload transition still being in progress:
@@ -299,6 +365,7 @@ def do_capture(lcd, menu_item, menu_index, dismiss_cmd=None, drainer=None):
         # the writes: if the LCD port dropped (device slept/rebooted), retry the
         # attempt instead of crashing the whole suite ([Errno 6]).
         try:
+            t_start = time.time()
             lcd.write(b"home\n")
             time.sleep(2)
             lcd.write(b"wake\n")
@@ -310,12 +377,14 @@ def do_capture(lcd, menu_item, menu_index, dismiss_cmd=None, drainer=None):
                 "menu_item": menu_item, "menu_index": menu_index,
                 "msg_id": 1, "ts": 1000,
             })
+            t_cmd = time.time()
             lcd.write((cap_cmd + "\n").encode())
         except Exception as e:
             log_line(f"do_capture write failed (LCD port dropped?): {e}", "WARN")
             time.sleep(3)
             continue
 
+        timeline = None  # richest per-phase breakdown, emitted just before event=timing
         deadline = time.time() + 35
         while time.time() < deadline:
             try:
@@ -329,6 +398,8 @@ def do_capture(lcd, menu_item, menu_index, dismiss_cmd=None, drainer=None):
                         continue
                 if not line:
                     continue
+                if "event=timeline" in line:
+                    timeline = parse_camera_timeline(line)
                 if "event=timing" in line:
                     m = re.search(r"code=(\d+)", line)
                     m2 = re.search(r"len=(\d+)", line)
@@ -338,7 +409,18 @@ def do_capture(lcd, menu_item, menu_index, dismiss_cmd=None, drainer=None):
             except Exception:
                 break
         if timing_ms:
+            # Surface a full timing analysis: harness pre-roll vs camera work vs
+            # UART relay. A capture that ever looks "stuck" shows up here.
+            label = f"{menu_item} (attempt {attempt + 1})" if attempt else menu_item
+            log_capture_timing(
+                label, timeline,
+                preroll_ms=int((t_cmd - t_start) * 1000),
+                cmd_to_done_ms=int((time.time() - t_cmd) * 1000),
+            )
             break  # got it; no retry needed
+        else:
+            log_line(f"[CAPTURE_TIMING] {menu_item}: no timing received on "
+                     f"attempt {attempt + 1} (waited 35s)", "TIMING")
 
     if dismiss_cmd and timing_ms:
         time.sleep(1)
@@ -1206,12 +1288,14 @@ def run_eol_suite(config):
         # (intermittent USB hiccup) rather than aborting the whole run.
         jpeg = None
         meta_line = None
+        t_shot = None
         for cam_attempt in range(3):
             try:
                 sense.ser.reset_input_buffer()
             except Exception:
                 pass
             try:
+                t_shot = time.time()
                 sense.ser.write(b"SHOT\n")
                 sense.ser.flush()
                 jpeg, meta_line = sense.read_jpeg(timeout=20.0)
@@ -1242,6 +1326,19 @@ def run_eol_suite(config):
             m = re.search(r"cam_on_ms=(\d+)", meta_line)
             if m:
                 cam_on_ms = int(m.group(1))
+        # Timing analysis for the EOL SHOT path. The big wall-clock cost here is
+        # the raw-JPEG transfer over 115200-baud serial (~10 bits/byte), NOT the
+        # camera — separate them so a real camera stall is distinguishable.
+        shot_wall_ms = int((time.time() - t_shot) * 1000) if t_shot else None
+        warm_ms = (re.search(r"warm_ms=(\d+)", meta_line) if meta_line else None)
+        cap_ms = (re.search(r"cap_ms=(\d+)", meta_line) if meta_line else None)
+        xfer_est_ms = int(len(jpeg) * 10 * 1000 / 115200) if jpeg else None
+        tline = (f"[CAPTURE_TIMING] EOL SHOT: wall={shot_wall_ms}ms "
+                 f"cam_on={cam_on_ms}ms warm_ms={warm_ms.group(1) if warm_ms else '?'} "
+                 f"cap_ms={cap_ms.group(1) if cap_ms else '?'} "
+                 f"jpeg={len(jpeg) if jpeg else 0}B serial_xfer≈{xfer_est_ms}ms")
+        log_line(tline, "TIMING")
+        emit("log", tline)
         coh_ok, coh_detail = analyze_coherence(jpeg, img_url)
         heat_fail = (cam_on_ms is not None and cam_on_ms > 4000)
         if cam_on_ms is not None:
