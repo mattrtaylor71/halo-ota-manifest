@@ -1901,21 +1901,24 @@ def run_test_suite(config):
         time.sleep(1)
         drainer.stop()
         lcd.close()
-        # Wait up to ~45s for the device to sleep — after a burst of captures +
+        # Wait up to ~90s for the device to sleep — after a burst of captures +
         # uploads + OTA-schedule fetch, the sleep coordinator legitimately needs
-        # the WiFi/upload work to drain before it powers down (15s was too tight).
+        # the WiFi/upload work to drain before it powers down, and on a WEAK
+        # signal (RSSI < -78) that drain runs long. 45s false-failed two healthy
+        # units in a row (each then PASSED Wake-from-Sleep, proving they DID
+        # sleep — just slower than 45s). 90s covers the slow-but-real case.
         sleep_ok = False
-        for i in range(90):
+        for i in range(180):
             if not os.path.exists(lcd_port):
                 sleep_ok = True
                 break
-            if i == 40:
-                emit_step(step, "Sleep Test", "running", "Still draining activity, waiting for sleep...")
+            if i == 50:
+                emit_step(step, "Sleep Test", "running", "Still draining activity (weak-signal units sleep slower), waiting...")
             time.sleep(0.5)
         if sleep_ok:
             emit_step(step, "Sleep Test", "pass", "Device went to sleep (port disappeared)")
         else:
-            emit_step(step, "Sleep Test", "fail", "Device still awake after testmodeoff (45s)")
+            emit_step(step, "Sleep Test", "fail", "Device still awake after testmodeoff (90s)")
 
         time.sleep(5)
 
