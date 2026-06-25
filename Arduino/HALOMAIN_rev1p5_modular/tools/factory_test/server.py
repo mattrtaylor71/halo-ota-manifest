@@ -98,6 +98,55 @@ def emit(event_type, data):
     test_events.put({"type": event_type, "data": data, "time": datetime.now(timezone.utc).isoformat()})
 
 
+# ── Per-run log capture (serial stream + step results) for failure forensics ──
+RUN_LOG_DIR = os.path.join(SCRIPT_DIR, "logs")
+_run_log_f = None
+_run_log_path = None
+
+
+def log_line(s, tag=""):
+    """Append a line to the current run's log file (if one is open)."""
+    if _run_log_f is None:
+        return
+    try:
+        t = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        _run_log_f.write(f"[{t}]{('[' + tag + ']') if tag else ''} {s}\n")
+    except Exception:
+        pass
+
+
+def start_run_log(mode, device_id):
+    """Open a new per-run log. Returns True if THIS caller opened it (owner) —
+    chained sub-suites reuse the already-open log and get False."""
+    global _run_log_f, _run_log_path
+    if _run_log_f is not None:
+        return False
+    try:
+        os.makedirs(RUN_LOG_DIR, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        _run_log_path = os.path.join(RUN_LOG_DIR, f"run_{mode}_{ts}.log")
+        _run_log_f = open(_run_log_path, "a", buffering=1)
+    except Exception:
+        _run_log_f = None
+        return False
+    log_line(f"=== run start mode={mode} device={device_id} {ts}Z ===")
+    return True
+
+
+def end_run_log(owner):
+    """Close the run log if this caller owns it; returns the log path."""
+    global _run_log_f
+    path = _run_log_path
+    if owner and _run_log_f is not None:
+        log_line("=== run end ===")
+        try:
+            _run_log_f.close()
+        except Exception:
+            pass
+        _run_log_f = None
+    return path
+
+
 def emit_step(step_id, name, status, detail="", image=None):
     """Emit a test step update. Optional `image` is a URL rendered as a thumbnail."""
     if CHAIN is not None:
@@ -108,6 +157,7 @@ def emit_step(step_id, name, status, detail="", image=None):
     if image:
         entry["image"] = image
     test_results.append(entry)
+    log_line(f"STEP {step_id} [{status.upper()}] {name}: {detail}", "STEP")
     emit("step", entry)
 
 
@@ -198,6 +248,7 @@ class SerialDrainer:
                 if self.lcd.in_waiting:
                     line = self.lcd.readline().decode("utf-8", errors="replace").strip()
                     if line:
+                        log_line(line, "LCD")
                         self.lines.put(line)
                 else:
                     time.sleep(0.01)
@@ -520,7 +571,10 @@ class EolLink:
         raw = self.ser.readline()
         if not raw:
             return None
-        return raw.decode("utf-8", errors="replace").strip()
+        s = raw.decode("utf-8", errors="replace").strip()
+        if s:
+            log_line(s, "SENSE" if "1101" in self.port else ("LCD" if "21201" in self.port else "EOL"))
+        return s
 
     @staticmethod
     def _ignorable(line):
@@ -959,6 +1013,7 @@ def run_eol_suite(config):
     stylus_port = config.get("stylus_port")   # actuator: tap-to-wake a sleepy prod board
     device_id = config.get("device_id", "unknown")
 
+    log_owner = start_run_log("eol", device_id)
     emit("start", {"mode": "eol", "device_id": device_id,
                    "sense_port": sense_port, "lcd_port": lcd_port})
     step = 0
@@ -1318,6 +1373,7 @@ def run_eol_suite(config):
         if lcd is not None:
             lcd.close()
         test_running = False
+        end_run_log(log_owner)
 
 
 def run_test_suite(config):
@@ -1333,6 +1389,7 @@ def run_test_suite(config):
     do_flash = config.get("flash", False)
     sense_port = config.get("sense_port")
 
+    log_owner = start_run_log("factory", device_id)
     emit("start", {"device_id": device_id, "lcd_port": lcd_port, "stylus_port": stylus_port})
     step = 0
 
@@ -1747,13 +1804,15 @@ def run_test_suite(config):
         emit("done", {"result": "error", "reason": str(e)})
     finally:
         test_running = False
+        end_run_log(log_owner)
 
 
 def emit_final_done(result, reason, passed=None, failed=None, total=None):
     """Emit the merged run's single terminal 'done' (bypasses CHAIN capture)."""
     global CHAIN
     saved, CHAIN = CHAIN, None
-    d = {"result": result, "reason": reason}
+    d = {"result": result, "reason": reason,
+         "log": os.path.basename(_run_log_path) if _run_log_path else None}
     if passed is not None:
         d.update({"passed": passed, "failed": failed, "total": total})
     emit("done", d)
@@ -1769,6 +1828,7 @@ def run_full_suite(config):
     test_running = True
     test_results = []
     CHAIN = {"offset": 0, "max": 0, "dones": []}
+    log_owner = start_run_log("full", config.get("device_id", "unknown"))
     emit("start", {"mode": "full", "device_id": config.get("device_id", "unknown")})
     try:
         # Phase 0: prepare so the EOL phase can flash a sleepy prod device.
@@ -1876,6 +1936,7 @@ def run_full_suite(config):
     finally:
         CHAIN = None
         test_running = False
+        end_run_log(log_owner)
 
 
 # ── Routes ──
@@ -1943,6 +2004,20 @@ def api_sleep_u4wdh():
 def api_captures(fn):
     """Serve EOL captured images from the captures/ directory."""
     return send_from_directory(CAPTURES_DIR, fn)
+
+@app.route("/api/logs")
+def api_logs():
+    """List saved per-run logs, most recent first."""
+    try:
+        files = sorted([f for f in os.listdir(RUN_LOG_DIR) if f.endswith(".log")], reverse=True)
+    except Exception:
+        files = []
+    return jsonify({"logs": files})
+
+@app.route("/api/logs/<path:fn>")
+def api_log_file(fn):
+    """Serve a run log as plain text."""
+    return send_from_directory(RUN_LOG_DIR, fn, mimetype="text/plain")
 
 @app.route("/api/events")
 def api_events():

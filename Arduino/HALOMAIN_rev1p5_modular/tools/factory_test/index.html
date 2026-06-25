@@ -455,6 +455,9 @@ function attachEventSource(btn) {
         btn.textContent = 'FAILED \u2717 — Click to Retry';
         btn.className = 'run-btn done-fail';
       }
+      if (d.log) {
+        document.getElementById('summary-detail').innerHTML += ' &nbsp;&middot;&nbsp; <a href="/api/logs/' + d.log + '" target="_blank" style="color:var(--blue);font-weight:600;">&#128196; View full log (' + d.log + ')</a>';
+      }
       btn.disabled = false;
       eventSource.close();
     } else if (msg.type === 'log') {
