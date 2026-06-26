@@ -1260,10 +1260,12 @@ def run_eol_suite(config):
         step += 1
         emit_step(step, "Preflight: both boards reachable", "running",
                   "Verifying Sense + LCD USB ports are present (tap-waking if asleep)...")
+        # 30s per board: some units' Sense wakes slowly (~15s observed after the
+        # LCD `wake`), and 12s false-failed the preflight on those.
         missing = []
-        if not ensure_port(sense_port, stylus_port, 12):
+        if not ensure_port(sense_port, stylus_port, 30):
             missing.append(f"Sense ({sense_port})")
-        if not ensure_port(lcd_port, stylus_port, 12):
+        if not ensure_port(lcd_port, stylus_port, 30):
             missing.append(f"LCD ({lcd_port})")
         if missing:
             hard_fail("Preflight: both boards reachable",
