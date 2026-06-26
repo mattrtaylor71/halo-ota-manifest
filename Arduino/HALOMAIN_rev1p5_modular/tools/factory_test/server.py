@@ -1642,6 +1642,8 @@ def run_test_suite(config):
     log_owner = start_run_log("factory", device_id)
     emit("start", {"device_id": device_id, "lcd_port": lcd_port, "stylus_port": stylus_port})
     step = 0
+    lcd = None          # so the finally cleanup can reference these even if the
+    drainer = None      # run fails before they're assigned
 
     try:
         # Hard guard: refuse the forbidden port on any role.
@@ -1989,6 +1991,30 @@ def run_test_suite(config):
         emit_step(step, "Error", "fail", str(e))
         emit("done", {"result": "error", "reason": str(e)})
     finally:
+        # ALWAYS restore normal sleep. The Sleep Test step sends `testmodeoff`,
+        # but a run that fails/throws BEFORE it (e.g. [Errno 6] when the device
+        # drops mid-capture) skips that step and would leave the unit stuck in
+        # testmode (1h keep-awake) — it then won't sleep like a normal device.
+        # Best-effort: close our handles, reopen the LCD, send testmodeoff+home.
+        try:
+            if drainer is not None:
+                drainer.stop()
+        except Exception:
+            pass
+        try:
+            if lcd is not None and getattr(lcd, "is_open", False):
+                lcd.close()
+        except Exception:
+            pass
+        try:
+            time.sleep(0.3)
+            if os.path.exists(lcd_port):   # only if awake; an asleep unit is already fine
+                _t = serial.Serial(lcd_port, 115200, timeout=1)
+                _t.write(b"testmodeoff\n"); time.sleep(0.3)
+                _t.write(b"home\n"); time.sleep(0.3)
+                _t.close()
+        except Exception:
+            pass
         # Inside a full run (CHAIN set) the parent run_full_suite owns the run
         # slot; only clear it when running standalone.
         if CHAIN is None:
@@ -2183,6 +2209,17 @@ def run_full_suite(config):
     except Exception as e:
         emit_final_done("error", str(e))
     finally:
+        # Safety net: if the run enabled testmode (prepare/settle) but failed
+        # before the factory phase's own testmodeoff cleanup, restore normal
+        # sleep so the unit doesn't get left awake in testmode.
+        try:
+            if lcd_p and os.path.exists(lcd_p):
+                _t = serial.Serial(lcd_p, 115200, timeout=1)
+                _t.write(b"testmodeoff\n"); time.sleep(0.3)
+                _t.write(b"home\n"); time.sleep(0.3)
+                _t.close()
+        except Exception:
+            pass
         CHAIN = None
         test_running = False
         end_run_log(log_owner)
