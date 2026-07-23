@@ -1355,7 +1355,7 @@ class FirstSeenOrder:
 
 def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
                    agents=None, names=None, positions=None, firstseen=None,
-                   log_warn=None):
+                   switched=False, log_warn=None):
     """Return a list of protocol JSON strings (hdr + s/x per session + end).
 
     Status comes from the transcript-tail verdict (derive_status). Sessions are
@@ -1409,7 +1409,10 @@ def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
     # Phase 3: emit. Summaries are resolved only for the survivors (so dropped
     # sessions never trigger an LLM dispatch).
     n = len(recs)
-    lines = [_dump({"t": "hdr", "seq": seq, "n": n})]
+    hdr = {"t": "hdr", "seq": seq, "n": n}
+    if switched:                           # force-render this frame (fleet just toggled)
+        hdr["sw"] = 1
+    lines = [_dump(hdr)]
     for i, r in enumerate(recs):
         s, pj = r["s"], clean(_project_label(r["cwd"]), PROJ_MAX)
         if summaries is not None:
@@ -1570,7 +1573,7 @@ class NebulaScanner:
         return d.get("channels") if isinstance(d, dict) else None
 
 
-def build_nebula_snapshot(records, seq):
+def build_nebula_snapshot(records, seq, switched=False):
     """Nebula fleet snapshot in the SAME hdr/s/x/end schema the firmware renders.
     Read-only: no summaries/agents/custom-names/pins/voice. Order = Nebula-pinned
     first, then status group (d/w/i), then freshest."""
@@ -1579,7 +1582,10 @@ def build_nebula_snapshot(records, seq):
     if len(ordered) > MAX_SESSIONS:
         ordered = ordered[:MAX_SESSIONS]
     n = len(ordered)
-    lines = [_dump({"t": "hdr", "seq": seq, "n": n})]
+    hdr = {"t": "hdr", "seq": seq, "n": n}
+    if switched:                           # force-render this frame (fleet just toggled)
+        hdr["sw"] = 1
+    lines = [_dump(hdr)]
     for i, r in enumerate(ordered):
         nm = clean(r["nm"], NAME_MAX) or "channel"
         msg = clean(r["msg"], MSG_MAX)
@@ -2062,13 +2068,16 @@ def _snapshot_lines(args, seq, summaries, order, agents, names, positions=None,
     if args.fake:
         return build_fake_snapshot(seq)
     fleet = view_state["fleet"] if view_state else "claude"
+    # First snapshot after a fleet toggle carries sw:1 so the firmware force-renders
+    # it immediately (bypassing its defer-while-interacting logic). Read-and-clear.
+    switched = bool(view_state.pop("switched", False)) if view_state else False
     if fleet == "nebula" and nebula is not None:
-        return build_nebula_snapshot(nebula.poll(), seq)   # on-demand poll, throttled
+        return build_nebula_snapshot(nebula.poll(), seq, switched=switched)
     sessions = read_sessions(_now_wall())
     return build_snapshot(
         sessions, seq, _now_wall(),
         summaries=summaries, order=order, agents=agents, names=names,
-        positions=positions, firstseen=firstseen,
+        positions=positions, firstseen=firstseen, switched=switched,
         log_warn=lambda m: print("[SB] warn:", m, file=sys.stderr),
     )
 
@@ -2671,6 +2680,7 @@ class ProtocolLink:
                 fleet = parse_view(line)
                 if self.view_state is not None:
                     self.view_state["fleet"] = fleet
+                    self.view_state["switched"] = True   # next snapshot flagged sw:1
                     print("[SB] view -> %s fleet" % fleet, file=sys.stderr)
                     self.send_obj({"t": "view", "ok": True, "fleet": fleet})
                     resend = "resend"       # switch the board to the new fleet now
