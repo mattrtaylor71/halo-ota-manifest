@@ -2122,26 +2122,9 @@ def process_capture(buf, end_idx, sid8, verbose=False, mode=None, names=None,
         sys.stderr.write("[SB] voice(%s) %.1fs -> %r\n" % (sid8, secs, text))
 
     words = len(text.split())
-    # Fleet-background gesture: spawn a brand-new claude session instead of
-    # delivering to an existing agent's mailbox. msg stays None (no consumption
-    # poll) so the caller downlinks immediately on launch.
-    if sid8 == NEW_SESSION_SENTINEL:
-        ok, err = spawn_new_session(text)
-        if not ok:
-            return _voice_fail(sid8, err, text=text, wav=wav_path, words=words)
-        return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
-                "sid8": sid8, "msg": None}
-
-    # Rename gesture: set the persistent custom name; do NOT deliver to a mailbox.
-    if mode == "rename":
-        name = _clean_custom_name(text)
-        if not name:
-            return _voice_fail(sid8, "empty name", text=text, wav=wav_path, words=words)
-        if names is not None:
-            names.set(sid8, name)
-        print("[SB] voice: renamed %s -> %r" % (sid8, name))
-        return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
-                "sid8": sid8, "msg": None}
+    # Mode-based routes are checked FIRST so an explicit mode wins over the id: the
+    # firmware reuses id="NEWSESS0" as a placeholder for nebula_new, which would
+    # otherwise fall into the Claude-spawn sentinel below and spawn a Claude session.
 
     # Nebula new-channel gesture (fleet-background long-press): create + seed a new
     # channel. Fire-and-forget (bg thread) - reply surfaces in the next poll.
@@ -2160,6 +2143,27 @@ def process_capture(buf, end_idx, sid8, verbose=False, mode=None, names=None,
                                text=text, wav=wav_path, words=words)
         nebula_send(cid, text)
         print("[SB] voice: sent to nebula channel %s" % cid)
+        return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
+                "sid8": sid8, "msg": None}
+
+    # Rename gesture: set the persistent custom name; do NOT deliver to a mailbox.
+    if mode == "rename":
+        name = _clean_custom_name(text)
+        if not name:
+            return _voice_fail(sid8, "empty name", text=text, wav=wav_path, words=words)
+        if names is not None:
+            names.set(sid8, name)
+        print("[SB] voice: renamed %s -> %r" % (sid8, name))
+        return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
+                "sid8": sid8, "msg": None}
+
+    # Claude fleet-background gesture: spawn a brand-new claude session instead of
+    # delivering to an existing agent's mailbox. msg stays None (no consumption
+    # poll) so the caller downlinks immediately on launch.
+    if sid8 == NEW_SESSION_SENTINEL:
+        ok, err = spawn_new_session(text)
+        if not ok:
+            return _voice_fail(sid8, err, text=text, wav=wav_path, words=words)
         return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
                 "sid8": sid8, "msg": None}
 
