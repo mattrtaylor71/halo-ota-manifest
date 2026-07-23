@@ -69,6 +69,14 @@ NEBULA_TIMEOUT = 20
 # like "0 agents" but was really "wrong workspace"). slug "matt-taylor" = Matt's
 # Personal ws (id ws_0xbd309ffb...); override via env if the account/ws changes.
 NEBULA_WORKSPACE = os.environ.get("SESSION_BOARD_NEBULA_WORKSPACE", "matt-taylor")
+# Nebula write-actions (v2): voice -> `chat` into a channel, and new-channel create.
+# `chat` is SYNCHRONOUS (waits for the agent's full reply even with --no-stream), so
+# these ALWAYS run fire-and-forget on a bg thread the daemon never waits on - the
+# reply surfaces naturally in the next channels-list poll. Default agent for new
+# channels = "Nebula" (the workspace's default user agent).
+NEBULA_DEFAULT_AGENT = os.environ.get("SESSION_BOARD_NEBULA_AGENT",
+                                      "agt_06978f6b9b717fba80006458ccc6df20")
+NEBULA_CHAT_TIMEOUT = 300   # bg-thread zombie-safety cap (a reply can be slow)
 # Capture heartbeat cadence (s). Default 5s is fine for normal operation; set
 # SESSION_BOARD_CAPTURE_HB=1 for a diagnostic upload run so the daemon's per-tick
 # receive view (bytes-since-last, inst KB/s, gap-since-last-growth) can be lined up
@@ -1538,6 +1546,7 @@ class NebulaScanner:
         self._last_poll = -1e9
         self._err = None
         self._validated = False   # one-time workspace-existence check done?
+        self._id_map = {}         # board sid8 -> full "thrd_..." channel id (for sends)
 
     def poll(self):
         """Return mapped records, re-fetching only if the throttle has elapsed."""
@@ -1549,8 +1558,15 @@ class NebulaScanner:
         raw = self._fetch()
         if raw is not None:
             self._records = [_map_nebula_channel(c, _now_wall()) for c in raw]
+            # sid8 -> full channel id, so a voice send can target the real "thrd_..."
+            self._id_map = {_nebula_sid8(str(c.get("id"))): str(c.get("id"))
+                            for c in raw if c.get("id")}
             self._err = None
         return self._records
+
+    def channel_id_for(self, sid8):
+        """Full Nebula channel id for a board sid8 (from the last poll), or None."""
+        return self._id_map.get(sid8)
 
     def _fetch(self):
         try:
@@ -1607,6 +1623,66 @@ class NebulaScanner:
         elif self.verbose:
             print("[SB] nebula workspace pinned: %s (%s)"
                   % (hit.get("slug"), hit.get("id")), file=sys.stderr)
+
+
+def _nebula_cli(args, timeout=NEBULA_TIMEOUT):
+    """Run a nebula-ai subcommand (pinned workspace, non-interactive). Returns the
+    CompletedProcess, or None on spawn/timeout failure."""
+    try:
+        return subprocess.run(["npx", NEBULA_CLI, "--json", "--workspace",
+                               NEBULA_WORKSPACE] + list(args),
+                              stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+
+def _nebula_title(text):
+    """Short channel title from spoken text (first few words, capped)."""
+    words = clean(text, 60).split()
+    return " ".join(words[:6])[:40] or "New channel"
+
+
+def nebula_send(channel_id, text):
+    """Fire-and-forget: post text into a Nebula channel on a background thread.
+    `chat` blocks until the agent's full reply (even --no-stream), so the daemon
+    NEVER waits on it - the reply surfaces in the next channels-list poll."""
+    def _run():
+        p = _nebula_cli(["chat", text, "-c", channel_id, "--no-stream"],
+                        timeout=NEBULA_CHAT_TIMEOUT)
+        if p is None or p.returncode != 0:
+            print("[SB] nebula send FAILED (chan %s): %s"
+                  % (channel_id, (p.stderr[:150] if p else "spawn/timeout")),
+                  file=sys.stderr)
+        else:
+            print("[SB] nebula sent -> %s" % channel_id, file=sys.stderr)
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def nebula_new_channel(text):
+    """Create a new Nebula channel (titled from the spoken text, default agent),
+    then seed it with the message. All on a background thread, fire-and-forget."""
+    def _run():
+        title = _nebula_title(text)
+        p = _nebula_cli(["channels", "create", "-t", title, "-a", NEBULA_DEFAULT_AGENT])
+        cid = None
+        if p is not None and p.returncode == 0:
+            try:
+                o = json.loads(p.stdout)
+                cid = o.get("id") if isinstance(o, dict) else None
+            except (ValueError, TypeError):
+                cid = None
+        if not cid:
+            print("[SB] nebula new-channel create FAILED: %s"
+                  % (p.stderr[:150] if p else "spawn/timeout"), file=sys.stderr)
+            return
+        print("[SB] nebula created channel %s (%r); seeding" % (cid, title),
+              file=sys.stderr)
+        p2 = _nebula_cli(["chat", text, "-c", cid, "--no-stream"],
+                         timeout=NEBULA_CHAT_TIMEOUT)
+        if p2 is None or p2.returncode != 0:
+            print("[SB] nebula seed-send FAILED (chan %s)" % cid, file=sys.stderr)
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def build_nebula_snapshot(records, seq):
@@ -2011,12 +2087,13 @@ def _voice_fail(sid8, err, text="", wav=None, words=0):
 
 
 def process_capture(buf, end_idx, sid8, verbose=False, mode=None, names=None,
-                    pcm_len=None, rate=None):
+                    pcm_len=None, rate=None, nebula=None):
     """Finalize a capture: write wav, transcribe, then route by mode/sid8 - spawn
-    a new session (NEWSESS0), set a custom name (mode="rename"), or deliver to the
-    target mailbox (normal). PCM is either WAV_END-delimited (end_idx) or an exact
-    byte count (pcm_len, for a spooled upload). rate is the PCM sample rate the
-    board reported (None => legacy 44100). Outcome is logged unconditionally."""
+    a new session (NEWSESS0), set a custom name (mode="rename"), send into a Nebula
+    channel (mode="nebula_send") or start a new one (mode="nebula_new"), or deliver
+    to the target Claude mailbox (normal). PCM is either WAV_END-delimited (end_idx)
+    or an exact byte count (pcm_len). rate is the PCM sample rate (None => legacy
+    44100). nebula = the NebulaScanner (for channel-id lookup). Logged unconditionally."""
     eff_rate = rate or VOICE_RATE
     pcm = extract_pcm_len(buf, pcm_len) if pcm_len is not None else extract_pcm(buf, end_idx)
     secs = (len(pcm) // VOICE_WIDTH) / float(eff_rate)
@@ -2063,6 +2140,26 @@ def process_capture(buf, end_idx, sid8, verbose=False, mode=None, names=None,
         if names is not None:
             names.set(sid8, name)
         print("[SB] voice: renamed %s -> %r" % (sid8, name))
+        return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
+                "sid8": sid8, "msg": None}
+
+    # Nebula new-channel gesture (fleet-background long-press): create + seed a new
+    # channel. Fire-and-forget (bg thread) - reply surfaces in the next poll.
+    if mode == "nebula_new":
+        nebula_new_channel(text)
+        print("[SB] voice: new nebula channel from %r" % (text[:40],))
+        return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
+                "sid8": sid8, "msg": None}
+
+    # Nebula send gesture (hold-speak on a Nebula channel card): post into that
+    # channel. sid8 is the board's hashed id; resolve it to the real "thrd_..." id.
+    if mode == "nebula_send":
+        cid = nebula.channel_id_for(sid8) if nebula is not None else None
+        if not cid:
+            return _voice_fail(sid8, "nebula channel not found",
+                               text=text, wav=wav_path, words=words)
+        nebula_send(cid, text)
+        print("[SB] voice: sent to nebula channel %s" % cid)
         return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
                 "sid8": sid8, "msg": None}
 
@@ -2465,12 +2562,13 @@ class ProtocolLink:
     binary voice-capture state machine, identical across serial and TCP."""
 
     def __init__(self, transport, verbose=False, token=None, auth_required=False,
-                 names=None, positions=None, view_state=None):
+                 names=None, positions=None, view_state=None, nebula=None):
         self.tp = transport
         self.verbose = verbose
         self.names = names        # NameStore for the rename gesture
         self.positions = positions  # PositionStore for the manual-reorder gesture
         self.view_state = view_state  # {"fleet": "claude"|"nebula"} shared w/ main loop
+        self.nebula = nebula          # NebulaScanner (for voice-to-channel sends)
         self.rx = b""
         self.capture = None       # dict while in binary voice-capture mode
         self._wlock = threading.Lock()   # main loop + async verifier share the transport
@@ -2592,13 +2690,14 @@ class ProtocolLink:
             p = _pcm_start(buf)
             res = process_capture(buf, 0, self.capture["sid8"], verbose=self.verbose,
                                   mode=self.capture.get("mode"), names=self.names,
-                                  pcm_len=want, rate=self.capture.get("rate"))
+                                  pcm_len=want, rate=self.capture.get("rate"),
+                                  nebula=self.nebula)
             trailing = bytes(buf[p + want:])
             reason = "bytes=%d ok=%s" % (want, res["ok"])
         else:
             res = process_capture(buf, idx, self.capture["sid8"], verbose=self.verbose,
                                   mode=self.capture.get("mode"), names=self.names,
-                                  rate=self.capture.get("rate"))
+                                  rate=self.capture.get("rate"), nebula=self.nebula)
             trailing = bytes(buf[idx + len(WAV_END_MARK):])
             reason = "wav_end ok=%s" % res["ok"]
         if res["ok"] and res.get("msg") is not None:
@@ -2948,7 +3047,7 @@ def run_daemon(args, summaries, order, agents, names, positions, view_state, neb
                     serial_link[0] = ProtocolLink(SerialTransport(ser), args.verbose,
                                                   token=token, auth_required=False,
                                                   names=names, positions=positions,
-                                                  view_state=view_state)
+                                                  view_state=view_state, nebula=nebula)
                     last_send[0] = -1e9
                     print("[SB] serial connected %s" % args.port, file=sys.stderr)
                 except (serial.SerialException, OSError):
@@ -2970,7 +3069,8 @@ def run_daemon(args, summaries, order, agents, names, positions, view_state, neb
                         continue
                     pl = ProtocolLink(SocketTransport(conn, peer), args.verbose,
                                       token=token, auth_required=True, names=names,
-                                      positions=positions, view_state=view_state)
+                                      positions=positions, view_state=view_state,
+                                      nebula=nebula)
                     if tcp_link[0] is not None and tcp_link[0].authed:
                         # A device is authed and working. Hold the newcomer aside; it
                         # only takes over once IT authenticates. This stops a stray
