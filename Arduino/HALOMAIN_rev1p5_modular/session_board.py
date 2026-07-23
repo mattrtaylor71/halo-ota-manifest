@@ -127,6 +127,16 @@ WAV_END_MARK = b"-- WAV_END --"
 NEW_SESSION_SENTINEL = "NEWSESS0"  # rec-start id => spawn a fresh claude session
 WHISPER_PY = os.path.expanduser("~/.whisper-venv/bin/python")
 WHISPER_TIMEOUT = 60
+# Default mlx-whisper was 'whisper-tiny' — measurably poor on short, noisy rename-
+# length utterances (word confusion + repetition-loop hallucinations). base.en is
+# already cached locally and, paired with the decode params below, fails gracefully
+# (near-misses, not garbage) on degraded audio. Override with SESSION_BOARD_WHISPER_MODEL
+# (e.g. a small.en repo) if real-world clips need more headroom.
+WHISPER_MODEL = os.environ.get("SESSION_BOARD_WHISPER_MODEL",
+                               "mlx-community/whisper-base.en-mlx")
+# Rename is a constrained use case (a short label, not a sentence) — a vocabulary/style
+# hint biases whisper toward a terse name and away from wandering into a garbled phrase.
+WHISPER_RENAME_PROMPT = "A short agent name or label."
 TEAMS_DIR = os.path.join(HOME, ".claude", "teams")
 
 # ---------------------------------------------------------------------------
@@ -1452,13 +1462,21 @@ def _openai_key():
     return None
 
 
-def _transcribe_mlx(wav_path):
+def _transcribe_mlx(wav_path, initial_prompt=None):
+    # kwargs passed as JSON argv so the model + decode profile are explicit.
+    # condition_on_previous_text=False stops the repetition/hallucination loops
+    # ("Olid Olid Olid...") that the default True produces on short/noisy clips.
+    kw = {"path_or_hf_repo": WHISPER_MODEL,
+          "condition_on_previous_text": False,
+          "verbose": False}
+    if initial_prompt:
+        kw["initial_prompt"] = initial_prompt
     try:
         proc = subprocess.run(
             [WHISPER_PY, "-c",
              "import mlx_whisper,json,sys;"
-             "print(json.dumps(mlx_whisper.transcribe(sys.argv[1])))",
-             wav_path],
+             "print(json.dumps(mlx_whisper.transcribe(sys.argv[1], **json.loads(sys.argv[2]))))",
+             wav_path, json.dumps(kw)],
             stdin=subprocess.DEVNULL, capture_output=True, text=True,
             timeout=WHISPER_TIMEOUT,
         )
@@ -1472,7 +1490,7 @@ def _transcribe_mlx(wav_path):
         return None
 
 
-def _transcribe_openai(wav_path):
+def _transcribe_openai(wav_path, initial_prompt=None):
     key = _openai_key()
     if not key:
         return None
@@ -1488,6 +1506,11 @@ def _transcribe_openai(wav_path):
     parts.append(b'Content-Disposition: form-data; name="model"')
     parts.append(b"")
     parts.append(b"whisper-1")
+    if initial_prompt:                        # bias the fallback the same way
+        parts.append(("--" + boundary).encode())
+        parts.append(b'Content-Disposition: form-data; name="prompt"')
+        parts.append(b"")
+        parts.append(initial_prompt.encode("utf-8"))
     parts.append(("--" + boundary).encode())
     parts.append(b'Content-Disposition: form-data; name="file"; filename="rec.wav"')
     parts.append(b"Content-Type: audio/wav")
@@ -1505,15 +1528,18 @@ def _transcribe_openai(wav_path):
         return None
 
 
-def transcribe(wav_path):
+def transcribe(wav_path, mode=None):
     """Local mlx-whisper first, OpenAI whisper-1 as fallback.
-    Returns the transcript str (may be "" if the model RAN but heard no speech),
-    or None if every transcriber CRASHED (so the caller can tell "no speech"
-    apart from "transcribe failed")."""
-    r = _transcribe_mlx(wav_path)
+    mode selects a decode profile: "rename" biases toward a short label with a
+    vocabulary hint; normal voice uses no hint. Both use base.en +
+    condition_on_previous_text=False (see _transcribe_mlx). Returns the transcript
+    str (may be "" if the model RAN but heard no speech), or None if every
+    transcriber CRASHED (so the caller can tell "no speech" from "transcribe failed")."""
+    prompt = WHISPER_RENAME_PROMPT if mode == "rename" else None
+    r = _transcribe_mlx(wav_path, initial_prompt=prompt)
     if r is not None:          # mlx ran (text or empty)
         return r
-    return _transcribe_openai(wav_path)   # None only if it also crashed
+    return _transcribe_openai(wav_path, initial_prompt=prompt)   # None only if it also crashed
 
 
 def normalize_pcm(frames):
@@ -1689,7 +1715,7 @@ def process_capture(buf, end_idx, sid8, verbose=False, mode=None, names=None,
     _prune_voice_dir()
     print("[SB] voice wav saved %s (%.1fs, gain x%.1f)" % (wav_path, secs, gain))
 
-    text = transcribe(wav_path)
+    text = transcribe(wav_path, mode=mode)
     if text is None:
         return _voice_fail(sid8, "transcribe failed", wav=wav_path)   # whisper crashed
     if not text.strip():
