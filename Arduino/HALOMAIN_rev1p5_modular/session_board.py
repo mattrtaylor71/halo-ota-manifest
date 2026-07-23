@@ -1409,7 +1409,7 @@ def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
     # Phase 3: emit. Summaries are resolved only for the survivors (so dropped
     # sessions never trigger an LLM dispatch).
     n = len(recs)
-    lines = [_dump({"t": "hdr", "seq": seq, "n": n})]
+    lines = [_dump({"t": "hdr", "seq": seq, "n": n, "fleet": "claude"})]
     for i, r in enumerate(recs):
         s, pj = r["s"], clean(_project_label(r["cwd"]), PROJ_MAX)
         if summaries is not None:
@@ -1579,7 +1579,7 @@ def build_nebula_snapshot(records, seq):
     if len(ordered) > MAX_SESSIONS:
         ordered = ordered[:MAX_SESSIONS]
     n = len(ordered)
-    lines = [_dump({"t": "hdr", "seq": seq, "n": n})]
+    lines = [_dump({"t": "hdr", "seq": seq, "n": n, "fleet": "nebula"})]
     for i, r in enumerate(ordered):
         nm = clean(r["nm"], NAME_MAX) or "channel"
         msg = clean(r["msg"], MSG_MAX)
@@ -1612,7 +1612,7 @@ def build_fake_snapshot(seq):
     # Same board ordering as live: done, working, idle (group only; stable input).
     fakes.sort(key=lambda f: STATUS_RANK.get(f["st"], 9))
     n = len(fakes)
-    lines = [_dump({"t": "hdr", "seq": seq, "n": n})]
+    lines = [_dump({"t": "hdr", "seq": seq, "n": n, "fleet": "claude"})]
     for i, fk in enumerate(fakes):
         lines.append(_dump_s({"t": "s", "i": i, "id": fk["id"], "nm": fk["nm"],
                               "pj": fk["pj"], "st": fk["st"], "age": fk["age"], "msg": fk["msg"]}))
