@@ -57,6 +57,12 @@ AUTH_TIMEOUT = 15.0                # a new TCP link must auth within this or be 
                                    #  ngrok needs more than a LAN-tuned 5s)
 NGROK_BIN = os.environ.get("SESSION_BOARD_NGROK_BIN", "ngrok")
 NGROK_API = "http://127.0.0.1:4040/api/tunnels"
+# Nebula.gg second fleet view (read-only). The CLI reuses the persisted ~/.nebula
+# session non-interactively; we poll ONLY while the Nebula view is active (on-demand,
+# never in the background) and no faster than NEBULA_POLL_SECS.
+NEBULA_CLI = os.environ.get("SESSION_BOARD_NEBULA_CLI", "nebula-ai")  # run via npx
+NEBULA_POLL_SECS = 8.0
+NEBULA_TIMEOUT = 20
 # Capture heartbeat cadence (s). Default 5s is fine for normal operation; set
 # SESSION_BOARD_CAPTURE_HB=1 for a diagnostic upload run so the daemon's per-tick
 # receive view (bytes-since-last, inst KB/s, gap-since-last-growth) can be lined up
@@ -1216,6 +1222,19 @@ def parse_pos(line_bytes):
     return None
 
 
+def parse_view(line_bytes):
+    """{"t":"view","fleet":"claude"|"nebula"} -> the fleet name; else None."""
+    if not line_bytes.startswith(b"{"):
+        return None
+    try:
+        o = json.loads(line_bytes)
+    except (ValueError, TypeError):
+        return None
+    if o.get("t") == "view" and o.get("fleet") in ("claude", "nebula"):
+        return o.get("fleet")
+    return None
+
+
 def apply_pins(ordered_ids, positions, max_slots):
     """Apply A1 manual pins to a calm-ordered id list AND cap to max_slots in one
     pass. Returns the final visible id list (length min(len(ordered_ids),max_slots)).
@@ -1432,6 +1451,113 @@ def _dump_s(rec):
 def _dump_x(rec):
     """Serialize an 'x' (detail) record, trimming dtl to fit the cap."""
     return _dump_capped(rec, "dtl")
+
+
+# ---------------------------------------------------------------------------
+# Nebula.gg second fleet (read-only status board via the nebula-ai CLI)
+# ---------------------------------------------------------------------------
+
+def _nebula_sid8(cid):
+    """Stable 8-char board id from a Nebula thread id. HASHED, not a prefix slice:
+    Nebula thread ids can share leading hex ("thrd_06978f70..." x3), which would
+    collide on a prefix and merge distinct channels on the board."""
+    return hashlib.sha1(cid.encode("utf-8")).hexdigest()[:8] if cid else "nebula00"
+
+
+def _map_nebula_channel(c, now_wall):
+    """Map one Nebula channel dict -> a board record. Status: open_turns non-empty
+    => working; else done/idle by last_activity recency (mirrors derive_status).
+    Summary: thread_summary, else last_message.preview_text (no Haiku needed)."""
+    turns = (c.get("state") or {}).get("turns") or {}
+    working = bool(turns.get("open_turns"))
+    last_ms = c.get("last_activity_at")
+    last_s = (last_ms / 1000.0) if isinstance(last_ms, (int, float)) else 0.0
+    if working:
+        st = "w"
+    elif last_s and (now_wall - last_s) <= DONE_WINDOW_SECS:
+        st = "d"
+    else:
+        st = "i"
+    age = max(0, min(int(now_wall - last_s), 359999)) if last_s else 359999
+    label = c.get("channel_label") or c.get("title") or "channel"
+    summ = (c.get("thread_summary") or "").strip()
+    if not summ:
+        summ = ((c.get("last_message") or {}).get("preview_text") or "").strip()
+    return {"sid8": _nebula_sid8(str(c.get("id") or "")), "nm": label, "st": st,
+            "age": age, "msg": summ, "pinned": bool(c.get("is_pinned"))}
+
+
+class NebulaScanner:
+    """Polls the Nebula CLI (`npx nebula-ai --json channels list`) for the user's
+    agent channels, ON DEMAND only (while the Nebula view is active) and no faster
+    than NEBULA_POLL_SECS. Non-interactive (reuses the persisted ~/.nebula session).
+    Caches the last good mapped records so a transient CLI error never blanks the
+    board."""
+
+    def __init__(self, verbose=False):
+        self.verbose = verbose
+        self._records = []
+        self._last_poll = -1e9
+        self._err = None
+
+    def poll(self):
+        """Return mapped records, re-fetching only if the throttle has elapsed."""
+        now = _now_mono()
+        if self._records and (now - self._last_poll) < NEBULA_POLL_SECS:
+            return self._records
+        self._last_poll = now
+        raw = self._fetch()
+        if raw is not None:
+            self._records = [_map_nebula_channel(c, _now_wall()) for c in raw]
+            self._err = None
+        return self._records
+
+    def _fetch(self):
+        try:
+            p = subprocess.run(["npx", NEBULA_CLI, "--json", "channels", "list"],
+                               stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=NEBULA_TIMEOUT)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            self._err = str(e)
+            if self.verbose:
+                print("[SB] nebula poll error: %s" % e, file=sys.stderr)
+            return None
+        if p.returncode != 0:
+            self._err = "exit %d" % p.returncode
+            if self.verbose:
+                print("[SB] nebula exit %d: %s"
+                      % (p.returncode, (p.stderr or "")[:200]), file=sys.stderr)
+            return None
+        try:
+            d = json.loads(p.stdout)
+        except (ValueError, TypeError):
+            self._err = "bad json"
+            return None
+        if isinstance(d, list):
+            return d
+        return d.get("channels") if isinstance(d, dict) else None
+
+
+def build_nebula_snapshot(records, seq):
+    """Nebula fleet snapshot in the SAME hdr/s/x/end schema the firmware renders.
+    Read-only: no summaries/agents/custom-names/pins/voice. Order = Nebula-pinned
+    first, then status group (d/w/i), then freshest."""
+    ordered = sorted(records, key=lambda r: (0 if r.get("pinned") else 1,
+                                             STATUS_RANK.get(r["st"], 9), r["age"]))
+    if len(ordered) > MAX_SESSIONS:
+        ordered = ordered[:MAX_SESSIONS]
+    n = len(ordered)
+    lines = [_dump({"t": "hdr", "seq": seq, "n": n})]
+    for i, r in enumerate(ordered):
+        nm = clean(r["nm"], NAME_MAX) or "channel"
+        msg = clean(r["msg"], MSG_MAX)
+        dtl = fit_detail(clean(r["msg"], 10 ** 9), DETAIL_MAX)
+        srec = {"t": "s", "i": i, "id": r["sid8"], "nm": nm, "pj": "nebula",
+                "st": r["st"], "age": r["age"], "msg": msg}
+        lines.append(_dump_s(srec))
+        lines.append(_dump_x({"t": "x", "i": i, "dtl": dtl}))
+    lines.append(_dump({"t": "end", "seq": seq, "n": n}))
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -1898,10 +2024,14 @@ def _now_mono():
     return time.monotonic()
 
 
-def _snapshot_lines(args, seq, summaries, order, agents, names, positions=None):
+def _snapshot_lines(args, seq, summaries, order, agents, names, positions=None,
+                    view_state=None, nebula=None):
     """Build one snapshot's protocol lines for the current session state."""
     if args.fake:
         return build_fake_snapshot(seq)
+    fleet = view_state["fleet"] if view_state else "claude"
+    if fleet == "nebula" and nebula is not None:
+        return build_nebula_snapshot(nebula.poll(), seq)   # on-demand poll, throttled
     sessions = read_sessions(_now_wall())
     return build_snapshot(
         sessions, seq, _now_wall(),
@@ -1912,7 +2042,10 @@ def _snapshot_lines(args, seq, summaries, order, agents, names, positions=None):
 
 
 def run_once(args, summaries, order, agents, names, positions, seq):
-    if not args.fake and summaries is not None:
+    want_nebula = getattr(args, "nebula", False)
+    view_state = {"fleet": "nebula" if want_nebula else "claude"}
+    nebula = NebulaScanner(args.verbose) if want_nebula else None
+    if not args.fake and summaries is not None and not want_nebula:
         # Prime summaries synchronously so the single snapshot has LLM titles.
         now = _now_wall()
         sessions = read_sessions(now)
@@ -1926,7 +2059,7 @@ def run_once(args, summaries, order, agents, names, positions, seq):
             jobs.append((s, ra, ru, sclass))
         summaries.prime_sync(jobs)
     lines = _snapshot_lines(args, 1 if args.fake else seq, summaries, order, agents,
-                            names, positions)
+                            names, positions, view_state, nebula)
     sys.stdout.write("\n".join(lines) + "\n")
     sys.stdout.flush()
     if args.verbose:
@@ -2261,11 +2394,12 @@ class ProtocolLink:
     binary voice-capture state machine, identical across serial and TCP."""
 
     def __init__(self, transport, verbose=False, token=None, auth_required=False,
-                 names=None, positions=None):
+                 names=None, positions=None, view_state=None):
         self.tp = transport
         self.verbose = verbose
         self.names = names        # NameStore for the rename gesture
         self.positions = positions  # PositionStore for the manual-reorder gesture
+        self.view_state = view_state  # {"fleet": "claude"|"nebula"} shared w/ main loop
         self.rx = b""
         self.capture = None       # dict while in binary voice-capture mode
         self._wlock = threading.Lock()   # main loop + async verifier share the transport
@@ -2501,6 +2635,13 @@ class ProtocolLink:
                         print("[SB] pinned %s -> row %d" % (sid8, idx), file=sys.stderr)
                     self.send_obj({"t": "pos", "ok": True, "id": sid8, "idx": idx})
                     resend = "resend"       # reflect the new order immediately
+            elif parse_view(line) is not None:
+                fleet = parse_view(line)
+                if self.view_state is not None:
+                    self.view_state["fleet"] = fleet
+                    print("[SB] view -> %s fleet" % fleet, file=sys.stderr)
+                    self.send_obj({"t": "view", "ok": True, "fleet": fleet})
+                    resend = "resend"       # switch the board to the new fleet now
             elif is_rec_stop(line):
                 pass                    # stray stop (already finalized)
             elif line == WAV_END_MARK:
@@ -2541,7 +2682,7 @@ class ProtocolLink:
         threading.Thread(target=worker, daemon=True).start()
 
 
-def run_daemon(args, summaries, order, agents, names, positions):
+def run_daemon(args, summaries, order, agents, names, positions, view_state, nebula):
     """Dual-transport controller: serial (pause-gated) AND TCP server live at once,
     plus the UDP discovery beacon. One snapshot per interval fans out to every
     connected transport; input (acks/refresh/voice) is processed from each."""
@@ -2636,7 +2777,7 @@ def run_daemon(args, summaries, order, agents, names, positions):
     def send_all():
         seq["n"] += 1
         lines = _snapshot_lines(args, seq["n"], summaries, order, agents, names,
-                                positions)
+                                positions, view_state, nebula)
         sent = 0
         for l in list(links()):
             try:
@@ -2734,7 +2875,8 @@ def run_daemon(args, summaries, order, agents, names, positions):
                     ser.reset_input_buffer()
                     serial_link[0] = ProtocolLink(SerialTransport(ser), args.verbose,
                                                   token=token, auth_required=False,
-                                                  names=names, positions=positions)
+                                                  names=names, positions=positions,
+                                                  view_state=view_state)
                     last_send[0] = -1e9
                     print("[SB] serial connected %s" % args.port, file=sys.stderr)
                 except (serial.SerialException, OSError):
@@ -2756,7 +2898,7 @@ def run_daemon(args, summaries, order, agents, names, positions):
                         continue
                     pl = ProtocolLink(SocketTransport(conn, peer), args.verbose,
                                       token=token, auth_required=True, names=names,
-                                      positions=positions)
+                                      positions=positions, view_state=view_state)
                     if tcp_link[0] is not None and tcp_link[0].authed:
                         # A device is authed and working. Hold the newcomer aside; it
                         # only takes over once IT authenticates. This stops a stray
@@ -2855,6 +2997,8 @@ def parse_args(argv):
     p.add_argument("--no-tunnel", dest="tunnel", action="store_false",
                    help="disable the ngrok cross-network tunnel (LAN-only)")
     p.add_argument("--verbose", action="store_true", help="per-cycle summary to stderr")
+    p.add_argument("--nebula", action="store_true",
+                   help="with --once: emit the Nebula.gg fleet snapshot instead of Claude")
     return p.parse_args(argv)
 
 
@@ -2870,10 +3014,12 @@ def main(argv=None):
     agents = None if args.fake else AgentActivity()   # teammate CPU-delta tracker
     names = NameStore()      # persistent Matt-assigned custom names
     positions = PositionStore()   # persistent manual pins (A1 absolute-index reorder)
+    view_state = {"fleet": "claude"}   # active board fleet (toggled by firmware)
+    nebula = NebulaScanner(args.verbose)   # 2nd fleet; polled only while view active
     if args.once:
         run_once(args, summaries, order, agents, names, positions, seq=1)
         return 0
-    run_daemon(args, summaries, order, agents, names, positions)
+    run_daemon(args, summaries, order, agents, names, positions, view_state, nebula)
     return 0
 
 
