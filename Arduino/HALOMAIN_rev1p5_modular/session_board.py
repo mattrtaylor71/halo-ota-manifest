@@ -49,6 +49,8 @@ SECRET_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), ".session_board_secret")
 NAMES_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), ".session_board_names.json")
+POSITIONS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".session_board_positions.json")
 CUSTOM_NAME_MAX = 30               # Matt-assigned custom name cap
 AUTH_TIMEOUT = 15.0                # a new TCP link must auth within this or be dropped
                                    # (tunnel-tolerant: a real internet round-trip via
@@ -1142,6 +1144,124 @@ class NameStore:
                 pass
 
 
+class PositionStore:
+    """Persistent sid8 -> [index, seq] manual pin (A1: absolute-index reordering).
+    A pinned agent holds a fixed board row regardless of status; unpinned agents
+    flow through the calm order in the gaps. seq is a monotonic set-counter used
+    only to break placement ties (the most-recently-moved agent wins its exact
+    slot). Sibling file, NEVER version-busted (user-set, precious like custom
+    names)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._pins = {}       # sid8 -> [idx, seq]
+        self._seq = 0
+        try:
+            with open(POSITIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if (isinstance(v, list) and len(v) == 2
+                            and all(isinstance(x, int) and not isinstance(x, bool)
+                                    for x in v)):
+                        self._pins[k] = [v[0], v[1]]
+                        self._seq = max(self._seq, v[1])
+        except (OSError, ValueError):
+            pass
+
+    def any(self):
+        return bool(self._pins)
+
+    def get(self, sid8):
+        """(idx, seq) for a pinned agent, or None if unpinned."""
+        p = self._pins.get(sid8)
+        return (p[0], p[1]) if p else None
+
+    def set(self, sid8, idx):
+        with self._lock:
+            self._seq += 1
+            self._pins[sid8] = [int(idx), self._seq]
+            self._save()
+
+    def clear(self, sid8):
+        with self._lock:
+            if self._pins.pop(sid8, None) is not None:
+                self._save()
+
+    def _save(self):
+        tmp = POSITIONS_FILE + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self._pins, f)
+            os.replace(tmp, POSITIONS_FILE)
+        except OSError:
+            pass
+
+
+def parse_pos(line_bytes):
+    """{"t":"pos","id":<sid8>,"idx":<int>} -> (sid8, idx); idx == -1 means unpin.
+    Returns (sid8, idx) or None. sid trimmed to 8 chars (board identity)."""
+    if not line_bytes.startswith(b"{"):
+        return None
+    try:
+        o = json.loads(line_bytes)
+    except (ValueError, TypeError):
+        return None
+    if o.get("t") == "pos":
+        sid = o.get("id")
+        idx = o.get("idx")
+        if (isinstance(sid, str) and sid
+                and isinstance(idx, int) and not isinstance(idx, bool)):
+            return (sid[:8], idx)
+    return None
+
+
+def apply_pins(ordered_ids, positions, max_slots):
+    """Apply A1 manual pins to a calm-ordered id list AND cap to max_slots in one
+    pass. Returns the final visible id list (length min(len(ordered_ids),max_slots)).
+    Pinned agents are placed at their stored index (clamped into the visible
+    window so a pin is never truncated by the cap); collisions resolve by
+    (index asc, most-recent-set first) spilling to the next free slot; unpinned
+    agents fill the remaining slots in calm order."""
+    n = len(ordered_ids)
+    limit = min(n, max_slots)
+    if positions is None or not positions.any() or limit == 0:
+        return ordered_ids[:limit]                 # no pins: calm order, capped
+
+    def clamp(idx):
+        return 0 if idx < 0 else (limit - 1 if idx > limit - 1 else idx)
+
+    pinned, unpinned = [], []
+    for sid in ordered_ids:
+        p = positions.get(sid[:8])
+        if p is None:
+            unpinned.append(sid)
+        else:
+            pinned.append((sid, p[0], p[1]))       # (sid, idx, seq)
+    if not pinned:
+        return ordered_ids[:limit]
+    # index asc, then most-recently-set first (so the just-moved agent wins ties)
+    pinned.sort(key=lambda t: (clamp(t[1]), -t[2]))
+    slots = [None] * limit
+    for sid, idx, _seq in pinned[:limit]:          # can't seat more pins than slots
+        target = clamp(idx)
+        j = target
+        while j < limit and slots[j] is not None:  # first free slot at/after target
+            j += 1
+        if j >= limit:                             # none after -> search backward
+            j = target - 1
+            while j >= 0 and slots[j] is not None:
+                j -= 1
+        if 0 <= j < limit:
+            slots[j] = sid
+    ui = 0
+    for k in range(limit):                         # unpinned fill the gaps, calm order
+        if slots[k] is None and ui < len(unpinned):
+            slots[k] = unpinned[ui]
+            ui += 1
+    return [s for s in slots if s is not None]
+
+
 def _clean_custom_name(text):
     """Lightly clean a spoken rename into a custom name: strip a leading
     'call it'/'name it'/'rename to' phrase, trim, cap to CUSTOM_NAME_MAX."""
@@ -1193,7 +1313,7 @@ class OrderTracker:
 
 
 def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
-                   agents=None, names=None, log_warn=None):
+                   agents=None, names=None, positions=None, log_warn=None):
     """Return a list of protocol JSON strings (hdr + s/x per session + end).
 
     Status comes from the transcript-tail verdict (derive_status). Sessions are
@@ -1226,14 +1346,15 @@ def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
     ranks = {r["sid"]: STATUS_RANK.get(r["st"], 9) for r in recs}
     if order is not None:
         ordered_ids = order.order([(r["sid"], ranks[r["sid"]]) for r in recs])
-        by_sid = {r["sid"]: r for r in recs}
-        recs = [by_sid[i] for i in ordered_ids if i in by_sid]
-    else:
-        recs.sort(key=lambda r: ranks[r["sid"]])   # stable: group only, no persistence
-    if len(recs) > MAX_SESSIONS:
-        if log_warn:
-            log_warn("more than %d sessions (%d); capping" % (MAX_SESSIONS, len(recs)))
-        recs = recs[:MAX_SESSIONS]
+    else:                                          # stable: group only, no persistence
+        ordered_ids = [r["sid"] for r in sorted(recs, key=lambda r: ranks[r["sid"]])]
+    if log_warn and len(ordered_ids) > MAX_SESSIONS:
+        log_warn("more than %d sessions (%d); capping" % (MAX_SESSIONS, len(ordered_ids)))
+    # Manual pins (A1): place pinned agents at fixed rows, unpinned flow into the
+    # gaps in calm order; also caps to MAX_SESSIONS (pins clamped into view).
+    final_ids = apply_pins(ordered_ids, positions, MAX_SESSIONS)
+    by_sid = {r["sid"]: r for r in recs}
+    recs = [by_sid[i] for i in final_ids if i in by_sid]
 
     # Phase 3: emit. Summaries are resolved only for the survivors (so dropped
     # sessions never trigger an LLM dispatch).
@@ -1260,6 +1381,8 @@ def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
         cnm = names.get(r["sid"][:8]) if names is not None else None
         if cnm:                            # Matt-assigned custom name; omit when unset
             srec["cnm"] = strip_bold(clean(cnm, CUSTOM_NAME_MAX))
+        if positions is not None and positions.get(r["sid"][:8]) is not None:
+            srec["pn"] = 1                 # manually pinned; firmware shows a pin badge
         lines.append(_dump_s(srec))
         xrec = {"t": "x", "i": i, "dtl": dtl}
         if r["agn"]:                       # omit the fields when no agents
@@ -1775,7 +1898,7 @@ def _now_mono():
     return time.monotonic()
 
 
-def _snapshot_lines(args, seq, summaries, order, agents, names):
+def _snapshot_lines(args, seq, summaries, order, agents, names, positions=None):
     """Build one snapshot's protocol lines for the current session state."""
     if args.fake:
         return build_fake_snapshot(seq)
@@ -1783,11 +1906,12 @@ def _snapshot_lines(args, seq, summaries, order, agents, names):
     return build_snapshot(
         sessions, seq, _now_wall(),
         summaries=summaries, order=order, agents=agents, names=names,
+        positions=positions,
         log_warn=lambda m: print("[SB] warn:", m, file=sys.stderr),
     )
 
 
-def run_once(args, summaries, order, agents, names, seq):
+def run_once(args, summaries, order, agents, names, positions, seq):
     if not args.fake and summaries is not None:
         # Prime summaries synchronously so the single snapshot has LLM titles.
         now = _now_wall()
@@ -1801,7 +1925,8 @@ def run_once(args, summaries, order, agents, names, seq):
                                        agent_active=aga > 0)
             jobs.append((s, ra, ru, sclass))
         summaries.prime_sync(jobs)
-    lines = _snapshot_lines(args, 1 if args.fake else seq, summaries, order, agents, names)
+    lines = _snapshot_lines(args, 1 if args.fake else seq, summaries, order, agents,
+                            names, positions)
     sys.stdout.write("\n".join(lines) + "\n")
     sys.stdout.flush()
     if args.verbose:
@@ -2136,10 +2261,11 @@ class ProtocolLink:
     binary voice-capture state machine, identical across serial and TCP."""
 
     def __init__(self, transport, verbose=False, token=None, auth_required=False,
-                 names=None):
+                 names=None, positions=None):
         self.tp = transport
         self.verbose = verbose
         self.names = names        # NameStore for the rename gesture
+        self.positions = positions  # PositionStore for the manual-reorder gesture
         self.rx = b""
         self.capture = None       # dict while in binary voice-capture mode
         self._wlock = threading.Lock()   # main loop + async verifier share the transport
@@ -2364,6 +2490,17 @@ class ProtocolLink:
                 resend = "resend"
                 if self.verbose:
                     print("[SB] refresh requested (%s)" % self.kind, file=sys.stderr)
+            elif parse_pos(line) is not None:
+                sid8, idx = parse_pos(line)
+                if self.positions is not None:
+                    if idx < 0:
+                        self.positions.clear(sid8)
+                        print("[SB] unpinned %s" % sid8, file=sys.stderr)
+                    else:
+                        self.positions.set(sid8, idx)
+                        print("[SB] pinned %s -> row %d" % (sid8, idx), file=sys.stderr)
+                    self.send_obj({"t": "pos", "ok": True, "id": sid8, "idx": idx})
+                    resend = "resend"       # reflect the new order immediately
             elif is_rec_stop(line):
                 pass                    # stray stop (already finalized)
             elif line == WAV_END_MARK:
@@ -2404,7 +2541,7 @@ class ProtocolLink:
         threading.Thread(target=worker, daemon=True).start()
 
 
-def run_daemon(args, summaries, order, agents, names):
+def run_daemon(args, summaries, order, agents, names, positions):
     """Dual-transport controller: serial (pause-gated) AND TCP server live at once,
     plus the UDP discovery beacon. One snapshot per interval fans out to every
     connected transport; input (acks/refresh/voice) is processed from each."""
@@ -2498,7 +2635,8 @@ def run_daemon(args, summaries, order, agents, names):
 
     def send_all():
         seq["n"] += 1
-        lines = _snapshot_lines(args, seq["n"], summaries, order, agents, names)
+        lines = _snapshot_lines(args, seq["n"], summaries, order, agents, names,
+                                positions)
         sent = 0
         for l in list(links()):
             try:
@@ -2596,7 +2734,7 @@ def run_daemon(args, summaries, order, agents, names):
                     ser.reset_input_buffer()
                     serial_link[0] = ProtocolLink(SerialTransport(ser), args.verbose,
                                                   token=token, auth_required=False,
-                                                  names=names)
+                                                  names=names, positions=positions)
                     last_send[0] = -1e9
                     print("[SB] serial connected %s" % args.port, file=sys.stderr)
                 except (serial.SerialException, OSError):
@@ -2617,7 +2755,8 @@ def run_daemon(args, summaries, order, agents, names):
                     except OSError:
                         continue
                     pl = ProtocolLink(SocketTransport(conn, peer), args.verbose,
-                                      token=token, auth_required=True, names=names)
+                                      token=token, auth_required=True, names=names,
+                                      positions=positions)
                     if tcp_link[0] is not None and tcp_link[0].authed:
                         # A device is authed and working. Hold the newcomer aside; it
                         # only takes over once IT authenticates. This stops a stray
@@ -2730,10 +2869,11 @@ def main(argv=None):
     order = OrderTracker()   # calm, in-memory board ordering (persists across cycles)
     agents = None if args.fake else AgentActivity()   # teammate CPU-delta tracker
     names = NameStore()      # persistent Matt-assigned custom names
+    positions = PositionStore()   # persistent manual pins (A1 absolute-index reorder)
     if args.once:
-        run_once(args, summaries, order, agents, names, seq=1)
+        run_once(args, summaries, order, agents, names, positions, seq=1)
         return 0
-    run_daemon(args, summaries, order, agents, names)
+    run_daemon(args, summaries, order, agents, names, positions)
     return 0
 
 
