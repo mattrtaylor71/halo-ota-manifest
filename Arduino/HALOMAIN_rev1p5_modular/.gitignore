@@ -1,0 +1,44 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Audio files (generated)
+*.wav
+*.mp3
+response_audio.mp3
+mic_recording.wav
+recording.wav
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AWS/Lambda
+*.zip
+function.zip
+
+# Local MQTT secrets (do not commit)
+**/MqttSecrets.local.h
+**/MqttSecrets.local.cpp
+
+# Session Board runtime state (never commit — .session_board_secret is the
+# internet-facing auth token; the others are local caches)
+.session_board_secret
+.session_board_names.json
+.session_board_summaries.json
+.session_board_positions.json
