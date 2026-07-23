@@ -115,6 +115,13 @@ VOICE_KEEP = 20                    # keep the last N .wav recordings
 VOICE_RATE = 44100                 # int16 mono PCM, as streamed by firmware
 VOICE_WIDTH = 2
 VOICE_CHANNELS = 1
+VOICE_NORM_MAX_GAIN = 8.0          # cap on peak-normalization gain. Beyond ~8x a
+                                   # "quiet" clip is almost always low-SNR (noise, not
+                                   # a quiet talker); over-amplifying it makes whisper
+                                   # hallucinate repeated tokens ("okay okay okay").
+                                   # Capping still boosts a genuinely quiet talker while
+                                   # leaving a noise clip quiet enough that whisper
+                                   # honestly returns "no speech".
 WAV_BEGIN_MARK = b"-- WAV_BEGIN --"
 WAV_END_MARK = b"-- WAV_END --"
 NEW_SESSION_SENTINEL = "NEWSESS0"  # rec-start id => spawn a fresh claude session
@@ -1512,7 +1519,9 @@ def transcribe(wav_path):
 def normalize_pcm(frames):
     """Peak-normalize 16-bit PCM so a quiet talker still clears whisper's VAD.
     Returns (frames, gain): gain 1.0 = unchanged (already loud), a factor > 1 =
-    scaled to ~28000 peak, or 0.0 = genuinely silent (peak <= 200)."""
+    scaled toward ~28000 peak but CAPPED at VOICE_NORM_MAX_GAIN (so a low-SNR clip
+    isn't over-amplified into whisper hallucinations), or 0.0 = genuinely silent
+    (peak <= 200)."""
     try:
         import audioop
     except ImportError:
@@ -1525,7 +1534,11 @@ def normalize_pcm(frames):
         return frames, 0.0            # silent -> caller uses the empty-audio path
     if peak >= 16000:
         return frames, 1.0            # already loud enough
-    factor = 28000.0 / peak
+    # Cap the boost: a clip needing >8x is almost always noise, not a quiet talker;
+    # amplifying it to full scale turns that noise into hallucinated tokens. Capped,
+    # a real quiet talker still gets audible while a noise clip stays quiet enough
+    # that whisper honestly returns no speech.
+    factor = min(28000.0 / peak, VOICE_NORM_MAX_GAIN)
     try:
         return audioop.mul(frames, VOICE_WIDTH, factor), factor
     except audioop.error:
