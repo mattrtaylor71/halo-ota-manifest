@@ -63,6 +63,12 @@ NGROK_API = "http://127.0.0.1:4040/api/tunnels"
 NEBULA_CLI = os.environ.get("SESSION_BOARD_NEBULA_CLI", "nebula-ai")  # run via npx
 NEBULA_POLL_SECS = 8.0
 NEBULA_TIMEOUT = 20
+# Pin the workspace EXPLICITLY on every call (global --workspace flag "overrides
+# stored") so we never inherit the CLI's ambient/drifting active-workspace state -
+# that drift once silently pointed `channels list` at an empty workspace (looked
+# like "0 agents" but was really "wrong workspace"). slug "matt-taylor" = Matt's
+# Personal ws (id ws_0xbd309ffb...); override via env if the account/ws changes.
+NEBULA_WORKSPACE = os.environ.get("SESSION_BOARD_NEBULA_WORKSPACE", "matt-taylor")
 # Capture heartbeat cadence (s). Default 5s is fine for normal operation; set
 # SESSION_BOARD_CAPTURE_HB=1 for a diagnostic upload run so the daemon's per-tick
 # receive view (bytes-since-last, inst KB/s, gap-since-last-growth) can be lined up
@@ -1534,6 +1540,7 @@ class NebulaScanner:
         self._records = []
         self._last_poll = -1e9
         self._err = None
+        self._validated = False   # one-time workspace-existence check done?
 
     def poll(self):
         """Return mapped records, re-fetching only if the throttle has elapsed."""
@@ -1541,6 +1548,7 @@ class NebulaScanner:
         if self._records and (now - self._last_poll) < NEBULA_POLL_SECS:
             return self._records
         self._last_poll = now
+        self._validate_workspace()   # one-shot defensive check (self-guarded)
         raw = self._fetch()
         if raw is not None:
             self._records = [_map_nebula_channel(c, _now_wall()) for c in raw]
@@ -1549,7 +1557,10 @@ class NebulaScanner:
 
     def _fetch(self):
         try:
-            p = subprocess.run(["npx", NEBULA_CLI, "--json", "channels", "list"],
+            # --workspace is a GLOBAL flag (before the subcommand) that overrides
+            # the CLI's stored active workspace -> immune to that state drifting.
+            p = subprocess.run(["npx", NEBULA_CLI, "--json",
+                                "--workspace", NEBULA_WORKSPACE, "channels", "list"],
                                stdin=subprocess.DEVNULL, capture_output=True,
                                text=True, timeout=NEBULA_TIMEOUT)
         except (subprocess.TimeoutExpired, OSError) as e:
@@ -1571,6 +1582,34 @@ class NebulaScanner:
         if isinstance(d, list):
             return d
         return d.get("channels") if isinstance(d, dict) else None
+
+    def _validate_workspace(self):
+        """One-time defensive check: confirm the pinned workspace actually exists
+        in the account, so a bad SESSION_BOARD_NEBULA_WORKSPACE or auth drift is
+        LOGGED (distinguishing 'wrong/absent workspace' from 'genuinely 0 agents')
+        rather than silently looking like an empty fleet. Never blocks polling."""
+        if self._validated:
+            return
+        self._validated = True
+        try:
+            p = subprocess.run(["npx", NEBULA_CLI, "--json", "workspace", "list"],
+                               stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=NEBULA_TIMEOUT)
+            wss = json.loads(p.stdout) if p.returncode == 0 else None
+        except (subprocess.TimeoutExpired, OSError, ValueError, TypeError):
+            return   # non-fatal; the pinned --workspace still applies to the fetch
+        if not isinstance(wss, list):
+            return
+        hit = next((w for w in wss if isinstance(w, dict) and NEBULA_WORKSPACE
+                    in (w.get("slug"), w.get("id"), w.get("name"))), None)
+        if hit is None:
+            avail = ", ".join(str(w.get("slug")) for w in wss if isinstance(w, dict))
+            print("[SB] nebula WARNING: pinned workspace %r not found (available: "
+                  "%s) - channels list may be empty/wrong"
+                  % (NEBULA_WORKSPACE, avail), file=sys.stderr)
+        elif self.verbose:
+            print("[SB] nebula workspace pinned: %s (%s)"
+                  % (hit.get("slug"), hit.get("id")), file=sys.stderr)
 
 
 def build_nebula_snapshot(records, seq, switched=False):
