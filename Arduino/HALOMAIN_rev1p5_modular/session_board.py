@@ -1331,8 +1331,31 @@ class OrderTracker:
         return base
 
 
+class FirstSeenOrder:
+    """Append-on-first-appearance ordering: an id keeps its slot as long as it
+    exists, newcomers append to the end, vanished ids drop out. This is the stable
+    'spatial map' base for the FLEET list (manual pins layer on top) - nothing moves
+    unless Matt pins it. Decoupled from the carousel, which stays calm status-group.
+    In-memory (a restart re-seeds from the first cycle)."""
+
+    def __init__(self):
+        self._seen = []
+
+    def order(self, ids):
+        cur = set(ids)
+        seen = [i for i in self._seen if i in cur]      # survivors keep their slot
+        known = set(seen)
+        for i in ids:                                   # newcomers append, stable
+            if i not in known:
+                seen.append(i)
+                known.add(i)
+        self._seen = seen
+        return list(seen)
+
+
 def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
-                   agents=None, names=None, positions=None, log_warn=None):
+                   agents=None, names=None, positions=None, firstseen=None,
+                   log_warn=None):
     """Return a list of protocol JSON strings (hdr + s/x per session + end).
 
     Status comes from the transcript-tail verdict (derive_status). Sessions are
@@ -1360,20 +1383,28 @@ def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
                      "st": st, "sclass": sclass, "age": age, "agn": agn, "aga": aga,
                      "drm": dormant})
 
-    # Phase 2: board order = done(0), working(1), idle(2). Within a group, keep
-    # the previous emitted order (calm - no age churn). Ages are display-only.
+    # Phase 2: TWO decoupled orderings (Matt's choice (c)).
+    #  - CAROUSEL (the emitted s-line 'i' order): calm status-group (done->working->
+    #    idle), within-group previous-emit-stable. NO pins - unchanged glance order.
+    #  - FLEET (the 'fi' field): first-seen base + manual pins - a fully stable
+    #    spatial map where nothing moves unless Matt pinned it.
+    # The visible set is the fleet's top MAX_SESSIONS (pins clamped into view); the
+    # carousel orders that same set.
     ranks = {r["sid"]: STATUS_RANK.get(r["st"], 9) for r in recs}
+    all_sids = [r["sid"] for r in recs]
     if order is not None:
-        ordered_ids = order.order([(r["sid"], ranks[r["sid"]]) for r in recs])
+        calm_ids = order.order([(r["sid"], ranks[r["sid"]]) for r in recs])
     else:                                          # stable: group only, no persistence
-        ordered_ids = [r["sid"] for r in sorted(recs, key=lambda r: ranks[r["sid"]])]
-    if log_warn and len(ordered_ids) > MAX_SESSIONS:
-        log_warn("more than %d sessions (%d); capping" % (MAX_SESSIONS, len(ordered_ids)))
-    # Manual pins (A1): place pinned agents at fixed rows, unpinned flow into the
-    # gaps in calm order; also caps to MAX_SESSIONS (pins clamped into view).
-    final_ids = apply_pins(ordered_ids, positions, MAX_SESSIONS)
+        calm_ids = [r["sid"] for r in sorted(recs, key=lambda r: ranks[r["sid"]])]
+    base = firstseen.order(all_sids) if firstseen is not None else list(calm_ids)
+    fleet_ids = apply_pins(base, positions, MAX_SESSIONS)   # visible set + fleet order
+    if log_warn and len(all_sids) > MAX_SESSIONS:
+        log_warn("more than %d sessions (%d); capping" % (MAX_SESSIONS, len(all_sids)))
+    visible = set(fleet_ids)
+    fleet_pos = {sid: k for k, sid in enumerate(fleet_ids)}
+    emit_ids = [i for i in calm_ids if i in visible]       # visible set, carousel order
     by_sid = {r["sid"]: r for r in recs}
-    recs = [by_sid[i] for i in final_ids if i in by_sid]
+    recs = [by_sid[i] for i in emit_ids if i in by_sid]
 
     # Phase 3: emit. Summaries are resolved only for the survivors (so dropped
     # sessions never trigger an LLM dispatch).
@@ -1394,7 +1425,8 @@ def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
         # a trim split a ** span (fit_detail keeps the closer intact).
         nm, msg, dtl = strip_bold(nm), strip_bold(msg), balance_bold(dtl)
         srec = {"t": "s", "i": i, "id": r["sid"][:8], "nm": nm, "pj": pj,
-                "st": r["st"], "age": r["age"], "msg": msg}
+                "st": r["st"], "age": r["age"], "msg": msg,
+                "fi": fleet_pos.get(r["sid"], i)}   # fleet-list row (decoupled from i)
         if r["drm"]:                       # dormant: grey-out hint; omit when not
             srec["drm"] = 1
         cnm = names.get(r["sid"][:8]) if names is not None else None
@@ -1553,7 +1585,7 @@ def build_nebula_snapshot(records, seq):
         msg = clean(r["msg"], MSG_MAX)
         dtl = fit_detail(clean(r["msg"], 10 ** 9), DETAIL_MAX)
         srec = {"t": "s", "i": i, "id": r["sid8"], "nm": nm, "pj": "nebula",
-                "st": r["st"], "age": r["age"], "msg": msg}
+                "st": r["st"], "age": r["age"], "msg": msg, "fi": i}  # fleet == carousel
         lines.append(_dump_s(srec))
         lines.append(_dump_x({"t": "x", "i": i, "dtl": dtl}))
     lines.append(_dump({"t": "end", "seq": seq, "n": n}))
@@ -2025,7 +2057,7 @@ def _now_mono():
 
 
 def _snapshot_lines(args, seq, summaries, order, agents, names, positions=None,
-                    view_state=None, nebula=None):
+                    view_state=None, nebula=None, firstseen=None):
     """Build one snapshot's protocol lines for the current session state."""
     if args.fake:
         return build_fake_snapshot(seq)
@@ -2036,12 +2068,12 @@ def _snapshot_lines(args, seq, summaries, order, agents, names, positions=None,
     return build_snapshot(
         sessions, seq, _now_wall(),
         summaries=summaries, order=order, agents=agents, names=names,
-        positions=positions,
+        positions=positions, firstseen=firstseen,
         log_warn=lambda m: print("[SB] warn:", m, file=sys.stderr),
     )
 
 
-def run_once(args, summaries, order, agents, names, positions, seq):
+def run_once(args, summaries, order, agents, names, positions, firstseen, seq):
     want_nebula = getattr(args, "nebula", False)
     view_state = {"fleet": "nebula" if want_nebula else "claude"}
     nebula = NebulaScanner(args.verbose) if want_nebula else None
@@ -2059,7 +2091,7 @@ def run_once(args, summaries, order, agents, names, positions, seq):
             jobs.append((s, ra, ru, sclass))
         summaries.prime_sync(jobs)
     lines = _snapshot_lines(args, 1 if args.fake else seq, summaries, order, agents,
-                            names, positions, view_state, nebula)
+                            names, positions, view_state, nebula, firstseen)
     sys.stdout.write("\n".join(lines) + "\n")
     sys.stdout.flush()
     if args.verbose:
@@ -2682,7 +2714,8 @@ class ProtocolLink:
         threading.Thread(target=worker, daemon=True).start()
 
 
-def run_daemon(args, summaries, order, agents, names, positions, view_state, nebula):
+def run_daemon(args, summaries, order, agents, names, positions, view_state, nebula,
+               firstseen):
     """Dual-transport controller: serial (pause-gated) AND TCP server live at once,
     plus the UDP discovery beacon. One snapshot per interval fans out to every
     connected transport; input (acks/refresh/voice) is processed from each."""
@@ -2777,7 +2810,7 @@ def run_daemon(args, summaries, order, agents, names, positions, view_state, neb
     def send_all():
         seq["n"] += 1
         lines = _snapshot_lines(args, seq["n"], summaries, order, agents, names,
-                                positions, view_state, nebula)
+                                positions, view_state, nebula, firstseen)
         sent = 0
         for l in list(links()):
             try:
@@ -3010,16 +3043,18 @@ def main(argv=None):
         os.makedirs(LLM_WORKER_DIR, exist_ok=True)   # summarizer worker cwd
     except OSError:
         pass
-    order = OrderTracker()   # calm, in-memory board ordering (persists across cycles)
+    order = OrderTracker()   # calm carousel ordering (persists across cycles)
+    firstseen = FirstSeenOrder()   # stable first-seen base for the fleet (pins on top)
     agents = None if args.fake else AgentActivity()   # teammate CPU-delta tracker
     names = NameStore()      # persistent Matt-assigned custom names
     positions = PositionStore()   # persistent manual pins (A1 absolute-index reorder)
     view_state = {"fleet": "claude"}   # active board fleet (toggled by firmware)
     nebula = NebulaScanner(args.verbose)   # 2nd fleet; polled only while view active
     if args.once:
-        run_once(args, summaries, order, agents, names, positions, seq=1)
+        run_once(args, summaries, order, agents, names, positions, firstseen, seq=1)
         return 0
-    run_daemon(args, summaries, order, agents, names, positions, view_state, nebula)
+    run_daemon(args, summaries, order, agents, names, positions, view_state, nebula,
+               firstseen)
     return 0
 
 
