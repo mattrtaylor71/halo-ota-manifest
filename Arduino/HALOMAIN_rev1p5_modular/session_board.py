@@ -120,7 +120,8 @@ LLM_TEXT_CAP = 3500                # assistant text chars fed to the model
 LLM_USER_CAP = 500                 # user text chars fed to the model
 SUMMARY_CACHE_MAX = 200            # LRU cap on persisted summaries
 SUMMARY_FAIL_COOLDOWN = 120        # don't retry a failed key for this long
-SUMMARY_CACHE_VERSION = 7          # bump to bust the persisted cache on meaning changes
+SUMMARY_CACHE_VERSION = 8          # bump to bust the persisted cache on meaning changes
+                                   # (8: targeted did/question/next detail prompt)
 TITLE_MAX = 24
 STATUS_MAX = 260
 DETAIL_MAX = 700                   # richer detail-view text
@@ -210,12 +211,20 @@ def _split_closer(text):
 
 
 def _safe_trim(s, budget):
-    """Trim s to <= budget chars without leaving an unbalanced ** span."""
+    """Trim s to <= budget chars without leaving an unbalanced ** span, and prefer
+    a sentence boundary over a mid-word cut when one is reasonably close to the end."""
     if len(s) <= budget:
         return s
     t = s[:budget]
     if t.count("**") % 2:            # cut landed inside a bold span -> back off
         t = t[:t.rfind("**")]
+    # end at the last sentence boundary if it keeps most of the budget (cleaner than
+    # slicing mid-word); else fall back to a word boundary.
+    end = max(t.rfind(". "), t.rfind("! "), t.rfind("? "))
+    if end >= len(t) * 0.6:
+        t = t[:end + 1]
+    elif " " in t:                   # avoid a mid-word tail
+        t = t[:t.rfind(" ")]
     return t.rstrip()
 
 
@@ -725,11 +734,17 @@ _LLM_PROMPT = (
     "status: at most 260 characters, plain English, dumbed down for a quick "
     "glance. No file paths, no code, no jargon, no markdown, NO asterisks. "
     "@@TENSE@@\n"
-    "detail: at most 700 characters, plain English but meatier. FIRST give a "
-    "2-4 sentence overview - what the agent has done so far, the key findings or "
-    "decisions, and what it is doing next or waiting on (same tense rule as "
-    "status). Wrap the 2-5 MOST important words or short phrases in double "
-    "asterisks for bold, e.g. \"created a new identity (**trepo-bot-readonly**) "
+    "detail: plain English, TIGHT and specific - aim for ~2-3 short sentences "
+    "(hard cap 700 chars, but shorter is better). Include ONLY these, in order, "
+    "and CUT everything else (no preamble, no background, no restating the "
+    "project name, no filler):\n"
+    "  1. What the agent JUST DID - one sentence: the concrete last action or "
+    "result.\n"
+    "  2. Any OPEN QUESTION it is waiting on the user to answer - ONLY if there "
+    "genuinely is one; otherwise skip this entirely, do not pad.\n"
+    "  3. What happens NEXT - the immediate next step or what it is waiting on.\n"
+    "Same tense rule as status. Wrap the 2-4 MOST important words or short "
+    "phrases in double asterisks for bold, e.g. \"created **trepo-bot-readonly** "
     "with **scoped permissions**\". THEN end with EXACTLY ONE closing sentence "
     "that states what the agent is actually telling the user, taken from its "
     "latest message (do NOT invent it). Prefix that closer with exactly one of "
@@ -1397,28 +1412,18 @@ def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
                      "st": st, "sclass": sclass, "age": age, "agn": agn, "aga": aga,
                      "drm": dormant})
 
-    # Phase 2: TWO decoupled orderings (Matt's choice (c)).
-    #  - CAROUSEL (the emitted s-line 'i' order): calm status-group (done->working->
-    #    idle), within-group previous-emit-stable. NO pins - unchanged glance order.
-    #  - FLEET (the 'fi' field): first-seen base + manual pins - a fully stable
-    #    spatial map where nothing moves unless Matt pinned it.
-    # The visible set is the fleet's top MAX_SESSIONS (pins clamped into view); the
-    # carousel orders that same set.
-    ranks = {r["sid"]: STATUS_RANK.get(r["st"], 9) for r in recs}
+    # Phase 2: ONE unified order (Matt: the single-agent/carousel order must MATCH
+    # the fleet). Emit in FLEET order = first-seen base + manual pins (a stable
+    # spatial map - nothing moves unless pinned). fi == i, so the carousel (which
+    # renders the emitted s-line sequence) and the fleet-by-fi render identically.
+    # (`order`/OrderTracker's calm status-grouping is no longer used - superseded.)
     all_sids = [r["sid"] for r in recs]
-    if order is not None:
-        calm_ids = order.order([(r["sid"], ranks[r["sid"]]) for r in recs])
-    else:                                          # stable: group only, no persistence
-        calm_ids = [r["sid"] for r in sorted(recs, key=lambda r: ranks[r["sid"]])]
-    base = firstseen.order(all_sids) if firstseen is not None else list(calm_ids)
-    fleet_ids = apply_pins(base, positions, MAX_SESSIONS)   # visible set + fleet order
+    base = firstseen.order(all_sids) if firstseen is not None else all_sids
+    fleet_ids = apply_pins(base, positions, MAX_SESSIONS)   # visible set + order
     if log_warn and len(all_sids) > MAX_SESSIONS:
         log_warn("more than %d sessions (%d); capping" % (MAX_SESSIONS, len(all_sids)))
-    visible = set(fleet_ids)
-    fleet_pos = {sid: k for k, sid in enumerate(fleet_ids)}
-    emit_ids = [i for i in calm_ids if i in visible]       # visible set, carousel order
     by_sid = {r["sid"]: r for r in recs}
-    recs = [by_sid[i] for i in emit_ids if i in by_sid]
+    recs = [by_sid[i] for i in fleet_ids if i in by_sid]
 
     # Phase 3: emit. Summaries are resolved only for the survivors (so dropped
     # sessions never trigger an LLM dispatch).
@@ -1440,7 +1445,7 @@ def build_snapshot(sessions, seq, now_wall, summaries=None, order=None,
         nm, msg, dtl = strip_bold(nm), strip_bold(msg), balance_bold(dtl)
         srec = {"t": "s", "i": i, "id": r["sid"][:8], "nm": nm, "pj": pj,
                 "st": r["st"], "age": r["age"], "msg": msg,
-                "fi": fleet_pos.get(r["sid"], i)}   # fleet-list row (decoupled from i)
+                "fi": i}   # fleet row == emit/carousel row (unified order)
         if r["drm"]:                       # dormant: grey-out hint; omit when not
             srec["drm"] = 1
         cnm = names.get(r["sid"][:8]) if names is not None else None
