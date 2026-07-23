@@ -114,7 +114,12 @@ LLM_BIN = os.environ.get("SESSION_BOARD_CLAUDE_BIN", "claude")
 LLM_WORKER_DIR = "/tmp/sb_llm_worker"
 _LLM_WORKER_PREFIXES = (LLM_WORKER_DIR, os.path.realpath(LLM_WORKER_DIR))
 _TMP_GHOST_NAME_RE = re.compile(r"^tmp-[0-9a-f]{2}$")
-LLM_TIMEOUT = 30                   # seconds per claude -p call
+LLM_TIMEOUT = 60                   # seconds per claude -p call. Structured summaries
+                                   # of a full session take ~15-30s+; at 30s they
+                                   # frequently timed out -> raw-transcript fallback
+                                   # (verbose + untargeted), which was the real cause
+                                   # of the "detail too long / not focused" reports.
+                                   # Async worker, so a longer call never blocks the board.
 LLM_MAX_CONCURRENT = 2
 LLM_TEXT_CAP = 3500                # assistant text chars fed to the model
 LLM_USER_CAP = 500                 # user text chars fed to the model
