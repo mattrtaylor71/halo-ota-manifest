@@ -2739,12 +2739,18 @@ class ProtocolLink:
         # Progress-STALL: WAV_END was likely dropped by the RF path; abandon fast
         # so the link doesn't sit frozen (snapshots paused) until the 200s cap.
         if (now - self.capture.get("grow", self.capture["start"])) > VOICE_STALL_SECS:
-            self.send_obj({"t": "sent", "ok": False, "err": "link stalled"})
+            if self.capture.get("mode") == "nebula_call":
+                self._call_error("link stalled")     # clear pending, re-arm the mic
+            else:
+                self.send_obj({"t": "sent", "ok": False, "err": "link stalled"})
             self._end_capture("stalled")
             self.rx = b""
             return True
         if (now - self.capture["start"]) > VOICE_CAP_SECS:
-            self.send_obj({"t": "sent", "ok": False, "err": "timeout"})
+            if self.capture.get("mode") == "nebula_call":
+                self._call_error("timeout")          # clear pending, re-arm the mic
+            else:
+                self.send_obj({"t": "sent", "ok": False, "err": "timeout"})
             self._end_capture("timeout")
             self.rx = b""
             return True
@@ -2803,11 +2809,7 @@ class ProtocolLink:
             if res.get("ok") and res.get("channel"):
                 self._deliver_call_turn(res["channel"], res["text"])
             else:
-                seq = self._call_seq
-                self._call_seq += 1
-                self._call_pending = False
-                self.send_obj({"t": "call", "turn": "error", "seq": seq,
-                               "text": res.get("err") or "no speech"})
+                self._call_error(res.get("err") or "no speech")
         elif res["ok"] and res.get("msg") is not None:
             # Delivered to the inbox; confirm the target actually CONSUMES it
             # (dormant terminals never poll). Verify async -> downlink later.
@@ -2819,6 +2821,15 @@ class ProtocolLink:
         self.rx = trailing
         self._end_capture(reason)
         return "resend"
+
+    def _call_error(self, text):
+        """Send a call-mode error turn - clears the firmware's pending-block (and our
+        backstop flag) so the mic re-arms. Logged so the failure is visible."""
+        seq = self._call_seq
+        self._call_seq += 1
+        self._call_pending = False
+        self.send_obj({"t": "call", "turn": "error", "seq": seq, "text": text})
+        print("[SB] call turn %d: error (%s)" % (seq, text), file=sys.stderr)
 
     def _deliver_call_turn(self, channel_id, text):
         """One call turn: downlink the user's transcript immediately, then fetch the
