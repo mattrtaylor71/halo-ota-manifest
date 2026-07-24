@@ -1692,15 +1692,33 @@ def nebula_send(channel_id, text):
 def nebula_chat_reply(channel_id, text):
     """Call-mode: post `text` to a channel and RETURN the agent's reply text
     (chat's `final_message`), or None on failure. Blocks until the reply lands
-    (can be seconds to >1min) - callers MUST run this on a background thread."""
-    p = _nebula_cli(["chat", text, "-c", channel_id, "--no-stream"],
-                    timeout=NEBULA_CHAT_TIMEOUT)
-    if p is None or p.returncode != 0:
-        return None
+    (can be seconds to >1min) - callers MUST run this on a background thread.
+
+    The `--json` output carries a huge `events` stream (MULTI-MEGABYTE for a
+    tool-using reply); an in-memory pipe capture truncates it at ~64KB and breaks
+    json parsing, so we stream stdout straight to a temp file and parse that."""
+    import tempfile
+    tf = None
     try:
-        o = json.loads(p.stdout)
-    except (ValueError, TypeError):
+        fd, tf = tempfile.mkstemp(prefix="sb_chat_", suffix=".json")
+        with os.fdopen(fd, "wb") as f:
+            p = subprocess.run(
+                ["npx", NEBULA_CLI, "--json", "--workspace", NEBULA_WORKSPACE,
+                 "chat", text, "-c", channel_id, "--no-stream"],
+                stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.DEVNULL,
+                timeout=NEBULA_CHAT_TIMEOUT)
+        if p.returncode != 0:
+            return None
+        with open(tf, "r", encoding="utf-8", errors="replace") as f:
+            o = json.load(f)
+    except (subprocess.TimeoutExpired, OSError, ValueError, TypeError):
         return None
+    finally:
+        if tf:
+            try:
+                os.remove(tf)
+            except OSError:
+                pass
     if isinstance(o, dict):
         msg = o.get("final_message")
         return msg if isinstance(msg, str) and msg.strip() else None
@@ -2814,15 +2832,21 @@ class ProtocolLink:
             return
         self.send_obj({"t": "call", "turn": "user", "seq": seq, "text": text})
         self._call_pending = True
+        print("[SB] call turn %d: user %r -> chat %s (waiting)"
+              % (seq, text[:50], channel_id), file=sys.stderr)
 
         def _run():
             reply = nebula_chat_reply(channel_id, text)
             self._call_pending = False
             try:
                 if reply is None:
+                    print("[SB] call turn %d: chat FAILED / no reply" % seq,
+                          file=sys.stderr)
                     self.send_obj({"t": "call", "turn": "error", "seq": seq,
                                    "text": "no reply"})
                     return
+                print("[SB] call turn %d: agent reply %d chars" % (seq, len(reply)),
+                      file=sys.stderr)
                 if len(reply) > NEBULA_CALL_REPLY_MAX:   # bound the board's RAM ring
                     reply = (reply[:NEBULA_CALL_REPLY_MAX].rstrip()
                              + " … (full reply in Nebula)")
@@ -2833,7 +2857,8 @@ class ProtocolLink:
                         msg["more"] = 1
                     self.send_obj(msg)
             except (OSError, serial.SerialException, ConnectionError):
-                pass                         # link dropped / call ended - discard reply
+                print("[SB] call turn %d: link gone, reply discarded" % seq,
+                      file=sys.stderr)
         threading.Thread(target=_run, daemon=True).start()
 
     def _auth_result(self, line):
