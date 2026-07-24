@@ -77,6 +77,8 @@ NEBULA_WORKSPACE = os.environ.get("SESSION_BOARD_NEBULA_WORKSPACE", "matt-taylor
 NEBULA_DEFAULT_AGENT = os.environ.get("SESSION_BOARD_NEBULA_AGENT",
                                       "agt_06978f6b9b717fba80006458ccc6df20")
 NEBULA_CHAT_TIMEOUT = 300   # bg-thread zombie-safety cap (a reply can be slow)
+NEBULA_CALL_CHUNK = 800     # call-mode: agent reply split into <=this many chars per
+                            # downlink so each stays under the 1000-byte board line cap
 # Capture heartbeat cadence (s). Default 5s is fine for normal operation; set
 # SESSION_BOARD_CAPTURE_HB=1 for a diagnostic upload run so the daemon's per-tick
 # receive view (bytes-since-last, inst KB/s, gap-since-last-growth) can be lined up
@@ -1256,6 +1258,21 @@ def parse_pos(line_bytes):
     return None
 
 
+def parse_call(line_bytes):
+    """{"t":"call","state":"start"|"end","id":<sid8>} -> (state, sid8); else None.
+    (Nebula call-mode: enter/leave the live-chat modal on a channel.)"""
+    if not line_bytes.startswith(b"{"):
+        return None
+    try:
+        o = json.loads(line_bytes)
+    except (ValueError, TypeError):
+        return None
+    if o.get("t") == "call" and o.get("state") in ("start", "end"):
+        sid = o.get("id")
+        return (o.get("state"), sid[:8] if isinstance(sid, str) and sid else None)
+    return None
+
+
 def parse_view(line_bytes):
     """{"t":"view","fleet":"claude"|"nebula"} -> the fleet name; else None."""
     if not line_bytes.startswith(b"{"):
@@ -1667,6 +1684,37 @@ def nebula_send(channel_id, text):
         else:
             print("[SB] nebula sent -> %s" % channel_id, file=sys.stderr)
     threading.Thread(target=_run, daemon=True).start()
+
+
+def nebula_chat_reply(channel_id, text):
+    """Call-mode: post `text` to a channel and RETURN the agent's reply text
+    (chat's `final_message`), or None on failure. Blocks until the reply lands
+    (can be seconds to >1min) - callers MUST run this on a background thread."""
+    p = _nebula_cli(["chat", text, "-c", channel_id, "--no-stream"],
+                    timeout=NEBULA_CHAT_TIMEOUT)
+    if p is None or p.returncode != 0:
+        return None
+    try:
+        o = json.loads(p.stdout)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(o, dict):
+        msg = o.get("final_message")
+        return msg if isinstance(msg, str) and msg.strip() else None
+    return None
+
+
+def _chunk_text(text, size=NEBULA_CALL_CHUNK):
+    """Split text into <=size pieces, preferring a whitespace boundary near the cut."""
+    text = text or ""
+    out = []
+    while len(text) > size:
+        cut = text.rfind(" ", int(size * 0.6), size)
+        cut = cut if cut > 0 else size
+        out.append(text[:cut].rstrip())
+        text = text[cut:].lstrip()
+    out.append(text)
+    return out
 
 
 def nebula_new_channel(text):
@@ -2144,6 +2192,17 @@ def process_capture(buf, end_idx, sid8, verbose=False, mode=None, names=None,
         return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
                 "sid8": sid8, "msg": None}
 
+    # Nebula CALL turn (live-chat modal): resolve the channel and hand the
+    # transcript back to the link, which echoes the user line + runs chat on a bg
+    # thread + delivers the agent's reply (see ProtocolLink._deliver_call_turn).
+    if mode == "nebula_call":
+        cid = nebula.channel_id_for(sid8) if nebula is not None else None
+        if not cid:
+            return _voice_fail(sid8, "nebula channel not found",
+                               text=text, wav=wav_path, words=words)
+        return {"ok": True, "words": words, "err": None, "text": text, "wav": wav_path,
+                "sid8": sid8, "msg": None, "call": True, "channel": cid}
+
     # Nebula send gesture (hold-speak on a Nebula channel card): post into that
     # channel. sid8 is the board's hashed id; resolve it to the real "thrd_..." id.
     if mode == "nebula_send":
@@ -2583,6 +2642,8 @@ class ProtocolLink:
         self.positions = positions  # PositionStore for the manual-reorder gesture
         self.view_state = view_state  # {"fleet": "claude"|"nebula"} shared w/ main loop
         self.nebula = nebula          # NebulaScanner (for voice-to-channel sends)
+        self._call_seq = 0            # call-mode: per-call turn counter
+        self._call_pending = False    # call-mode: a turn's reply is in flight
         self.rx = b""
         self.capture = None       # dict while in binary voice-capture mode
         self._wlock = threading.Lock()   # main loop + async verifier share the transport
@@ -2714,7 +2775,10 @@ class ProtocolLink:
                                   rate=self.capture.get("rate"), nebula=self.nebula)
             trailing = bytes(buf[idx + len(WAV_END_MARK):])
             reason = "wav_end ok=%s" % res["ok"]
-        if res["ok"] and res.get("msg") is not None:
+        if res.get("call"):
+            # Call-mode turn: echo the user line + fetch the agent reply (bg thread).
+            self._deliver_call_turn(res["channel"], res["text"])
+        elif res["ok"] and res.get("msg") is not None:
             # Delivered to the inbox; confirm the target actually CONSUMES it
             # (dormant terminals never poll). Verify async -> downlink later.
             self._verify_consumption_async(res["sid8"], res["msg"], res["words"])
@@ -2725,6 +2789,37 @@ class ProtocolLink:
         self.rx = trailing
         self._end_capture(reason)
         return "resend"
+
+    def _deliver_call_turn(self, channel_id, text):
+        """One call turn: downlink the user's transcript immediately, then fetch the
+        agent's reply on a bg thread and downlink it (chunked) when it lands. The
+        daemon never blocks; send_obj is thread-safe (shares the write lock)."""
+        seq = self._call_seq
+        self._call_seq += 1
+        if self._call_pending:               # backstop; firmware should block first
+            self.send_obj({"t": "call", "turn": "error", "seq": seq,
+                           "text": "reply still pending"})
+            return
+        self.send_obj({"t": "call", "turn": "user", "seq": seq, "text": text})
+        self._call_pending = True
+
+        def _run():
+            reply = nebula_chat_reply(channel_id, text)
+            self._call_pending = False
+            try:
+                if reply is None:
+                    self.send_obj({"t": "call", "turn": "error", "seq": seq,
+                                   "text": "no reply"})
+                    return
+                chunks = _chunk_text(reply)
+                for i, piece in enumerate(chunks):
+                    msg = {"t": "call", "turn": "agent", "seq": seq, "text": piece}
+                    if i < len(chunks) - 1:
+                        msg["more"] = 1
+                    self.send_obj(msg)
+            except (OSError, serial.SerialException, ConnectionError):
+                pass                         # link dropped / call ended - discard reply
+        threading.Thread(target=_run, daemon=True).start()
 
     def _auth_result(self, line):
         """"ok" (token matches), "bootstrap" (empty token from a LAN device on
@@ -2826,6 +2921,16 @@ class ProtocolLink:
                     print("[SB] view -> %s fleet" % fleet, file=sys.stderr)
                     self.send_obj({"t": "view", "ok": True, "fleet": fleet})
                     resend = "resend"       # switch the board to the new fleet now
+            elif parse_call(line) is not None:
+                state, _sid8 = parse_call(line)
+                if state == "start":
+                    self._call_seq = 0
+                    self._call_pending = False
+                    print("[SB] call: start", file=sys.stderr)
+                else:                        # "end": leave the modal, reset turn state
+                    self._call_pending = False
+                    print("[SB] call: end", file=sys.stderr)
+                self.send_obj({"t": "call", "state": state, "ok": True})
             elif is_rec_stop(line):
                 pass                    # stray stop (already finalized)
             elif line == WAV_END_MARK:
