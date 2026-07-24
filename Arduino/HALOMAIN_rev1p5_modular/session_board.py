@@ -79,6 +79,9 @@ NEBULA_DEFAULT_AGENT = os.environ.get("SESSION_BOARD_NEBULA_AGENT",
 NEBULA_CHAT_TIMEOUT = 300   # bg-thread zombie-safety cap (a reply can be slow)
 NEBULA_CALL_CHUNK = 800     # call-mode: agent reply split into <=this many chars per
                             # downlink so each stays under the 1000-byte board line cap
+NEBULA_CALL_REPLY_MAX = 1500  # cap the total agent reply pushed to the board (its
+                              # transcript ring is RAM-bounded); longer replies are
+                              # truncated with a "full reply in Nebula" marker.
 # Capture heartbeat cadence (s). Default 5s is fine for normal operation; set
 # SESSION_BOARD_CAPTURE_HB=1 for a diagnostic upload run so the daemon's per-tick
 # receive view (bytes-since-last, inst KB/s, gap-since-last-growth) can be lined up
@@ -2775,9 +2778,18 @@ class ProtocolLink:
                                   rate=self.capture.get("rate"), nebula=self.nebula)
             trailing = bytes(buf[idx + len(WAV_END_MARK):])
             reason = "wav_end ok=%s" % res["ok"]
-        if res.get("call"):
-            # Call-mode turn: echo the user line + fetch the agent reply (bg thread).
-            self._deliver_call_turn(res["channel"], res["text"])
+        if self.capture.get("mode") == "nebula_call":
+            # Call-mode: EVERY outcome is a call turn (never a {"t":"sent"} toast, which
+            # the call modal doesn't handle). Success -> user echo + agent reply; any
+            # failure (channel not found / no speech / transcribe fail) -> error turn.
+            if res.get("ok") and res.get("channel"):
+                self._deliver_call_turn(res["channel"], res["text"])
+            else:
+                seq = self._call_seq
+                self._call_seq += 1
+                self._call_pending = False
+                self.send_obj({"t": "call", "turn": "error", "seq": seq,
+                               "text": res.get("err") or "no speech"})
         elif res["ok"] and res.get("msg") is not None:
             # Delivered to the inbox; confirm the target actually CONSUMES it
             # (dormant terminals never poll). Verify async -> downlink later.
@@ -2811,6 +2823,9 @@ class ProtocolLink:
                     self.send_obj({"t": "call", "turn": "error", "seq": seq,
                                    "text": "no reply"})
                     return
+                if len(reply) > NEBULA_CALL_REPLY_MAX:   # bound the board's RAM ring
+                    reply = (reply[:NEBULA_CALL_REPLY_MAX].rstrip()
+                             + " … (full reply in Nebula)")
                 chunks = _chunk_text(reply)
                 for i, piece in enumerate(chunks):
                     msg = {"t": "call", "turn": "agent", "seq": seq, "text": piece}
