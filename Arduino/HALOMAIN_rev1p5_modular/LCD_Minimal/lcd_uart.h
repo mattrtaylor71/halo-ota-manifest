@@ -46,9 +46,36 @@ typedef struct {
 } tx_msg_t;
 
 static QueueHandle_t uart_tx_queue = NULL;
-static tx_msg_t deferred_awake_tx_msg = {};
-static bool deferred_awake_tx_valid = false;
 static unsigned long deferred_awake_tx_last_ping_ms = 0;
+static uint32_t uart_tx_dropped_count = 0;             // enqueues that failed (queue full)
+
+#include "lcd_deferred_ring.h"   // deferred-until-awake TX ring (host-testable)
+
+// How long a message may sit deferred waiting for the Sense to prove it is
+// awake before we give up on it. Draining uart_tx_queue is gated on the
+// deferred slot being empty, so a message that never sends is HEAD-OF-LINE
+// BLOCKING for every later message — and deferred_awake_tx_service() retries
+// the wake forever with no abandon path. Without a deadline, one unwakeable
+// Sense silently stalls all TX until the 20-deep queue overflows.
+#define DEFERRED_AWAKE_TX_MAX_MS 12000UL
+
+// Enqueue a TX message, reporting failure instead of discarding it.
+// All six original call sites called xQueueSend() and ignored the result, so a
+// full queue dropped a real user action with no log line anywhere. Queue depth
+// is 20; it only fills when the head of line is already stuck, which is exactly
+// when losing input is least acceptable.
+static inline bool uart_tx_enqueue(const tx_msg_t* msg, const char* site) {
+  if (!uart_tx_queue || !msg) return false;
+  if (xQueueSend(uart_tx_queue, msg, pdMS_TO_TICKS(10)) == pdTRUE) return true;
+  uart_tx_dropped_count++;
+  Serial.printf("[UART_TX_DROP] queue full - DROPPED type=%s site=%s total_dropped=%lu "
+                "deferred=%d deferred_type=%s\n",
+                msg->type, site ? site : "?",
+                (unsigned long)uart_tx_dropped_count,
+                deferred_awake_tx_pending() ? 1 : 0,
+                deferred_awake_tx_pending() ? deferred_ring_oldest()->msg.type : "-");
+  return false;
+}
 
 // ── UART init ────────────────────────────────────────────────────────
 static void init_uart() {
@@ -202,9 +229,10 @@ static void uart_send_input_message(const char* type, int delta = 0, const char*
   }
   uart_note_input_type(type);
   StaticJsonDocument<256> doc;
+  const uint32_t this_msg_id = get_next_msg_id();
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = type;
-  doc["msg_id"] = get_next_msg_id();
+  doc["msg_id"] = this_msg_id;
   doc["ts"] = millis();
   if (delta != 0) {
     doc["delta"] = delta;
@@ -218,6 +246,10 @@ static void uart_send_input_message(const char* type, int delta = 0, const char*
   senseSerial.print(output);
   senseSerial.print("\n");
   senseSerial.flush();
+  // Hold user-intent messages until the Sense acks this msg_id. Registered with
+  // the exact bytes just sent so a retransmit is byte-identical — a re-serialize
+  // would mint a new msg_id and defeat the Sense's duplicate suppression.
+  link_ack_track(this_msg_id, type, output.c_str());
   Serial.printf("[PROTO] TX: %s\n", output.c_str());
 }
 
@@ -359,16 +391,24 @@ static void tx_msg_send_now(const tx_msg_t* tx_msg) {
   if (strcmp(tx_msg->type, "INPUT_MENU_SELECT") == 0) {
     request_sense_wake("menu_select");
     StaticJsonDocument<256> doc;
+    uint32_t cap_msg_id = get_next_msg_id();
     doc["ver"] = PROTOCOL_VERSION;
     doc["type"] = "INPUT_MENU_SELECT";
-    doc["msg_id"] = get_next_msg_id();
+    doc["msg_id"] = cap_msg_id;
     doc["ts"] = millis();
+    // Start the capture trace at the moment the request leaves. Reuses msg_id
+    // as the correlation id — no new protocol field.
+    captrace_request(cap_msg_id, tx_msg->has_id ? tx_msg->id : "",
+                     last_sense_rx_ms);
     doc["menu_item"] = tx_msg->has_id ? tx_msg->id : "";
     doc["menu_index"] = tx_msg->has_delta ? tx_msg->delta : -1;
     String output;
     serializeJson(doc, output);
     senseSerial.println(output);
     senseSerial.flush();
+    // The capture trigger. This is the message whose loss strands the user on
+    // the capturing screen, so it is the one that most needs the retransmit.
+    link_ack_track(cap_msg_id, "INPUT_MENU_SELECT", output.c_str());
     Serial.printf("[MENU] queued menu selection sent: %s\n", output.c_str());
     return;
   }

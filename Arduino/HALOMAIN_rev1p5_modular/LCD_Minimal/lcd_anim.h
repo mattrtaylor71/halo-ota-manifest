@@ -128,7 +128,7 @@ static void log_lcd_wake_pin_tick() {
   int level = digitalRead(INT_PIN);
   int pullup = lcd_wake_pin_pullup;
   int mode = lcd_wake_pin_mode;
-  Serial.printf("[LCD_WAKE_PIN] mode=%s pullup=%d level=%d phase=tick\n",
+  HALO_CHATTY_PRINTF("[LCD_WAKE_PIN] mode=%s pullup=%d level=%d phase=tick\n",
                 mode == OUTPUT ? "OUT" : "IN",
                 pullup,
                 level);
@@ -608,7 +608,7 @@ static void release_wake_line(const char* reason) {
   Serial.printf("[SLEEP] release_wake_line reason=%s level=%d\n",
                 reason ? reason : "unknown",
                 digitalRead(INT_PIN));
-  Serial.printf("[LCD_WAKE_PIN] mode=%s pullup=%d level=%d phase=release\n",
+  HALO_CHATTY_PRINTF("[LCD_WAKE_PIN] mode=%s pullup=%d level=%d phase=release\n",
                 hold_high ? "OUT" : "IN",
                 hold_high ? 0 : 1,
                 digitalRead(INT_PIN));
@@ -623,7 +623,7 @@ static void status_screen_use_text(const char* text) {
   }
   status_screen_auto_hide_at_ms = 0;
   lv_obj_set_style_bg_img_src(status_screen, NULL, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(status_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(status_screen, lv_color_hex(COL_CREAM), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(status_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_label_set_text(status_label, text ? text : "");
   lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);

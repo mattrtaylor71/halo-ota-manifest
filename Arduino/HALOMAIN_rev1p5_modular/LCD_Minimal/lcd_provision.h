@@ -72,7 +72,7 @@ static void create_provision_screen_if_needed() {
 
   provision_title_label = lv_label_create(provision_screen);
   lv_label_set_text(provision_title_label, "Halo Wi-Fi Setup");
-  lv_obj_set_style_text_color(provision_title_label, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_text_color(provision_title_label, lv_color_hex(COL_DARK), 0);
   lv_obj_align(provision_title_label, LV_ALIGN_TOP_MID, 0, 16);
   lv_obj_add_flag(provision_title_label, LV_OBJ_FLAG_HIDDEN);
 
@@ -80,19 +80,19 @@ static void create_provision_screen_if_needed() {
 
   provision_ssid_label = lv_label_create(provision_screen);
   lv_label_set_text(provision_ssid_label, "SSID: -");
-  lv_obj_set_style_text_color(provision_ssid_label, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_text_color(provision_ssid_label, lv_color_hex(COL_DARK), 0);
   lv_obj_align(provision_ssid_label, LV_ALIGN_BOTTOM_MID, 0, -64);
   lv_obj_add_flag(provision_ssid_label, LV_OBJ_FLAG_HIDDEN);
 
   provision_url_label = lv_label_create(provision_screen);
   lv_label_set_text(provision_url_label, "Open: http://192.168.4.1");
-  lv_obj_set_style_text_color(provision_url_label, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_text_color(provision_url_label, lv_color_hex(COL_DARK), 0);
   lv_obj_align(provision_url_label, LV_ALIGN_BOTTOM_MID, 0, -40);
   lv_obj_add_flag(provision_url_label, LV_OBJ_FLAG_HIDDEN);
 
   provision_status_label = lv_label_create(provision_screen);
   lv_label_set_text(provision_status_label, "Setup Mode");
-  lv_obj_set_style_text_color(provision_status_label, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_text_color(provision_status_label, lv_color_hex(COL_DARK), 0);
   lv_obj_align(provision_status_label, LV_ALIGN_BOTTOM_MID, 0, -16);
   lv_obj_add_flag(provision_status_label, LV_OBJ_FLAG_HIDDEN);
 
@@ -106,25 +106,25 @@ static void create_provision_intro_screen_if_needed() {
   provision_intro_screen = lv_obj_create(lv_scr_act());
   lv_obj_set_size(provision_intro_screen, LV_HOR_RES, LV_VER_RES);
   lv_obj_clear_flag(provision_intro_screen, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_bg_color(provision_intro_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_color(provision_intro_screen, lv_color_hex(COL_CREAM), LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_bg_opa(provision_intro_screen, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_border_width(provision_intro_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(provision_intro_screen, 40, LV_PART_MAIN | LV_STATE_DEFAULT);
-  lv_obj_set_style_shadow_color(provision_intro_screen, lv_color_hex(0xD4C4AE), LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_shadow_color(provision_intro_screen, lv_color_hex(COL_DARK), LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_shadow_spread(provision_intro_screen, -20, LV_PART_MAIN | LV_STATE_DEFAULT);
 
   // WiFi icon
   lv_obj_t* wifi_icon = lv_label_create(provision_intro_screen);
   lv_label_set_text(wifi_icon, LV_SYMBOL_WIFI);
   lv_obj_set_style_text_font(wifi_icon, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_set_style_text_color(wifi_icon, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+  lv_obj_set_style_text_color(wifi_icon, lv_color_hex(COL_DARK), LV_PART_MAIN);
   lv_obj_align(wifi_icon, LV_ALIGN_CENTER, 0, -40);
 
   // Title
   lv_obj_t* title = lv_label_create(provision_intro_screen);
   lv_label_set_text(title, "Wi-Fi Setup");
   lv_obj_set_style_text_font(title, &lv_font_montserrat_24, LV_PART_MAIN);
-  lv_obj_set_style_text_color(title, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+  lv_obj_set_style_text_color(title, lv_color_hex(COL_DARK), LV_PART_MAIN);
   lv_obj_align(title, LV_ALIGN_CENTER, 0, 20);
 
   // Tap prompt
@@ -145,7 +145,6 @@ static void show_provision_intro_screen(const char* reason) {
   if (list_container) lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
   if (status_screen) lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
   if (menu_screen) lv_obj_add_flag(menu_screen, LV_OBJ_FLAG_HIDDEN);
-  if (meal_result_screen) lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
   if (logged_screen) lv_obj_add_flag(logged_screen, LV_OBJ_FLAG_HIDDEN);
   if (expiry_screen) lv_obj_add_flag(expiry_screen, LV_OBJ_FLAG_HIDDEN);
   if (provision_screen) lv_obj_add_flag(provision_screen, LV_OBJ_FLAG_HIDDEN);
@@ -180,7 +179,6 @@ static void show_provisioning_screen(const char* ssid, const char* password, con
   if (list_container) lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
   if (status_screen) lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
   if (menu_screen) lv_obj_add_flag(menu_screen, LV_OBJ_FLAG_HIDDEN);
-  if (meal_result_screen) lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
   if (logged_screen) lv_obj_add_flag(logged_screen, LV_OBJ_FLAG_HIDDEN);
   if (expiry_screen) lv_obj_add_flag(expiry_screen, LV_OBJ_FLAG_HIDDEN);
 

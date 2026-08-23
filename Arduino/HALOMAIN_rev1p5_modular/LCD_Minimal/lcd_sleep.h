@@ -46,6 +46,66 @@ static void log_ext1_wakeup_status(const char* phase) {
                 (status & (1ULL << PIN_EC1_B)) ? 1 : 0);
 }
 
+// ── Touch during the sleep teardown ──────────────────────────────────
+//
+// Sleep entry is not instantaneous. Between `transition_begin` and
+// esp_deep_sleep_start() the LCD saves the list to NVS, tears down the UI,
+// powers the panel off and writes an errlog entry. MEASURED on hardware:
+// `[SLEEP_WATCH] teardown_ms=166`. A tap landing inside those 166ms is seen by
+// nobody — the UI task has stopped treating touches as input and ext1 is not
+// armed until the last instruction — so it is silently lost and the user taps
+// again.
+//
+// A held touch is NOT affected: the INT stays asserted, so ext1 ANY_LOW fires
+// the moment sleep starts. Only a tap that both starts AND ends inside the
+// window is lost.
+//
+// Polling cannot close this — the tap is a transient pulse and the teardown is
+// busy doing I2C, NVS and serial work. An edge-triggered ISR can: it fires
+// regardless of what the main flow is doing, and the flag is checked at the last
+// point where sleep can still be abandoned CLEANLY, i.e. above Touch_Standby(),
+// the backlight going off and vTaskDelete(ui_task_handle) — abort_sleep_transition()
+// restores the panel, backlight and LVGL flag, but it cannot recreate a deleted
+// UI task.
+//
+// HISTORY: this was built and reverted on 08-19 because the defect it was
+// written for (a "~4s dead zone") turned out to be a measurement artifact. The
+// 166ms window is real and measured; this reinstates the fix for THAT, and it is
+// testable via HALO_TEARDOWN_DELAY_MS below.
+static volatile bool s_touch_during_sleep = false;
+static volatile uint32_t s_touch_isr_count = 0;
+static uint32_t s_sleep_transition_ms = 0;
+
+// Bench-only: widen the teardown window so a tap can actually be landed inside
+// it. The actuator's stroke is ~1.7s end to end, so a 166ms target is not
+// hittable — without this the fix is untestable, which is exactly why it was
+// left unbuilt for a day. Production keeps the real 166ms window.
+#ifndef HALO_TEARDOWN_DELAY_MS
+#define HALO_TEARDOWN_DELAY_MS 0
+#endif
+
+static void IRAM_ATTR lcd_sleep_touch_isr() {
+  s_touch_during_sleep = true;
+  s_touch_isr_count++;
+}
+
+// GPIO9 is open-drain from the CST816 and idles high (lcd_touch_wake_active()
+// is `digitalRead(PIN_TOUCH_INT) == 0`), so a touch is a FALLING edge. Nothing
+// else in the tree attaches an interrupt to this pin — it is otherwise only
+// polled — so there is no handler to displace.
+static void lcd_sleep_touch_watch_begin() {
+  s_touch_during_sleep = false;
+  s_touch_isr_count = 0;
+  s_sleep_transition_ms = millis();
+  attachInterrupt(digitalPinToInterrupt(LCD_WAKE_GPIO), lcd_sleep_touch_isr, FALLING);
+}
+
+static void lcd_sleep_touch_watch_end() {
+  detachInterrupt(digitalPinToInterrupt(LCD_WAKE_GPIO));
+}
+
+static bool lcd_sleep_touch_fired() { return s_touch_during_sleep; }
+
 static void clear_input_wake_sources(const char* reason) {
   uint16_t touch_x = 0;
   uint16_t touch_y = 0;
@@ -92,6 +152,21 @@ static bool input_wake_sources_idle(const char* reason) {
 }
 
 static void enterLightSleep() {
+#if HALO_DEV_NO_SLEEP
+  // Bench builds never idle-sleep, so USB-CDC stays up and reflashing is instant.
+  // This has to sit HERE, not only at lcd_sleep_intent_allowed(): this function is
+  // the real funnel for idle sleep (6 callers in LCD_Minimal.ino) and it does not
+  // consult that gate at all. Guarding only the gate let the device sleep anyway.
+  // It also has to be before the sleep_deny_count logic below, which force-sleeps
+  // once denials pile up — a gate that always says "no" would trip exactly that.
+  static uint32_t suppressed = 0;
+  if ((suppressed++ % 20) == 0) {
+    Serial.printf("[DEV] idle sleep suppressed x%lu (HALO_DEV_NO_SLEEP=1)\n",
+                  (unsigned long)suppressed);
+  }
+  resetActivityTimer();
+  return;
+#endif
   if (sleep_blocked_for_ota()) {
     Serial.println("[SLEEP] blocked (ota_pending)");
     resetActivityTimer();
@@ -178,7 +253,6 @@ static void enterLightSleep() {
   
   // Reset all UI state variables to defaults
   buttons_visible = false;
-  meal_result_shown_time = 0;
   status_screen_shown_time = 0;
   delete_cooldown_until = 0;
   long_press_sent = false;
@@ -205,6 +279,8 @@ static void enterLightSleep() {
 
   g_sleep_transition = true;
   Serial.println("[SLEEP] transition_begin");
+  // Everything below here is the window in which a tap used to be dropped.
+  lcd_sleep_touch_watch_begin();
   g_lvgl_running = false;
   
   // Save shopping list to persistent storage before sleep (with reset index)
@@ -260,12 +336,14 @@ static void enterLightSleep() {
                     (unsigned long)WAKE_LINE_STUCK_WARN_MS);
     }
     Serial.println("[SLEEP_SANITY] wake pin already at wake level; refusing_sleep");
+    lcd_sleep_touch_watch_end();   // every path out of here releases the ISR
     abort_sleep_transition("ext0_active_pre_sleep");
     delay(250);
     return;
   }
   if (!input_wake_sources_idle("idle_pre_sleep")) {
     Serial.println("[SLEEP_SANITY] input wake sources still active; refusing_sleep");
+    lcd_sleep_touch_watch_end();
     abort_sleep_transition("ext1_active_pre_sleep");
     delay(250);
     return;
@@ -367,6 +445,31 @@ static void enterLightSleep() {
   Serial.println("[SLEEP] entering_deep_sleep");
   sleep_entry_time = millis();
 
+#if HALO_TEARDOWN_DELAY_MS
+  // Bench: hold the window open long enough for a real tap to land in it.
+  Serial.printf("[SLEEP_WATCH] teardown window widened to %dms for testing\n",
+                (int)HALO_TEARDOWN_DELAY_MS);
+  delay(HALO_TEARDOWN_DELAY_MS);
+#endif
+
+  // Report the window every time, not just on abort: without this, "the tap was
+  // lost" and "no tap ever happened" look identical from the log.
+  Serial.printf("[SLEEP_WATCH] teardown_ms=%lu isr_count=%lu fired=%d level=%d\n",
+                (unsigned long)(millis() - s_sleep_transition_ms),
+                (unsigned long)s_touch_isr_count,
+                lcd_sleep_touch_fired() ? 1 : 0,
+                digitalRead(LCD_WAKE_GPIO));
+
+  // LAST CHANCE TO ABANDON. Must stay ABOVE Touch_Standby()/backlight-off/
+  // vTaskDelete: once the UI task is gone there is no clean way back.
+  if (lcd_sleep_touch_fired()) {
+    lcd_sleep_touch_watch_end();
+    Serial.println("[SLEEP_ABORT] touch arrived during teardown - abandoning sleep");
+    abort_sleep_transition("touch_during_teardown");
+    return;
+  }
+  lcd_sleep_touch_watch_end();
+
   // Put touch IC into standby mode so it generates INT on touch during deep sleep
   if (g_touch_initialized) {
     Touch_Standby();
@@ -378,7 +481,7 @@ static void enterLightSleep() {
     vTaskDelete(ui_task_handle);
     ui_task_handle = NULL;
   }
-  
+
   // Enter deep sleep (no return)
   Serial.printf("[LCD_SLEEP] wake_sources=%s timer_s=%lu\n",
                 sleep_timer_sec > 0 ? "EXT0_TIMER" : "EXT0_ONLY",
@@ -652,6 +755,9 @@ static bool sleep_prepare_wake_line_for_request() {
 // Send sleep signal to Sense board before LCD goes to sleep
 static bool notify_sense_sleep() {
   Serial.println("[LCD] Notifying Sense board to sleep...");
+  // Send diagnostics BEFORE the sleep handshake. After SLEEP_READY the Sense is
+  // already asleep and anything sent then is lost (measured: 1 of 19 delivered).
+  lcd_send_diag_pre_sleep();
   lcd_sleep_ts("notify_sense_sleep");
   sleep_ready_received = false;
   sleep_deny_received = false;
@@ -777,7 +883,6 @@ static bool notify_sense_sleep() {
         touch_press_y = 0;
         long_press_sent = false;
         ship_ai_touch_active = false;
-        touch_used_to_dismiss_meal = false;
         touch_ignore_until = millis() + 450;
         scroll_ignore_until = millis() + 200;
         cancel_pending_sleep_for_user_input("pre_sleep_touch");

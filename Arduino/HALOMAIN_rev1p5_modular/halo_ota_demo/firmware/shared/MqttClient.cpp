@@ -58,7 +58,7 @@ namespace {
   static bool s_connected = false;
   static bool s_started = false;
   static bool s_need_stop = false;
-  static bool s_allowed = true;
+  static bool s_allowed = false;  // MQTT disabled
   static bool s_task_started = false;
 
   static uint32_t s_last_connect_ms = 0;

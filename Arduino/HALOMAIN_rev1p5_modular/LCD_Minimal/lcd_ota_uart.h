@@ -744,12 +744,7 @@ static void lcd_ota_handle_end(JsonObject& doc) {
         //
         // Clear testmode NVS so it doesn't persist after reboot.
         if (g_test_mode_active) {
-            g_test_mode_active = false;
-            Preferences prefs;
-            if (prefs.begin("test_cfg", false)) {
-                prefs.remove("test_mode");
-                prefs.end();
-            }
+            test_mode_clear("ota reboot");  // also wipes the RTC budget
         }
         // Clear maintenance NVS so stale state doesn't re-enter headless after reboot.
         lcd_clear_persisted_maintenance_state("ota_complete");

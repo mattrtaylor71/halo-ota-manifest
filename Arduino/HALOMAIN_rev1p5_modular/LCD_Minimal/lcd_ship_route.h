@@ -400,7 +400,6 @@ static void dump_route_table() {
   Serial.println("  UPLOAD_STARTING-> SHIP_PROCESSING");
   Serial.println("  UPLOADING      -> SHIP_PROCESSING");
   Serial.println("  RESULT_WAITING -> SHIP_PROCESSING");
-  Serial.println("  RESULT_READY   -> MEAL_RESULT");
   Serial.println("  ERROR          -> SHIP_ERROR_THEN_HOME");
 }
 
@@ -606,14 +605,14 @@ static void result_screen_init() {
 
   result_icon_label = lv_label_create(result_root);
   lv_obj_set_style_text_font(result_icon_label, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_set_style_text_color(result_icon_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(result_icon_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(result_icon_label, LV_ALIGN_TOP_MID, 0, 24);
 
   result_title_label = lv_label_create(result_root);
   lv_label_set_long_mode(result_title_label, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(result_title_label, LV_PCT(90));
   lv_obj_set_style_text_font(result_title_label, &lv_font_montserrat_24, LV_PART_MAIN);
-  lv_obj_set_style_text_color(result_title_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(result_title_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(result_title_label, LV_ALIGN_TOP_MID, 0, 100);
 
   result_subtitle_label = lv_label_create(result_root);
@@ -633,7 +632,7 @@ static void result_screen_init() {
 
   result_btn_home_label = lv_label_create(result_btn_home);
   lv_label_set_text(result_btn_home_label, "Back to Home");
-  lv_obj_set_style_text_color(result_btn_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(result_btn_home_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_center(result_btn_home_label);
 
   result_btn_retry = lv_obj_create(result_root);
@@ -646,7 +645,7 @@ static void result_screen_init() {
 
   result_btn_retry_label = lv_label_create(result_btn_retry);
   lv_label_set_text(result_btn_retry_label, "Retry");
-  lv_obj_set_style_text_color(result_btn_retry_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(result_btn_retry_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_center(result_btn_retry_label);
 }
 
@@ -681,6 +680,11 @@ static void ui_show_result_impl(bool is_error, const char* title, const char* mo
   status_overlay_hide();
   ui_busy = false;
   ui_screen_state = SCREEN_RESULT;
+  // Must have a deadline: SCREEN_RESULT is not sleep-eligible, so without one
+  // the device cannot idle-sleep from here at all. Shares the error screen's
+  // dismisser -- both land on SCREEN_RESULT and both return to the main menu.
+  ship_error_hide_at_ms = millis() + RESULT_SCREEN_TIMEOUT_MS;
+  ship_logged_hide_at_ms = 0;
   lv_obj_clear_flag(result_root, LV_OBJ_FLAG_HIDDEN);
   lv_scr_load(result_root);
   lv_timer_handler();
@@ -728,31 +732,31 @@ static void debug_screen_init() {
 
   debug_title = lv_label_create(debug_screen);
   lv_label_set_text(debug_title, "Debug");
-  lv_obj_set_style_text_color(debug_title, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(debug_title, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(debug_title, LV_ALIGN_TOP_MID, 0, 16);
 
   debug_label_status = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_status, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(debug_label_status, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(debug_label_status, LV_ALIGN_TOP_LEFT, 12, 52);
 
   debug_label_status2 = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_status2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(debug_label_status2, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(debug_label_status2, LV_ALIGN_TOP_LEFT, 12, 76);
 
   debug_label_sense = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_sense, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(debug_label_sense, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(debug_label_sense, LV_ALIGN_TOP_LEFT, 12, 108);
 
   debug_label_hb = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_hb, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(debug_label_hb, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(debug_label_hb, LV_ALIGN_TOP_LEFT, 12, 132);
 
   debug_label_wifi = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_wifi, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(debug_label_wifi, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(debug_label_wifi, LV_ALIGN_TOP_LEFT, 12, 156);
 
   debug_label_ui = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_ui, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(debug_label_ui, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_align(debug_label_ui, LV_ALIGN_TOP_LEFT, 12, 180);
 
   debug_btn_back = lv_obj_create(debug_screen);
@@ -765,7 +769,7 @@ static void debug_screen_init() {
 
   debug_btn_back_label = lv_label_create(debug_btn_back);
   lv_label_set_text(debug_btn_back_label, "Back");
-  lv_obj_set_style_text_color(debug_btn_back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(debug_btn_back_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_center(debug_btn_back_label);
 }
 

@@ -46,7 +46,7 @@ static void ship_menu_show_press_overlay(const ship_menu_hitbox_t* hb) {
   }
   if (!ship_menu_press_overlay) {
     ship_menu_press_overlay = lv_obj_create(lv_layer_top());
-    lv_obj_set_style_bg_color(ship_menu_press_overlay, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ship_menu_press_overlay, lv_color_hex(COL_WHITE), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(ship_menu_press_overlay, LV_OPA_30, LV_PART_MAIN);
     lv_obj_set_style_border_width(ship_menu_press_overlay, 0, LV_PART_MAIN);
   }
@@ -188,7 +188,7 @@ static void ship_menu_send_menu_select(const char* menu_item, int menu_index, co
   strncpy(tx_msg.id, menu_item, sizeof(tx_msg.id) - 1);
   tx_msg.has_id = true;
   if (uart_tx_queue != NULL) {
-    xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+    uart_tx_enqueue(&tx_msg, "ship_action");
   }
   if (label && label[0]) {
     Serial.printf("[MENU] tap=%s\n", label);
@@ -286,11 +286,9 @@ static void ship_menu_request_fw_info() {
 
 static void ship_menu_service_fw_info_request(unsigned long now_ms) {
   if (ui_screen_state != SCREEN_SETTINGS) {
-    if (deferred_awake_tx_valid &&
-        strcmp(deferred_awake_tx_msg.type, "INPUT_SENSE_FW") == 0) {
-      deferred_awake_tx_valid = false;
-      deferred_awake_tx_last_ping_ms = 0;
-    }
+    // Drop only the FW-info requests; other deferred messages may be real user
+    // actions and must not be collateral damage.
+    deferred_ring_remove_type("INPUT_SENSE_FW");
     g_fw_info_request_ms = 0;
     g_fw_info_last_attempt_ms = 0;
     g_fw_info_retry_deadline_ms = 0;
@@ -310,11 +308,7 @@ static void ship_menu_service_fw_info_request(unsigned long now_ms) {
   }
   // Clear any stale deferred INPUT_SENSE_FW so the awake-proof deferral path
   // can't interfere with the direct re-send below.
-  if (deferred_awake_tx_valid &&
-      strcmp(deferred_awake_tx_msg.type, "INPUT_SENSE_FW") == 0) {
-    deferred_awake_tx_valid = false;
-    deferred_awake_tx_last_ping_ms = 0;
-  }
+  deferred_ring_remove_type("INPUT_SENSE_FW");
   // Re-send via the proven direct path each retry (pulses + writes directly).
   user_activity_bump("fw_info_retry");
   uart_send_input_message("INPUT_SENSE_FW");
@@ -326,8 +320,7 @@ static void ship_menu_service_fw_info_request(unsigned long now_ms) {
                 sense_awake_confirmed ? 1 : 0,
                 link_synced ? 1 : 0,
                 sense_recently_heard(1500) ? 1 : 0,
-                (deferred_awake_tx_valid &&
-                 strcmp(deferred_awake_tx_msg.type, "INPUT_SENSE_FW") == 0) ? 1 : 0);
+                deferred_ring_has_type("INPUT_SENSE_FW") ? 1 : 0);
 }
 
 static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
@@ -554,209 +547,32 @@ static void ship_menu_handle_ui_status(const JsonDocument& doc) {
   }
 }
 
-static void ui_apply_ship_meal_result(const JsonDocument& doc) {
-  // Nutrition result from scan
-  int calories = doc["calories"] | 0;
-  float protein_g = doc["protein_g"] | 0.0f;
-  float carbs_g = doc["carbs_g"] | 0.0f;
-  float fat_g = doc["fat_g"] | 0.0f;
-  float confidence = doc["confidence"] | 0.0f;
-  const char* meal_summary = doc["meal_summary"] | "";
-  const char* recommendation = doc["recommendation"] | "";
-  const char* mode = doc["mode"] | "";
-  uint32_t job_id = (uint32_t)(doc["job_id"] | 0);
-
-  if (job_id != 0 && g_ship_ui_job_id != 0 &&
-      ui_screen_state == SCREEN_PROCESSING &&
-      job_id != g_ship_ui_job_id) {
-    Serial.printf("[SHIP_MEAL] ignoring stale result active_job_id=%lu result_job_id=%lu\n",
-                  (unsigned long)g_ship_ui_job_id,
-                  (unsigned long)job_id);
-    return;
-  }
-
-  if (!dish_processing_active && ui_screen_state != SCREEN_PROCESSING) {
-    bool allow_late = false;
-    unsigned long now_ms = millis();
-    if (dish_timeout_at_ms > 0 &&
-        (now_ms - dish_timeout_at_ms) <= DISH_RESULT_LATE_GRACE_MS &&
-        (dish_timeout_job_id == 0 || job_id == dish_timeout_job_id)) {
-      allow_late = true;
-      Serial.printf("[SHIP_MEAL] late_result_override age_ms=%lu job_id=%lu\n",
-                    (unsigned long)(now_ms - dish_timeout_at_ms),
-                    (unsigned long)job_id);
-    }
-    if (!allow_late) {
-      Serial.println("[SHIP_MEAL] ignoring result (not waiting)");
-      return;
-    }
-  }
-
-  const char* safe_mode = (mode && mode[0]) ? mode : (g_ship_ui_mode[0] ? g_ship_ui_mode : "dish");
-  if (strcmp(safe_mode, "discard") == 0 || ship_mode_is_dish("SCAN", safe_mode)) {
-    Serial.printf("[UART] %s mode - ignoring meal result, not displaying meal nutrition\n",
-                  safe_mode);
-    dish_processing_active = false;
-    dish_processing_start_ms = 0;
-    dish_timeout_at_ms = 0;
-    dish_timeout_job_id = 0;
-    if (meal_result_screen != NULL) {
-      lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (list_container != NULL) {
-      lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
-    }
-    return;
-  }
-
-  Serial.printf("[SHIP_MEAL] received result kcal=%d conf=%.2f mode=%s -> show MEAL_RESULT\n",
-                calories, confidence, mode ? mode : "");
-
-  strncpy(g_ship_ui_op, "SCAN", sizeof(g_ship_ui_op) - 1);
-  g_ship_ui_op[sizeof(g_ship_ui_op) - 1] = '\0';
-  strncpy(g_ship_ui_mode, safe_mode, sizeof(g_ship_ui_mode) - 1);
-  g_ship_ui_mode[sizeof(g_ship_ui_mode) - 1] = '\0';
-  strncpy(g_ship_ui_phase, "RESULT_READY", sizeof(g_ship_ui_phase) - 1);
-  g_ship_ui_phase[sizeof(g_ship_ui_phase) - 1] = '\0';
-  strncpy(g_ship_ui_text, meal_summary ? meal_summary : "", sizeof(g_ship_ui_text) - 1);
-  g_ship_ui_text[sizeof(g_ship_ui_text) - 1] = '\0';
-  g_ship_ui_job_id = job_id;
-  g_ship_ui_last_ms = millis();
-  g_ship_ui_busy = false;
-  g_ship_ui_terminal = true;
-  g_ship_ui_error = false;
-  waiting_for_scan_response = false;
-  scan_request_sent_ms = 0;
-  if (job_id) {
-    g_ship_ui_finalized = true;
-    g_ship_ui_finalized_job_id = job_id;
-  }
-  dish_processing_active = false;
-  dish_processing_start_ms = 0;
-  dish_timeout_at_ms = 0;
-  dish_timeout_job_id = 0;
-
-  log_active_screen("meal_result_rx");
-  if (status_screen != NULL) {
-    lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
-    Serial.println("[STATUS] Hiding status screen - meal result received");
-  }
-
-  resetActivityTimer();
-
-  if (app_event_queue != NULL) {
-    app_event_t evt = {};
-    evt.type = EVT_SHOW_MEAL_RESULT;
-    evt.data.meal_result.calories = calories;
-    evt.data.meal_result.protein_g = protein_g;
-    evt.data.meal_result.carbs_g = carbs_g;
-    evt.data.meal_result.fat_g = fat_g;
-    strncpy(evt.data.meal_result.meal_summary, meal_summary ? meal_summary : "",
-            sizeof(evt.data.meal_result.meal_summary) - 1);
-    evt.data.meal_result.meal_summary[sizeof(evt.data.meal_result.meal_summary) - 1] = '\0';
-    strncpy(evt.data.meal_result.recommendation, recommendation ? recommendation : "",
-            sizeof(evt.data.meal_result.recommendation) - 1);
-    evt.data.meal_result.recommendation[sizeof(evt.data.meal_result.recommendation) - 1] = '\0';
-    if (xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20)) != pdTRUE) {
-      Serial.println("[UI_EVT][WARN] meal_result queue full, dropping oldest");
-      app_event_t dropped = {};
-      xQueueReceive(app_event_queue, &dropped, 0);
-      if (xQueueSend(app_event_queue, &evt, 0) == pdTRUE) {
-        Serial.println("[UART] Posted EVT_SHOW_MEAL_RESULT event to UI task (retry)");
-      }
-    } else {
-      Serial.println("[UART] Posted EVT_SHOW_MEAL_RESULT event to UI task");
-    }
-  }
-}
-
-static void ui_handle_meal_result_event(const app_event_t* evt) {
-  if (!evt) {
-    return;
-  }
-  if (g_base_screen != NULL) {
-    lv_scr_load(g_base_screen);
-  }
-  ui_screen_state = SCREEN_RESULT;
-  ui_busy = false;
-  dish_processing_active = false;
-  dish_processing_start_ms = 0;
-
-  log_active_screen("meal_result_show");
-  Serial.printf("[UI] Showing meal result: %d cal, %.1fg protein, %.1fg carbs, %.1fg fat\n",
-                evt->data.meal_result.calories, evt->data.meal_result.protein_g,
-                evt->data.meal_result.carbs_g, evt->data.meal_result.fat_g);
-
-  if (list_container != NULL) {
-    lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (loading_screen != NULL) {
-    lv_obj_add_flag(loading_screen, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (status_screen != NULL) {
-    lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
-    status_screen_shown_time = 0;
-  }
-
-  if (meal_result_screen != NULL) {
-    lv_obj_clear_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
-    if (meal_calories_label != NULL) {
-      char cal_text[32];
-      snprintf(cal_text, sizeof(cal_text), "%dcal", evt->data.meal_result.calories);
-      lv_label_set_text(meal_calories_label, cal_text);
-    }
-    if (meal_description_label != NULL) {
-      lv_label_set_text(meal_description_label, evt->data.meal_result.meal_summary);
-    }
-    if (meal_protein_value_label != NULL) {
-      char protein_text[32];
-      snprintf(protein_text, sizeof(protein_text), "%.0fg", evt->data.meal_result.protein_g);
-      lv_label_set_text(meal_protein_value_label, protein_text);
-    }
-    if (meal_carbs_value_label != NULL) {
-      char carbs_text[32];
-      snprintf(carbs_text, sizeof(carbs_text), "%.0fg", evt->data.meal_result.carbs_g);
-      lv_label_set_text(meal_carbs_value_label, carbs_text);
-    }
-    if (meal_fat_value_label != NULL) {
-      char fat_text[32];
-      snprintf(fat_text, sizeof(fat_text), "%.0fg", evt->data.meal_result.fat_g);
-      lv_label_set_text(meal_fat_value_label, fat_text);
-    }
-    if (meal_recommendation_label != NULL) {
-      lv_label_set_text(meal_recommendation_label, evt->data.meal_result.recommendation);
-    }
-    ui_lvgl_tick();
-    meal_result_shown_time = millis();
-  }
-}
-
 static void create_custom_ui() {
   // Get default screen
   lv_obj_t *scr = lv_scr_act();
   g_base_screen = scr;
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(scr, lv_color_hex(COL_CREAM), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
   
   // Create loading screen
   loading_screen = lv_obj_create(scr);
   lv_obj_set_size(loading_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(loading_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(loading_screen, lv_color_hex(COL_CREAM), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(loading_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_center(loading_screen);
 
   lv_obj_t *loading_label = lv_label_create(loading_screen);
   lv_label_set_text(loading_label, "Loading...");
-  lv_obj_set_style_text_color(loading_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+  lv_obj_set_style_text_color(loading_label, lv_color_hex(COL_DARK), LV_PART_MAIN);
   lv_obj_center(loading_label);
   
   // Create list container
   list_container = lv_obj_create(scr);
   lv_obj_set_size(list_container, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(list_container, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(list_container, lv_color_hex(COL_CREAM), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(list_container, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(list_container, 30, LV_PART_MAIN);
-  lv_obj_set_style_shadow_color(list_container, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
+  lv_obj_set_style_shadow_color(list_container, lv_color_hex(COL_DARK), LV_PART_MAIN);
   lv_obj_set_style_shadow_spread(list_container, -15, LV_PART_MAIN);
   lv_obj_set_style_border_width(list_container, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(list_container, 0, LV_PART_MAIN);
@@ -779,14 +595,14 @@ static void create_custom_ui() {
   delete_item_btn = lv_btn_create(delete_menu);
   lv_obj_set_size(delete_item_btn, 340, 120);  // Match menu size
   lv_obj_align(delete_item_btn, LV_ALIGN_CENTER, 0, 0);  // Centered in menu
-  lv_obj_set_style_bg_color(delete_item_btn, lv_color_hex(0xE53935), LV_PART_MAIN);  // Trepo Red
+  lv_obj_set_style_bg_color(delete_item_btn, lv_color_hex(COL_RED), LV_PART_MAIN);  // Trepo Red
   lv_obj_set_style_bg_opa(delete_item_btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(delete_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_outline_width(delete_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(delete_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(delete_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(delete_item_btn, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(delete_item_btn, lv_color_hex(0xE53935), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(delete_item_btn, lv_color_hex(COL_RED), LV_STATE_PRESSED);
   lv_obj_set_style_bg_opa(delete_item_btn, LV_OPA_COVER, LV_STATE_PRESSED);
   delete_item_label = lv_label_create(delete_item_btn);
   lv_label_set_text(delete_item_label, "Delete");
@@ -810,14 +626,14 @@ static void create_custom_ui() {
   menu_item_btn = lv_btn_create(menu_menu);
   lv_obj_set_size(menu_item_btn, 340, 120);  // Match menu size
   lv_obj_align(menu_item_btn, LV_ALIGN_CENTER, 0, 0);  // Centered in menu
-  lv_obj_set_style_bg_color(menu_item_btn, lv_color_hex(0x2D4FFF), LV_PART_MAIN);  // Trepo Deep Blue
+  lv_obj_set_style_bg_color(menu_item_btn, lv_color_hex(COL_TEAL), LV_PART_MAIN);  // brand accent (was retired royal blue 0x2D4FFF)
   lv_obj_set_style_bg_opa(menu_item_btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(menu_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_outline_width(menu_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(menu_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(menu_item_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(menu_item_btn, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(menu_item_btn, lv_color_hex(0x2D4FFF), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(menu_item_btn, lv_color_hex(COL_TEAL), LV_STATE_PRESSED);
   lv_obj_set_style_bg_opa(menu_item_btn, LV_OPA_COVER, LV_STATE_PRESSED);
   menu_item_label = lv_label_create(menu_item_btn);
   lv_label_set_text(menu_item_label, "Menu");
@@ -828,104 +644,6 @@ static void create_custom_ui() {
   // Attach menu handler
   lv_obj_add_event_cb(menu_item_btn, menu_btn_event_handler, LV_EVENT_CLICKED, NULL);
   
-  // Create meal result screen (hidden by default)
-  meal_result_screen = lv_obj_create(scr);
-  lv_obj_set_size(meal_result_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(meal_result_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(meal_result_screen, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(meal_result_screen, 30, LV_PART_MAIN);
-  lv_obj_set_style_shadow_color(meal_result_screen, lv_color_hex(0xD4C4AE), LV_PART_MAIN);
-  lv_obj_set_style_shadow_spread(meal_result_screen, -15, LV_PART_MAIN);
-  lv_obj_set_style_border_width(meal_result_screen, 0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(meal_result_screen, 20, LV_PART_MAIN);
-  lv_obj_center(meal_result_screen);
-  lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_clear_flag(meal_result_screen, LV_OBJ_FLAG_SCROLLABLE);
-  
-  // Calories label - large text at top
-  meal_calories_label = lv_label_create(meal_result_screen);
-  lv_label_set_text(meal_calories_label, "0cal");
-  lv_obj_set_style_text_font(meal_calories_label, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_set_style_text_color(meal_calories_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-  lv_obj_align(meal_calories_label, LV_ALIGN_TOP_MID, 0, 20);
-
-  // Meal description label - centered, medium text
-  meal_description_label = lv_label_create(meal_result_screen);
-  lv_label_set_text(meal_description_label, "");
-  lv_obj_set_style_text_font(meal_description_label, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_set_style_text_color(meal_description_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-  lv_obj_set_style_text_align(meal_description_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_label_set_long_mode(meal_description_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping
-  lv_obj_set_width(meal_description_label, 280);  // Reduced from 300 to fit circular screen better
-  lv_obj_set_style_pad_hor(meal_description_label, 10, LV_PART_MAIN);  // Add horizontal padding
-  lv_obj_align(meal_description_label, LV_ALIGN_CENTER, 0, -40);
-  
-  // Macros container - horizontal layout with stacked labels
-  lv_obj_t *macros_container = lv_obj_create(meal_result_screen);
-  lv_obj_set_size(macros_container, 300, 80);  // Increased height for larger font and spacing
-  lv_obj_set_style_bg_opa(macros_container, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_border_width(macros_container, 0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(macros_container, 0, LV_PART_MAIN);
-  lv_obj_align(macros_container, LV_ALIGN_CENTER, 0, 50);  // Moved down (was 20, now 50)
-  
-  // Protein - value label (top) - doubled font size
-  meal_protein_value_label = lv_label_create(macros_container);
-  lv_label_set_text(meal_protein_value_label, "0g");
-  lv_obj_set_style_text_font(meal_protein_value_label, &lv_font_montserrat_40, LV_PART_MAIN);  // Doubled font size (20 -> 40)
-  lv_obj_set_style_text_color(meal_protein_value_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-  lv_obj_set_style_text_opa(meal_protein_value_label, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_align(meal_protein_value_label, LV_ALIGN_LEFT_MID, 0, -20);  // More spacing above center (was -10)
-
-  // Protein - name label (bottom)
-  meal_protein_name_label = lv_label_create(macros_container);
-  lv_label_set_text(meal_protein_name_label, "Protein");
-  lv_obj_set_style_text_font(meal_protein_name_label, &lv_font_montserrat_14, LV_PART_MAIN);  // Smaller font for label
-  lv_obj_set_style_text_color(meal_protein_name_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-  lv_obj_align(meal_protein_name_label, LV_ALIGN_LEFT_MID, 0, 20);  // More spacing below center (was 10)
-  
-  // Carbs - value label (top) - doubled font size
-  meal_carbs_value_label = lv_label_create(macros_container);
-  lv_label_set_text(meal_carbs_value_label, "0g");
-  lv_obj_set_style_text_font(meal_carbs_value_label, &lv_font_montserrat_40, LV_PART_MAIN);  // Doubled font size (20 -> 40)
-  lv_obj_set_style_text_color(meal_carbs_value_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-  lv_obj_set_style_text_opa(meal_carbs_value_label, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_align(meal_carbs_value_label, LV_ALIGN_CENTER, 0, -20);  // More spacing above center (was -10)
-
-  // Carbs - name label (bottom)
-  meal_carbs_name_label = lv_label_create(macros_container);
-  lv_label_set_text(meal_carbs_name_label, "Carbs");
-  lv_obj_set_style_text_font(meal_carbs_name_label, &lv_font_montserrat_14, LV_PART_MAIN);  // Smaller font for label
-  lv_obj_set_style_text_color(meal_carbs_name_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-  lv_obj_align(meal_carbs_name_label, LV_ALIGN_CENTER, 0, 20);  // More spacing below center (was 10)
-  
-  // Fat - value label (top) - doubled font size
-  meal_fat_value_label = lv_label_create(macros_container);
-  lv_label_set_text(meal_fat_value_label, "0g");
-  lv_obj_set_style_text_font(meal_fat_value_label, &lv_font_montserrat_40, LV_PART_MAIN);  // Doubled font size (20 -> 40)
-  lv_obj_set_style_text_color(meal_fat_value_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-  lv_obj_set_style_text_opa(meal_fat_value_label, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_align(meal_fat_value_label, LV_ALIGN_RIGHT_MID, 0, -20);  // More spacing above center (was -10)
-
-  // Fat - name label (bottom)
-  meal_fat_name_label = lv_label_create(macros_container);
-  lv_label_set_text(meal_fat_name_label, "Fat");
-  lv_obj_set_style_text_font(meal_fat_name_label, &lv_font_montserrat_14, LV_PART_MAIN);  // Smaller font for label
-  lv_obj_set_style_text_color(meal_fat_name_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
-  lv_obj_align(meal_fat_name_label, LV_ALIGN_RIGHT_MID, 0, 20);  // More spacing below center (was 10)
-  
-  // Recommendation label - small text at bottom
-  // For circular screen (360x360), use narrower width to ensure text fits within circle bounds
-  meal_recommendation_label = lv_label_create(meal_result_screen);
-  lv_label_set_text(meal_recommendation_label, "");
-  lv_obj_set_style_text_font(meal_recommendation_label, &lv_font_montserrat_12, LV_PART_MAIN);
-  lv_obj_set_style_text_color(meal_recommendation_label, lv_color_hex(0x4A4A4A), LV_PART_MAIN);
-  lv_obj_set_style_text_align(meal_recommendation_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_label_set_long_mode(meal_recommendation_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping
-  lv_obj_set_width(meal_recommendation_label, 280);  // Reduced from 300 to fit circular screen better
-  lv_obj_set_style_pad_hor(meal_recommendation_label, 10, LV_PART_MAIN);  // Add horizontal padding
-  lv_obj_set_style_pad_ver(meal_recommendation_label, 5, LV_PART_MAIN);  // Add vertical padding
-  lv_obj_align(meal_recommendation_label, LV_ALIGN_BOTTOM_MID, 0, -15);  // Slightly higher to give more room
-  
   // Create recording indicator (solid halo/ring for long press)
   // Screen is 360x360px, create a circular border
   recording_indicator = lv_obj_create(scr);
@@ -933,7 +651,7 @@ static void create_custom_ui() {
   lv_obj_align(recording_indicator, LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_style_bg_opa(recording_indicator, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(recording_indicator, 12, LV_PART_MAIN);  // 12px thick border
-  lv_obj_set_style_border_color(recording_indicator, lv_color_hex(0x2D4FFF), LV_PART_MAIN);  // Trepo Deep Blue
+  lv_obj_set_style_border_color(recording_indicator, lv_color_hex(COL_TEAL), LV_PART_MAIN);  // brand accent (was retired royal blue 0x2D4FFF)
   lv_obj_set_style_radius(recording_indicator, LV_RADIUS_CIRCLE, LV_PART_MAIN);  // Perfect circle
   lv_obj_set_style_border_opa(recording_indicator, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_add_flag(recording_indicator, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
@@ -946,7 +664,7 @@ static void create_custom_ui() {
   lv_obj_align(processing_indicator, LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_style_bg_opa(processing_indicator, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(processing_indicator, 12, LV_PART_MAIN);  // 12px thick border
-  lv_obj_set_style_border_color(processing_indicator, lv_color_hex(0x2D4FFF), LV_PART_MAIN);  // Trepo Deep Blue
+  lv_obj_set_style_border_color(processing_indicator, lv_color_hex(COL_TEAL), LV_PART_MAIN);  // brand accent (was retired royal blue 0x2D4FFF)
   lv_obj_set_style_radius(processing_indicator, LV_RADIUS_CIRCLE, LV_PART_MAIN);  // Perfect circle
   lv_obj_set_style_border_opa(processing_indicator, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_add_flag(processing_indicator, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
@@ -955,7 +673,7 @@ static void create_custom_ui() {
   // Create status screen (for "On it!", "Hold still!", etc.)
   status_screen = lv_obj_create(scr);
   lv_obj_set_size(status_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(status_screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White background
+  lv_obj_set_style_bg_color(status_screen, lv_color_hex(COL_WHITE), LV_PART_MAIN);  // White background
   lv_obj_set_style_bg_opa(status_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(status_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(status_screen, 0, LV_PART_MAIN);
@@ -967,7 +685,7 @@ static void create_custom_ui() {
   status_label = lv_label_create(status_screen);
   lv_label_set_text(status_label, "");
   lv_obj_set_style_text_font(status_label, &lv_font_montserrat_32, LV_PART_MAIN);  // Large font
-  lv_obj_set_style_text_color(status_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);  // Off-black text
+  lv_obj_set_style_text_color(status_label, lv_color_hex(COL_DARK), LV_PART_MAIN);  // Off-black text
   lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping for multi-line
   lv_obj_set_width(status_label, 300);  // Width for circular screen
@@ -976,20 +694,20 @@ static void create_custom_ui() {
   // Reset Wi-Fi button (hidden by default)
   status_reset_button = lv_btn_create(status_screen);
   lv_obj_set_size(status_reset_button, 200, 50);
-  lv_obj_set_style_bg_color(status_reset_button, lv_color_hex(0x2D4FFF), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(status_reset_button, lv_color_hex(COL_TEAL), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(status_reset_button, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_radius(status_reset_button, 10, LV_PART_MAIN);
   lv_obj_align(status_reset_button, LV_ALIGN_BOTTOM_MID, 0, -30);
   lv_obj_add_flag(status_reset_button, LV_OBJ_FLAG_HIDDEN);
   status_reset_label = lv_label_create(status_reset_button);
   lv_label_set_text(status_reset_label, "Reset Wi-Fi");
-  lv_obj_set_style_text_color(status_reset_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(status_reset_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
   lv_obj_center(status_reset_label);
   
   // Create logged screen (for Discard mode - shown after image capture)
   logged_screen = lv_obj_create(scr);
   lv_obj_set_size(logged_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(logged_screen, lv_color_hex(0x1F4D2B), LV_PART_MAIN);  // Trepo dark green
+  lv_obj_set_style_bg_color(logged_screen, lv_color_hex(COL_GREEN), LV_PART_MAIN);  // Trepo dark green
   lv_obj_set_style_bg_opa(logged_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(logged_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(logged_screen, 0, LV_PART_MAIN);
@@ -1001,7 +719,7 @@ static void create_custom_ui() {
   logged_label = lv_label_create(logged_screen);
   lv_label_set_text(logged_label, "");
   lv_obj_set_style_text_font(logged_label, &lv_font_montserrat_32, LV_PART_MAIN);  // Large font
-  lv_obj_set_style_text_color(logged_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+  lv_obj_set_style_text_color(logged_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);  // White text
   lv_obj_set_style_text_align(logged_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_center(logged_label);
   lv_obj_add_flag(logged_label, LV_OBJ_FLAG_HIDDEN);
@@ -1009,7 +727,7 @@ static void create_custom_ui() {
   // Create menu screen (blue background with menu items)
   menu_screen = lv_obj_create(scr);
   lv_obj_set_size(menu_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(menu_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);  // Cream background
+  lv_obj_set_style_bg_color(menu_screen, lv_color_hex(COL_CREAM), LV_PART_MAIN);  // Cream background
   lv_obj_set_style_bg_opa(menu_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(menu_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(menu_screen, 0, LV_PART_MAIN);
@@ -1032,7 +750,7 @@ static void create_custom_ui() {
     menu_item_labels[i] = lv_label_create(menu_list_container);
     lv_label_set_text(menu_item_labels[i], "");
     lv_obj_set_style_text_font(menu_item_labels[i], &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(menu_item_labels[i], lv_color_hex(0x1A1A1A), LV_PART_MAIN);  // Off-black text
+    lv_obj_set_style_text_color(menu_item_labels[i], lv_color_hex(COL_DARK), LV_PART_MAIN);  // Off-black text
     lv_obj_set_style_text_opa(menu_item_labels[i], LV_OPA_70, LV_PART_MAIN);  // Default to slightly transparent
     lv_obj_set_style_text_align(menu_item_labels[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);  // Center align text
     lv_obj_set_style_pad_ver(menu_item_labels[i], 12, LV_PART_MAIN);  // Vertical spacing between items
@@ -1048,7 +766,7 @@ static void create_custom_ui() {
   // Create expiration date entry screen (for Check-in mode)
   expiry_screen = lv_obj_create(scr);
   lv_obj_set_size(expiry_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(expiry_screen, lv_color_hex(0xF5E9D8), LV_PART_MAIN);  // Cream background
+  lv_obj_set_style_bg_color(expiry_screen, lv_color_hex(COL_CREAM), LV_PART_MAIN);  // Cream background
   lv_obj_set_style_bg_opa(expiry_screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(expiry_screen, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(expiry_screen, 0, LV_PART_MAIN);
@@ -1065,9 +783,9 @@ static void create_custom_ui() {
   lv_arc_set_rotation(expiry_timeout_ring, 270);
   lv_obj_set_style_arc_width(expiry_timeout_ring, 4, LV_PART_MAIN);
   lv_obj_set_style_arc_width(expiry_timeout_ring, 4, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(0x8A7E72), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(COL_MUTED), LV_PART_MAIN);
   lv_obj_set_style_arc_opa(expiry_timeout_ring, (lv_opa_t)80, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(0x1F4D2B), LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(COL_GREEN), LV_PART_INDICATOR);
   lv_obj_set_style_arc_opa(expiry_timeout_ring, LV_OPA_COVER, LV_PART_INDICATOR);
   lv_obj_set_style_outline_width(expiry_timeout_ring, 0, LV_PART_MAIN);
   lv_obj_set_style_shadow_width(expiry_timeout_ring, 0, LV_PART_MAIN);
@@ -1077,7 +795,7 @@ static void create_custom_ui() {
   expiry_title_label = lv_label_create(expiry_screen);
   lv_label_set_text(expiry_title_label, "Expiration");
   lv_obj_set_style_text_font(expiry_title_label, &lv_font_montserrat_26, LV_PART_MAIN);
-  lv_obj_set_style_text_color(expiry_title_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+  lv_obj_set_style_text_color(expiry_title_label, lv_color_hex(COL_DARK), LV_PART_MAIN);
   lv_obj_set_style_text_align(expiry_title_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_align(expiry_title_label, LV_ALIGN_TOP_MID, 0, 32);
   
@@ -1136,7 +854,7 @@ static void create_custom_ui() {
   lv_obj_t *check_label = lv_label_create(expiry_check_button);
   lv_label_set_text(check_label, "OK");
   lv_obj_set_style_text_font(check_label, &lv_font_montserrat_24, LV_PART_MAIN);
-  lv_obj_set_style_text_color(check_label, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+  lv_obj_set_style_text_color(check_label, lv_color_hex(COL_DARK), LV_PART_MAIN);
   lv_obj_center(check_label);
 
   expiry_backspace_button = NULL;

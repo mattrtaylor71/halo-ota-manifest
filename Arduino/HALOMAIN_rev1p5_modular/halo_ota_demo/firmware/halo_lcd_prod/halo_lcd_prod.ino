@@ -351,12 +351,16 @@ void halo_lcd_prod_setup() {
                 HALO_OTA_POLICY_MAINTENANCE_ONLY ? 1 : 0, OTA_ENABLED ? 1 : 0, HALO_SHIP_TEST_MODE ? 1 : 0);
   Serial.printf("[LCD_MAINT] wake_cause=%s maint_flag=%d allowed_now=%d\n",
                 lcd_wake_cause_label(), lcd_maintenance_active() ? 1 : 0, lcd_is_maintenance_allowed_now() ? 1 : 0);
-#if HALO_OTA_POLICY_MAINTENANCE_ONLY
-  if (!lcd_is_maintenance_allowed_now()) {
-    Serial.println("[LCD_OTA] maintenance_only skip all ota prep");
-    return;
-  }
-#endif
+  // Deliberately NOT gated on maintenance state any more.
+  //
+  // This used to `return` early unless lcd_is_maintenance_allowed_now(), which
+  // depends on the maintenance-window machinery the nightly design removes — so
+  // the gate would have become permanently closed and ota_fail_load() would never
+  // run, leaving the LCD's OTA failure tracking pinned at zero forever.
+  //
+  // Same trap as SenseOtaPolicy::allowOtaWorkNow() on the Sense, which silently
+  // skipped every nightly update check while reporting success. The prep here is
+  // two NVS reads and some logging; there is nothing to gate.
   Serial.println("[LCD_OTA] OTA is now proxied via UART by the Sense board");
   ota_fail_load();
   Serial.printf("[LCD_OTA] fail_state count=%lu last_epoch=%lu\n",

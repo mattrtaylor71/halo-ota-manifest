@@ -98,7 +98,6 @@ Current behavior:
 - UI / status messages:
   - `UI_LIST`
   - `UI_STATUS`
-  - `UI_MEAL_RESULT`
   - `UI_TOAST`
   - `UI_VOICE_RESPONSE`
   - legacy/compatibility still handled in LCD code:

@@ -24,8 +24,6 @@
  *     diag_record_error() from sense_diag.h
  *   - uart_send_sense_diag() from sense_uart.h
  *   - UploadJob::CameraUploadMeta from sense_ops.h
- *   - waiting_for_mqtt_result, mqttClient, wifiClient
- *   - mqtt_clear_result_subscription() from sense_mqtt.h
  */
 
 #ifndef SENSE_CAMERA_H
@@ -386,9 +384,14 @@ static void tune_sensor_for_low_light() {
 
 // ── Camera capture helpers ──────────────────────────────────────────
 
+// Bounded grab. Every esp_camera_fb_get() below goes through this: the raw call
+// takes no timeout, so a sensor that never delivers a frame would hang the
+// capture task with no budget check able to fire.
+#include "sense_camera_grab.h"
+
 static void camera_settle_discard(uint8_t frames, uint32_t delay_ms) {
   for (uint8_t i = 0; i < frames; ++i) {
-    camera_fb_t* tmp = esp_camera_fb_get();
+    camera_fb_t* tmp = sense_camera_fb_get_bounded(CAMERA_GRAB_WARMUP_TIMEOUT_MS);
     if (tmp) {
       esp_camera_fb_return(tmp);
     }
@@ -430,7 +433,7 @@ static int compute_scene_brightness_preflight(sensor_t* s, int* green_ratio_out)
     s->set_quality(s, JPEG_QUALITY);
     return -1;
   }
-  camera_fb_t* fb = esp_camera_fb_get();
+  camera_fb_t* fb = sense_camera_fb_get_bounded(CAMERA_GRAB_WARMUP_TIMEOUT_MS);
   pre_elapsed_ms = millis() - pre_start_ms;
   if (pre_elapsed_ms > CAMERA_PREFLIGHT_BUDGET_MS) {
     camera_timeline_event("pre_timeout", (int32_t)pre_elapsed_ms);
@@ -553,16 +556,15 @@ static void deinit_camera() {
   esp_log_level_set("gdma", ESP_LOG_NONE);
   esp_camera_deinit();
   esp_log_level_set("gdma", ESP_LOG_ERROR);
+  // Release the bounded-grab worker BEFORE re-reserving: its stack is 5,120
+  // bytes of the same contiguous DMA-capable pool the reservation wants, and
+  // holding it here is what made the re-reservation fail (15x in a bench run)
+  // and the next camera init fail with it.
+  sense_camera_grab_stop();
   // Re-reserve the DMA block now that camera has freed its buffers.
   // This protects the contiguous region from WiFi/TLS fragmentation
   // before the next camera init.
-  g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
-      CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  if (g_camera_dma_reserve) {
-    Serial.printf("[CAMERA] DMA reservation re-acquired at %p\n", g_camera_dma_reserve);
-  } else {
-    Serial.println("[CAMERA] WARNING: DMA re-reservation failed");
-  }
+  camera_dma_reserve_acquire("camera_deinit");
   Serial.println("[CAM_PWR] esp_camera_deinit complete");
   camera_stop_xclk();
   camera_set_pins_high_z();
@@ -584,24 +586,111 @@ static void deinit_camera() {
 // ── Camera init ─────────────────────────────────────────────────────
 
 static bool init_camera() {
+#if HALO_CAMERA_KEEP_INIT
+  // Already initialised from an earlier capture this session — reuse it.
+  //
+  // NOTE: this does NOT fire today. The op worker deinits at the start of every
+  // capture ("SCAN: Camera already initialized - deinitializing first"), so the
+  // sensor is always gone by the time we get here. Kept because it is correct if
+  // that pre-deinit is removed. The actual fix for the DMA fragmentation is that
+  // the post-capture deinit is deferred (HALO_CAMERA_KEEP_INIT), which puts the
+  // free and the re-alloc back to back.
+  //
+  // This is the fix for "one reliable capture per boot". esp_camera_init() needs
+  // a contiguous 16KB internal DMA block, and after the first TLS handshake of a
+  // boot that block no longer exists (~40KB free, largest 15,860). Re-initialising
+  // per capture meant every capture after the first had to win that allocation
+  // out of an already-fragmented heap — measured 6/6 ok for the first, ~60% fail
+  // thereafter.
+  //
+  // The per-mode profile still has to be re-applied (dish/check-in/discard differ).
+  // The init-time warmup is deliberately skipped: capture_image() does its own
+  // warmup immediately before the shot, so AE still settles.
+  {
+    sensor_t* s_existing = esp_camera_sensor_get();
+    if (s_existing != NULL) {
+      Serial.printf("[CAMERA] reusing initialised camera (KEEP_INIT) profile=%d\n",
+                    (int)g_camera_profile);
+      camera_timeline_event("init_reuse", (int32_t)g_camera_profile);
+      apply_camera_profile(s_existing, g_camera_profile);
+      camera_timeline_event("profile_set", (int32_t)g_camera_profile);
+      return true;
+    }
+  }
+#endif
   Serial.println("[CAMERA] Initializing camera...");
   camera_timeline_event("init_begin", 0);
 
   // --- HTTP drain: user capture takes absolute priority over background uploads.
-  // foreground_active flag causes upload worker to abort PUT immediately.
-  // Just kill WiFi to free DMA — don't wait for upload to finish.
+  //
+  // This block used to say "don't wait for upload to finish" and call
+  // WiFi.mode(WIFI_OFF) with an HTTP request still in flight. That is a
+  // use-after-free: tearing down the interface frees lwIP's pbufs while the
+  // upload task is blocked inside recv(), so when that recv returns it walks a
+  // freed pbuf and calls its stale free-callback. Captured on-device as
+  //   Guru Meditation Error: Core 1 panic'ed (InstrFetchProhibited)
+  //   lwip_recvfrom -> lwip_recv_tcp -> pbuf_free -> esp_pbuf_free -> garbage PC
+  // ~14% of captures when an upload happened to overlap. The foreground_active
+  // abort cannot prevent it: that check only runs BETWEEN retry attempts, so it
+  // can never interrupt a task already blocked in recv().
+  //
+  // The capture still has absolute priority — we simply let the socket close
+  // itself first. foreground_active makes the upload task bail at its next
+  // check; we wait a bounded time for http_inflight to clear before touching
+  // WiFi at all.
   if (http_inflight) {
-    Serial.println("[CAMERA] HTTP inflight — killing WiFi for DMA (no wait)");
-    WiFi.disconnect(true);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    WiFi.mode(WIFI_OFF);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    WiFi.mode(WIFI_STA);
-    Serial.printf("[CAMERA] WiFi killed, http_inflight=%d\n", http_inflight ? 1 : 0);
+    // Nudge the upload worker to bail, but restore the flag afterwards — the
+    // scan flow owns foreground_active (set/cleared in Sense_Minimal.ino), and
+    // leaving it stuck true here would suppress every later background upload.
+    const bool fg_prev = foreground_active;
+    foreground_active = true;
+    const uint32_t drain_deadline_ms = millis() + CAMERA_HTTP_DRAIN_MAX_MS;
+    while (http_inflight && (int32_t)(millis() - drain_deadline_ms) < 0) {
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    foreground_active = fg_prev;
+    if (http_inflight) {
+      // Did not drain in time. Killing WiFi here is what crashes, so DON'T.
+      // Skip the teardown and let the capture proceed on whatever DMA is
+      // available; a degraded capture beats a panic that reboots the board,
+      // strands the LCD and loses the image entirely.
+      Serial.printf("[CAMERA] HTTP still inflight after %lums — SKIPPING WiFi teardown "
+                    "(avoids pbuf use-after-free panic)\n",
+                    (unsigned long)CAMERA_HTTP_DRAIN_MAX_MS);
+      uart_send_sense_diag("camera", "http_drain_timeout", "init",
+                           (int32_t)CAMERA_HTTP_DRAIN_MAX_MS, "skipped_wifi_kill");
+    } else {
+      Serial.println("[CAMERA] HTTP drained — safe to free DMA via WiFi teardown");
+      WiFi.disconnect(true);
+      vTaskDelay(pdMS_TO_TICKS(50));
+      WiFi.mode(WIFI_OFF);
+      vTaskDelay(pdMS_TO_TICKS(50));
+      WiFi.mode(WIFI_STA);
+    }
   } else {
-    // No HTTP inflight — only kill WiFi if DMA is too fragmented.
-    // Check DMA first; skip WiFi kill if we have enough space already.
+    // No HTTP inflight. Do NOT pre-emptively tear WiFi down.
+    //
+    // This measurement is taken while the 16KB DMA reserve is STILL HELD — it is
+    // not released until further down, right before esp_camera_init(). So the
+    // number here understates what the camera will actually have by the size of
+    // the reserve, and it read "low" on every single capture:
+    //     DMA low (18420 < 24576) — killing WiFi        x11 in an 11-capture run
+    // Killing WiFi every time is what starves uploads. On a strong AP the
+    // reconnect is fast enough to hide it; on a weak one (the real-home case)
+    // the link never comes back before the next capture kills it again, and
+    // uploads are "missed or very late" exactly as reported. A measured run had
+    // ZERO uploads complete across 11 successful captures for this reason.
+    //
+    // The teardown is also redundant: init_camera() already makes two attempts
+    // and calls quiesce_network_for_camera("retry_after_init_fail") between
+    // them, so a genuine DMA shortage is recovered anyway — at the cost of one
+    // failed attempt instead of one lost connection. Measured dma_largest of
+    // 18420 already exceeds the ~16KB esp_camera_init() needs, so attempt 1 is
+    // expected to succeed with WiFi up.
+    //
+    // Set CAMERA_PREEMPTIVE_WIFI_KILL=1 to restore the old behaviour.
     size_t dma_check = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+#if CAMERA_PREEMPTIVE_WIFI_KILL
     if (dma_check < CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES) {
       Serial.printf("[CAMERA] DMA low (%u < %u) — killing WiFi\n",
                     (unsigned)dma_check, (unsigned)CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES);
@@ -615,6 +704,10 @@ static bool init_camera() {
     } else {
       Serial.printf("[CAMERA] DMA OK (%u) — WiFi stays up\n", (unsigned)dma_check);
     }
+#else
+    Serial.printf("[CAMERA] DMA %u (reserve still held, +%u on release) — keeping WiFi up\n",
+                  (unsigned)dma_check, (unsigned)CAMERA_DMA_RESERVE_BYTES);
+#endif
   }
 
   auto log_camera_init_memory = [](const char* stage) {
@@ -629,20 +722,6 @@ static bool init_camera() {
   };
   auto quiesce_network_for_camera = [&](const char* reason) {
     bool changed = false;
-#ifndef HALO_SENSE_PROD_WRAPPER
-    if (!waiting_for_mqtt_result) {
-      mqtt_clear_result_subscription();
-    }
-    if (mqttClient.connected()) {
-      Serial.printf("[CAMERA] Disconnecting MQTT before init reason=%s\n",
-                    reason ? reason : "unknown");
-      mqttClient.disconnect();
-      changed = true;
-    }
-    wifiClient.stop();
-#else
-    // Only use WiFi APIs here — mqtt_stop_for_ota() is NOT thread-safe
-    // from op_worker and races with MQTT event handler causing heap corruption.
     Serial.printf("[CAMERA] quiesce_network reason=%s wifi_mode=%d\n",
                   reason ? reason : "unknown", (int)WiFi.getMode());
     if (WiFi.getMode() != WIFI_OFF) {
@@ -654,7 +733,6 @@ static bool init_camera() {
       WiFi.mode(WIFI_STA);
       changed = true;
     }
-#endif
     if (changed || reason != nullptr) {
       delay(CAMERA_NETWORK_QUIESCE_DELAY_MS);
     }
@@ -663,27 +741,24 @@ static bool init_camera() {
 
   log_camera_init_memory("pre_init");
   size_t dma_largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  if (dma_largest < CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES
-#ifndef HALO_SENSE_PROD_WRAPPER
-      || mqttClient.connected()
-#endif
-  ) {
-    Serial.printf("[CAMERA] Pre-init guard dma_largest=%u threshold=%u mqtt=%d\n",
+  if (dma_largest < CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES) {
+    Serial.printf("[CAMERA] Pre-init guard dma_largest=%u threshold=%u\n",
                   (unsigned)dma_largest,
-                  (unsigned)CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES,
-#ifndef HALO_SENSE_PROD_WRAPPER
-                  mqttClient.connected() ? 1 : 0);
-#else
-                  0);
-#endif
+                  (unsigned)CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES);
     quiesce_network_for_camera("pre_init_guard");
   }
 
   // Release the DMA reservation so esp_camera_init() can allocate from it.
+  //
+  // Log the state even when there is nothing to release: "no release line before
+  // a failed init" was the entire signature of the 2026-08-20 failure, and it was
+  // indistinguishable from the line simply being dropped. Say so explicitly.
   if (g_camera_dma_reserve) {
-    heap_caps_free(g_camera_dma_reserve);
-    g_camera_dma_reserve = nullptr;
-    Serial.printf("[CAMERA] DMA reservation released (%u bytes freed)\n",
+    camera_dma_reserve_release("camera_init");
+  } else {
+    Serial.printf("[DMA_RESERVE][WARN] not held at camera_init - region was "
+                  "unprotected since the last release; largest=%u need=%u\n",
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
                   (unsigned)CAMERA_DMA_RESERVE_BYTES);
   }
 
@@ -743,6 +818,35 @@ static bool init_camera() {
       camera_set_pins_high_z();
       camera_power_disable();
       quiesce_network_for_camera("retry_after_init_fail");
+
+      // Wait for contiguous DMA to actually recover before retrying.
+      //
+      // Retrying immediately is what made this a ~1-in-12 (and in a mixed-mode
+      // soak, far worse) failure: the camera needs ONE contiguous 16,384-byte
+      // DMA block and the retry fired while only 15,860 was available. Measured
+      // 2026-08-21, the same capture:
+      //     Memory pre_init_guard        dma_largest=15860   need=16384  FAIL
+      //     quiesce_network -> WiFi off to free DMA buffers
+      //     Memory retry_after_init_fail dma_largest=15860   <- UNCHANGED
+      //     attempt=2                                         FAIL
+      // Killing WiFi frees nothing here; the block is held by a background
+      // upload parked mid-PUT. It comes back on its own — so wait for it rather
+      // than burning the retry on a number we can already see is too small.
+      {
+        const size_t need = CAMERA_DMA_RESERVE_BYTES;
+        const uint32_t t0 = millis();
+        const uint32_t deadline = t0 + CAMERA_DMA_RECOVER_MAX_MS;
+        size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        while (largest < need && (int32_t)(millis() - deadline) < 0) {
+          vTaskDelay(pdMS_TO_TICKS(100));
+          largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        }
+        Serial.printf("[CAMERA] dma_recover waited_ms=%lu largest=%u need=%u %s\n",
+                      (unsigned long)(millis() - t0), (unsigned)largest, (unsigned)need,
+                      largest >= need ? "RECOVERED" : "still_short");
+        uart_send_sense_diag("camera", "dma_recover", camera_diag_label(),
+                             (int32_t)largest, largest >= need ? "recovered" : "still_short");
+      }
       continue;
     }
 
@@ -755,6 +859,23 @@ static bool init_camera() {
 
   log_camera_init_memory("post_init");
   Serial.println("[CAMERA] Camera initialized successfully");
+  // Start the bounded-grab worker before ANY frame is pulled, so even the init
+  // warmup below is covered. Without this the first grabs of the boot would be
+  // the unbounded ones.
+  //
+  // Measured around the call because the task stack comes out of internal
+  // DMA-capable RAM, and esp_camera_init() needs a contiguous 16KB block from
+  // that same pool. A batch run showed init failing whenever dma_largest landed
+  // at 14324 or 7412 (vs succeeding at 17396/19444), so the worker's cost has to
+  // be a number, not an assumption.
+  {
+    const size_t dma_before = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
+    sense_camera_grab_start();
+    const size_t dma_after = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
+    Serial.printf("[CAM_GRAB] dma_largest before=%u after=%u delta=%d\n",
+                  (unsigned)dma_before, (unsigned)dma_after,
+                  (int)dma_after - (int)dma_before);
+  }
   camera_timeline_event("init_ok", 0);
   uart_send_sense_diag("camera", "init_ok", camera_diag_label(), 0, "camera_ready");
   sensor_t* s = esp_camera_sensor_get();
@@ -816,7 +937,7 @@ static bool init_camera() {
   bool detected_low_light = false;
   for (uint8_t i = 0; i < CAMERA_INIT_WARMUP_FRAMES; ++i) {
     uint32_t frame_start = millis();
-    camera_fb_t* tmp = esp_camera_fb_get();
+    camera_fb_t* tmp = sense_camera_fb_get_bounded(CAMERA_GRAB_WARMUP_TIMEOUT_MS);
     uint32_t frame_ms = millis() - frame_start;
     if (tmp) {
       // Auto-detect camera module on first frame (only once per boot)
@@ -899,7 +1020,7 @@ static bool warmup_and_capture(camera_fb_t*& fb, bool fast_profile) {
   int warmup_success = 0;
     int warmup_fail_streak = 0;
     for (int i = 0; i < warmup_frames; ++i) {
-    tmp = esp_camera_fb_get();
+    tmp = sense_camera_fb_get_bounded(CAMERA_GRAB_WARMUP_TIMEOUT_MS);
     if (tmp) {
       warmup_success++;
         warmup_fail_streak = 0;
@@ -939,8 +1060,22 @@ static bool warmup_and_capture(camera_fb_t*& fb, bool fast_profile) {
   Serial.println("[CAMERA] Attempting final capture...");
     camera_timeline_event("final_try", max_attempts);
     for (uint8_t attempt = 1; attempt <= max_attempts; ++attempt) {
-      out = esp_camera_fb_get();
+      // THE load-bearing trace pair. The grab is now bounded (see
+      // sense_camera_grab.h), so a stalled sensor returns nullptr here instead
+      // of hanging the capture task forever. The trace stays: a CAM_GRAB_BEGIN
+      // whose CAM_GRAB_END reports len=-1 after the full timeout is direct
+      // proof of a camera stall, and it is still the only log line that shows
+      // the difference between "no frame" and "no answer".
+      sense_captrace_mark_i("cam_grab_begin", "attempt", attempt);
+      out = sense_camera_fb_get_bounded(CAMERA_GRAB_TIMEOUT_MS);
+      sense_captrace_mark_i("cam_grab_end", "len", out ? (long)out->len : -1);
       if (out) {
+        break;
+      }
+      // A latched stall will refuse every subsequent grab, so retrying just
+      // burns the user's time on the capturing screen. Break out and report.
+      if (sense_camera_grab_stalled()) {
+        Serial.println("[CAMERA] Final capture aborted: grab stalled, not retrying");
         break;
       }
       Serial.printf("[CAMERA] WARNING: Final capture attempt %u/%u returned NULL\n",
@@ -949,10 +1084,21 @@ static bool warmup_and_capture(camera_fb_t*& fb, bool fast_profile) {
     }
 
     if (!out) {
-    Serial.println("[CAMERA] ERROR: Final capture returned NULL");
-    camera_timeline_event("final_null", -1);
-    diag_record_error("camera_capture", -1, "final_null");
-    uart_send_sense_diag("camera", "final_null", camera_diag_label(), -1, "final_capture_null");
+    // Distinguish "sensor gave us nothing" from "sensor never answered at all".
+    // They look identical to the old code but need different responses: a null
+    // is retryable, a stall means the camera is wedged until it is recovered.
+    const bool stalled = sense_camera_grab_stalled();
+    const char* reason = stalled ? "camera_stall" : "final_capture_null";
+    Serial.printf("[CAMERA] ERROR: Final capture failed (%s)\n", reason);
+    camera_timeline_event(stalled ? "final_stall" : "final_null", -1);
+    diag_record_error("camera_capture", -1, reason);
+    uart_send_sense_diag("camera", stalled ? "final_stall" : "final_null",
+                         camera_diag_label(), -1, reason);
+    if (stalled) {
+      // Try to clear it now so the NEXT capture has a chance; if the worker is
+      // genuinely wedged this reports that and the camera stays refused.
+      sense_camera_grab_recover();
+    }
     return false;
   }
 

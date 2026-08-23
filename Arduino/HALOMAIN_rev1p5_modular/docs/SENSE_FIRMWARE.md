@@ -10,7 +10,6 @@ The Sense board is an **XIAO ESP32-S3** with PSRAM, OV2640 camera, I2S microphon
 - **WiFi management** with guard state machine, background maintenance, and hard-reset recovery
 - **Sleep coordination** with the LCD board via a handshake protocol
 - **OTA self-update** (via production wrapper) and LCD OTA proxy over UART
-- **MQTT** dish result subscription (dev builds; disabled in production)
 - **Shopping list** fetch and display via UART to LCD
 
 ### Hardware
@@ -93,7 +92,7 @@ Boot flow:
    - **TIMER**: Init UARTs, send status, check if LCD is active (2s window), call `ota_on_timer_wake()`
    - **Cold boot**: Standard init
 6. Configure wake GPIO for runtime polling (pullup, input)
-7. Create FreeRTOS queues: `op_queue` (20 slots), `upload_queue` (10), `upload_queue_dish` (10)
+7. Create FreeRTOS queues: `op_queue` (20 slots), `upload_queue` (10)
 8. Init upload persistence (SPIFFS) if enabled
 9. Create mutexes: `http_mutex`, `wifi_connect_mutex`, `mic_mutex`, `g_list_mutex`
 10. Allocate voice audio buffer in PSRAM (512 KB)
@@ -135,7 +134,6 @@ Main loop responsibilities:
 4. **Upload persistence replay**: Attempt to re-queue failed uploads from SPIFFS.
 5. **Guardian force sleep**: If awake > 5 minutes, force deep sleep.
 6. **Work request processing**: Handle `reset_wifi_requested`, `refresh_requested`, `delete_requested`.
-7. **MQTT loop** (dev builds only).
 8. **Wake pin polling**: Detect LCD wake pulses (falling edge on GPIO2) every 50ms.
 9. **Sleep coordination**: Evaluate `sleep_requested`, check cooldown, holdoff, background work, then enter deep sleep.
 
@@ -204,7 +202,7 @@ Sleep flow:
 1. LCD sends `INPUT_SLEEP`
 2. Sense checks wake pin, pending operations, cooldown
 3. If blocked, sends `SLEEP_DENY` with retry_ms
-4. If clear, drains upload queue (30s window), disconnects WiFi/MQTT, deinits camera
+4. If clear, drains upload queue (budget scales with queue depth), disconnects WiFi, deinits camera
 5. Configures EXT0 + timer wake, sends `SLEEP_READY` + WiFi diag summary
 6. Calls `esp_deep_sleep_start()` (no return)
 
@@ -285,7 +283,7 @@ fetch_ms=... (request->UI_LIST)`.
 #### Key Functions
 
 **`init_camera()`** -- Camera initialization sequence:
-1. Check DMA availability; kill WiFi if DMA < 24 KB or HTTP inflight
+1. Check DMA availability. If DMA < 24 KB: with an HTTP request **inflight**, wait up to `CAMERA_HTTP_DRAIN_MAX_MS` (1500) for it to finish, then tear WiFi down — and if it has *not* drained, **skip the teardown entirely**. Tearing WiFi down under an inflight request frees lwIP pbufs while the upload task is blocked in `recv()`, which panicked the board (`lwip_recvfrom → lwip_recv_tcp → pbuf_free`) at a measured 2 panics / 8 captures. Losing the DMA headroom for one capture is strictly better than a panic.
 2. Release DMA reservation (16 KB) so esp_camera_init can use it
 3. Configure camera hardware (XCLK, pins, JPEG, 2 framebuffers in PSRAM)
 4. Two init attempts; on first failure, deinit + quiesce network + retry
@@ -321,7 +319,94 @@ fetch_ms=... (request->UI_LIST)`.
 - `camera_power_hold_enable()`: GPIO hold + deep sleep hold (keeps camera off during sleep)
 - `camera_stop_xclk()`: Detach LEDC channel from XCLK pin
 
+#### Upload failure must never free the photo
+
+A failed upload used to destroy the user's capture outright. The `put_fail` path
+went straight from the diagnostic to `free(job.image_buf)` with **no persistence
+attempt at all** — not SPIFFS, not the SD card. The SD spool built to prevent
+exactly this was only wired into the *sleep* path (a job parked because the
+foreground was busy), never into the failure path it exists for.
+
+Order now, in `upload_persist_handle_failure()` so every failure reason is
+covered (`put_fail`, `put_timeout`, `presign_fail`, `presign_timeout`,
+`voice_post_fail`) rather than patching call sites one at a time:
+
+1. `upload_persist_save()` → SPIFFS. For a real capture this **always** fails:
+   the partition is 173,441 B and writing needs roughly twice the image size.
+   Measured: `skip_save len=156779 avail=173441 required=222391`.
+2. Fall back to `sense_spool_image_to_lcd()` → the LCD's SD card.
+3. Only if both fail is the photo lost, and that emits a `SENSE_DIAG` marked
+   `PHOTO_LOST` so the unrecoverable case is at least visible.
+
+**The image buffer may only be freed after this returns.** Any new failure path
+that frees earlier reintroduces silent data loss.
+
+#### Bounded Frame Grab (`sense_camera_grab.h`)
+
+`esp_camera_fb_get()` takes no timeout — the installed driver exposes only `camera_fb_t* esp_camera_fb_get(void)`, with no timeout variant. Every budget check in this module (`CAMERA_PREFLIGHT_BUDGET_MS`, `camera_timeline_event`, the `elapsed_ms` comparisons) runs *after* the call returns, so none of them can fire on the one failure they exist for: a sensor that never delivers a frame. That hung the capture task and stranded the LCD on the capturing screen.
+
+The grab now runs on a dedicated worker task; callers wait on a semaphore with a deadline.
+
+| Symbol | Meaning |
+|---|---|
+| `sense_camera_fb_get_bounded(timeout_ms)` | The only way frames are pulled. Returns `nullptr` on expiry. |
+| `sense_camera_grab_start()` | Starts the worker. Called from `init_camera()` immediately after `esp_camera_init()` succeeds, so even init warmup frames are covered. |
+| `sense_camera_grab_stalled()` | True once a grab has overrun; further grabs are refused rather than queued behind a task that will never wake. |
+| `sense_camera_grab_recover()` | Clears the latch if the frame merely arrived late. Returns false if the worker is genuinely wedged. |
+| `CAMERA_GRAB_TIMEOUT_MS` (5000) | Final capture bound (typical grab is ~300–800 ms). |
+| `CAMERA_GRAB_WARMUP_TIMEOUT_MS` (2500) | Warmup/preflight bound. |
+
+**Rules:**
+- **Every** grab must go through `sense_camera_fb_get_bounded()`. Two contexts calling `esp_camera_fb_get()` concurrently would race inside the driver, so a direct call left anywhere reintroduces the bug in a harder-to-find form. All five former call sites in this module are converted; the only live raw calls are inside the worker and its no-worker fallback.
+- A stall **latches**. The worker stays blocked inside the driver — FreeRTOS cannot cancel a blocked task and `esp_camera_deinit()` contends on the same state — so there is no in-process way to reclaim it.
+- A late frame is returned to the pool by the worker, not the caller, so a caller that gave up cannot leak one of the driver's small framebuffer pool.
+- Capture failure now reports `camera_stall` distinctly from `final_capture_null`: a null is retryable, a stall is not, and retrying a latched stall only burns the user's time on the capturing screen.
+
 #### DMA Guard Pattern
+
+> **2026-08-20 — the guards were failing silently, and it cost ~1 capture in 12.**
+> The margin here is about **1 KB**: `esp_camera_init()` needs one contiguous
+> **16,384**-byte DMA block and the largest free block measures **17,396**. The
+> reserve exists to hold exactly that block so WiFi/TLS cannot fragment it.
+>
+> Six sites released it and five re-acquired it, each open-coded. **Three released
+> with no log at all, and every re-acquire discarded its result** (`halo_tls_restore_dma_reserve()`
+> logged `"restored reserve, ptr=%p"` unconditionally, printing `ptr=0x0` on failure
+> and still reading as success). So a failed re-acquire left the region unprotected
+> with no evidence, and the *next* camera init failed with a bare `0xffffffff`.
+> The signature was a failed init with **no preceding "DMA reservation released"
+> line** — because the pointer was already null, so the guarded release did nothing.
+> That is indistinguishable from a dropped log line, which is how it survived.
+>
+> Measured: the reserve was **NOT held at camera-init time in 37 of 39 captures**.
+> The safety net was essentially never deployed; inits were succeeding on luck.
+>
+> All sites now delegate to `camera_dma_reserve_release(who)` /
+> `camera_dma_reserve_acquire(who)` (`Sense_Minimal.ino`, just after
+> `CAMERA_DMA_RESERVE_BYTES`), which log every transition with its caller, retry
+> the acquire 3× (TLS frees internal SRAM slightly *after* the socket closes, so
+> the destructor is the worst possible moment to try), and emit
+> `[DMA_RESERVE][WARN] re-acquire FAILED ... next camera init is at risk` when
+> exhausted. `init_camera()` additionally logs when the reserve was **not** held,
+> so the exact signature that hid this now self-reports.
+>
+> **The exposure itself is still open, and one fix was tried and REVERTED.**
+> An idle re-arm (re-acquire the reserve whenever the device looks idle) drove
+> exposure 95% → 0% over 24 captures — and broke uploads: presign `HTTP 200` went
+> **41/41 → 6/25**, with one capture losing its photo outright
+> (`SD spool FAILED ... saved=0`). A TLS handshake needs ~25–30KB **contiguous**
+> internal RAM, which is the whole reason these guards release the block; "idle" is
+> not mutually exclusive with an upload in flight (uploads continue in the
+> background after `current_job` reports DONE), so the re-arm raced the guards and
+> took the block back mid-handshake. The logs interleave exactly that:
+> `PRESIGN attempt=` / `re-armed while idle` / `HTTP_FAIL label=PRESIGN`.
+> Gating on `http_inflight`/`upload_inflight` is **not** sufficient — the presign
+> retry loop spans seconds with gaps where those flags are clear.
+>
+> Current state: diagnostics + retry only. Camera init fails ~1 in 12 but reports
+> an honest error and the next capture succeeds; a failed upload can lose the
+> photo. Protecting the upload is worth more. Any future attempt at this must be
+> measured against **presign success rate**, not just camera exposure.
 
 Before WiFi/TLS operations, the 16 KB DMA reservation is freed to give TLS enough contiguous internal SRAM. An RAII `DmaGuard` struct re-acquires it on function exit. This pattern appears in:
 - `http_post_json_with_retries()`
@@ -355,7 +440,7 @@ Before WiFi/TLS operations, the 16 KB DMA reservation is freed to give TLS enoug
 5. If wake pin active: wait for deassert, apply mitigation, send RELEASE_WAKE request
 6. If still stuck: disable EXT0, use timer fallback
 7. **Upload flush window** (30s max): Wait for pending uploads to drain
-8. Disconnect MQTT and WiFi; stop BT
+8. Disconnect WiFi; stop BT
 9. Flush UART, suspend op_worker_task
 10. Deinit camera, enable PWDN hold through sleep
 11. Configure wake sources (EXT0 + OTA timer)
@@ -451,7 +536,22 @@ Tracks per-wake-cycle WiFi stats:
 
 ### 6. sense_upload_exec.h -- Upload Execution
 
-**Purpose:** Presign URL request, S3 PUT upload with chunked write, dish result HTTP polling, and UI meal result message.
+**Purpose:** Presign URL request and S3 PUT upload with chunked write.
+
+**Nutrition removal (2026-08-21):** the dish-result HTTP poller (`wait_for_dish_result_http()`), `build_dish_result_url()` and `uart_send_ui_meal_result()` were deleted with the nutrition feature. Dish is a plain capture-and-log.
+
+**TLS on the photo PUT (2026-08-20):** the S3 PUT used `tls.setInsecure()` while presign, MQTT and
+the OTA paths all validated — the one leg carrying user photo data was the one not checking who it
+was talking to. It now calls the same `tls_configure()` helper as the rest of the HTTP path (cert
+bundle when available, else the pinned Amazon Root CA 1). The presigned URL is fetched over a
+validated channel, so this was never wide open, but "the URL is secret" is not peer authentication.
+
+This was left unfixed for a while because the path has a heap-exhaustion panic history (the AES-DMA
+fault fixed in 6.1.815) and validation costs more heap than `setInsecure`. Measured on hardware,
+that fear did not materialise: `[UPLOAD_TLS] validated heap_before=35956 after=36168 delta=+212
+dma_largest=17396`, `PUT status: 200`, 4/4 captures. Heap is logged either side of the handshake
+on every PUT so a future regression is visible rather than inferred; if free heap or
+`dma_largest` collapses here, revert.
 
 #### Key Functions
 
@@ -473,12 +573,8 @@ Tracks per-wake-cycle WiFi stats:
 - Uses result_url from presign response (or builds from user/device/job IDs)
 - Polls with `http_get_with_retries()` in a loop
 - Handles states: pending, fast (intermediate result), final (complete)
-- Emits `UI_MEAL_RESULT` UART message to LCD with calories, macros, health score
 - Respects `DISH_RESULT_TIMEOUT_MS` (60s) and job deadline
 
-**`uart_send_ui_meal_result()`** -- Sends structured nutrition data to LCD:
-- JSON message type `UI_MEAL_RESULT`
-- Fields: calories, protein_g, carbs_g, fat_g, confidence, meal_summary, recommendation, mode, job_id
 
 ---
 
@@ -493,7 +589,7 @@ Tracks per-wake-cycle WiFi stats:
 **`upload_queue_is_full()`** -- True if total >= `UPLOAD_QUEUE_MAX` (10).
 
 **`queue_upload_job()`** -- Enqueue image upload:
-- Dish jobs go to `upload_queue_dish` via `xQueueSendToFront` (priority)
+- All modes go to `upload_queue` via `xQueueSend` (plain FIFO; the dish priority queue was removed 2026-08-21)
 - Normal jobs go to `upload_queue` via `xQueueSend`
 - Copies mode, expiry, quantity, camera metadata, image buffer pointer
 
@@ -579,27 +675,14 @@ Sessions track conversation context across multiple voice turns:
 
 ---
 
-### 10. sense_mqtt.h -- MQTT (Dev Builds Only)
+### 10. sense_mqtt.h -- DELETED (2026-08-21)
 
-**Purpose:** AWS IoT MQTT connection for receiving dish analysis results. **Disabled in production** (`HALO_SENSE_PROD_WRAPPER` uses HTTP polling instead).
+Removed with the nutrition feature. MQTT existed solely to receive dish
+analysis results; `on_mqtt_message()` handled nothing else. All of
+`waiting_for_mqtt_result`, `mqtt_wait_deadline`, `current_result_local_job_id`,
+`current_result_mode`, `active_dish_job_id`, `clear_active_dish_job()` and
+`g_dish_timing` went with it.
 
-In production builds, all MQTT variables are stubbed:
-- `mqtt_clear_result_subscription()` and `mqtt_subscribe_result_topic_if_needed()` are no-ops
-- `waiting_for_mqtt_result` is still used as a generic "waiting for dish result" flag
-
-#### Key Functions (Dev Builds)
-
-**`connect_to_mqtt()`** -- Connects to AWS IoT with mTLS (root CA + device cert + private key).
-
-**`on_mqtt_message()`** -- Callback for dish result messages:
-- Matches job_id against `current_scan_job_id`
-- Handles fast (intermediate) and final results
-- Sends `UI_MEAL_RESULT` to LCD
-- Clears wait state on receipt
-
-**`mqtt_ensure_connected()`** -- Reconnect with retry (250ms backoff, 4 attempts before reset).
-
----
 
 ### 11. sense_presign.h -- Presign URL Generation
 
@@ -637,7 +720,7 @@ In production builds, all MQTT variables are stubbed:
 1. LCD shows HOLD_STILL (CAPTURING)
 2. Sense captures image
 3. LCD shows LOGGED for 2s (DONE)
-4. Background: presign + PUT upload (no nutrition wait in foreground)
+4. Background: presign + PUT upload, deferred to the sleep flush like every other mode
 
 **Check-in mode:**
 1. LCD shows HOLD_STILL (CAPTURING)
@@ -653,7 +736,7 @@ In production builds, all MQTT variables are stubbed:
 
 **`scan_ui_status_emit()`** -- Sends `UI_STATUS` to LCD with phase, mode, job_id, and auto-generated screen hint. Suppresses most phases for quiet modes.
 
-**`dish_upload_pending()`** -- True if any dish work is in progress (active job, dish queue, dish scan inflight, or waiting for result).
+**`dish_upload_pending()`** -- Deleted 2026-08-21. Dish has no special upload handling.
 
 **`foreground_scan_pending()`** -- True if a scan is actively in progress (for sleep blocking).
 
@@ -750,9 +833,56 @@ hold `g_list_mutex`.
 
 ---
 
+### RTC memory: `RTC_DATA_ATTR` does NOT survive `esp_restart()`
+
+A trap that cost a real bug, found 2026-08-20. The two attributes are not interchangeable:
+
+| Attribute | Section | Deep-sleep wake | `esp_restart()` | Power-on |
+|---|---|---|---|---|
+| `RTC_DATA_ATTR` | `.rtc.data` (**initialised**) | survives | **re-initialised from the image** | re-initialised |
+| `RTC_NOINIT_ATTR` | `.rtc_noinit` (not initialised) | survives | **survives** | garbage |
+
+`g_cam_wedge_restarts` — the counter bounding the camera self-heal restart budget — was
+`RTC_DATA_ATTR`, so it was zeroed by the very `esp_restart()` it was counting. Measured on
+hardware: eight consecutive self-heal restarts all reported `wedge_restart code=1`, never 2, and
+`restart_budget_exhausted` never fired. A genuinely faulty camera would have rebooted the device
+forever — exactly the boot loop the cap exists to prevent. The code comment claiming it "survives
+deep sleep and SW reset" was simply wrong.
+
+Fixed to `RTC_NOINIT_ATTR` plus a magic word (`CAM_WEDGE_MAGIC`), because `.rtc_noinit` holds
+garbage after a power cycle and needs an explicit validity check to distinguish "fresh device" from
+"restarted mid-self-heal".
+
+**Audit rule:** any counter that must survive a self-heal restart needs `RTC_NOINIT_ATTR` + a
+magic. Any state that only needs to survive deep sleep can stay `RTC_DATA_ATTR`. Check which one
+you actually need — the failure is silent, and it hides behind seeded tests that write the value
+directly.
+
 ### 16. sense_time.h -- NTP/RTC Time Cache
 
 **Purpose:** Persist last-known epoch to RTC memory and NVS so TLS can bootstrap time after deep sleep without waiting for NTP.
+
+**Owner timezone (2026-08-20).** The nightly maintenance wake is scheduled at **02:00 local**, so
+the zone is not cosmetic. `sense_set_timezone()` applies a POSIX TZ string; `HALO_DEFAULT_TZ` is
+`PST8PDT,M3.2.0,M11.1.0`.
+
+The real defect was in the prod wrapper, not here: `ensure_timezone_pt()` hardcoded
+`setenv("TZ","PST8PDT,…")` and runs on **WiFi connect** — i.e. *after* `setup()` applies the zone
+loaded from NVS — so it silently overwrote it and forced US Pacific on every device in the fleet.
+**A backend change alone would never have fixed this**; the firmware discarded whatever arrived,
+while `nextwake` reported the wrong zone convincingly. It now reads NVS and applies the owner's
+zone, logging `[TZ] set=<tz> source=nvs|default reason=<why>`.
+
+Plumbing: `ProvisioningState::load/saveTimezone` (NVS key `tz`); the claim-response parser accepts
+`timezone` or `tz` (response doc grown 256 → 384 so a TZ string cannot silently truncate the
+parse); absent/empty leaves the existing value alone rather than resetting it to Pacific.
+Verified end to end on hardware: stored `EST5EDT,M3.2.0,M11.1.0` → reboot → applied from NVS →
+wake target `2026-08-21 02:00:00` Eastern, 48,202 s out — correct to the second.
+
+**Backend still owes** the field in the claim 200 response. It must be a POSIX string WITH the DST
+rule, not an IANA name (`America/New_York` will not work — there is no tz database on the ESP32),
+and already-claimed devices never re-claim, so moving the existing fleet off Pacific needs a
+backfill path.
 
 #### Storage
 

@@ -150,21 +150,18 @@ extern "C" bool halo_wifi_hard_reset_for_ota(const char* reason, uint32_t timeou
 // Sense_Minimal.ino, which is #included into this translation unit (line above),
 // so they are in scope here. These hooks have external linkage so the shared
 // ProvisioningManager.cpp (a separate TU) can call them.
+// Both delegate to camera_dma_reserve_{release,acquire} (Sense_Minimal.ino) so
+// every release/re-acquire in the firmware is logged the same way and a failure
+// is loud. The previous restore logged "restored reserve, ptr=%p" unconditionally,
+// which prints ptr=0x0 on failure and still READS as success -- misleading rather
+// than silent, but it hides the same state: an unprotected DMA region that makes
+// the next esp_camera_init() fail with a bare 0xffffffff.
 extern "C" void halo_tls_free_dma_reserve() {
-  if (g_camera_dma_reserve != nullptr) {
-    heap_caps_free(g_camera_dma_reserve);
-    g_camera_dma_reserve = nullptr;
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    LOG_INFO("[TLS_DMA] freed reserve, largest_internal=%u", (unsigned)largest);
-  }
+  camera_dma_reserve_release("provisioning_tls");
 }
 
 extern "C" void halo_tls_restore_dma_reserve() {
-  if (g_camera_dma_reserve == nullptr) {
-    g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
-        CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    LOG_INFO("[TLS_DMA] restored reserve, ptr=%p", (void*)g_camera_dma_reserve);
-  }
+  camera_dma_reserve_acquire("provisioning_tls");
 }
 
 // Shared RAII guard for outbound TLS in THIS translation unit: frees the 16KB
@@ -202,8 +199,15 @@ static const uint32_t MAINT_FOLLOWUP_RETRY_DELAYS_S[MAINT_FOLLOWUP_RETRY_MAX_ATT
 #ifndef OTA_CHANNEL
 #define OTA_CHANNEL "dev"
 #endif
+// PROD by default (2026-08-21). A plain `arduino-cli compile` must be
+// ship-safe, exactly like the bench flags in SHIP_CHECKLIST §1 — the previous
+// default meant every device built from this tree fetched firmware from
+// halo-ota-dev, the bucket we push TEST builds to. A stray dev push would have
+// gone straight to customer hardware.
+//
+// Bench/dev builds opt IN:  --build-property "compiler.cpp.extra_flags=-DOTA_DEFAULT_ENV=\"dev\""
 #ifndef OTA_DEFAULT_ENV
-#define OTA_DEFAULT_ENV "dev"
+#define OTA_DEFAULT_ENV "prod"
 #endif
 #ifndef OTA_S3_BUCKET
 #define OTA_S3_BUCKET ""
@@ -443,40 +447,6 @@ static void maintenance_followup_retry_clear(const char* reason) {
   g_maint_followup_retry_request_id[0] = '\0';
 }
 
-static bool maintenance_followup_retry_schedule(const MaintenanceWindow* mw, const char* reason) {
-  if (g_maint_followup_retry_attempts >= MAINT_FOLLOWUP_RETRY_MAX_ATTEMPTS) {
-    LOG_INFO("[MAINT_RETRY] exhausted attempts=%u reason=%s",
-             (unsigned)g_maint_followup_retry_attempts,
-             reason ? reason : "unknown");
-    return false;
-  }
-  uint32_t base_epoch = maint_sync_epoch_now();
-  if (base_epoch == 0) {
-    LOG_INFO("[MAINT_RETRY] schedule_failed reason=%s base_epoch=0",
-             reason ? reason : "unknown");
-    return false;
-  }
-  uint8_t next_attempt = g_maint_followup_retry_attempts;
-  uint32_t delay_s = MAINT_FOLLOWUP_RETRY_DELAYS_S[next_attempt];
-  g_maint_followup_retry_active = 1;
-  g_maint_followup_retry_attempts = next_attempt + 1;
-  g_maint_followup_retry_wake_epoch = base_epoch + delay_s;
-  maint_sync_copy_str(g_maint_followup_retry_reason,
-                      sizeof(g_maint_followup_retry_reason),
-                      reason ? reason : "unknown");
-  maint_sync_copy_str(g_maint_followup_retry_request_id,
-                      sizeof(g_maint_followup_retry_request_id),
-                      (mw && mw->request_id[0]) ? mw->request_id : "");
-  LOG_INFO("[MAINT_RETRY] scheduled attempt=%u/%u delay_s=%lu wake_epoch=%lu reason=%s request_id=%s",
-           (unsigned)g_maint_followup_retry_attempts,
-           (unsigned)MAINT_FOLLOWUP_RETRY_MAX_ATTEMPTS,
-           (unsigned long)delay_s,
-           (unsigned long)g_maint_followup_retry_wake_epoch,
-           g_maint_followup_retry_reason[0] ? g_maint_followup_retry_reason : "-",
-           g_maint_followup_retry_request_id[0] ? g_maint_followup_retry_request_id : "-");
-  sched_event_note("followup_retry", g_maint_followup_retry_request_id);
-  return true;
-}
 
 static bool maintenance_followup_retry_consume_wake() {
   if (!maintenance_followup_retry_pending()) {
@@ -517,19 +487,6 @@ static void maint_sync_note_resolution(const char* resolution, const char* reque
                       request_id);
 }
 
-static void maintenance_idle_diag_note(unsigned long idle_ms,
-                                       bool gate_hit,
-                                       bool bypassed,
-                                       bool http_window,
-                                       const char* reason) {
-  g_maint_last_idle_ms = static_cast<uint32_t>(idle_ms);
-  g_maint_last_idle_gate_hit = gate_hit ? 1 : 0;
-  g_maint_last_idle_gate_bypassed = bypassed ? 1 : 0;
-  g_maint_last_idle_http_window = http_window ? 1 : 0;
-  maint_sync_copy_str(g_maint_last_idle_gate_reason,
-                      sizeof(g_maint_last_idle_gate_reason),
-                      reason ? reason : "unknown");
-}
 
 static void maint_sync_reset_ack_state() {
   g_lcd_maint_ack_received = false;
@@ -586,24 +543,9 @@ static bool maintenance_window_is_consumed(const MaintenanceWindow& mw, uint64_t
           (mw.start_epoch + mw.duration_sec + mw.grace_after_sec) == g_maint_consumed_end_epoch);
 }
 
-static void maintenance_window_mark_consumed(const MaintenanceWindow& mw, const char* reason) {
-  maintenance_followup_retry_clear("consumed");
-  g_maint_consumed_valid = 1;
-  g_maint_consumed_start_epoch = mw.start_epoch;
-  g_maint_consumed_end_epoch = mw.start_epoch + mw.duration_sec + mw.grace_after_sec;
-  strncpy(g_maint_consumed_request_id, mw.request_id, sizeof(g_maint_consumed_request_id) - 1);
-  g_maint_consumed_request_id[sizeof(g_maint_consumed_request_id) - 1] = '\0';
-  sched_event_note(reason ? reason : "maint_consumed", mw.request_id);
-  set_maintenance_schedule_pending_sync_to_lcd(true);
-  LOG_INFO("[MAINT_GUARD] consumed request_id=%s start=%llu end=%llu reason=%s",
-           mw.request_id[0] ? mw.request_id : "-",
-           (unsigned long long)g_maint_consumed_start_epoch,
-           (unsigned long long)g_maint_consumed_end_epoch,
-           reason ? reason : "unknown");
-}
 
 static bool sense_action_inflight() {
-  if (http_inflight || upload_inflight || waiting_for_mqtt_result) {
+  if (http_inflight || upload_inflight) {
     return true;
   }
   if (scan_ui_inflight) {
@@ -633,6 +575,21 @@ static void ota_sched_save();
 // Tracks whether configTime()/SNTP has been started this boot. File-scope so the
 // provisioning STATE_CONNECTED path can kick SNTP early (halo_prod_kick_time_sync)
 // and the main-loop SNTP block stays idempotent with it.
+// Legacy OTA orchestration (schedule fetch / arm / revalidate / windows /
+// cooldowns / the 7-reason dispatcher). Set to 0 to run the nightly 02:00 path
+// ALONE — which is the state the teardown produces, so building with it off is
+// how the replacement gets tested before ~842 lines are deleted.
+// DEFAULT 0 as of 2026-08-18: ship builds now run the nightly 02:00 path alone.
+//
+// Verified on hardware before flipping — with legacy off, a timer wake produced
+// nightly_begin -> nightly_done and the schedule machinery went completely
+// silent (0 ota_sched lines, vs 3 fetch/arm cycles in five minutes with it on).
+// Build with =1 to restore the old orchestrator if the nightly path ever needs
+// to be backed out in a hurry; the code is still here until it is deleted.
+#ifndef HALO_LEGACY_OTA_ORCHESTRATOR
+#define HALO_LEGACY_OTA_ORCHESTRATOR 0
+#endif
+
 static bool g_prod_sntp_started = false;
 static bool maintenance_window_load(MaintenanceWindow* mw);
 
@@ -878,15 +835,6 @@ static void ota_test_handle_serial() {
 }
 #endif
 
-static bool ota_override_enabled() {
-  Preferences prefs;
-  if (!prefs.begin("ota_override", true)) {
-    return false;
-  }
-  bool enabled = prefs.getBool("ota_override", false);
-  prefs.end();
-  return enabled;
-}
 
 static bool ota_disabled_for_local_dev() {
 #if (HALO_DEV_NO_OTA || LOCAL_DEV_BUILD)
@@ -1096,63 +1044,13 @@ static void ota_sched_print_status(const char* reason) {
                 g_last_ota_result);
 }
 
-static bool maintenance_window_equals(const MaintenanceWindow& a, const MaintenanceWindow& b) {
-  return a.scheduled == b.scheduled &&
-         a.start_epoch == b.start_epoch &&
-         a.duration_sec == b.duration_sec &&
-         a.grace_before_sec == b.grace_before_sec &&
-         a.grace_after_sec == b.grace_after_sec &&
-         strncmp(a.request_id, b.request_id, sizeof(a.request_id)) == 0;
-}
 
 static bool ota_sched_http_configured() {
   return OTA_SCHED_HTTP_URL[0] != '\0';
 }
 
-static bool ota_sched_http_is_https(const char* url) {
-  return url && strncmp(url, "https://", 8) == 0;
-}
 
-static void ota_sched_http_append_query(String& url, const char* key, const char* value) {
-  if (!key || !key[0] || !value || !value[0]) {
-    return;
-  }
-  url += (url.indexOf('?') >= 0) ? "&" : "?";
-  url += key;
-  url += '=';
-  for (const char* p = value; *p; ++p) {
-    const unsigned char c = static_cast<unsigned char>(*p);
-    const bool safe = (c >= 'A' && c <= 'Z') ||
-                      (c >= 'a' && c <= 'z') ||
-                      (c >= '0' && c <= '9') ||
-                      c == '-' || c == '_' || c == '.' || c == '~';
-    if (safe) {
-      url += static_cast<char>(c);
-    } else {
-      char hex[4];
-      snprintf(hex, sizeof(hex), "%%%02X", c);
-      url += hex;
-    }
-  }
-}
 
-static String ota_sched_http_build_url() {
-  String url = OTA_SCHED_HTTP_URL;
-  char device_id[32] = {0};
-  load_runtime_device_id(device_id, sizeof(device_id));
-  char owner_id[64] = {0};
-  bool owner_ok = ProvisioningState::loadOwnerId(owner_id, sizeof(owner_id));
-  ota_sched_http_append_query(url, "device_id", device_id);
-  if (owner_ok && owner_id[0]) {
-    ota_sched_http_append_query(url, "owner_id", owner_id);
-  }
-  ota_sched_http_append_query(url, "board", HALO_BOARD_NAME);
-  ota_sched_http_append_query(url, "fw", kFirmwareVersion);
-  ota_sched_http_append_query(url, "build", kBuildId);
-  ota_sched_http_append_query(url, "channel", OTA_CHANNEL);
-  ota_sched_http_append_query(url, "device_type", "sense");
-  return url;
-}
 
 static const char* ota_report_reset_reason_str(esp_reset_reason_t reason) {
   switch (reason) {
@@ -1458,310 +1356,8 @@ static bool ota_report_post_pre_sleep(uint32_t timeout_ms) {
   return ota_report_post("pre_sleep", nullptr, timeout_ms);
 }
 
-static JsonObject ota_sched_http_get_payload_root(DynamicJsonDocument& doc) {
-  JsonVariant maintenance = doc["maintenance"];
-  if (!maintenance.isNull() && maintenance.is<JsonObject>()) {
-    return maintenance.as<JsonObject>();
-  }
-  return doc.as<JsonObject>();
-}
 
-static bool ota_sched_http_fetch_window(uint32_t timeout_ms) {
-  if (!ota_sched_http_configured()) {
-    ota_http_schedule_note("disabled", 0, nullptr);
-    return false;
-  }
-  if (!wifi_is_connected()) {
-    ota_http_schedule_note("wifi_down", 0, nullptr);
-    return false;
-  }
-  if (!is_time_valid()) {
-    ota_http_schedule_note("time_invalid", 0, nullptr);
-    return false;
-  }
 
-  String url = ota_sched_http_build_url();
-  LOG_INFO("[OTA_HTTP_SCHED] fetch url=%s timeout_ms=%lu", url.c_str(), (unsigned long)timeout_ms);
-  // Forward URL to LCD for in-enclosure debugging (truncate if needed)
-  {
-    char url_detail[200];
-    snprintf(url_detail, sizeof(url_detail), "url=%s", url.c_str());
-    uart_send_sense_diag("ota_sched", "fetch_url", "OTA_SCHED", 0, url_detail);
-  }
-
-  // Free the camera DMA reserve for the duration of the HTTPS handshake/GET and
-  // auto-restore on every return path. The awake-path gate (and provisioning
-  // gate) normally keeps this off the dangerous SoftAP-up window, but defense in
-  // depth: any HTTPS fetch with the 16KB camera reserve held can starve the TLS
-  // esp-aes DMA alloc and panic. Only armed on the HTTPS branch.
-  const bool sched_is_https = ota_sched_http_is_https(url.c_str());
-  ScopedTlsDmaReserve tls_dma_guard(sched_is_https);
-
-  HTTPClient http;
-  WiFiClient plain_client;
-  WiFiClientSecure secure_client;
-  int http_code = 0;
-  String body;
-  bool started = false;
-  if (sched_is_https) {
-#if OTA_SCHED_HTTP_INSECURE
-    secure_client.setInsecure();
-#else
-    ota_http_configure_tls(secure_client, "OTA_HTTP_SCHED", OTA_SCHED_HTTP_ROOT_CA);
-#endif
-    secure_client.setHandshakeTimeout(15);
-    secure_client.setTimeout(timeout_ms);
-    started = http.begin(secure_client, url);
-  } else {
-    plain_client.setTimeout(timeout_ms);
-    started = http.begin(plain_client, url);
-  }
-  if (!started) {
-    ota_http_schedule_note("begin_fail", 0, nullptr);
-    LOG_WARN("[OTA_HTTP_SCHED] begin failed url=%s", url.c_str());
-    return false;
-  }
-
-  http.setConnectTimeout((int)timeout_ms);
-  http.setTimeout((int)timeout_ms);
-  http.setReuse(false);
-  http_code = http.GET();
-  if (http_code > 0) {
-    body = http.getString();
-  }
-  http.end();
-
-  time_t now_s = time(nullptr);
-  uint64_t now_epoch = (now_s > 0) ? (uint64_t)now_s : 0ULL;
-
-  MaintenanceWindow existing;
-  bool had_existing = maintenance_window_load(&existing);
-
-  if (http_code == HTTP_CODE_NO_CONTENT) {
-    ota_http_schedule_note("none", http_code, nullptr);
-    LOG_INFO("[OTA_HTTP_SCHED] no schedule (204) preserve_existing=%d", had_existing ? 1 : 0);
-    return true;
-  }
-
-  if (http_code != HTTP_CODE_OK) {
-    ota_http_schedule_note("http_error", http_code, nullptr);
-    LOG_WARN("[OTA_HTTP_SCHED] http error code=%d", http_code);
-    return false;
-  }
-
-  if (body.length() == 0) {
-    ota_http_schedule_note("empty_body", http_code, nullptr);
-    LOG_WARN("[OTA_HTTP_SCHED] empty response");
-    return false;
-  }
-
-  DynamicJsonDocument doc(1024);
-  DeserializationError err = deserializeJson(doc, body);
-  if (err || !doc.is<JsonObject>()) {
-    ota_http_schedule_note("parse_error", http_code, nullptr);
-    LOG_WARN("[OTA_HTTP_SCHED] parse error: %s", err.c_str());
-    return false;
-  }
-
-  JsonObject root = ota_sched_http_get_payload_root(doc);
-  if (root.isNull()) {
-    ota_http_schedule_note("invalid_payload", http_code, nullptr);
-    LOG_WARN("[OTA_HTTP_SCHED] invalid payload root");
-    return false;
-  }
-
-  const char* request_id = root["request_id"] | "";
-  if (!request_id || !request_id[0]) {
-    request_id = doc["request_id"] | "";
-  }
-  bool enabled = root["enabled"].isNull() ? true : (root["enabled"] | false);
-  if (!enabled) {
-    if (had_existing) {
-      existing.clear();
-      maintenance_followup_retry_clear("http_clear");
-      maintenance_window_consumed_clear("http_clear");
-      set_maintenance_schedule_pending_sync_to_lcd(true);
-      sched_event_note("http_cleared", request_id);
-      ota_http_schedule_note("cleared", http_code, request_id);
-      LOG_INFO("[OTA_HTTP_SCHED] cleared request_id=%s", request_id && request_id[0] ? request_id : "-");
-      return true;
-    }
-    ota_http_schedule_note("none", http_code, request_id);
-    LOG_INFO("[OTA_HTTP_SCHED] no schedule enabled=0");
-    return true;
-  }
-  if (!request_id || !request_id[0]) {
-    ota_http_schedule_note("missing_request_id", http_code, nullptr);
-    LOG_WARN("[OTA_HTTP_SCHED] missing request_id");
-    return false;
-  }
-
-  if (had_existing && request_id && request_id[0] &&
-      strcmp(existing.request_id, request_id) != 0) {
-    maintenance_followup_retry_clear("new_request_id");
-    maintenance_window_consumed_clear("new_request_id");
-  }
-
-  MaintenanceWindow incoming;
-  if (!incoming.setFromJson(root, now_epoch, 60)) {
-    ota_http_schedule_note("invalid_window", http_code, request_id);
-    LOG_WARN("[OTA_HTTP_SCHED] invalid future window request_id=%s",
-             request_id && request_id[0] ? request_id : "-");
-    return false;
-  }
-
-  int min_idle_min = root["min_idle_min"] | g_ota_sched.min_idle_min;
-  if (doc["min_idle_min"].is<int>()) {
-    min_idle_min = doc["min_idle_min"].as<int>();
-  }
-  g_ota_sched.min_idle_min = (uint8_t)clamp_int(min_idle_min, 0, 120);
-  ota_sched_save();
-
-  if (had_existing && maintenance_window_equals(existing, incoming)) {
-    ota_http_schedule_note("unchanged", http_code, incoming.request_id);
-    LOG_INFO("[OTA_HTTP_SCHED] unchanged request_id=%s start=%llu dur=%lu",
-             incoming.request_id,
-             (unsigned long long)incoming.start_epoch,
-             (unsigned long)incoming.duration_sec);
-    return true;
-  }
-
-  if (g_maint_followup_retry_attempts > 0 &&
-      incoming.request_id[0] &&
-      strcmp(g_maint_followup_retry_request_id, incoming.request_id) != 0) {
-    maintenance_followup_retry_clear("http_saved_new_request");
-  }
-
-  incoming.saveToNvs();
-  sched_event_note("http_saved", incoming.request_id);
-  set_maintenance_schedule_pending_sync_to_lcd(true);
-  ota_http_schedule_note("saved", http_code, incoming.request_id);
-  LOG_INFO("[OTA_HTTP_SCHED] saved request_id=%s start=%llu dur=%lu grace_b=%lu grace_a=%lu min_idle_min=%u",
-           incoming.request_id,
-           (unsigned long long)incoming.start_epoch,
-           (unsigned long)incoming.duration_sec,
-           (unsigned long)incoming.grace_before_sec,
-           (unsigned long)incoming.grace_after_sec,
-           (unsigned)g_ota_sched.min_idle_min);
-  return true;
-}
-
-// Cancel-safety: re-validate the LIVE cloud schedule at maintenance-window start.
-// The device may have fetched+armed a window earlier; if the operator has since
-// deleted/disabled/replaced it in the cloud, the cached RTC/NVS window must NOT
-// be acted upon. This GET inspects the response directly (unlike
-// ota_sched_http_fetch_window, which treats 204 as "keep existing window").
-// NOTE: the schedule GET only returns enabled windows whose start_epoch is in
-// the FUTURE, so a 204 means "no future window" — which includes a live,
-// enabled window whose start has already passed (the normal wake-at-window
-// case) as well as a truly deleted row. We therefore fail-open on 204. A real
-// cancel must be expressed as enabled=false on the schedule row (HTTP 200),
-// which returns at any wake time and reliably aborts.
-//   204                      -> REVAL_FETCH_FAILED (no future window / past-start, fail-open)
-//   200 enabled=false        -> REVAL_CANCELLED (schedule disabled)
-//   200 enabled=true, rid !=  -> REVAL_REPLACED (different request_id)
-//   200 enabled=true, rid ==  -> REVAL_VALID
-//   any error / not ready    -> REVAL_FETCH_FAILED (fail-open, proceed with OTA)
-static SchedRevalidate ota_sched_revalidate(const MaintenanceWindow& cached,
-                                            uint64_t now_epoch,
-                                            uint32_t timeout_ms) {
-  (void)now_epoch;
-  if (!ota_sched_http_configured() || !wifi_is_connected() || !is_time_valid()) {
-    LOG_INFO("[MAINT_RUN] revalidate skip (not_ready) -> REVAL_FETCH_FAILED (fail-open)");
-    return REVAL_FETCH_FAILED;
-  }
-
-  String url = ota_sched_http_build_url();
-  LOG_INFO("[MAINT_RUN] revalidate GET url=%s timeout_ms=%lu", url.c_str(), (unsigned long)timeout_ms);
-
-  HTTPClient http;
-  WiFiClient plain_client;
-  WiFiClientSecure secure_client;
-  int http_code = 0;
-  String body;
-  bool started = false;
-  if (ota_sched_http_is_https(url.c_str())) {
-#if OTA_SCHED_HTTP_INSECURE
-    secure_client.setInsecure();
-#else
-    ota_http_configure_tls(secure_client, "OTA_HTTP_REVAL", OTA_SCHED_HTTP_ROOT_CA);
-#endif
-    secure_client.setHandshakeTimeout(15);
-    secure_client.setTimeout(timeout_ms);
-    started = http.begin(secure_client, url);
-  } else {
-    plain_client.setTimeout(timeout_ms);
-    started = http.begin(plain_client, url);
-  }
-  if (!started) {
-    LOG_WARN("[MAINT_RUN] revalidate begin failed -> REVAL_FETCH_FAILED (fail-open)");
-    return REVAL_FETCH_FAILED;
-  }
-
-  http.setConnectTimeout((int)timeout_ms);
-  http.setTimeout((int)timeout_ms);
-  http.setReuse(false);
-  http_code = http.GET();
-  if (http_code > 0) {
-    body = http.getString();
-  }
-  http.end();
-
-  if (http_code == HTTP_CODE_NO_CONTENT) {
-    // 204 = no FUTURE window. The schedule GET only returns enabled windows
-    // whose start_epoch is still in the future. A live, enabled window whose
-    // start has already passed (the normal case — the device wakes AT the
-    // window) returns 204, as does a deleted row. Treating 204 as CANCELLED
-    // would falsely abort legitimate scheduled OTAs, so fail-open here. A real
-    // cancel is expressed as enabled=false (HTTP 200), which reliably aborts.
-    LOG_INFO("[MAINT_RUN] revalidate http=204 (no future window / past-start) -> fail_open (REVAL_FETCH_FAILED)");
-    return REVAL_FETCH_FAILED;
-  }
-
-  if (http_code != HTTP_CODE_OK) {
-    LOG_WARN("[MAINT_RUN] revalidate http=%d -> REVAL_FETCH_FAILED (fail-open)", http_code);
-    return REVAL_FETCH_FAILED;
-  }
-
-  if (body.length() == 0) {
-    LOG_WARN("[MAINT_RUN] revalidate http=200 empty_body -> REVAL_FETCH_FAILED (fail-open)");
-    return REVAL_FETCH_FAILED;
-  }
-
-  DynamicJsonDocument doc(1024);
-  DeserializationError err = deserializeJson(doc, body);
-  if (err || !doc.is<JsonObject>()) {
-    LOG_WARN("[MAINT_RUN] revalidate parse_error=%s -> REVAL_FETCH_FAILED (fail-open)", err.c_str());
-    return REVAL_FETCH_FAILED;
-  }
-
-  JsonObject root = ota_sched_http_get_payload_root(doc);
-  if (root.isNull()) {
-    LOG_WARN("[MAINT_RUN] revalidate invalid_payload -> REVAL_FETCH_FAILED (fail-open)");
-    return REVAL_FETCH_FAILED;
-  }
-
-  bool enabled = root["enabled"].isNull() ? true : (root["enabled"] | false);
-  if (!enabled) {
-    LOG_INFO("[MAINT_RUN] revalidate http=200 enabled=false -> REVAL_CANCELLED (disabled)");
-    return REVAL_CANCELLED;
-  }
-
-  const char* resp_request_id = root["request_id"] | "";
-  if (!resp_request_id || !resp_request_id[0]) {
-    resp_request_id = doc["request_id"] | "";
-  }
-  if (cached.request_id[0] && resp_request_id && resp_request_id[0] &&
-      strcmp(cached.request_id, resp_request_id) != 0) {
-    LOG_INFO("[MAINT_RUN] revalidate http=200 request_id changed cached=%s live=%s -> REVAL_REPLACED",
-             cached.request_id, resp_request_id);
-    return REVAL_REPLACED;
-  }
-
-  LOG_INFO("[MAINT_RUN] revalidate http=200 request_id=%s -> REVAL_VALID",
-           (resp_request_id && resp_request_id[0]) ? resp_request_id : "-");
-  return REVAL_VALID;
-}
 
 static void ota_sched_self_test() {
 #if OTA_SCHED_SELF_TEST
@@ -2250,44 +1846,6 @@ static void maybe_cancel_manual_ota_unready() {
   }
 }
 
-static bool send_lcd_ota_check_request(const char* reason, bool allow_reboot) {
-  if (g_lcd_ota_request_active) {
-    LOG_INFO("[LCD_OTA_ORCH] skip already_active");
-    return false;
-  }
-  uint32_t req_id = get_next_msg_id();
-  g_lcd_ota_request_id = req_id;
-  g_lcd_ota_recent_request_id = req_id;
-  g_lcd_ota_request_active = true;
-  g_lcd_ota_ack_received = false;
-  g_lcd_ota_done = false;
-  g_lcd_ota_request_start_ms = millis();
-  strncpy(g_lcd_ota_result, "pending", sizeof(g_lcd_ota_result) - 1);
-  g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-  g_lcd_ota_version[0] = '\0';
-  if (is_time_valid()) {
-    g_lcd_ota_last_request_epoch = (uint32_t)time(nullptr);
-  }
-
-  StaticJsonDocument<192> doc;
-  doc["ver"] = PROTOCOL_VERSION;
-  doc["type"] = "OTA_CHECK";
-  doc["msg_id"] = req_id;
-  doc["ts"] = millis();
-  doc["request_id"] = req_id;
-  doc["allow_reboot"] = allow_reboot ? true : false;
-  if (reason && reason[0]) {
-    doc["reason"] = reason;
-  }
-  String output;
-  serializeJson(doc, output);
-  uart_send_json(output.c_str());
-  LOG_INFO("[LCD_OTA_ORCH] tx OTA_CHECK request_id=%lu reason=%s allow_reboot=%d",
-           (unsigned long)req_id,
-           reason ? reason : "unknown",
-           allow_reboot ? 1 : 0);
-  return true;
-}
 
 void halo_prod_request_manual_ota(const char* reason) {
   manual_ota_override_set(reason ? reason : "manual");
@@ -2466,38 +2024,6 @@ static void keep_lcd_awake_during_maint_arm() {
   g_maint_keepalive_last_tx_ms = now_ms;
 }
 
-static void keep_lcd_awake_for_maintenance(uint32_t remaining_s, const char* reason) {
-  if (remaining_s == 0) {
-    return;
-  }
-  MaintenanceWindow mw;
-  bool has_window = maintenance_window_load(&mw);
-  unsigned long start_ms = millis();
-  unsigned long last_tx_ms = 0;
-  bool link_recent = false;
-  bool sent_after_link = false;
-  while ((millis() - start_ms) < LCD_MAINT_KEEPALIVE_MS) {
-    pump_uart_rx_once();
-    link_recent = halo_uart_link_recent(LCD_MAINT_LINK_RECENT_MS);
-    unsigned long now_ms = millis();
-    if (last_tx_ms == 0 || (now_ms - last_tx_ms) >= LCD_MAINT_RESEND_INTERVAL_MS) {
-      send_maint_window(has_window ? &mw : nullptr, remaining_s, 0, false);
-      last_tx_ms = now_ms;
-      if (link_recent) {
-        sent_after_link = true;
-      }
-    }
-    if (link_recent && sent_after_link) {
-      LOG_INFO("[MAINT_TX] keepalive_done reason=%s link_recent=1",
-               reason ? reason : "unknown");
-      return;
-    }
-    delay(50);
-  }
-  LOG_INFO("[MAINT_TX] keepalive_timeout reason=%s link_recent=%d",
-           reason ? reason : "unknown",
-           link_recent ? 1 : 0);
-}
 
 static void sync_pending_maintenance_to_lcd(const char* reason) {
   bool pending = maintenance_schedule_pending_sync_to_lcd();
@@ -2993,54 +2519,6 @@ static bool wait_for_time_valid(uint32_t timeout_ms) {
   return false;
 }
 
-static bool ensure_maintenance_wifi_connected() {
-  const uint32_t initial_timeout_ms = 15000;
-  if (ensure_wifi_connected("maintenance", initial_timeout_ms)) {
-    return true;
-  }
-
-  uint32_t retry_timeout_ms = initial_timeout_ms >= 3000 ? 3000 : initial_timeout_ms;
-  if (retry_timeout_ms >= 1000) {
-    LOG_INFO("[MAINT_WIFI] retry wifi (hard reset) timeout_ms=%lu",
-             (unsigned long)retry_timeout_ms);
-    if (wifi_hard_reset_and_reconnect("maintenance_retry", retry_timeout_ms)) {
-      LOG_INFO("[MAINT_WIFI] recovered after hard reset retry");
-      return true;
-    }
-  }
-
-  unsigned long start_ms = millis();
-  unsigned long next_retry_ms = start_ms;
-  while ((millis() - start_ms) < PRE_SLEEP_WIFI_RECOVERY_MS) {
-    if (wifi_is_connected()) {
-      LOG_INFO("[MAINT_WIFI] recovered during recovery_window");
-      return true;
-    }
-
-    unsigned long now_ms = millis();
-    if (now_ms >= next_retry_ms) {
-      uint32_t remaining_ms =
-          (uint32_t)(PRE_SLEEP_WIFI_RECOVERY_MS - (now_ms - start_ms));
-      uint32_t attempt_ms =
-          (remaining_ms > PRE_SLEEP_WIFI_HARD_RESET_MS)
-              ? PRE_SLEEP_WIFI_HARD_RESET_MS
-              : remaining_ms;
-      if (attempt_ms >= 1000) {
-        LOG_INFO("[MAINT_WIFI] recovery retry timeout_ms=%lu",
-                 (unsigned long)attempt_ms);
-        if (wifi_hard_reset_and_reconnect("maintenance_recover", attempt_ms)) {
-          LOG_INFO("[MAINT_WIFI] recovered during recovery_retry");
-          return true;
-        }
-      }
-      next_retry_ms = now_ms + PRE_SLEEP_WIFI_RETRY_INTERVAL_MS;
-    }
-    delay(200);
-  }
-
-  LOG_INFO("[MAINT_WIFI] failed after recovery_window");
-  return false;
-}
 
 static bool wifiReadyForHttps() {
   if (!wifi_is_connected()) {
@@ -3063,14 +2541,30 @@ static bool is_time_valid() {
 
 static bool g_tz_initialized = false;
 
+// Apply the owner's timezone once, at the first point we have a network.
+//
+// This used to hardcode `setenv("TZ", "PST8PDT,...")`. It runs on WiFi connect,
+// i.e. AFTER setup() has already applied the zone loaded from NVS — so it
+// silently overwrote it and forced US Pacific on every device in the fleet. The
+// nightly maintenance wake is defined in LOCAL time, so an owner in New York was
+// being woken at 05:00 and one in London at 10:00, and the boot log looked
+// perfectly healthy because `nextwake` faithfully reported the wrong zone.
+//
+// Reading NVS here (rather than trusting what setup() applied) is deliberate:
+// this runs well after ProvisioningState::init(), so it is the first moment the
+// stored zone is guaranteed readable.
 static void ensure_timezone_pt(const char* reason) {
   if (g_tz_initialized) {
     return;
   }
-  setenv("TZ", "PST8PDT,M3.2.0,M11.1.0", 1);
-  tzset();
+  char saved_tz[64];
+  const bool have = ProvisioningState::loadTimezone(saved_tz, sizeof(saved_tz)) && saved_tz[0];
+  sense_set_timezone(have ? saved_tz : nullptr);   // nullptr -> HALO_DEFAULT_TZ
   g_tz_initialized = true;
-  LOG_INFO("[TZ] set=PT reason=%s", reason ? reason : "unknown");
+  LOG_INFO("[TZ] set=%s source=%s reason=%s",
+           have ? saved_tz : HALO_DEFAULT_TZ,
+           have ? "nvs" : "default",
+           reason ? reason : "unknown");
 }
 
 // Start SNTP/NTP the instant WiFi (STA) connects, so the owner-claim TLS and OTA
@@ -3083,7 +2577,7 @@ void halo_prod_kick_time_sync(const char* reason) {
   if (g_prod_sntp_started) {
     return;
   }
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+  sense_ntp_begin();   // configTime(0,0,..) would reset TZ to UTC; see sense_time.h
   ensure_timezone_pt(reason ? reason : "kick_time_sync");
   g_prod_sntp_started = true;
   LOG_INFO("[TLS_GUARD] SNTP init (early on connect) reason=%s", reason ? reason : "unknown");
@@ -3374,178 +2868,14 @@ static void ota_sched_configure_timer_wakeup() {
   uart_send_sense_diag("ota_sched", "timer_arm", "OTA_SCHED", (int32_t)delta_s, detail);
 }
 
-static void ota_sched_reschedule_after_failure(time_t now, bool time_valid) {
-  if (!g_ota_sched.enabled) {
-    return;
-  }
-  uint32_t base = time_valid ? (uint32_t)now : g_last_time_sync_epoch;
-  if (base == 0) {
-    return;
-  }
-  uint32_t window_start = g_next_ota_epoch;
-  if (window_start == 0) {
-    window_start = ota_sched_compute_next_epoch(base);
-  }
-  uint32_t window_end = window_start + (uint32_t)g_ota_sched.window_dur_min * 60;
-  uint32_t candidate = base + 3600;
-  if (candidate <= window_end) {
-    g_next_ota_epoch = candidate;
-  } else {
-    g_next_ota_epoch = ota_sched_compute_next_epoch(base);
-  }
-  ota_sched_save();
-}
 
-static bool ota_sched_in_window(time_t now) {
-  if (g_next_ota_epoch == 0) {
-    return false;
-  }
-  uint32_t start = g_next_ota_epoch;
-  uint32_t end = start + (uint32_t)g_ota_sched.window_dur_min * 60;
-  return (now >= (time_t)start && now <= (time_t)end);
-}
 
-static bool maintenance_window_active_for_retry(uint32_t window_end_epoch, uint32_t* remaining_s_out) {
-  if (remaining_s_out) {
-    *remaining_s_out = 0;
-  }
-  if (window_end_epoch == 0 || !is_time_valid()) {
-    return false;
-  }
-  uint32_t now_epoch = (uint32_t)time(nullptr);
-  if (now_epoch >= window_end_epoch) {
-    return false;
-  }
-  if (remaining_s_out) {
-    *remaining_s_out = window_end_epoch - now_epoch;
-  }
-  return true;
-}
 
-static bool sense_maintenance_result_retryable(const char* result) {
-  if (!result || !result[0] || strcmp(result, "pending") == 0 || strcmp(result, "check_begin") == 0) {
-    return true;
-  }
-  if (strcmp(result, "apply_success") == 0 ||
-      strcmp(result, "up_to_date") == 0 ||
-      strcmp(result, "downgrade_blocked") == 0 ||
-      strcmp(result, "rollout_min_version") == 0 ||
-      strcmp(result, "rollout_skip") == 0 ||
-      strcmp(result, "manifest_url_invalid") == 0 ||
-      strcmp(result, "board_mismatch") == 0 ||
-      strcmp(result, "bin_url_disallowed") == 0) {
-    return false;
-  }
-  if (strncmp(result, "apply_blocked:", 14) == 0) {
-    return false;
-  }
-  return true;
-}
 
-static bool lcd_maintenance_result_retryable(const char* result) {
-  if (!result || !result[0] || strcmp(result, "pending") == 0) {
-    return true;
-  }
-  if (strcmp(result, "updated") == 0 ||
-      strcmp(result, "noop") == 0 ||
-      strcmp(result, "skipped_user_active") == 0 ||
-      strcmp(result, "skipped_rate_limited") == 0 ||
-      strcmp(result, "skipped_no_request") == 0) {
-    return false;
-  }
-  if (strncmp(result, "success:", 8) == 0 || strncmp(result, "no_update:", 10) == 0) {
-    return false;
-  }
-  if (strncmp(result, "fail:user_active", 16) == 0 ||
-      strncmp(result, "fail:reboot_not_allowed", 23) == 0 ||
-      strncmp(result, "fail:maintenance_only", 21) == 0 ||
-      strncmp(result, "fail:manifest_url_invalid", 25) == 0 ||
-      strncmp(result, "fail:board_mismatch", 19) == 0 ||
-      strncmp(result, "fail:bin_url_disallowed", 23) == 0 ||
-      strncmp(result, "fail:guard_disabled", 19) == 0 ||
-      strncmp(result, "fail:wake_window_retry_exhausted", 32) == 0) {
-    return false;
-  }
-  return true;
-}
 
-static bool lcd_maintenance_result_successful(const char* result) {
-  if (!result || !result[0]) {
-    return false;
-  }
-  if (strcmp(result, "updated") == 0 ||
-      strcmp(result, "noop") == 0) {
-    return true;
-  }
-  return (strncmp(result, "success:", 8) == 0 ||
-          strncmp(result, "no_update:", 10) == 0);
-}
 
-static bool maintenance_window_should_consume_after_run(const MaintenanceWindow& mw,
-                                                        uint32_t window_end_epoch) {
-  time_t now_s = time(nullptr);
-  uint64_t now_epoch = (now_s > 0) ? (uint64_t)now_s : 0ULL;
-  if (now_epoch > 0 && now_epoch >= (uint64_t)window_end_epoch) {
-    LOG_INFO("[MAINT_GUARD] consume_after_run request_id=%s reason=window_expired now=%llu end=%lu",
-             mw.request_id[0] ? mw.request_id : "-",
-             (unsigned long long)now_epoch,
-             (unsigned long)window_end_epoch);
-    return true;
-  }
 
-  bool sense_terminal = !sense_maintenance_result_retryable(g_last_ota_result);
-  bool lcd_success = lcd_maintenance_result_successful(g_lcd_ota_result);
-  bool consume = sense_terminal && lcd_success;
-  LOG_INFO("[MAINT_GUARD] consume_after_run request_id=%s sense_result=%s lcd_result=%s sense_terminal=%d lcd_success=%d consume=%d",
-           mw.request_id[0] ? mw.request_id : "-",
-           g_last_ota_result[0] ? g_last_ota_result : "pending",
-           g_lcd_ota_result[0] ? g_lcd_ota_result : "pending",
-           sense_terminal ? 1 : 0,
-           lcd_success ? 1 : 0,
-           consume ? 1 : 0);
-  return consume;
-}
 
-static bool maintenance_wait_for_retry_slot(uint32_t window_end_epoch,
-                                            unsigned long retry_interval_ms,
-                                            const char* keepalive_reason,
-                                            uint32_t* remaining_s_io) {
-  unsigned long wait_start_ms = millis();
-  unsigned long last_keepalive_ms = 0;
-  uint32_t remaining_s = 0;
-  while ((millis() - wait_start_ms) < retry_interval_ms) {
-    pump_uart_rx_once();
-    if (!maintenance_window_active_for_retry(window_end_epoch, &remaining_s)) {
-      if (remaining_s_io) {
-        *remaining_s_io = 0;
-      }
-      return false;
-    }
-    if (remaining_s_io) {
-      *remaining_s_io = remaining_s;
-    }
-    g_lcd_ota_window_remaining_s = remaining_s;
-    unsigned long now_ms = millis();
-    if (last_keepalive_ms == 0 || (now_ms - last_keepalive_ms) >= LCD_MAINT_KEEPALIVE_MS) {
-      keep_lcd_awake_for_maintenance(remaining_s, keepalive_reason);
-      last_keepalive_ms = now_ms;
-    }
-    delay(50);
-  }
-  return maintenance_window_active_for_retry(window_end_epoch, remaining_s_io);
-}
-
-static void reset_lcd_maintenance_ota_state(const char* result) {
-  g_lcd_ota_done = false;
-  strncpy(g_lcd_ota_result, result ? result : "pending", sizeof(g_lcd_ota_result) - 1);
-  g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-  g_lcd_ota_version[0] = '\0';
-  g_lcd_ota_request_active = false;
-  g_lcd_ota_ack_received = false;
-  g_lcd_ota_request_id = 0;
-  g_lcd_ota_request_start_ms = 0;
-  g_lcd_ota_recent_request_id = 0;
-}
 
 static void mark_lcd_ota_still_pending(const char* reason) {
   LOG_INFO("[LCD_OTA_ORCH] pending request_id=%lu reason=%s",
@@ -3620,520 +2950,94 @@ static bool load_lcd_ota_result_nvs() {
   return loaded;
 }
 
-static void run_lcd_maintenance_ota_attempt(const char* maintenance_reason,
-                                            uint32_t window_end_epoch,
-                                            uint32_t* remaining_s_io) {
-  uint32_t remaining_s = remaining_s_io ? *remaining_s_io : 0;
-  g_lcd_ota_window_remaining_s = remaining_s;
-  keep_lcd_awake_for_maintenance(remaining_s, "maintenance_attempt");
 
-  bool force_lcd = OtaIntent::getDesiredForce();
-  unsigned long last_act_ms = sense_get_last_user_activity_ms();
-  bool explicit_http_window =
-      (maintenance_reason && strcmp(maintenance_reason, "scheduled_http") == 0);
-  if (!force_lcd && last_act_ms > 0) {
-    unsigned long idle_ms = millis() - last_act_ms;
-    if (idle_ms < (unsigned long)g_ota_sched.min_idle_min * 60000UL) {
-      if (explicit_http_window) {
-        maintenance_idle_diag_note(idle_ms, true, true, true, "http_window_lcd_override");
-        LOG_INFO("[LCD_OTA_ORCH] bypass user_active idle_ms=%lu min_idle_min=%u reason=http_window",
-                 (unsigned long)idle_ms,
-                 (unsigned)g_ota_sched.min_idle_min);
-      } else {
-        maintenance_idle_diag_note(idle_ms, true, false, false, "lcd_user_active");
-        LOG_INFO("[LCD_OTA_ORCH] skip user_active idle_ms=%lu", (unsigned long)idle_ms);
-        strncpy(g_lcd_ota_result, "skipped_user_active", sizeof(g_lcd_ota_result) - 1);
-        g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-        g_lcd_ota_done = true;
-        return;
-      }
-    } else {
-      maintenance_idle_diag_note(idle_ms, false, false, explicit_http_window, "lcd_idle_ok");
-    }
-  } else if (explicit_http_window) {
-    maintenance_idle_diag_note(0, false, true, true, "http_window_no_activity");
-  } else {
-    maintenance_idle_diag_note(0, false, false, false, "lcd_no_activity");
+// ── Nightly maintenance (replaces the orchestrator) ───────────────────
+//
+// The whole design, in one sentence: we woke on the 02:00 timer, so check
+// whether an update exists, apply it or not, and go back to sleep.
+//
+// There is no schedule to fetch, no window to arm, revalidate or consume, no
+// cooldown, no intent negotiation and no seven-reason dispatch — a missed night
+// is not an incident, because the next night retries. That is what lets ~842
+// lines and a 407-line orchestrator disappear.
+//
+// maybeRunOtaCheck() already does ALL the real work (manifest fetch, SHA256
+// verify, self-apply, LCD proxy, cloud report); the old orchestrator was almost
+// entirely scheduling wrapped around a call to it. Sleep is NOT forced here:
+// the existing idle path sleeps on its own, and the next 02:00 is armed at
+// sleep entry by sense_enter_deep_sleep().
+static bool g_nightly_maintenance_pending = false;
+static uint32_t g_nightly_deadline_ms = 0;
+
+// Call once early in setup(): did the 02:00 timer wake us?
+static void nightly_maintenance_note_wake() {
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+    g_nightly_maintenance_pending = true;
+    // Bounded: if WiFi never comes up we still stop waiting and let the device
+    // sleep, rather than burning the battery holding out for a network that is
+    // not there. The next night retries.
+    g_nightly_deadline_ms = millis() + 120000;
+    Serial.println("[NIGHTLY] woke on the maintenance timer - update check pending");
   }
+}
 
-  // ── LCD OTA proxy: spawn task (TLS needs >8KB stack) ──
-  if (!g_lcd_ota_done && !g_lcd_ota_task_running) {
-    g_lcd_ota_task_running = true;
-    g_manifest_client.releaseConnection();
-    mqtt_stop_for_ota();
-    vTaskDelay(pdMS_TO_TICKS(300));
-    LOG_INFO("[LCD_OTA_ORCH] maint heap: free=%u largest=%u psram=%u",
-             (unsigned)esp_get_free_heap_size(),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    BaseType_t rc2 = xTaskCreatePinnedToCore(
-      lcd_ota_proxy_task, "lcd_ota_proxy", 12288, NULL, 3, NULL, tskNO_AFFINITY);
-    if (rc2 != pdPASS) {
-      LOG_ERROR("[LCD_OTA_ORCH] maint task create FAILED rc=%d", (int)rc2);
-      g_lcd_ota_task_running = false;
-      send_ota_uart_message("OTA_UNLOCK");
-      LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (maint task create failed)");
-      strncpy(g_lcd_ota_result, "task_create_fail", sizeof(g_lcd_ota_result) - 1);
-      g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-      g_lcd_ota_done = true;
-      mqtt_force_connect();
-    } else {
-      LOG_INFO("[LCD_OTA_ORCH] proxy maint task spawned");
-    }
+// Call from loop(). No-op unless a nightly check is pending.
+static void nightly_maintenance_tick() {
+  if (!g_nightly_maintenance_pending) return;
+
+  if ((int32_t)(millis() - g_nightly_deadline_ms) >= 0) {
+    g_nightly_maintenance_pending = false;
+    Serial.println("[NIGHTLY] no network within the window - skipping, next night retries");
+    uart_send_sense_diag("ota", "nightly_skip", "no_wifi", 0, "deadline");
+    return;
   }
+  if (!wifi_is_connected()) return;   // still coming up
 
-  // Wait for proxy task to complete regardless of whether we just spawned it
-  // or it was already running from a previous attempt. This blocks the
-  // orchestrator so it cannot send MAINT_WINDOW JSON on the UART during
-  // binary COBS transfer.
+  g_nightly_maintenance_pending = false;
+  Serial.println("[NIGHTLY] network up - running the update check");
+  uart_send_sense_diag("ota", "nightly_begin", "timer", 0, "wifi_up");
+
+  // Re-sync the clock BEFORE the update check, so the wake timer armed at sleep
+  // entry is computed from a fresh time rather than a drifted one.
   //
-  // CRITICAL: pump UART when the proxy is in JSON mode so that mailbox
-  // flags (QUERY_RESP, BEGIN_ACK, END_ACK) get set. Without this, the
-  // proxy task deadlocks — it waits for flags that only parse_input_message()
-  // can set, but parse_input_message() is called from pump_uart_rx_once()
-  // which only runs from this loop during maintenance.
-  if (g_lcd_ota_task_running && !g_lcd_ota_done) {
-    unsigned long wait_start = millis();
-    unsigned long last_log_ms = 0;
-    const unsigned long LCD_OTA_PROXY_TIMEOUT_MS = 600000UL; // 10 min max
-    while (!g_lcd_ota_done && (millis() - wait_start) < LCD_OTA_PROXY_TIMEOUT_MS) {
-      // Pump UART when proxy is NOT in binary COBS mode — safe because
-      // reads and the proxy's writes don't conflict (full duplex), and
-      // during binary mode the proxy reads lcdSerial directly.
-      if (!g_lcd_ota_proxy_owns_uart) {
-        pump_uart_rx_once();
-      }
-      vTaskDelay(pdMS_TO_TICKS(10));  // 10ms for responsive UART polling
-      // Log progress every 30s
-      unsigned long elapsed = millis() - wait_start;
-      if (elapsed - last_log_ms >= 30000) {
-        last_log_ms = elapsed;
-        LOG_INFO("[LCD_OTA_ORCH] waiting for proxy task elapsed=%lus result=%s",
-                 (unsigned long)(elapsed / 1000),
-                 g_lcd_ota_result);
-      }
-    }
-    if (!g_lcd_ota_done) {
-      LOG_ERROR("[LCD_OTA_ORCH] proxy task timeout after %lus",
-                (unsigned long)((millis() - wait_start) / 1000));
-      strncpy(g_lcd_ota_result, "proxy_timeout", sizeof(g_lcd_ota_result) - 1);
-      g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-      g_lcd_ota_done = true;
-    } else {
-      LOG_INFO("[LCD_OTA_ORCH] proxy task completed in %lus result=%s",
-               (unsigned long)((millis() - wait_start) / 1000),
-               g_lcd_ota_result);
-    }
-  }
-}
-
-static void run_maintenance_if_needed() {
-  if (!g_maintenance_mode || g_maintenance_handled) {
-    return;
-  }
-  LOG_INFO("[MAINT_RUN] enter mode=1 handled=0");
-  g_maintenance_handled = true;
-  bool retry_wake = g_maint_followup_retry_wake;
-  g_maint_followup_retry_wake = false;
-  g_maintenance_in_window = false;
-  g_lcd_ota_done = false;
-  strncpy(g_lcd_ota_result, "pending", sizeof(g_lcd_ota_result) - 1);
-  g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-  g_lcd_ota_version[0] = '\0';
-  g_lcd_ota_request_active = false;
-  g_lcd_ota_ack_received = false;
-  g_lcd_ota_request_id = 0;
-  g_lcd_ota_request_start_ms = 0;
-  g_lcd_ota_attempted_this_window = false;
-
-  // lcd_ota_due_nvs is set before a Sense self-OTA reboot — it means
-  // the LCD OTA is owed immediately after reboot, regardless of whether
-  // a maintenance window is active. Check this FIRST, before window logic.
-  if (get_lcd_ota_due_nvs()) {
-    LOG_INFO("[MAINT_RUN] lcd_ota_due from NVS — bypassing window check");
-    if (!ensure_maintenance_wifi_connected()) {
-      LOG_INFO("[MAINT_RUN] lcd_ota_due wifi_fail -> sleep");
-      set_lcd_ota_due_nvs(false);
-      send_ota_uart_message("OTA_UNLOCK");
-      g_maintenance_mode = false;
-      sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-      return;
-    }
-    run_lcd_maintenance_ota_attempt("lcd_ota_due", 0, nullptr);
-    set_lcd_ota_due_nvs(false);
-    LOG_INFO("[MAINT_RUN] lcd_ota_due completed result=%s", g_lcd_ota_result);
-    g_maintenance_mode = false;
-    sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-    return;
-  }
-
-  MaintenanceWindow mw;
-  bool has_mw = maintenance_window_load(&mw);
-  if (!g_ota_sched.enabled && !has_mw && !retry_wake) {
-    LOG_INFO("[MAINT_RUN] no_schedule enabled=0 has_mw=0 -> sleep");
-    maintenance_followup_retry_clear("no_schedule");
-    g_maintenance_mode = false;
-    sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-    return;
-  }
-
-  if (!ensure_maintenance_wifi_connected()) {
-    LOG_INFO("[MAINT_RUN] wifi_fail -> sleep");
-    ota_sched_reschedule_after_failure(time(nullptr), is_time_valid());
-    if (!maintenance_followup_retry_schedule(has_mw ? &mw : nullptr, "wifi_fail")) {
-      maintenance_followup_retry_clear("wifi_fail");
-    }
-    ota_set_last_result("maintenance_wifi_fail");
-    g_maintenance_mode = false;
-    sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-    return;
-  }
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-  ensure_timezone_pt("maintenance");
-  if (!is_time_valid()) {
-    LOG_INFO("[MAINT_RUN] time_invalid -> sleep");
-    ota_sched_schedule_time_retry("maintenance_time_invalid");
-    if (!maintenance_followup_retry_schedule(has_mw ? &mw : nullptr, "time_invalid")) {
-      maintenance_followup_retry_clear("time_invalid");
-    }
-    ota_set_last_result("maintenance_time_invalid");
-    g_maintenance_mode = false;
-    sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-    return;
-  }
-
-  if (retry_wake && ota_sched_http_configured()) {
-    uint32_t fetch_timeout_ms = OTA_SCHED_HTTP_TIMEOUT_MS;
-    if (fetch_timeout_ms < 2000UL) {
-      fetch_timeout_ms = 2000UL;
-    }
-    LOG_INFO("[MAINT_RETRY] refresh_schedule timeout_ms=%lu", (unsigned long)fetch_timeout_ms);
-    ota_sched_http_fetch_window(fetch_timeout_ms);
-    has_mw = maintenance_window_load(&mw);
-    if (maintenance_schedule_pending_sync_to_lcd()) {
-      sync_pending_maintenance_to_lcd("maint_retry_refresh");
-    }
-    if (!g_ota_sched.enabled && !has_mw) {
-      LOG_INFO("[MAINT_RETRY] no_schedule_after_refresh -> sleep");
-      if (!maintenance_followup_retry_schedule(nullptr, "retry_no_schedule")) {
-        maintenance_followup_retry_clear("retry_no_schedule");
-      }
-      ota_set_last_result("maintenance_retry_no_schedule");
-      g_maintenance_mode = false;
-      sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-      return;
-    }
-  }
-
-  time_t now = time(nullptr);
-  uint32_t remaining_s = 0;
-  uint32_t window_end_epoch = 0;
-  if (has_mw) {
-    uint64_t now_epoch = (uint64_t)now;
-    uint64_t window_start = (mw.grace_before_sec >= mw.start_epoch) ? 0 : (mw.start_epoch - mw.grace_before_sec);
-    uint64_t window_end = mw.start_epoch + mw.duration_sec + mw.grace_after_sec;
-    if (maintenance_window_is_consumed(mw, now_epoch)) {
-      LOG_INFO("[MAINT_RUN] consumed request_id=%s now=%llu start=%llu end=%llu -> sleep",
-               mw.request_id[0] ? mw.request_id : "-",
-               (unsigned long long)now_epoch,
-               (unsigned long long)window_start,
-               (unsigned long long)window_end);
-      sched_event_note("skip_consumed", mw.request_id);
-      ota_set_last_result("maintenance_consumed");
-      maintenance_followup_retry_clear("consumed");
-      g_maintenance_mode = false;
-      sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-      return;
-    }
-    if (now_epoch < window_start || now_epoch > window_end) {
-      if (mw.hasExpired(now_epoch)) {
-        mw.clear();
-        maintenance_window_consumed_clear("expired");
-      }
-      LOG_INFO("[MAINT_RUN] outside_window now=%llu start=%llu end=%llu -> sleep",
-               (unsigned long long)now_epoch,
-               (unsigned long long)window_start,
-               (unsigned long long)window_end);
-      if (now_epoch < window_start && !mw.hasExpired(now_epoch)) {
-        // Woke BEFORE the window opens — clock was off at arm-time (NTP just
-        // corrected it) or a fixed-delay retry landed early. Don't burn misaligned
-        // followup retries that may also miss and ultimately abandon the window;
-        // clear the retry so the pre-sleep timer re-arm (ota_sched_configure_timer_
-        // wakeup) re-targets the actual window start (start-15) using the now-synced
-        // clock. Converges in one cycle.
-        LOG_INFO("[MAINT_RUN] woke_before_window -> clear retry, re-arm for window start");
-        maintenance_followup_retry_clear("woke_before_window");
-      } else if (retry_wake || g_maint_followup_retry_attempts > 0) {
-        if (!maintenance_followup_retry_schedule(&mw, "outside_window")) {
-          maintenance_followup_retry_clear("outside_window");
-        }
-      } else {
-        maintenance_followup_retry_clear("outside_window");
-      }
-      ota_set_last_result("maintenance_outside_window");
-      g_maintenance_mode = false;
-      sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-      return;
-    }
-    g_maintenance_in_window = true;
-    window_end_epoch = (uint32_t)window_end;
-    remaining_s = (window_end > now_epoch) ? (uint32_t)(window_end - now_epoch) : 0;
-  } else {
-    ota_sched_update_next_epoch(now);
-    if (!ota_sched_in_window(now)) {
-      g_next_ota_epoch = ota_sched_compute_next_epoch(now);
-      ota_sched_save();
-      LOG_INFO("[MAINT_RUN] sched_outside_window now=%ld next_epoch=%lu -> sleep",
-               (long)now,
-               (unsigned long)g_next_ota_epoch);
-      if (retry_wake || g_maint_followup_retry_attempts > 0) {
-        if (!maintenance_followup_retry_schedule(nullptr, "sched_outside_window")) {
-          maintenance_followup_retry_clear("sched_outside_window");
-        }
-      } else {
-        maintenance_followup_retry_clear("sched_outside_window");
-      }
-      ota_set_last_result("maintenance_outside_window");
-      g_maintenance_mode = false;
-      sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-      return;
-    }
-    g_maintenance_in_window = true;
-    window_end_epoch = g_next_ota_epoch + (uint32_t)g_ota_sched.window_dur_min * 60;
-    remaining_s = (now < (time_t)window_end_epoch) ? (window_end_epoch - (uint32_t)now) : 0;
-  }
-
-  unsigned long last_activity_ms = sense_get_last_user_activity_ms();
-  if (last_activity_ms > 0) {
-    unsigned long idle_ms = millis() - last_activity_ms;
-    if (idle_ms < (unsigned long)g_ota_sched.min_idle_min * 60000UL) {
-      if (has_mw && mw.request_id[0]) {
-        maintenance_idle_diag_note(idle_ms, true, true, true, "http_window_override");
-        LOG_INFO("[MAINT_RUN] idle_bypassed idle_ms=%lu min_idle_min=%u request_id=%s",
-                 idle_ms,
-                 (unsigned)g_ota_sched.min_idle_min,
-                 mw.request_id);
-      } else {
-        maintenance_idle_diag_note(idle_ms, true, false, false, "maintenance_idle_blocked");
-        LOG_INFO("[MAINT_RUN] idle_blocked idle_ms=%lu min_idle_min=%u -> sleep",
-                 idle_ms,
-                 (unsigned)g_ota_sched.min_idle_min);
-        ota_sched_reschedule_after_failure(now, true);
-        if (!maintenance_followup_retry_schedule(has_mw ? &mw : nullptr, "idle_blocked")) {
-          maintenance_followup_retry_clear("idle_blocked");
-        }
-        ota_set_last_result("maintenance_idle_blocked");
-        g_maintenance_mode = false;
-        sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-        return;
-      }
-    } else {
-      maintenance_idle_diag_note(idle_ms, false, false, has_mw, "maintenance_idle_ok");
-    }
-  } else {
-    maintenance_idle_diag_note(0, false, false, has_mw, "maintenance_no_activity");
-  }
-
-  // Cancel-safety: re-validate the LIVE cloud schedule before committing to OTA.
-  // If the operator disabled (enabled=false) or replaced (new request_id) the
-  // window after the device armed its cached copy, abort here. To pull a
-  // release, set enabled=false on the schedule row — do NOT delete it: a delete
-  // (204) is indistinguishable from a live past-start window and is fail-open.
-  // OTA_LOCK has NOT been sent yet, so no OTA_UNLOCK is needed on this path.
-  // Fail-open: a fetch failure / 204 proceeds with the cached window.
-  if (has_mw) {
-    SchedRevalidate rv = ota_sched_revalidate(
-        mw, (uint64_t)now, max(2000UL, (unsigned long)OTA_SCHED_HTTP_TIMEOUT_MS));
-    if (rv == REVAL_CANCELLED || rv == REVAL_REPLACED) {
-      const char* res = (rv == REVAL_CANCELLED) ? "schedule_cancelled" : "schedule_replaced";
-      char aborted_request_id[64];
-      strncpy(aborted_request_id, mw.request_id, sizeof(aborted_request_id) - 1);
-      aborted_request_id[sizeof(aborted_request_id) - 1] = '\0';
-      LOG_INFO("[MAINT_RUN] %s at window-start -> abort OTA (request_id=%s)",
-               res, aborted_request_id[0] ? aborted_request_id : "-");
-      sched_event_note(res, aborted_request_id);
-      ota_set_last_result(res);
-      maintenance_followup_retry_clear(res);
-      maintenance_window_consumed_clear(res);
-      mw.clear();  // wipe cached NVS window so pre_sleep won't re-arm it
-      g_maintenance_in_window = false;
-      g_maintenance_mode = false;
-      sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
-      return;
-    }
-    // REVAL_VALID or REVAL_FETCH_FAILED -> proceed (fail-open on fetch failure)
-  }
-
-  const char* maintenance_reason = has_mw ? "scheduled_http" : "maintenance";
-
-  // ── New scheduled-OTA order: LCD proxy FIRST, then Sense self-OTA ──
-  // At window entry BOTH boards are freshly awake (timer wake). The Sense
-  // self-OTA (inside maybeRunOtaCheck below) esp_restart()s on a successful
-  // apply; if the LCD were proxied AFTER that, the rebooted Sense would have
-  // to find/wake an LCD that has already idle-slept (Sense cannot wake the
-  // LCD — GPIO39 is LCD→Sense only), leaving the LCD stranded on old fw.
-  // Doing the LCD proxy first, while the LCD is still awake from this wake,
-  // sidesteps the limitation entirely: neither board needs to wake the other
-  // after a reboot.
-  LOG_INFO("[MAINT_RUN] LCD proxy first (pre-sense-ota)");
-
-  // OTA_LOCK keeps the LCD awake/listening for the UART-proxied OTA stream
-  // (extends ota_stay_awake_until_ms, wakes display from idle-dark, extends
-  // the maintenance deadline, blocks the LCD's own autonomous OTA check).
-  send_ota_uart_message("OTA_LOCK");
-  LOG_INFO("[MAINT_RUN] OTA_LOCK sent (lcd proxy first)");
-
-  // ── Phase 1: LCD OTA proxy (independent of any Sense self-OTA) ──
-  // run_lcd_maintenance_ota_attempt() spawns lcd_ota_proxy_task which does its
-  // own LCD_OTA_QUERY → manifest fetch → sense_lcd_ota_proxy(); it no-ops with
-  // result "noop" when the LCD is already on the target version. Success ->
-  // g_lcd_ota_result "updated" (or "noop"); failures leave a retryable result.
-  // The proxy task sends its own OTA_UNLOCK at completion (preserving the
-  // stay-awake window). Window budget is enforced via
-  // maintenance_window_active_for_retry / maintenance_wait_for_retry_slot.
-  for (uint8_t attempt = 0; attempt < LCD_MAINT_OTA_MAX_ATTEMPTS; ++attempt) {
-    if (!maintenance_window_active_for_retry(window_end_epoch, &remaining_s)) {
-      break;
-    }
-    if (attempt > 0) {
-      LOG_INFO("[MAINT_RUN] retry_lcd attempt=%u last_result=%s remaining_s=%lu",
-               (unsigned)(attempt + 1),
-               g_lcd_ota_result,
-               (unsigned long)remaining_s);
-      reset_lcd_maintenance_ota_state("pending");
-    }
-    run_lcd_maintenance_ota_attempt(maintenance_reason, window_end_epoch, &remaining_s);
-    if (!lcd_maintenance_result_retryable(g_lcd_ota_result)) {
-      break;
-    }
-    if ((attempt + 1) >= LCD_MAINT_OTA_MAX_ATTEMPTS) {
-      LOG_INFO("[MAINT_RUN] retry_lcd exhausted last_result=%s", g_lcd_ota_result);
-      break;
-    }
-    if (!maintenance_wait_for_retry_slot(window_end_epoch,
-                                         MAINT_OTA_RETRY_INTERVAL_MS,
-                                         "maintenance_lcd_retry",
-                                         &remaining_s)) {
-      break;
-    }
-  }
-  bool lcd_proxy_succeeded = lcd_maintenance_result_successful(g_lcd_ota_result);
-  LOG_INFO("[MAINT_RUN] lcd proxy phase done result=%s succeeded=%d",
-           g_lcd_ota_result[0] ? g_lcd_ota_result : "pending",
-           lcd_proxy_succeeded ? 1 : 0);
-
-  // ── Telemetry: "ota_complete" report (exactly once per maintenance run) ──
-  // Emitted AFTER the LCD proxy phase (so lcd_ota_result / lcd_fw reflect the
-  // LCD outcome — e.g. end_ack_timeout while lcd_fw is still the old version)
-  // and BEFORE the Sense self-OTA, which esp_restart()s on a successful apply
-  // and would otherwise vanish silently. Because the Sense has NOT self-updated
-  // yet here, fw == current sense fw; we attach sense_fw_target so the cloud can
-  // see the asymmetry (Sense about to move to X while LCD stayed on Y). This is
-  // the single exit point for BOTH branches: (a) Sense self-OTA will run (report
-  // then restart), and (b) Sense already up-to-date / no self-OTA (still reports
-  // the LCD outcome). It sits past the LCD retry loop, so it fires exactly once.
+  // The RTC drifts over a long sleep — measured ~8.5 min across one night. The
+  // arm then computes "next 02:00" from the stale clock and lands 507s away
+  // instead of ~24h, so the device wakes again 8 minutes later and re-arms
+  // correctly. Self-correcting, but it costs an extra wake every night and the
+  // maintenance actually runs ~02:08.
+  //
+  // Nearly free here: WiFi is already up for the manifest fetch, and the OTA
+  // check that follows gives SNTP several seconds to land before sleep entry
+  // reads the clock.
+  halo_prod_kick_time_sync("nightly");
   {
-    const char* sense_target = OtaIntent::getDesiredSense();
-    if (!sense_target || !sense_target[0]) {
-      TruthManifestState& ms = truth_get_manifest_state();
-      if (ms.status == TruthManifestState::OK && ms.version[0]) {
-        sense_target = ms.version;
-      }
+    const uint32_t before = sense_now_epoch();
+    const uint32_t deadline = millis() + 8000;
+    while ((int32_t)(millis() - deadline) < 0 && !is_time_valid()) {
+      delay(100);
     }
-    OtaReportExtras extras;
-    extras.add("sense_fw_target", sense_target);
-    extras.add("lcd_ota_succeeded", lcd_proxy_succeeded ? "1" : "0");
-    uint32_t report_to_ms =
-        OTA_REPORT_HTTP_TIMEOUT_MS < 5000UL ? OTA_REPORT_HTTP_TIMEOUT_MS : 5000UL;
-    ota_report_post("ota_complete", &extras, report_to_ms);
-    LOG_INFO("[OTA_REPORT] ota_complete sent lcd_result=%s lcd_succeeded=%d sense_target=%s",
-             g_lcd_ota_result[0] ? g_lcd_ota_result : "pending",
-             lcd_proxy_succeeded ? 1 : 0,
-             (sense_target && sense_target[0]) ? sense_target : "-");
-  }
-
-  // ── Phase 2: Sense self-OTA (may esp_restart on success — EXPECTED) ──
-  // Re-assert OTA_LOCK so the LCD's stay-awake window covers the Sense self-OTA
-  // download + reboot (the LCD proxy task above sent OTA_UNLOCK at its end;
-  // OTA_LOCK only ever extends the window, never shortens it). The LCD is
-  // already up-to-date now, so the inline LCD-proxy inside maybeRunOtaCheck()
-  // will see compareVersions<=0 and no-op ("up_to_date") rather than wastefully
-  // re-streaming — confirmed in sense_lcd_ota_proxy()'s version check.
-  send_ota_uart_message("OTA_LOCK");
-  LOG_INFO("[MAINT_RUN] OTA_LOCK re-asserted (sense self-ota next)");
-
-  // Reset OTA check gate — a previous check in this boot cycle may have set
-  // g_ota_check_done=true, which would cause maybeRunOtaCheck() to skip entirely.
-  g_ota_check_done = false;
-  g_ota_skip_logged = false;
-  maybeRunOtaCheck(maintenance_reason, true);
-  if (sense_maintenance_result_retryable(g_last_ota_result)) {
-    for (uint8_t attempt = 1; attempt < SENSE_MAINT_OTA_MAX_ATTEMPTS; ++attempt) {
-      if (!maintenance_wait_for_retry_slot(window_end_epoch,
-                                           MAINT_OTA_RETRY_INTERVAL_MS,
-                                           "maintenance_sense_retry",
-                                           &remaining_s)) {
-        break;
-      }
-      LOG_INFO("[MAINT_RUN] retry_sense attempt=%u last_result=%s remaining_s=%lu",
-               (unsigned)(attempt + 1),
-               g_last_ota_result,
-               (unsigned long)remaining_s);
-      g_ota_check_done = false;
-      g_ota_skip_logged = false;
-      maybeRunOtaCheck(maintenance_reason, true);
-      if (!sense_maintenance_result_retryable(g_last_ota_result)) {
-        break;
-      }
-      if ((attempt + 1) >= SENSE_MAINT_OTA_MAX_ATTEMPTS) {
-        LOG_INFO("[MAINT_RUN] retry_sense exhausted last_result=%s", g_last_ota_result);
-      }
+    const uint32_t after = sense_now_epoch();
+    const int32_t corrected = (int32_t)(after - before);
+    Serial.printf("[NIGHTLY] clock resync: %lu -> %lu (%+ds) valid=%d\n",
+                  (unsigned long)before, (unsigned long)after,
+                  (int)corrected, is_time_valid() ? 1 : 0);
+    if (corrected > 60 || corrected < -60) {
+      uart_send_sense_diag("ota", "clock_corrected", "nightly", corrected,
+                           "rtc_drift_over_sleep");
     }
   }
-
-  // The Sense self-OTA did not reboot (no update / blocked / failed); release
-  // the LCD so it can sleep. (On a successful Sense apply, esp_restart() above
-  // never returns here.)
-  send_ota_uart_message("OTA_UNLOCK");
-  LOG_INFO("[MAINT_RUN] OTA_UNLOCK sent (sense self-ota done, no reboot)");
-
-  // Conditional lcd_ota_due fallback: only CLEAR the next-boot LCD retry when
-  // the LCD proxy actually succeeded above (or was already up-to-date). If the
-  // LCD proxy failed/was skipped, SET it so the boot-time get_lcd_ota_due_nvs()
-  // branch at the top of run_maintenance_if_needed() reliably re-proxies the
-  // LCD next boot/window as the fallback. (In the Sense-update case the inline
-  // proxy inside maybeRunOtaCheck() already manages this flag before its reboot;
-  // since the LCD is up-to-date by then it clears it — consistent with success.)
-  set_lcd_ota_due_nvs(!lcd_proxy_succeeded);
-  LOG_INFO("[MAINT_RUN] lcd_ota_due=%d (lcd_proxy_succeeded=%d)",
-           lcd_proxy_succeeded ? 0 : 1, lcd_proxy_succeeded ? 1 : 0);
-  dump_system_truth("maintenance_done");
-  bool followup_retry_needed =
-      sense_maintenance_result_retryable(g_last_ota_result) ||
-      lcd_maintenance_result_retryable(g_lcd_ota_result);
-  if (has_mw) {
-    if (maintenance_window_should_consume_after_run(mw, window_end_epoch)) {
-      maintenance_window_mark_consumed(mw, "maint_done");
-    } else {
-      LOG_INFO("[MAINT_GUARD] leaving_request_reusable request_id=%s last_sense=%s last_lcd=%s",
-               mw.request_id[0] ? mw.request_id : "-",
-               g_last_ota_result[0] ? g_last_ota_result : "pending",
-               g_lcd_ota_result[0] ? g_lcd_ota_result : "pending");
-    }
-  }
-  if (followup_retry_needed) {
-    if (!maintenance_followup_retry_schedule(has_mw ? &mw : nullptr, "maintenance_followup")) {
-      maintenance_followup_retry_clear("maintenance_followup_exhausted");
-    }
-  } else {
-    maintenance_followup_retry_clear("maintenance_terminal");
-  }
-  g_next_ota_epoch = ota_sched_compute_next_epoch(time(nullptr));
-  ota_sched_save();
-  g_maintenance_in_window = false;
-  g_maintenance_mode = false;
-  sense_enter_sleep(SENSE_SLEEP_DEEP_MAINT);
+  maybeRunOtaCheck("nightly", true);
+  // g_ota_check_done is set by maybeRunOtaCheck() only when it actually performed
+  // the check. Reporting "checked" unconditionally is how a silent policy skip
+  // masqueraded as a successful nightly run — the wake fired, the log said
+  // checked, and no update check had happened at all.
+  const bool did_check = g_ota_check_done;
+  uart_send_sense_diag("ota", did_check ? "nightly_done" : "nightly_noop",
+                       "timer", did_check ? 1 : 0,
+                       did_check ? "checked" : "SKIPPED_no_check_performed");
+  Serial.printf("[NIGHTLY] update check %s\n", did_check ? "performed" : "SKIPPED");
 }
+
 
 void halo_prod_pre_sleep() {
   LOG_INFO("[PRE_SLEEP] window start");
@@ -4229,7 +3133,6 @@ void halo_prod_pre_sleep() {
         http_timeout_ms = remaining_ms;
       }
       if (http_timeout_ms >= 1000) {
-        ota_sched_http_fetch_window(http_timeout_ms);
       } else {
         ota_http_schedule_note("budget_low", 0, nullptr);
       }
@@ -4346,10 +3249,11 @@ void halo_prod_pre_sleep() {
   }
   mqtt_set_allowed(false);
 
-  ota_sched_configure_timer_wakeup();
 }
 
 void halo_prod_pre_setup() {
+  // Record the wake cause before anything else can disturb it.
+  nightly_maintenance_note_wake();
   g_provisioning_manager.init(nullptr);
   bool provisioned = ProvisioningState::isProvisioned();
   if (!provisioned) {
@@ -5010,6 +3914,7 @@ void halo_prod_loop() {
   static unsigned long s_mqtt_awake_failover_ms = 0;
   static bool s_last_setup_mode_active = true;
 
+
 #if OTA_TEST_BUILD
   ota_test_handle_serial();
   if (g_ota_test_crash_after_boot_ms > 0 &&
@@ -5023,7 +3928,11 @@ void halo_prod_loop() {
 #endif
 
   if (g_maintenance_mode && !g_maintenance_handled) {
-    run_maintenance_if_needed();
+    // Nightly path runs alongside the old orchestrator for now; it is a no-op
+    // unless the 02:00 timer woke us. The orchestrator is deleted only once
+    // this has been verified on hardware — OTA is the recovery path for a
+    // fielded device, so it does not get replaced on a compile check alone.
+    nightly_maintenance_tick();
     return;
   }
 
@@ -5181,7 +4090,6 @@ void halo_prod_loop() {
       uint32_t to_ms = OTA_SCHED_HTTP_TIMEOUT_MS < 5000UL ? OTA_SCHED_HTTP_TIMEOUT_MS : 5000UL;
       LOG_INFO("[AWAKE_SCHED] fetch awake_ms=%lu fetch_age_s=%ld",
                (unsigned long)(now_ms - last_wake_ms), (long)fetch_age);
-      ota_sched_http_fetch_window(to_ms);
       if (maintenance_schedule_pending_sync_to_lcd()) {
         sync_pending_maintenance_to_lcd("awake_sched_fetch");
       }

@@ -294,16 +294,12 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
 
   // Release camera DMA reservation to defragment internal SRAM for TLS.
   bool dma_was_reserved_voice = (g_camera_dma_reserve != nullptr);
-  if (dma_was_reserved_voice) {
-    heap_caps_free(g_camera_dma_reserve);
-    g_camera_dma_reserve = nullptr;
-  }
+  if (dma_was_reserved_voice) camera_dma_reserve_release("voice_upload");
   struct DmaGuardVoice {
     bool should_reacquire;
     ~DmaGuardVoice() {
-      if (should_reacquire && !g_camera_dma_reserve) {
-        g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
-            CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+      if (should_reacquire) {
+        camera_dma_reserve_acquire("voice_upload");
       }
     }
   } dma_guard_voice{dma_was_reserved_voice};

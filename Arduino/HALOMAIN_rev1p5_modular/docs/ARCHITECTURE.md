@@ -13,7 +13,7 @@ The device uses a **two-board ESP32-S3 architecture**:
 - **Sense board** (XIAO ESP32S3 Sense) -- Camera, WiFi, microphone, all network operations
 - **LCD board** (custom ESP32-S3 with round display) -- 1.28" round LCD, touch, rotary encoder, all UI rendering
 
-The boards communicate over a dedicated **UART link at 115200 baud**. The LCD board is the **sleep leader** -- it decides when the system sleeps based on user inactivity. The Sense board is the **network leader** -- it owns all WiFi, HTTPS, MQTT, and OTA downloads.
+The boards communicate over a dedicated **UART link at 115200 baud**. The LCD board is the **sleep leader** -- it decides when the system sleeps based on user inactivity. The Sense board is the **network leader** -- it owns all WiFi, HTTPS and OTA downloads.
 
 ### Physical Architecture
 
@@ -37,7 +37,7 @@ HALOMAIN_rev1p5_modular/
   halo_common/             # Shared board config (BoardConfig.h)
   halo_ota_demo/
     firmware/
-      halo_sense_prod/     # Production Sense wrapper (OTA + MQTT + provisioning)
+      halo_sense_prod/     # Production Sense wrapper (OTA + provisioning)
       halo_lcd_prod/       # Production LCD wrapper (OTA receiver)
       shared/              # Shared OTA/MQTT/provisioning libraries (~30 files)
     publish_both.sh        # OTA build + publish pipeline
@@ -104,6 +104,14 @@ HALOMAIN_rev1p5_modular/
 
 All normal inter-board communication uses **newline-delimited JSON** at 115200 baud over UART1. Every message has four required fields:
 
+> **Two TX paths, and they are not equivalent.** UI actions go through
+> `uart_tx_enqueue()` → `uart_tx_queue` → the drain in `uart_task`, which is where awake-proof
+> checking and the deferred ring live. USB-injected commands call `uart_send_json()` **directly**
+> and bypass all of that. This matters when testing: injecting
+> `{"type":"INPUT_MENU_SELECT"}` over USB will never exercise the deferral path, because the
+> drain never sees it. Use the bench `enq` command (gated by `HALO_SPOOL_TEST`), which goes
+> through the real enqueue call — only the trigger is synthetic.
+
 ```json
 {
   "ver": 1,
@@ -150,7 +158,6 @@ Maximum line length: 4096 bytes (allows rich voice response payloads).
 |---|---|
 | `UI_STATUS` | Status update with op/phase/text/screen_hint for UI routing |
 | `UI_LIST` | Shopping list data (items array) |
-| `UI_MEAL_RESULT` | Dish analysis result (kcal, macros, health score) |
 | `UI_VOICE_RESPONSE` | Voice assistant response (text, items, transcript) |
 | `UI_TOAST` | Ephemeral notification overlay |
 | `SYNC_ACK` | Link sync confirmed |
@@ -170,9 +177,23 @@ Maximum line length: 4096 bytes (allows rich voice response payloads).
 | `PROVISION_QR` | QR code data for provisioning display |
 | `FW_INFO` | Firmware versions reply to `INPUT_FW_INFO` or `INPUT_SENSE_FW`. **Diagnostic reply (INPUT_FW_INFO):** real running firmware of BOTH boards + LCD partition/state: `sense_fw`, `lcd_fw` (freshly queried, not cached manifest), `lcd_running_part`, `lcd_running_state`, `lcd_boot_part`, `lcd_fw_age_s`; `lcd_fw="unknown"` if the fresh LCD query fails. **Fast reply (INPUT_SENSE_FW):** `sense_fw` (live) + `lcd_fw` (CACHED `g_lcd_ota_version`, or `"unknown"`); partition/state fields omitted, no blocking query |
 
-### COBS Binary Protocol (OTA Only)
+### Delivery Guarantee for User-Intent Messages
 
-During LCD OTA updates, the UART switches from JSON to **COBS-framed binary** for firmware chunk transfer. This uses `UartOtaProtocol` (shared between both boards).
+`INPUT_*` messages that carry user intent are **acknowledged and retransmitted**; everything else remains fire-and-forget.
+
+- The LCD holds each tracked message (`lcd_link_ack.h`) until the Sense returns `INPUT_ACK` with a matching `ack_id`, retransmitting every 400 ms up to 5 attempts.
+- After the budget is spent it posts `EVT_LINK_SEND_FAILED`, and the UI resolves with "Couldn't reach sensor" instead of stranding on the capturing screen. A lost `INPUT_MENU_SELECT` was the single best explanation for the reported capture hang.
+- A retransmit replays the **original bytes with the original `msg_id`**. Re-serializing would mint a new `msg_id` (`get_next_msg_id()` increments) and the Sense could not tell a retry from a second button press.
+- The Sense therefore **must** dedupe: it acks *before* doing any work, then suppresses the repeat action for any `msg_id` in its 8-deep seen-ring. Retransmission without dedupe turns one tap into two captures — a worse bug than the one being fixed. A duplicate is still re-acked, because the LCD is retrying precisely because it did not hear the first ack.
+- The LCD does not sleep while a tracked message is unacked (bounded: a slot is retired after ~2 s regardless).
+
+Tracked types mirror `input_requires_sense()`. `INPUT_SCROLL` and `INPUT_PING` are deliberately excluded — high-frequency and near-idempotent, and retransmitting them would add load exactly when the link is already struggling.
+
+Verified on hardware: happy path `tracked=3 acked=3 retries=0` (RTT 17 ms) with the Sense seeing exactly 3; induced loss gave `retry 2/5..5/5` then `GIVE_UP` at 2011 ms plus the UI error; dropped acks gave 3 receptions of one `msg_id`, 2 suppressed, exactly 1 scan job queued.
+
+### COBS Binary Protocol (OTA and image spool)
+
+During LCD OTA updates **and capture-image spooling**, the UART switches from JSON to **COBS-framed binary**. This uses `UartOtaProtocol` (shared between both boards).
 
 Frame structure (before COBS encoding):
 
@@ -193,6 +214,45 @@ Message types:
 - `MSG_ACK (4)` -- Acknowledge receipt
 - `MSG_NACK (5)` -- Negative acknowledge (with error code)
 - `MSG_ERROR (6)` -- Error notification
+
+Image-spool types are **deliberately distinct** from the firmware types above. Both transfers share this link and this framing, and the consequences are asymmetric: a firmware frame written into a `.jpg` is a corrupt photo, but an image frame written to an OTA partition is a bricked board.
+- `MSG_IMG_BEGIN (0x11)`, `MSG_IMG_CHUNK (0x12)`, `MSG_IMG_END (0x13)`, `MSG_IMG_ACK (0x14)`, `MSG_IMG_NACK (0x15)`
+
+**Two hard-won rules for anything that hands off from JSON to COBS on this link:**
+
+1. **Never `println()` the handshake.** It emits `"\r\n"`; the peer's line parser terminates on the `\r` and stops reading the instant it enters binary mode, leaving the `\n` in the FIFO to be consumed as the first COBS byte. One stray byte shifts the entire decode. Reproduced exactly on the host (`tools/cobs_probe.c`): a valid 519-byte frame parses as `decoded_len=520, data_len=59649, expected=59656` — byte-for-byte what the device reported. It is fully deterministic, so it reads like a framing bug and survives unrelated "fixes". Send a bare `\n`, and drain until quiet on the receiving side.
+2. **Suppress JSON TX for the duration of the transfer.** The LCD's TX-queue drain runs before its binary-mode branch, so status lines were being emitted into the middle of the COBS stream; the Sense saw `data_len=8818` (`0x2272` = `"r`). Messages queue and drain after the transfer instead.
+
+### Rule: harden BOTH directions, or neither works
+
+The link carries binary in both directions now (firmware LCD-ward, capture images both ways). Every hazard fixed in one direction has an exact twin in the other, and fixing only one produces failures that look unrelated. All three of these were found *after* the outbound direction was working:
+
+**The rule, stated once so it need not be rediscovered a fourth time: during any
+binary transfer, BOTH boards suppress JSON, regardless of which one is sending.**
+Three separate debugging cycles were spent fixing whichever side had just been
+observed to break. The flags are `g_img_rx_binary_mode` / `g_lcd_ota_binary_mode`
+/ `g_spool_tx_pending` / `g_spool_tx_active` on the LCD, and
+`g_lcd_ota_proxy_owns_uart` / `g_spool_owns_uart` / `g_img_spool_tx_active` on
+the Sense.
+
+The third instance hid the longest because the synthetic `spooltest` payload
+passed byte-exact twice (184,320 B, both directions) — but `spooltest` runs on an
+**idle** device. The real path runs during an upload failure with WiFi up, where
+the Sense emits `SENSE_DIAG` rssi every ~2s, and those bytes land inside its own
+outbound COBS stream: `[IMG_SPOOL] ack timeout at seq=5`. A test that cannot
+produce the interference cannot catch it.
+
+| Hazard | Outbound fix | Inbound twin (initially missed) |
+|---|---|---|
+| RX buffer too small for a ~521B frame | LCD `setRxBufferSize(1024)` | Sense had **none** (256B default) → `decoded_len=391` with a *correct* header |
+| Own JSON interleaved into own COBS stream | Suppress TX while `g_img_rx_binary_mode` | `binary_xfer_active` covered only RECEIVE states, so the LCD corrupted the stream it was TRANSMITTING |
+| Peer's periodic chatter corrupts frame reads | — | Sense `SENSE_DIAG` rssi (~2s) landed inside the LCD's ACK reads |
+
+**Diagnostic signature:** a *correct* header (`data_len=512`) with a short `decoded_len` means bytes were dropped — look at buffer sizes. A *garbage* `data_len` whose hex spells ASCII (`8818` = `0x2272` = `"r`) means JSON leaked into the stream — look at TX suppression on both boards.
+
+### COBS parser note
+
+`recv_frame()` treats `*data_len` as **IN/OUT** — the caller must pass the buffer capacity in, or every chunk is rejected as "payload too large".
 
 ---
 
@@ -222,14 +282,14 @@ Message types:
    - `TIMER`: Init UART, check if LCD is active, call `ota_on_timer_wake()`
    - `UNDEFINED` (cold boot): Full initialization
 7. **GPIO2 configure** -- Set as input with pullup for wake pulse polling
-8. **FreeRTOS queues** -- Create op_queue (20 slots), upload_queue (10), upload_queue_dish (10)
+8. **FreeRTOS queues** -- Create op_queue (20 slots), upload_queue (10)
 9. **Voice buffer** -- Allocate 512KB in PSRAM for audio recording
 10. **I2S audio init** -- Configure microphone with callback
 11. **Worker tasks:**
     - `op_worker` -- Core 1, priority 2, 16KB stack (foreground operations)
     - `upload_worker` -- Core 1, priority 1, 12KB stack (background uploads)
 12. **WiFi connect** -- Start connection using provisioned or default credentials
-13. **`halo_prod_setup()`** -- MQTT connect, OTA schedule check, provisioning state machine
+13. **`halo_prod_setup()`** -- OTA schedule check, provisioning state machine
 
 ### LCD Board Boot Sequence
 
@@ -264,6 +324,20 @@ Message types:
 
 The sleep flow is a coordinated handshake between LCD (leader) and Sense (follower).
 
+**Sleep entry is not instantaneous — measured `teardown_ms=166` on the LCD** between
+`transition_begin` and `esp_deep_sleep_start()` (NVS list save, UI teardown, panel off, errlog
+write). A tap landing inside that window used to be lost outright: the UI task has already stopped
+treating touches as input and ext1 is not armed until the final instruction, so nobody saw it and
+the user tapped again. A *held* touch was never affected — the INT stays asserted, so ext1
+`ANY_LOW` fires as soon as sleep begins.
+
+Closed 2026-08-20 with an edge-triggered ISR on the touch INT, armed at `transition_begin` and
+checked at the last point sleep can be abandoned cleanly (above `Touch_Standby()`, backlight-off
+and `vTaskDelete(ui_task_handle)` — `abort_sleep_transition()` restores panel/backlight/LVGL but
+cannot recreate a deleted UI task). Verified both directions on hardware, including 3/3 undisturbed
+cycles sleeping normally with `isr_count=0`, because a spurious abort would mean the device never
+sleeps — worse than the bug being fixed. See LCD_FIRMWARE.md for the test method.
+
 ### Full Sleep Sequence
 
 ```
@@ -289,7 +363,6 @@ LCD (idle timeout)            Sense
 - `cooldown` -- Sense just woke up (MIN_AWAKE_BEFORE_SLEEP_MS = 2000ms)
 - `op_inflight` -- Scan/upload/voice operation in progress
 - `ota_pending` -- OTA check or apply in progress
-- `mqtt_pending` -- MQTT connection or message inflight
 - `provisioning_active` -- Device provisioning in progress
 - `time_invalid` -- RTC time not yet synced (needed for TLS)
 
@@ -352,27 +425,36 @@ The capture pipeline handles food image capture for dish logging, check-in, chec
 
 7. Result Wait (Sense)
    - Send UI_STATUS phase=RESULT_WAITING
-   - Poll result_url or wait for MQTT notification
+   - (no result poll -- nutrition was removed 2026-08-21)
    - Timeout: 60s
 
 8. Display Result (LCD)
-   - Receive UI_MEAL_RESULT with kcal, macros, health score
-   - Show result screen with nutritional breakdown
+   - LCD shows "Logged!" and returns home, same as check-in and discard
 ```
 
 ### DMA Guard Pattern
 
-Camera DMA and TLS both need large contiguous PSRAM blocks. The guard pattern prevents conflicts:
+Camera DMA and TLS both need large contiguous blocks of **internal, DMA-capable** RAM — not PSRAM. That pool is the scarcest resource on the Sense and is where most capture/upload faults originate:
 
 ```cpp
-// Before capture: reserve DMA memory
-g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(16384, MALLOC_CAP_SPIRAM);
+// Reserved up front so WiFi/TLS fragmentation cannot eat the contiguous region
+g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+    CAMERA_DMA_RESERVE_BYTES /*16384*/, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
 
-// After capture, before upload: release reservation
-free(g_camera_dma_reserve);
-g_camera_dma_reserve = nullptr;
-// Now TLS can allocate for HTTPS PUT
+// Released immediately before esp_camera_init(), re-acquired in deinit_camera()
 ```
+
+**Do not pre-emptively tear WiFi down before camera init.** The old guard compared `heap_caps_get_largest_free_block()` against a 24576 threshold *while the 16KB reserve was still held*, so it understated the available block by the reserve size and fired on **every capture**:
+
+```
+[CAMERA] DMA low (18420 < 24576) — killing WiFi     x11 in an 11-capture run
+```
+
+Killing the connection on every capture is what starves uploads. A strong AP hides it; a weak one never reconnects before the next capture kills it again, producing "uploads missed or very late". A measured run had **zero uploads complete across 11 successful captures** for this reason. It is also redundant — `init_camera()` already makes two attempts with `quiesce_network_for_camera("retry_after_init_fail")` between them, so a real shortage costs one failed attempt instead of one lost connection. Restore the old behaviour with `CAMERA_PREEMPTIVE_WIFI_KILL=1` only with measurements in hand.
+
+**Never tear WiFi down with an HTTP request inflight.** Doing so frees lwIP pbufs while the upload task is blocked in `recv()` and panics the board (`lwip_recvfrom -> lwip_recv_tcp -> pbuf_free`), measured at 2 panics / 8 captures. `init_camera()` now drains for up to `CAMERA_HTTP_DRAIN_MAX_MS` (1500) and **skips** the teardown entirely if the request has not finished. Losing DMA headroom for one capture beats a panic.
+
+**Anything holding internal RAM across a camera re-init must release it first.** The bounded-grab worker's 4KB stack (5,120 B with TCB) took `dma_largest` from 19444 to 14324 — below the ~16KB `esp_camera_init()` needs — and caused 15/30 captures to fail. It is now released in `deinit_camera()` before the re-reservation, with a short yield because `vTaskDelete` defers freeing the stack to the IDLE task.
 
 ### Camera Profiles
 
@@ -392,11 +474,17 @@ The Sense board manages two priority-separated upload queues:
 ### Queue Architecture
 
 ```
-upload_queue_dish  (10 slots, high priority)  -- Dish/meal uploads
 upload_queue       (10 slots, lower priority) -- Check-in, discard, voice uploads
 ```
 
 The `upload_worker` FreeRTOS task (Core 1, priority 1) drains both queues. Dish queue is checked first for responsiveness.
+
+**TLS:** every leg validates the peer. The S3 photo PUT was the exception — it used
+`setInsecure()` while presign, MQTT and OTA all validated — and was switched to the shared
+`tls_configure()` helper on 2026-08-20. Measured cost on hardware: `heap delta +212 B`,
+`dma_largest 17396`, `PUT status: 200`. Heap is now logged either side of that handshake on every
+PUT, because this path has a heap-exhaustion panic history (the AES-DMA fault fixed in 6.1.815) and
+a regression there should be visible rather than inferred.
 
 ### Upload Job Structure
 
@@ -667,6 +755,24 @@ The Hard Gate is the "**Pulse Once, UART Forever**" paradigm: GPIO39 is only use
 - **Cleared** when Sense goes to sleep (`SLEEP_READY` received), re-enabling GPIO39 for the next wake cycle
 
 This eliminates an entire class of bugs where redundant GPIO39 pulses during normal operation could cause EXT0 re-wake on the next sleep entry.
+
+**The flag is not the only encoding of "awake", and they had drifted (fixed 2026-08-20).**
+There is also a `sense_state` enum (`SENSE_AWAKE` / `SENSE_ASLEEP` / `SENSE_UNKNOWN`), and two
+consumers act on *it* rather than the flag: the wake-probe decision (`need_probe` in
+`LCD_Minimal.ino`) and scroll handling (`lcd_ui_task.h`). Of the three setters above, only `PONG`
+went through `set_sense_awake_estimate()` → `sense_state_set()`; **`SYNC_ACK` and `UI_STATUS` set
+the flag directly and never touched the enum**. `sense_state_set()` compounded it by early-returning
+on an unchanged state while clearing the flag only *after* that return, so the common case (already
+`ASLEEP`) never reconciled the two. The device therefore behaved differently — redundant probes,
+altered scroll handling — while every log looked healthy.
+
+Both sources are closed: all three setters now go through `set_sense_awake_estimate()`, and the
+invariant (`not awake` ⇒ flag false) is enforced *before* the early return. A standing
+`[STATE_DISAGREE]` line in the 5s `[SENSE_LINK]` diagnostic reports any future violation from the
+field rather than leaving it to be inferred from behaviour months later.
+
+Note this is a different fix from `SENSE_AWAKE_TRUST_MS` (2026-06-17), which declines to *trust* a
+stale flag. That treats the symptom; this closes the source. Both are in place.
 
 ### Layer 2: RELEASE_WAKE
 
@@ -1008,7 +1114,6 @@ s3://trepo-uploads/{owner_id}/halo/{device_id}/{job_id}.jpg
 |---|---|
 | `sense_wifi.h` | WiFi connect/disconnect, recovery, guard state machine |
 | `sense_upload.h` | S3 upload core, HTTP client management |
-| `sense_mqtt.h` | MQTT connect, subscribe, command dispatch (dev only) |
 | `sense_camera.h` | Camera init, capture, quality validation, profiles |
 | `sense_sleep.h` | Sleep entry, wake sources, handshake, GPIO management |
 | `sense_voice.h` | Audio recording, voice upload, session management |
@@ -1038,7 +1143,7 @@ s3://trepo-uploads/{owner_id}/halo/{device_id}/{job_id}.jpg
 | `lcd_ship_screens.h` | Main menu, voice/AI UI, second menu, settings |
 | `lcd_ship_flow.h` | Animations, timeout rings, screen init/show |
 | `lcd_ship_route.h` | Screen routing, touch handling, result/debug screens |
-| `lcd_ship_action.h` | Menu actions, meal results, custom UI |
+| `lcd_ship_action.h` | Menu actions, custom UI |
 | `lcd_menu.h` | Menu display, button handlers, scroll |
 | `lcd_sleep.h` | Sleep/wake, INT_PIN pulse, sleep handshake |
 | `lcd_ota_uart.h` | OTA-over-UART receiver: state machine, esp_ota, SHA256, NVS resume |

@@ -14,7 +14,7 @@
  *   - diag_sanitize_token(), diag_record_action_event() from sense_diag.h
  *   - wifi_is_connected() from sense_wifi.h
  *   - TIME_VALID_MIN_EPOCH constant
- *   - upload_inflight, waiting_for_mqtt_result, dish_scan_inflight, scan_ui_inflight globals
+ *   - upload_inflight, dish_scan_inflight, scan_ui_inflight globals
  *   - g_boot_reset_reason, reset_reason_label() from sense_diag.h
  *   - halo_provisioning_active() (under HALO_SENSE_PROD_WRAPPER)
  *   - dump_system_truth() (under HALO_SENSE_PROD_WRAPPER)
@@ -439,7 +439,7 @@ static void upload_persist_maybe_replay() {
     return;
   }
   if (!wifi_is_connected() || upload_inflight || upload_queue_count() > 0 ||
-      waiting_for_mqtt_result || dish_scan_inflight || scan_ui_inflight) {
+      dish_scan_inflight || scan_ui_inflight) {
     return;
   }
 #ifdef HALO_SENSE_PROD_WRAPPER
@@ -518,6 +518,33 @@ static void upload_persist_handle_failure(const UploadJob& job, const char* reas
                             cached_count,
                             next_retries);
   dump_system_truth(saved ? "upload_cached" : "upload_cache_fail");
+
+  // SPIFFS could not take it — for a real capture it never can. The partition is
+  // 173,441 B total and needs roughly twice the image size to write, while images
+  // are 140-190 KB, so upload_persist_save() always hits skip_save. Every caller
+  // frees job.image_buf immediately after this returns, so without the fallback
+  // below a failed upload silently DESTROYS the user's photo.
+  //
+  // That was the live behaviour: the SD spool existed but was only wired into the
+  // sleep path (a job parked because the foreground was busy), not into the
+  // upload-failure path — which is the case it was built for. Measured: a forced
+  // upload failure left `upload=0 q=0` at sleep entry with nothing on the card.
+  //
+  // Spooling here covers every failure reason at once (put_fail, put_timeout,
+  // presign_fail, presign_timeout, voice_post_fail) rather than patching each
+  // call site and missing one.
+  if (!saved && !job.is_voice && job.image_buf && job.image_len > 0) {
+    Serial.printf("[UPLOAD_PERSIST] SPIFFS full — spooling job_id=%lu to LCD SD card\n",
+                  (unsigned long)job.job_id);
+    const bool spooled = sense_spool_image_to_lcd(job, job.image_buf, job.image_len);
+    saved = spooled;
+    uart_send_sense_diag("upload", spooled ? "spooled_to_sd" : "spool_failed",
+                         job.mode, (int32_t)job.job_id,
+                         spooled ? "kept_on_sd" : "PHOTO_LOST");
+    Serial.printf("[UPLOAD_PERSIST] SD spool %s for job_id=%lu\n",
+                  spooled ? "OK" : "FAILED", (unsigned long)job.job_id);
+  }
+
   Serial.printf("[UPLOAD_PERSIST] failure reason=%s job_id=%lu saved=%d next_retries=%u from_persisted=%d\n",
                 reason ? reason : "unknown",
                 (unsigned long)job.job_id,

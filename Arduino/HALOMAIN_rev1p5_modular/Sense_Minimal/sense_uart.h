@@ -94,6 +94,13 @@ static void initUarts() {
   // vanished; in-enclosure (no drain) it returns every-few-refreshes.
   Serial.setTxTimeoutMs(0);
   delay(50);
+  // 1024, matching the LCD. Until the SD-spool drain existed the Sense only
+  // ever RECEIVED small JSON lines and only ever SENT binary, so the 256-byte
+  // default was enough. Receiving a ~521-byte COBS frame overflows it and drops
+  // bytes mid-frame, which surfaces as a truncated decode rather than an error:
+  //     [UART_OTA] Frame too short: decoded_len=391, expected=519 (data_len=512)
+  // The header parses correctly there - the frame is simply missing bytes.
+  lcdSerial.setRxBufferSize(1024);
   lcdSerial.begin(UART_BAUD_RATE, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   delay(50);
   uart_rx_ring_head = 0;
@@ -212,6 +219,21 @@ static void uart_process_rx_ring() {
 // No-op while the LCD OTA proxy owns the serial port (binary COBS framing).
 static void pump_uart_rx_once() {
   if (g_lcd_ota_proxy_owns_uart) {
+    return;
+  }
+  // The spool drain owns the port while an image streams back from the LCD.
+  // The JSON line reader below would consume those COBS bytes as text and the
+  // transfer would die at seq=0 — the same failure the outbound direction hit.
+  if (g_spool_owns_uart) {
+    return;
+  }
+  // Same rule for the OUTBOUND direction. The earlier spooltest transfers passed
+  // only because the device was idle; during a real upload failure the Sense is
+  // emitting rssi SENSE_DIAG every ~2s, and those bytes land inside its own COBS
+  // stream — observed as "[IMG_SPOOL] ack timeout at seq=5" with the LCD
+  // reporting frame_timeout. Third instance of this same bug class: every
+  // transfer direction needs BOTH boards quiet.
+  if (g_img_spool_tx_active) {
     return;
   }
   while (lcdSerial.available() > 0) {
@@ -333,6 +355,23 @@ static bool validate_protocol_message(JsonDocument& doc) {
 static void uart_send_json(const char* json_str) {
   // Block JSON TX while LCD OTA proxy owns the UART for binary COBS framing
   if (g_lcd_ota_proxy_owns_uart) {
+    return;
+  }
+  // Same rule for the SD-spool drain. The Sense emits SENSE_DIAG rssi reports
+  // roughly every 2s; during a drain those land inside the LCD's ACK reads and
+  // corrupt its frame parser. Dropping a couple of diagnostic lines for the
+  // ~18s of a transfer is free — they are periodic and the next one is along
+  // shortly — whereas a corrupted frame costs the whole image.
+  if (g_spool_owns_uart) {
+    return;
+  }
+  // And while the Sense is SENDING an image. This is the direction that was
+  // missing: the RX pump was already guarded, so ACKs were not being stolen —
+  // but nothing stopped this board writing a SENSE_DIAG line into the middle of
+  // its own outbound COBS stream. The transfer then dies at a random chunk
+  // (seq=5, 24, 34 across runs) because the interferer is periodic, not
+  // positional.
+  if (g_img_spool_tx_active) {
     return;
   }
   size_t len = strlen(json_str);

@@ -36,6 +36,19 @@ function.zip
 **/MqttSecrets.local.h
 **/MqttSecrets.local.cpp
 
+# Built firmware images. A .bin embeds whatever MqttSecrets.local.cpp held at
+# build time, so every one of these is a copy of the device private key. 2,514 of
+# them were sitting untracked-but-not-ignored on 2026-08-20, i.e. one `git add -A`
+# away from the same leak that already happened via Sense_Minimal.ino.
+**/dist/
+**/artifacts/*.bin
+*.ino.bin
+
+# Tool runtime data. Contains presigned S3 URLs (access key id + signature in the
+# query string) captured from live runs -- expiring, but not source.
+tools/live_monitor/data.json
+tools/soak_dashboard/gallery.json
+
 # Session Board runtime state (never commit — .session_board_secret is the
 # internet-facing auth token; the others are local caches)
 .session_board_secret

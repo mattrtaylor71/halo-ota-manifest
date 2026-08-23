@@ -103,8 +103,7 @@ static void uart_process_received_message(const char* json_str) {
   Serial.printf("[PROTO] RX: type=%s\n", type);
 #if SHIP_MENU_UI
   if (provisioning_input_locked()) {
-    if (strcmp(type, "UI_STATUS") == 0 ||
-        strcmp(type, "UI_MEAL_RESULT") == 0) {
+    if (strcmp(type, "UI_STATUS") == 0) {
       Serial.printf("[PROVISION] ignore type=%s (provisioning_active)\n", type);
       return;
     }
@@ -143,10 +142,6 @@ static void uart_process_received_message(const char* json_str) {
     diag_store_wifi_summary(summary.c_str());
     return;
   }
-  if (strcmp(type, "UI_MEAL_RESULT") == 0) {
-    ui_apply_ship_meal_result(doc);
-    return;
-  }
   if (strcmp(type, "UI_TOAST") == 0) {
     ui_handle_ship_toast(doc);
     return;
@@ -178,6 +173,163 @@ static void uart_process_received_message(const char* json_str) {
     waiting_for_sense_logged = false;
   }
   
+  // Sense confirming it received a user-intent message. Clears the retransmit
+  // slot for that msg_id; an unmatched ack is harmless (a duplicate ack for a
+  // message we already retired) and is ignored.
+  if (strcmp(type, "INPUT_ACK") == 0) {
+    const uint32_t acked = (uint32_t)(doc["ack_id"] | 0);
+    link_ack_on_ack(acked);
+    note_sense_proof_of_life("INPUT_ACK");
+    return;
+  }
+
+  // Drain: Sense asking what is waiting on the card.
+  if (strcmp(type, "SPOOL_LIST_REQ") == 0) {
+    uint32_t seq = 0, len = 0, total = 0;
+    const uint32_t count = lcd_sd_spool_count(&total);
+    const bool have = lcd_spool_oldest(&seq, &len);
+    static char meta[320];
+    meta[0] = '\0';
+    if (have) lcd_spool_read_meta(seq, meta, sizeof(meta));
+    // Hand back the sidecar verbatim so the Sense can rebuild the UploadJob
+    // exactly as it was before sleep destroyed the RAM copy.
+    //
+    // static, not a local: uart_task has an 8KB stack and already parses JSON on
+    // it. A 512-byte frame here overflowed it — "Stack canary watchpoint
+    // triggered (uart_task)" — and a stack canary trip presents as a garbage
+    // backtrace, which is why it first read as an unrelated WiFi PHY fault.
+    // Only uart_task reaches this code, so static is safe.
+    static char out[512];
+    snprintf(out, sizeof(out),
+             "{\"ver\":%d,\"type\":\"SPOOL_LIST\",\"msg_id\":%lu,\"ts\":%lu,"
+             "\"count\":%lu,\"total\":%lu,\"slot\":%lu,\"len\":%lu,\"meta\":%s}",
+             PROTOCOL_VERSION, (unsigned long)get_next_msg_id(),
+             (unsigned long)millis(), (unsigned long)count, (unsigned long)total,
+             (unsigned long)(have ? seq : 0), (unsigned long)len,
+             (have && meta[0]) ? meta : "null");
+    senseSerial.print(out); senseSerial.print('\n'); senseSerial.flush();
+    Serial.printf("[SPOOL_TX] list count=%lu total=%lu oldest_slot=%lu len=%lu\n",
+                  (unsigned long)count, (unsigned long)total,
+                  (unsigned long)(have ? seq : 0), (unsigned long)len);
+    return;
+  }
+
+  // Drain: Sense asking for the bytes of one slot.
+  if (strcmp(type, "SPOOL_FETCH") == 0) {
+    const uint32_t slot = (uint32_t)(doc["slot"] | 0);
+    char p[64];
+    snprintf(p, sizeof(p), LCD_SD_SPOOL_DIR "/%lu.jpg", (unsigned long)slot);
+    const uint32_t len = lcd_spool_file_size(p);
+    const bool ok = (slot != 0 && len > 0);
+    static char out[192];   // see SPOOL_LIST_REQ above: uart_task stack is tight
+    snprintf(out, sizeof(out),
+             "{\"ver\":%d,\"type\":\"SPOOL_FETCH_READY\",\"msg_id\":%lu,\"ts\":%lu,"
+             "\"slot\":%lu,\"len\":%lu,\"ok\":%d}",
+             PROTOCOL_VERSION, (unsigned long)get_next_msg_id(),
+             (unsigned long)millis(), (unsigned long)slot,
+             (unsigned long)len, ok ? 1 : 0);
+    // Bare '\n', never println(): println emits "\r\n" and the peer's line
+    // parser stops on the '\r', leaving the '\n' to be eaten as the first byte
+    // of the COBS stream. That single byte shifts the entire decode — it cost a
+    // full debug cycle on the inbound direction, so do not reintroduce it here.
+    senseSerial.print(out); senseSerial.print('\n'); senseSerial.flush();
+    if (ok) {
+      // Let the Sense enter binary receive before the first frame goes out.
+      vTaskDelay(pdMS_TO_TICKS(120));
+      g_spool_tx_slot = slot;      // uart_task performs the transfer
+      g_spool_tx_pending = true;
+    }
+    Serial.printf("[SPOOL_TX] fetch slot=%lu len=%lu ok=%d\n",
+                  (unsigned long)slot, (unsigned long)len, ok ? 1 : 0);
+    return;
+  }
+
+  // Drain: Sense confirming the upload landed, so the slot can go.
+  if (strcmp(type, "SPOOL_DELETE") == 0) {
+    const uint32_t slot = (uint32_t)(doc["slot"] | 0);
+    if (slot) lcd_spool_delete(slot);
+    return;
+  }
+
+  // Sense is about to spool a capture image to our SD card.
+  if (strcmp(type, "IMG_XFER_BEGIN") == 0) {
+    uint32_t job = (uint32_t)(doc["job_id"] | 0);
+    uint32_t len = (uint32_t)(doc["len"] | 0);
+    // Stash the replay metadata now; lcd_img_rx_end() writes it beside the image
+    // only once the bytes are complete. Built by hand rather than by re-
+    // serializing `doc`, so the sidecar carries exactly the replay fields and
+    // not the transport envelope (ver/type/msg_id/ts).
+    {
+      JsonObject cm = doc["cam"];
+      snprintf(g_img_rx_meta, sizeof(g_img_rx_meta),
+               "{\"job_id\":%lu,\"len\":%lu,\"mode\":\"%s\",\"is_voice\":%d,"
+               "\"expiry\":\"%s\",\"qty\":%u,\"add_list\":%d,\"retries\":%u,"
+               "\"epoch\":%lu,\"cam\":{\"p\":%d,\"f\":%d,\"q\":%d,\"w\":%d,"
+               "\"h\":%d,\"fs\":%d,\"l\":%d,\"g\":%d,\"x\":%lu}}",
+               (unsigned long)job, (unsigned long)len,
+               (const char*)(doc["mode"] | ""),
+               (int)(doc["is_voice"] | 0),
+               (const char*)(doc["expiry"] | ""),
+               (unsigned)(doc["qty"] | 0),
+               (int)(doc["add_list"] | 0),
+               (unsigned)(doc["retries"] | 0),
+               (unsigned long)(doc["epoch"] | 0),
+               (int)(cm["p"] | 0), (int)(cm["f"] | 0), (int)(cm["q"] | 0),
+               (int)(cm["w"] | 0), (int)(cm["h"] | 0), (int)(cm["fs"] | 0),
+               (int)(cm["l"] | 0), (int)(cm["g"] | 0),
+               (unsigned long)(cm["x"] | 0));
+    }
+    g_img_rx_meta_epoch = (uint32_t)(doc["epoch"] | 0);
+    bool ready = lcd_img_rx_begin(job, len);
+    StaticJsonDocument<128> r;
+    r["ver"] = PROTOCOL_VERSION;
+    r["type"] = "IMG_XFER_READY";
+    r["job_id"] = job;
+    r["ok"] = ready ? 1 : 0;
+    String out; serializeJson(r, out);
+    senseSerial.println(out); senseSerial.flush();
+    if (ready) {
+      // Drain handshake residue BEFORE the COBS stream starts.
+      //
+      // The Sense sends this handshake with println(), which emits "\r\n". The
+      // line parser in lcd_uart_task.h terminates on the '\r' and then breaks
+      // out of the read loop the instant binary mode is set, so the orphaned
+      // '\n' stays in the FIFO and is consumed as the first byte of the first
+      // COBS frame. One byte shifts the entire decode. Reproduced exactly on
+      // the host (tools/cobs_probe): a single stray leading byte turns a valid
+      // 519-byte frame into decoded_len=520 / data_len=59649 / expected=59656 —
+      // byte-for-byte the values seen on device across three builds. It was
+      // deterministic, which is why it looked like a framing bug and survived
+      // an unrelated fix to the header parser.
+      //
+      // Waiting for the line to go quiet (rather than a single drain) closes
+      // the race where the '\n' has not arrived yet when we get here. The Sense
+      // waits 120ms after READY before its first frame, so a bounded quiet-wait
+      // well inside that window cannot swallow real payload.
+      const uint32_t drain_deadline_ms = millis() + 60;
+      uint32_t last_byte_ms = millis();
+      uint32_t drained = 0;
+      while ((int32_t)(millis() - drain_deadline_ms) < 0) {
+        if (senseSerial.available()) {
+          senseSerial.read();
+          drained++;
+          last_byte_ms = millis();
+        } else if ((millis() - last_byte_ms) >= 10) {
+          break;                      // quiet for 10ms: residue is gone
+        } else {
+          vTaskDelay(pdMS_TO_TICKS(1));
+        }
+      }
+      // No need to reset the proto: recv_frame() clears rx_buffer_pos on entry.
+      Serial.printf("[IMG_RX] drained %lu handshake byte(s) before binary mode\n",
+                    (unsigned long)drained);
+      g_img_rx_binary_mode = true;   // frames follow
+    }
+    Serial.printf("[IMG_RX] xfer_begin job=%lu len=%lu ready=%d\n",
+                  (unsigned long)job, (unsigned long)len, ready ? 1 : 0);
+    return;
+  }
+
   if (strcmp(type, "PONG") == 0) {
     unsigned long now_ms = millis();
     unsigned long age_ms = prev_rx_ms > 0 ? (now_ms - prev_rx_ms) : 0;
@@ -582,6 +734,14 @@ static void uart_process_received_message(const char* json_str) {
 
   if (strcmp(type, "SYNC_ACK") == 0) {
     link_synced = true;
+    // Go through the same path PONG uses. Setting sense_awake_confirmed on its
+    // own left the sense_state enum saying ASLEEP while the flag said awake, and
+    // sense_state_set() early-returns when the state is unchanged, so nothing
+    // ever reconciled them. Two readers act on that enum: the wake-probe
+    // decision (LCD_Minimal.ino need_probe) and scroll handling in lcd_ui_task —
+    // so a stale ASLEEP meant redundant probes and altered scroll behaviour
+    // while the Sense was demonstrably alive and talking to us.
+    set_sense_awake_estimate(true, "SYNC_ACK");
     sense_awake_confirmed = true;
     wake_timer_wait_mode = false;
     Serial.println("[LNK] synced=1");
@@ -1090,9 +1250,12 @@ static void uart_process_received_message(const char* json_str) {
     const char* phase = doc["phase"] | "";
     const char* text = doc["text"] | "";
     Serial.printf("[UART] Status: op=%s, phase=%s, text=%s\n", op, phase, text);
+    captrace_phase(op, phase);   // record how far the in-flight capture got
     note_sense_proof_of_life("UI_STATUS");
     refresh_note_ui_proof("UI_STATUS");
-    // Any UI_STATUS means Sense is awake and responding.
+    // Any UI_STATUS means Sense is awake and responding. Update the enum too,
+    // not just the flag — see the SYNC_ACK note above.
+    set_sense_awake_estimate(true, "UI_STATUS");
     sense_awake_confirmed = true;
     wake_timer_wait_mode = false;
     sense_wake_explicit_request = false;
@@ -1191,8 +1354,9 @@ static void uart_process_received_message(const char* json_str) {
     
     // Track SCAN operation state to prevent sleep during scan processing
     // NOTE: The SCAN block below still contains LVGL calls (status_screen, expiry_screen, logged_screen, lv_timer_handler).
-    // This is a known violation: uart_task must not call LVGL. Refactor: post EVT_UI_STATUS_SCAN with (op,phase,mode,text)
-    // and have the UI task apply the same UI updates.
+    // They are now serialised under example_lvgl_lock so they can no longer race the UI task's own lv_timer_handler(),
+    // but this is containment, not the fix. Refactor: post EVT_UI_STATUS_SCAN with (op,phase,mode,text) and have the
+    // UI task apply the same UI updates, so uart_task touches no LVGL at all.
     if (strcmp(op, "SCAN") == 0) {
       // Get mode from message (if present) - "dish" or "discard"
       const char* mode = doc["mode"] | "";
@@ -1210,7 +1374,17 @@ static void uart_process_received_message(const char* json_str) {
         
         // Check if this is a PREPARING phase with "Waiting for expiry date…" for check-in mode
         // This must be checked BEFORE the UPLOADING check
-        if (strcmp(mode, "check-in") == 0 && strcmp(phase, "PREPARING") == 0 && 
+        // Everything from here to the matching unlock touches LVGL, and this
+        // runs on uart_task (Core 0) while ui_task pumps lv_timer_handler() on
+        // Core 1 under this same lock. Two unsynchronised lv_timer_handler()
+        // calls mutate LVGL's timer list, invalid-area list and draw buffers
+        // concurrently; the visible result is a panel frozen on whichever
+        // screen was mid-render -- one of which is the "Logged!" screen shown
+        // in the discard branch below. Serialise rather than race.
+        if (!example_lvgl_lock(200)) {
+          Serial.println("[UART][WARN] SCAN screen update skipped - LVGL lock busy");
+        } else {
+        if (strcmp(mode, "check-in") == 0 && strcmp(phase, "PREPARING") == 0 &&
             strstr(text, "Waiting for expiry date") != NULL) {
           // For check-in mode, show expiration date entry screen when waiting for expiry date
           if (status_screen != NULL) {
@@ -1253,6 +1427,8 @@ static void uart_process_received_message(const char* json_str) {
               ui_lvgl_tick();  // Force immediate render
             }
           }
+        }
+        example_lvgl_unlock();
         }
       } else if (strcmp(phase, "DONE") == 0 || strcmp(phase, "ERROR") == 0) {
         waiting_for_scan_response = false;
@@ -1337,10 +1513,7 @@ static void uart_process_received_message(const char* json_str) {
         Serial.println("[UART] Failed to acquire mutex for optimistic voice items");
       }
     }
-  } else if (strcmp(type, "UI_MEAL_RESULT") == 0) {
-    ui_apply_ship_meal_result(doc);
-    return;
-  } else if (strcmp(type, "LCD_OTA_QUERY") == 0) {
+    } else if (strcmp(type, "LCD_OTA_QUERY") == 0) {
     lcd_ota_handle_query();
     return;
   } else if (strcmp(type, "LCD_OTA_BEGIN") == 0) {

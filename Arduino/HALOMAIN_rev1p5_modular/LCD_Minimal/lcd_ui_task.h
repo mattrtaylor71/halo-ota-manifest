@@ -24,8 +24,23 @@ static unsigned long usb_deltouch_tap_due_ms = 0;
 
 static void ui_task(void *arg) {
   Serial.println("[UI] UI task started");
-  
+
+  // The other half of the freeze protection. A wedged UI task leaves the panel
+  // frozen and the user with no feedback at all; the observed wedges killed
+  // serial output entirely, so both tasks are watched rather than guessing
+  // which one dies.
+  lcd_freeze_wdt_subscribe("ui_task");
+
   for (;;) {
+    lcd_freeze_wdt_feed();
+#if HALO_FREEZE_TEST
+    // Bench: hang here, past the feed, so the watchdog is the only thing that
+    // can recover the board.
+    if (g_bench_freeze_ui) {
+      Serial.println("[FREEZE_TEST] ui_task hanging now — TWDT should reset the board");
+      for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+#endif
     // Check for clean shutdown request BEFORE acquiring the LVGL lock.
     // This prevents heap corruption from vTaskDelete while holding the lock.
     if (g_ui_task_exit_requested) {
@@ -37,6 +52,48 @@ static void ui_task(void *arg) {
     if (!example_lvgl_lock(50)) {
       vTaskDelay(pdMS_TO_TICKS(1));
       continue;
+    }
+
+    // ── Cold-boot repaint (one-shot) ──────────────────────────────────────
+    // On a cold boot the device came up on a BLACK screen and stayed there.
+    // Cause: setup() calls show_ship_main_menu() (lcd_activity.h ~519) before
+    // this task exists (created ~527) and before g_lvgl_running is set (~541).
+    // That first frame does reach the panel — flush_ok settles at exactly 10,
+    // which is one full 360px screen at a 36-line buffer — but comes up blank.
+    // HOME is static, so LVGL never invalidates it again and the blank frame is
+    // latched forever. (The flush_cb also drops frames outright while
+    // g_sleep_transition is set, yet still calls lv_disp_flush_ready(), so LVGL
+    // marks those areas clean — same trap, different route.)
+    // Measured: a forced redraw takes flush_ok 10 -> 20 and the UI appears.
+    // Repaint once here, under the LVGL lock, after a short settle so the task,
+    // panel and backlight are all definitely up.
+    // A SINGLE repaint at a fixed delay is not enough: it fired, flush_ok reached
+    // 20 (two full frames), and the panel was still black — the frame is composed
+    // but does not land. Two known ways that happens, both timing-dependent:
+    // the panel isn't actually up yet, and example_lvgl_flush_cb() DISCARDS the
+    // frame outright while g_sleep_transition is set yet still calls
+    // lv_disp_flush_ready(), so LVGL marks it clean and never retries.
+    // So repaint repeatedly over the first few seconds, only while the panel is
+    // genuinely enabled and no sleep transition is in flight. Cost is a handful
+    // of full repaints at boot and nothing thereafter.
+    static uint8_t s_boot_repaints_left = 8;
+    static unsigned long s_boot_repaint_next_ms = 0;
+    if (s_boot_repaints_left && g_ui_initialized) {
+      unsigned long now_ms = millis();
+      if (s_boot_repaint_next_ms == 0) {
+        s_boot_repaint_next_ms = now_ms + 300;
+      } else if ((long)(now_ms - s_boot_repaint_next_ms) >= 0) {
+        if (g_panel_enabled && g_lvgl_running && !g_sleep_transition) {
+          lv_obj_t* scr = lv_scr_act();
+          if (scr) lv_obj_invalidate(scr);
+          s_boot_repaints_left--;
+          if (s_boot_repaints_left == 0) {
+            Serial.println("[UI] boot_repaint sequence complete");
+          }
+        }
+        // Not ready (panel off / mid sleep transition): retry, don't burn a slot.
+        s_boot_repaint_next_ms = now_ms + 500;
+      }
     }
     // OTA overlay state — hoisted out of the if (g_ota_screen_active) block so
     // the teardown below (reached only when OTA is no longer active) can see and
@@ -145,7 +202,7 @@ static void ui_task(void *arg) {
 #if (CONFIG_SPIRAM_USE_MALLOC || CONFIG_SPIRAM)
         heap_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
 #endif
-        Serial.printf("[UI_HB] heap=%u min=%u psram=%u hwm=%u loop=%lu tick_ms=%lu input_ms=%lu flush_ok=%lu fail=%lu out=%d soft_fault=%d\n",
+        HALO_CHATTY_PRINTF("[UI_HB] heap=%u min=%u psram=%u hwm=%u loop=%lu tick_ms=%lu input_ms=%lu flush_ok=%lu fail=%lu out=%d soft_fault=%d\n",
                       (unsigned)heap_internal,
                       (unsigned)heap_min,
                       (unsigned)heap_psram,
@@ -291,6 +348,32 @@ static void ui_task(void *arg) {
       ship_error_hide_at_ms = 0;
       show_ship_main_menu();
     }
+    // Strand net. Every user-feedback screen (VOICE_ACK / LOGGED / RESULT) is
+    // supposed to arm its own deadline, and none of them is sleep-eligible --
+    // so one that forgets pins the panel awake until the guardian force-sleeps
+    // five minutes later. That is exactly how the "stuck on the result screen"
+    // report happened. This only fires when NO deadline is armed, so a screen
+    // with a legitimately long one (the dish card) is never cut short.
+    {
+      static unsigned long feedback_stranded_since_ms = 0;
+      unsigned long now_fb = millis();
+      bool undeadlined_feedback =
+          (ship_user_state_current() == SHIP_USER_STATE_USER_FEEDBACK) &&
+          ship_error_hide_at_ms == 0 &&
+          ship_logged_hide_at_ms == 0 &&
+          ship_voice_ack_hide_at_ms == 0;
+      if (!undeadlined_feedback) {
+        feedback_stranded_since_ms = 0;
+      } else if (feedback_stranded_since_ms == 0) {
+        feedback_stranded_since_ms = now_fb;
+      } else if (now_fb - feedback_stranded_since_ms >= UI_FEEDBACK_STRAND_MS) {
+        Serial.printf("[UI_STRAND] feedback screen=%s had no deadline for %lu ms -> main_menu\n",
+                      ui_screen_state_name(ui_screen_state),
+                      now_fb - feedback_stranded_since_ms);
+        feedback_stranded_since_ms = 0;
+        show_ship_main_menu();
+      }
+    }
     if (g_ship_ui_dirty) {
       ui_apply_ship_ui_status(NULL);
       processed_anything = true;
@@ -349,6 +432,10 @@ static void ui_task(void *arg) {
       if (age_ms > SCAN_NO_RESPONSE_TIMEOUT_MS) {
         Serial.printf("[SCAN_TIMEOUT] no response from Sense in %lu ms -> error_then_home mode=%s\n",
                       age_ms, g_ship_ui_mode);
+        // Dump how far this capture actually got. "No response" alone cannot
+        // distinguish a lost request from a camera stall, and they need
+        // opposite fixes — this line names which one happened.
+        captrace_strand(age_ms, last_sense_rx_ms);
         waiting_for_scan_response = false;
         scan_request_sent_ms = 0;
         g_ship_ui_finalized = true;
@@ -560,17 +647,6 @@ static void ui_task(void *arg) {
               // Reset activity timer on user interaction
               resetActivityTimer();
               
-              // Hide meal result screen if visible (user is scrolling, wants to see list)
-              if (meal_result_screen != NULL && !lv_obj_has_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN)) {
-                Serial.println("[UI] Meal result screen visible - hiding and showing list (scroll)");
-                lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
-                meal_result_shown_time = 0;  // Reset timeout
-                // Show list again
-                if (list_container != NULL && g_active.count > 0) {
-                  lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
-                }
-              }
-              
               // LVGL tick already done in throttle block when we refreshed
               
               processed_anything = true;
@@ -646,6 +722,30 @@ static void ui_task(void *arg) {
         }
         ui_lvgl_tick();
         processed_anything = true;
+      } else if (evt.type == EVT_LINK_SEND_FAILED) {
+        // The Sense never acked a user-intent message after every retry. The
+        // request is genuinely gone — not slow — so the honest thing is to stop
+        // the animation and tell the user, rather than leave them watching a
+        // capture that will never happen. This is the strand the whole ack layer
+        // exists to convert into an error.
+        Serial.println("[UI] Link send failed - resolving screen with error");
+        if (is_glowing_animation) {
+          stop_glowing_animation();
+        }
+        // Retire the in-flight capture before showing the result. Leaving
+        // waiting_for_scan_response set strands the device: the scan watchdog
+        // below is deliberately suppressed on SCREEN_RESULT, so nothing else
+        // would ever resolve this screen, and SCREEN_RESULT is not
+        // sleep-eligible -- the panel stays lit until the 5-minute guardian.
+        waiting_for_scan_response = false;
+        scan_request_sent_ms = 0;
+        dish_processing_active = false;
+        dish_processing_start_ms = 0;
+        g_ship_ui_finalized = true;
+        g_ship_ui_finalized_job_id = g_ship_ui_job_id;
+        ui_show_result(true, "Couldn't reach sensor", "");
+        ui_lvgl_tick();
+        processed_anything = true;
       } else if (evt.type == EVT_LIST_REPLACED) {
         // List was replaced (from UART task) - stop glowing, then swap pending → active and render
         stop_glowing_animation();
@@ -703,9 +803,6 @@ static void ui_task(void *arg) {
               // Hide all screens and show only the list
               if (status_screen != NULL) {
                 lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
-              }
-              if (meal_result_screen != NULL) {
-                lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
               }
               if (delete_menu != NULL) {
                 lv_obj_add_flag(delete_menu, LV_OBJ_FLAG_HIDDEN);
@@ -833,9 +930,6 @@ static void ui_task(void *arg) {
           lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
         }
         set_status_reset_visible(false);
-        if (meal_result_screen != NULL) {
-          lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
-        }
         if (logged_screen != NULL) {
           lv_obj_add_flag(logged_screen, LV_OBJ_FLAG_HIDDEN);
         }
@@ -869,7 +963,6 @@ static void ui_task(void *arg) {
           lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
         }
         status_screen_shown_time = 0;
-        meal_result_shown_time = 0;
         lv_timer_handler();
         processed_anything = true;
       } else if (evt.type == EVT_HAPTIC_TICK) {
@@ -1135,9 +1228,6 @@ static void ui_task(void *arg) {
         }
         
         processed_anything = true;
-      } else if (evt.type == EVT_SHOW_MEAL_RESULT) {
-        ui_handle_meal_result_event(&evt);
-        processed_anything = true;
       }
     }
     
@@ -1152,7 +1242,7 @@ static void ui_task(void *arg) {
     unsigned long now_ms = millis();
     if ((now_ms - last_ui_heartbeat_ms) >= 500) {
       ui_heartbeat_counter++;
-      Serial.printf("[UI_HEARTBEAT] now=%lu sleep=%d transition=%d hb=%lu lvgl_calls=%lu backlight=%d panel_on=%d refresh_ok=%lu refresh_timeout=%lu refresh_retry=%lu\n",
+      HALO_CHATTY_PRINTF("[UI_HEARTBEAT] now=%lu sleep=%d transition=%d hb=%lu lvgl_calls=%lu backlight=%d panel_on=%d refresh_ok=%lu refresh_timeout=%lu refresh_retry=%lu\n",
                     now_ms,
                     g_in_light_sleep ? 1 : 0,
                     g_sleep_transition ? 1 : 0,

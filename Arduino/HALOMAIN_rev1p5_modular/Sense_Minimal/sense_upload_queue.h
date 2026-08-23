@@ -9,10 +9,9 @@
  * Prerequisites (must be declared before #include "sense_upload_queue.h"):
  *   - freertos/FreeRTOS.h, freertos/semphr.h, freertos/task.h
  *   - UploadJob struct from sense_ops.h
- *   - upload_queue, upload_queue_dish queue handles
+ *   - upload_queue queue handle
  *   - UPLOAD_QUEUE_MAX
  *   - scan_mode_is_dish() from sense_scan.h
- *   - clear_active_dish_job() from sense_scan.h
  *   - upload_persist_save(), upload_persist_has_pending(),
  *     upload_persist_note_event(), g_upload_persist_attempted_this_boot
  *     (conditionally, under HALO_SENSE_UPLOAD_PERSISTENCE)
@@ -28,14 +27,11 @@ static uint32_t upload_queue_count() {
   if (upload_queue) {
     count += (uint32_t)uxQueueMessagesWaiting(upload_queue);
   }
-  if (upload_queue_dish) {
-    count += (uint32_t)uxQueueMessagesWaiting(upload_queue_dish);
-  }
   return count;
 }
 
 static bool upload_queue_is_full() {
-  if (!upload_queue || !upload_queue_dish) {
+  if (!upload_queue) {
     return true;
   }
   return upload_queue_count() >= UPLOAD_QUEUE_MAX;
@@ -73,18 +69,34 @@ static void sleep_defer_queued_background_uploads() {
         }
       }
 #endif
+      // LAST RESORT before destroying a user's capture: the SD spool.
+      //
+      // NVS/SPIFFS persistence is one small slot and fails routinely; this path
+      // used to go straight from "not persisted" to free(), which silently threw
+      // away the photo (measured 2026-08-21). The LCD's SD card is the fallback
+      // the spool exists to be, and the drain picks it up on a later wake.
+      if (!saved && !queued.is_voice && queued.image_buf && queued.image_len > 0) {
+        if (sense_spool_image_to_lcd(queued, queued.image_buf, queued.image_len)) {
+          saved = true;
+          saved_count++;
+          Serial.printf("[SLEEP] deferred_upload_spooled label=%s job_id=%lu mode=%s len=%u\n",
+                        label ? label : "upload",
+                        (unsigned long)queued.job_id,
+                        queued.mode,
+                        (unsigned)queued.image_len);
+          uart_send_sense_diag("upload", "sleep_spool", queued.mode,
+                               (int32_t)queued.job_id, "spooled_to_sd");
+        }
+      }
       if (!saved) {
         dropped_count++;
-        Serial.printf("[SLEEP] deferred_upload_dropped label=%s job_id=%lu mode=%s voice=%d\n",
+        Serial.printf("[SLEEP] deferred_upload_dropped label=%s job_id=%lu mode=%s voice=%d PHOTO_LOST\n",
                       label ? label : "upload",
                       (unsigned long)queued.job_id,
                       queued.mode,
                       queued.is_voice ? 1 : 0);
         uart_send_sense_diag("upload", "sleep_drop", queued.mode,
                              (int32_t)queued.job_id, "queue_not_persisted");
-      }
-      if (scan_mode_is_dish(queued.mode)) {
-        clear_active_dish_job(queued.job_id, saved ? "sleep_deferred" : "sleep_dropped");
       }
       if (queued.image_buf) {
         free(queued.image_buf);
@@ -93,7 +105,6 @@ static void sleep_defer_queued_background_uploads() {
     }
   };
 
-  drain_queue(upload_queue_dish, "dish");
   drain_queue(upload_queue, "normal");
 
   if (saved_count > 0 || dropped_count > 0) {
@@ -136,8 +147,7 @@ static bool queue_upload_job(uint32_t job_id,
   if (!image_buf || image_len == 0) {
     return false;
   }
-  const bool is_dish = scan_mode_is_dish(mode);
-  QueueHandle_t target_queue = is_dish ? upload_queue_dish : upload_queue;
+  QueueHandle_t target_queue = upload_queue;
   if (!target_queue || upload_queue_is_full()) {
     return false;
   }
@@ -164,14 +174,12 @@ static bool queue_upload_job(uint32_t job_id,
   } else {
     memset(&job.camera_meta, 0, sizeof(job.camera_meta));
   }
-  BaseType_t ok = is_dish
-                    ? xQueueSendToFront(target_queue, &job, pdMS_TO_TICKS(10))
-                    : xQueueSend(target_queue, &job, pdMS_TO_TICKS(10));
+  // Plain FIFO for every mode. Dish used to xQueueSendToFront and jump ahead of
+  // captures the user took first; that priority existed only to shorten the wait
+  // for the nutrition result, which no longer exists.
+  BaseType_t ok = xQueueSend(target_queue, &job, pdMS_TO_TICKS(10));
   if (ok != pdTRUE) {
     return false;
-  }
-  if (is_dish) {
-    Serial.printf("[UPLOAD_QUEUE] prioritized dish job_id=%lu\n", (unsigned long)job_id);
   }
   if (from_persisted) {
     Serial.printf("[UPLOAD_QUEUE] restored persisted job_id=%lu retries=%u\n",

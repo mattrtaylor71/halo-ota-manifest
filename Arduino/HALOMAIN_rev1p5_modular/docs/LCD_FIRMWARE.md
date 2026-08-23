@@ -1,5 +1,13 @@
 # HALO LCD Board Firmware Documentation
 
+> **2026-08-21:** The SD spool never worked for a real capture, in either direction, because **the LCD slept through the transfer**. A ~175KB photo needs ~18–22s over the 115200 UART (512-byte chunks, one ACK each); the LCD idles out in 10s. The Sense already blocked its own sleep (`[SLEEP_BLOCK] reason=spool_transfer`); the LCD had no equivalent guard, so it stopped servicing the link mid-transfer and both ends timed out — `[IMG_RX] abort reason=frame_timeout` → `PHOTO_LOST` on receive, `[SPOOL_DRAIN] reset state=3 reason=frame_timeout` on drain.
+>
+> **There are TWO sleep paths on the LCD and both needed the guard:** `lcd_sleep_intent_allowed()` in `lcd_activity.h`, *and* the inactivity timeout in `loop()`. Guarding only the first is not enough — measured, `[SLEEP_DECISION] eligible=0 reason=home_age_lt_timeout` was logged while `[LOOP] Inactivity timeout - entering sleep...` slept anyway. Both now check `g_img_rx_active || g_spool_tx_active`.
+>
+> Timeouts were **not** the cause: raising them to 15s made throughput *worse* (392 B/s), and the fix passes with the original 4000/3000. Verified end to end — capture → forced upload failure → `result=OK bytes=175294 rate_Bps=9867` → `SD spool OK saved=1` → drain → `PUT status: 200` → `SPOOL_DELETE` → `deleted slot=1`.
+
+> **2026-08-20:** Fixed a strand on `SCREEN_RESULT` that pinned the device awake. `SCREEN_RESULT` is **not** sleep-eligible, yet `ui_show_result_impl()` armed no dismiss deadline at all — unlike every sibling (LOGGED 2s, ERROR 3s, VOICE_ACK 2s). Worse, the path that reaches it (`EVT_LINK_SEND_FAILED` → "Couldn't reach sensor") never cleared `waiting_for_scan_response`, and the scan-no-response watchdog is deliberately suppressed on `SCREEN_RESULT` (see the v6.1.804 note below) — so **nothing in the firmware could resolve that screen**. It sat lit until the 5-minute `GUARDIAN_FORCE_SLEEP_MS`. Three-part fix: (A) the `EVT_LINK_SEND_FAILED` handler now retires the in-flight capture (`waiting_for_scan_response=false`, `scan_request_sent_ms=0`, `dish_processing_active=false`, sets the finalize latch) before showing the result; (B) `ui_show_result_impl()` arms `ship_error_hide_at_ms = RESULT_SCREEN_TIMEOUT_MS` (10s, long enough to hit Retry) and `ui_handle_meal_result_event()` arms `MEAL_RESULT_SCREEN_TIMEOUT_MS` (30s, the dish card is read not glanced at); (C) a `[UI_STRAND]` net in `lcd_ui_task.h` returns to the main menu after `UI_FEEDBACK_STRAND_MS` (15s) if a user-feedback screen (VOICE_ACK/LOGGED/RESULT) has **no** deadline armed — it never pre-empts a screen that has one. **Rule: any screen that is not sleep-eligible must carry a dismiss deadline; arming it is not polish, it is what lets the device sleep.**
+
 > **2026-06-23 (v6.1.805):** Completes the v6.1.804 countdown-error fix for the check-in path. The check-in expiry date-picker is now also protected from the scan-no-response watchdog race. v6.1.804 only cleared the watchdogs inside `ship_show_expiry_choice_impl()` / `ship_show_expiry_screen_impl()`, but the **legacy check-in path** (`lcd_uart_rx.h:1220` / `:1243`) shows the picker by calling `expiry_prepare_picker_for_entry()` directly — it never set `ui_screen_state = SCREEN_EXPIRY` nor cleared the watchdogs, so `waiting_for_scan_response` stayed true and the scan-no-response watchdog could race the picker's own 30s timeout into a `SCREEN_SHIP_ERROR`. Fix: the four watchdog clears (`waiting_for_scan_response=false`, `scan_request_sent_ms=0`, `dish_processing_active=false`, `dish_processing_start_ms=0`) now live in the `expiry_prepare_picker_for_entry()` chokepoint (`LCD_Minimal.ino` ~2366) — the common function every expiry-picker show path calls (modern `ship_show_expiry_screen_impl` AND the legacy check-in paths). With the watchdogs cleared regardless of which path showed the picker, only the picker's own 30s timeout fires (`expiry_submit_empty_date` → send empty date → Logged → Home). The redundant 804 clears in `ship_show_expiry_screen_impl()` are kept (harmless); the `ship_show_expiry_choice_impl()` clears remain necessary since that screen does not call the picker chokepoint.
 
 > **2026-06-23 (v6.1.804):** Discard/expiry-choice countdown no longer races the scan-no-response watchdog into an error screen. Two-part fix: (A) `ship_show_expiry_choice_impl()` and `ship_show_expiry_screen_impl()` now clear the capture/processing watchdogs (`waiting_for_scan_response=false`, `scan_request_sent_ms=0`, `dish_processing_active=false`, `dish_processing_start_ms=0`) when the user-choice / expiry screen takes over — the Sense has already responded and that screen owns its own 30s graceful countdown. (B) the scan-no-response watchdog in `lcd_ui_task.h` is now screen-gated: it never fires when `ui_screen_state` is `SCREEN_EXPIRY_CHOICE`, `SCREEN_EXPIRY`, `SCREEN_LOGGED`, or `SCREEN_RESULT` (the error-screen state). The choice/expiry-choice (discard skip + check-in empty-date), expiry date picker, hold-still, AI-listening, and logged countdowns all end gracefully (skip→LOGGED→Home), never an error.
@@ -158,7 +166,9 @@ The LCD uses GPIO39 (INT_PIN) to wake the Sense board. Pin mode tracking (`lcd_w
 
 Messages are queued via `uart_tx_queue` (FreeRTOS queue of `tx_msg_t`) from ISR context (knob callbacks) or UI task. The `uart_task` drains the queue.
 
-**Deferred TX:** Messages requiring awake proof (INPUT_MENU_SELECT, INPUT_FW_INFO, INPUT_SENSE_FW) are held in `deferred_awake_tx_msg` until `sense_ready_for_control_tx()` returns true. The deferred service pings Sense periodically to wake it. The Settings version request now uses INPUT_SENSE_FW (the fast type), so `tx_msg_requires_awake_proof()` and `input_requires_sense()` recognize both INPUT_FW_INFO and INPUT_SENSE_FW.
+**Deferred TX (ring, 2026-08-20):** Messages requiring awake proof (INPUT_MENU_SELECT, INPUT_FW_INFO, INPUT_SENSE_FW) are held in a 4-slot ring (`lcd_deferred_ring.h`) until `sense_ready_for_control_tx()` returns true. The deferred service pings Sense periodically to wake it.
+
+This replaced a SINGLE slot. The defect was not that the slot overwrote (writes were guarded and it never did) — it was that the TX drain *stopped* at the first message needing awake-proof, so messages needing no proof at all (pings, diagnostics) queued behind it. The drain now defers and continues. On overflow the ring drops the OLDEST and logs it (`[UART_TX_DROP] deferred ring full`); silently discarding a user action is the exact failure this layer exists to prevent. `deferred_awake_tx_service()` flushes the whole ring IN ORDER when the Sense becomes reachable (two user actions can never swap), otherwise ages each entry out independently against `DEFERRED_AWAKE_TX_MAX_MS` (12s). Logic is covered by `tools/test_deferred_ring.cpp` (24 checks against the real header, not a copy); the integration path was verified on hardware with bench `enq` + the Sense parked in download mode: 6 enqueued -> 2 evicted -> 4 abandoned. The Settings version request now uses INPUT_SENSE_FW (the fast type), so `tx_msg_requires_awake_proof()` and `input_requires_sense()` recognize both INPUT_FW_INFO and INPUT_SENSE_FW.
 
 #### Important Flag
 
@@ -333,7 +343,6 @@ Three-segment picker (Month/Day/Year) with:
 Master UI builder called from `init_ui_stack()`. Creates the base screen hierarchy:
 - `g_base_screen` (root)
 - `loading_screen`, `list_container`, `status_screen`, `logged_screen`
-- `meal_result_screen` with calorie/protein/carbs/fat labels
 - `recording_indicator`, `processing_indicator` (full-screen border rings)
 - `menu_screen` with flex-column menu items
 - `expiry_screen` with date picker
@@ -434,7 +443,9 @@ Logs caller file/line for every screen transition for debugging.
 
 ### 8. lcd_ship_action.h -- Menu Actions and Meal Results
 
-**Purpose:** Hit-test dispatch, menu action handlers, meal result display, toast events, firmware info polling.
+**Purpose:** Hit-test dispatch, menu action handlers, toast events, firmware info polling.
+
+**Nutrition removal (2026-08-21):** `meal_result_screen` and its calorie/macro/recommendation labels, `ui_apply_ship_meal_result()`, `ui_handle_meal_result_event()`, `EVT_SHOW_MEAL_RESULT` and `MEAL_RESULT_SCREEN_TIMEOUT_MS` were deleted. This freed **74KB of flash** -- `lv_font_montserrat_48` was used only by the calories label.
 
 #### Key Functions
 
@@ -447,7 +458,7 @@ Logs caller file/line for every screen transition for debugging.
 | `ship_cancel_local_scan_request(reason, message)` | Cancels a pending scan if rejected by toast |
 | `ui_apply_ship_meal_result(doc)` | Processes nutrition result (calories, protein, carbs, fat, recommendation) |
 | `ship_menu_request_fw_info()` | Sends **INPUT_SENSE_FW** (the FAST request) to get the Sense firmware version for the Settings version line. Sense answers immediately with its cached sense_fw + lcd_fw and replies via the same `FW_INFO` message type (so the FW_INFO RX handler is unchanged). INPUT_FW_INFO remains the slow path (Sense runs a blocking LCD-OTA query first) reserved for diagnostics needing live lcd_fw/running_state. **(2026-06-17)** The request now goes out via the proven **direct** path `uart_send_input_message("INPUT_SENSE_FW")` (the same call the `fwinfo` USB command uses) — it pulses the Sense via `request_sense_wake` inside that helper and writes the JSON straight to `senseSerial`, instead of `xQueueSend(uart_tx_queue, ...)`. The old queue path got the message **deferred** behind `tx_msg_requires_awake_proof()` (the `deferred_awake_tx` path) and it dead-ended while on Settings, leaving "Sense `--`". |
-| `ship_menu_service_fw_info_request(now_ms)` | Retries the fw-info request (also INPUT_SENSE_FW) with backoff. **(2026-06-17)** Each retry now uses the same **direct** `uart_send_input_message("INPUT_SENSE_FW")` send (pulses + writes directly), replacing the previous deferred-service / `xQueueSend` branches. It first clears any stale deferred INPUT_SENSE_FW (`deferred_awake_tx_valid=false`, `deferred_awake_tx_last_ping_ms=0`) so the awake-proof deferral can't interfere. Deadline/interval guards, `g_fw_info_last_attempt_ms`, retry-count increment, and the `SCREEN_SETTINGS` gate are unchanged. |
+| `ship_menu_service_fw_info_request(now_ms)` | Retries the fw-info request (also INPUT_SENSE_FW) with backoff. **(2026-06-17)** Each retry now uses the same **direct** `uart_send_input_message("INPUT_SENSE_FW")` send (pulses + writes directly), replacing the previous deferred-service / `xQueueSend` branches. It first clears any stale deferred INPUT_SENSE_FW via `deferred_ring_remove_type("INPUT_SENSE_FW")` so the awake-proof deferral can't interfere. That call is surgical by design — it removes only the FW-info entries and leaves any other deferred messages (which may be real user actions) untouched. Deadline/interval guards, `g_fw_info_last_attempt_ms`, retry-count increment, and the `SCREEN_SETTINGS` gate are unchanged. |
 | `ship_menu_send_manual_ota(reason)` | Sends INPUT_OTA_CHECK, sets manual override, shows status |
 | `ship_menu_handle_ui_status(doc)` | Parses UI_STATUS from Sense, updates g_ship_ui_* globals, posts EVT_SHIP_UI_STATUS |
 
@@ -565,6 +576,83 @@ gates all three wake sites in `LCD_Minimal.ino`:
 
 **Settings fw fetch margin:** `FW_INFO_RETRY_TIMEOUT_MS` bumped `5000 → 8000` ms (a cold Sense
 deep-sleep wake is ~1.6 s + UART sync; 5 s was too tight). `FW_INFO_RETRY_INTERVAL_MS` stays 800 ms.
+
+#### Fixing the drift at its source, and guarding it (2026-08-20)
+
+`SENSE_AWAKE_TRUST_MS` above treats the symptom — it declines to trust a stale flag. The flag was
+still able to drift from the `sense_state` enum, and two consumers act on that enum:
+`need_probe` (`LCD_Minimal.ino`, redundant wake probes) and scroll handling
+(`lcd_ui_task.h`). So the device behaved differently while every log looked healthy.
+
+Two causes, both closed:
+
+1. **Writers bypassing the setter.** Three sites assert "awake". `PONG` went through
+   `set_sense_awake_estimate(true)` → `sense_state_set()` and stayed consistent, but **`SYNC_ACK`
+   and `UI_STATUS` set `sense_awake_confirmed = true` directly** and never touched the enum. Both
+   now call `set_sense_awake_estimate(true, …)` like `PONG`.
+2. **The setter's early return.** `sense_state_set()` returned immediately when the state was
+   unchanged, and cleared the flag only *after* that return — so the common case (state already
+   `ASLEEP`) skipped the clear and nothing reconciled the two. The invariant is now enforced
+   **before** the early return:
+   ```c
+   if (next != SENSE_AWAKE) sense_awake_confirmed = false;
+   if (sense_state == next) return;
+   ```
+
+**Standing guard.** The 5 s `[SENSE_LINK]` diagnostic now also emits `[STATE_DISAGREE]` if
+`sense_state != SENSE_AWAKE` while `sense_awake_confirmed` is set. "Fixed" is a claim; this makes
+the device report a violation in the field rather than it being inferred from behaviour months
+later. It did not fire in any bench run.
+
+Deliberately NOT done: collapsing `sense_awake_confirmed` / `sense_state` /
+`sense_ready_for_control_tx()` / `sense_recently_heard()` into one variable. The invariant is
+enforced and monitored, which buys what that refactor was for without rewriting the riskiest code
+in the tree.
+
+#### Freeze watchdog (`lcd_freeze_wdt.h`) — and what it does NOT cover
+
+The LCD wedged three times in one bench session: USB CDC stayed enumerated but the firmware
+produced nothing, and esptool could not sync. `uart_task` runs on Core 0 and owns the inter-board
+link, so when it stops the Sense is talking to a corpse — and in a kitchen there is no one who
+knows to unplug it. The application-level watchdogs all assume the firmware is still RUNNING, so
+none can fire when the scheduler itself is stuck.
+
+Hardware TWDT, 45,000 ms, `idle_core_mask = 0` (the idle tasks are deliberately NOT subscribed —
+the UI task runs long LVGL flushes and subscribing idle would reboot a healthy device under load).
+Both `uart_task` and `ui_task` subscribe; long COBS transfers feed it explicitly. Verified on
+hardware: hanging either task trips it at exactly 45.0s, names the culprit, reboots, and re-arms
+~1s later, with `resetreason` reporting `TASK_WDT` afterwards.
+
+**Limitation, found 2026-08-20: it does NOT recover a blocked USB-CDC write.** The LCD wedged that
+way and stayed dead for 90s against a 45s timeout — no reboot. The likely reason is that the panic
+path itself needs the console that is blocked, so the reset deadlocks. Recovery required a physical
+power cycle; esptool, a USB-JTAG reset and DTR/RTS bootloader entry all failed.
+
+This is **bench-only**: it requires a USB cable attached with nothing draining it, which is exactly
+what a host does when a test script closes the port and walks away. A shipped device has no cable,
+so `Serial` writes cannot block. But it means the watchdog's guarantee is precisely "recovers a
+hung TASK", not "recovers any wedge" — do not treat it as a universal backstop.
+
+#### Touch lost during the sleep teardown (2026-08-20)
+
+Sleep entry is not instantaneous: **measured `teardown_ms=166`** between `transition_begin` and
+`esp_deep_sleep_start()`. A tap landing inside that window was seen by nobody — the UI task has
+stopped treating touches as input and ext1 is not armed until the last instruction — so it was
+silently lost and the user tapped again. A *held* touch was never affected: the INT stays
+asserted, so ext1 `ANY_LOW` fires as soon as sleep starts.
+
+Polling cannot close it (transient pulse, busy teardown). An edge-triggered ISR on GPIO9 (FALLING —
+the CST816 INT is open-drain and idles high) is armed at `transition_begin` and checked at the last
+point sleep can be abandoned **cleanly**: above `Touch_Standby()`, backlight-off and
+`vTaskDelete(ui_task_handle)`, because `abort_sleep_transition()` restores panel/backlight/LVGL but
+**cannot recreate a deleted UI task**. Released on all four exit paths.
+
+Testability was the blocker for a day: the actuator stroke is ~1.7 s and the window is 166 ms.
+The stroke cannot be shortened but the window can be widened — `HALO_TEARDOWN_DELAY_MS`
+(bench-only, absent from ship binaries) opens it to 4000 ms. Verified both directions:
+`teardown_ms=4166 isr_count=58 fired=1` → `[SLEEP_ABORT] touch arrived during teardown` → screen
+restored; and 3/3 undisturbed cycles on the ship build slept normally with `isr_count=0 fired=0`
+(a spurious abort would mean the device never sleeps, which is worse than the bug being fixed).
 
 #### LCD clock + absolute-window self-wake (scheduled maintenance OTA)
 
@@ -718,7 +806,6 @@ Clears all OTA/maintenance flags, sets `provision_return_home_pending = true` so
 | `SLEEP_DENY` | Records deny reason and retry interval, enters wait state |
 | `SENSE_SLEEP_INTENT` | Checks if LCD allows sleep (via `lcd_sleep_intent_allowed`), sends SLEEP_DENY if not |
 | `UI_STATUS` | Routes to `ship_menu_handle_ui_status()` for ship UI; tracks voice/scan state |
-| `UI_MEAL_RESULT` | Routes to `ui_apply_ship_meal_result()` for nutrition display |
 | `UI_TOAST` | Posts `EVT_SHIP_UI_TOAST` to event queue |
 | `UI_VOICE_RESPONSE` | Stores JSON text, posts `EVT_SHIP_VOICE_JSON` to event queue |
 | `UI_LIST` | Full list replacement into `g_pending` (deleted-item filtering, optimistic voice-item preservation), posts `EVT_LIST_REPLACED`. **Dedup gate**: a UI_LIST arriving within `LCD_UI_LIST_DEDUPE_MS` (1000ms) of the last completion is dropped **only when no refresh is expecting a list** — `refresh_expecting_list = (refresh_state == REFRESH_WAKE_PENDING \|\| refresh_state == REFRESH_INFLIGHT) \|\| lcd_refresh_inflight \|\| waiting_for_list_response`. The SM state is checked because the Sense's cached-serve can answer a new refresh in ~100-300ms — before `lcd_refresh_inflight` is set for the new cycle — so an `lcd_refresh_inflight`-only gate discarded refresh N+1's answer as a duplicate of refresh N's and the SM spun to its 20s hard timeout. Logs `[UART] UI_LIST deduped (recent completion, no refresh expecting)` on drop. Completes the refresh SM from WAKE_PENDING or INFLIGHT, sets `g_list_refresh_completed_once`, stamps `lcd_last_ui_list_complete_ms` |
@@ -1034,7 +1121,7 @@ LCD_Minimal.ino (globals, setup, loop)
   |-- lcd_ship_screens.h (all screen builders)
   |-- lcd_ship_flow.h (animations, countdown, progress)
   |-- lcd_ship_route.h (screen routing, touch handlers)
-  |-- lcd_ship_action.h (menu actions, meal results)
+  |-- lcd_ship_action.h (menu actions)
   |-- lcd_menu.h (legacy menu, knob ISR callbacks)
   |-- lcd_sleep.h (deep sleep, sense handshake)
   |-- lcd_ota_uart.h (OTA receiver state machine)
@@ -1058,7 +1145,11 @@ The `uart_task` runs on Core 0. LVGL is not thread-safe and all LVGL objects are
 
 **Correct pattern:** Post an event to `app_event_queue`, let the UI task handle it.
 
-**Known violations:** The `UI_STATUS` handler for legacy SCAN mode still has LVGL calls (status_screen, expiry_screen). These should be refactored to use events.
+**Contained, not fixed (2026-08-20):** The `UI_STATUS` handler for legacy SCAN mode still has LVGL calls (status_screen, expiry_screen, logged_screen) — 10 `lv_*` calls including **three `lv_timer_handler()` pumps**, plus helpers (`expiry_prepare_picker_for_entry()`, `status_screen_use_text()`, `ui_lvgl_tick()`). They are now wrapped in `example_lvgl_lock(200)` in `lcd_uart_rx.h`, so they can no longer race the UI task's own `lv_timer_handler()` on Core 1. On lock-acquire failure the update is skipped with `[UART][WARN] SCAN screen update skipped - LVGL lock busy` rather than proceeding unsynchronised.
+
+That is containment. The real fix is still to post `EVT_UI_STATUS_SCAN` with `(op,phase,mode,text)` and let the UI task apply it, so `uart_task` touches no LVGL at all.
+
+Note this block did not execute in bench testing (`[STATUS] Showing 'Logged!' screen` never fired) — the ship UI routes SCAN through `ui_apply_ship_ui_status` instead — so the legacy path may be dormant. Dormant is not the same as safe: the lock costs nothing and the path is still reachable.
 
 ### 2. Stale Maintenance Flag Clearing
 

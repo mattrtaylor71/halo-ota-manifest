@@ -15,6 +15,71 @@
 #ifndef SENSE_UART_MSG_H
 #define SENSE_UART_MSG_H
 
+// ── User-intent ack + duplicate suppression ────────────────────────
+//
+// The LCD holds every user-intent message (INPUT_MENU_SELECT and friends) until
+// we ack its msg_id, retransmitting on a 400ms timer — see lcd_link_ack.h. That
+// closes the hole where a capture request lost to a cold UART left the user on
+// the capturing screen forever.
+//
+// The retransmit replays the ORIGINAL bytes, so the same msg_id can legitimately
+// arrive more than once whenever an ACK is what got lost. Suppressing the repeat
+// ACTION is therefore mandatory: without it, this fix would turn one tap into
+// two captures. Note we still RE-ACK a duplicate — the LCD is retrying precisely
+// because it never heard us, so staying silent would guarantee the next retry.
+
+#ifndef SENSE_INPUT_SEEN_RING
+#define SENSE_INPUT_SEEN_RING 8
+#endif
+
+static uint32_t g_input_seen_ids[SENSE_INPUT_SEEN_RING] = {0};
+static uint8_t  g_input_seen_pos = 0;
+static uint32_t g_input_dupes_suppressed = 0;
+
+static bool sense_input_seen_recently(uint32_t msg_id) {
+  if (msg_id == 0) return false;   // no id: cannot dedupe, treat as fresh
+  for (uint8_t i = 0; i < SENSE_INPUT_SEEN_RING; i++) {
+    if (g_input_seen_ids[i] == msg_id) return true;
+  }
+  return false;
+}
+
+static void sense_input_mark_seen(uint32_t msg_id) {
+  if (msg_id == 0) return;
+  g_input_seen_ids[g_input_seen_pos] = msg_id;
+  g_input_seen_pos = (uint8_t)((g_input_seen_pos + 1) % SENSE_INPUT_SEEN_RING);
+}
+
+#if HALO_SPOOL_TEST
+// Bench-only: swallow the next N acks to simulate a LOST ACK, which is the only
+// path that makes the LCD retransmit a message the Sense already executed. That
+// is precisely the case duplicate suppression exists for, and it cannot be
+// reached by making the Sense deaf (then it never executes anything). Reuses
+// the existing bench gate deliberately rather than adding another flag that
+// would have to be remembered at ship time.
+static uint32_t g_test_drop_acks = 0;
+#endif
+
+static void uart_send_input_ack(uint32_t ack_id) {
+#if HALO_SPOOL_TEST
+  if (g_test_drop_acks > 0) {
+    g_test_drop_acks--;
+    Serial.printf("[ACKTEST] dropping INPUT_ACK for ack_id=%lu (%lu left)\n",
+                  (unsigned long)ack_id, (unsigned long)g_test_drop_acks);
+    return;
+  }
+#endif
+  StaticJsonDocument<128> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = "INPUT_ACK";
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  doc["ack_id"] = ack_id;          // the LCD msg_id being acknowledged
+  String output;
+  serializeJson(doc, output);
+  uart_send_json(output.c_str());
+}
+
 // ── Sync ack ───────────────────────────────────────────────────────
 
 static void uart_send_sync_ack() {

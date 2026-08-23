@@ -1,6 +1,7 @@
 #include "SenseOtaApplier.h"
 #include "Log.h"
 #include "BuildFlags.h"
+#include "../shared/AmazonRootCa.h"
 #ifndef HALO_BOARD_LCD
 #include "OtaExpect.h"
 #endif
@@ -23,27 +24,6 @@ extern "C" void lcd_ota_on_success(const char* version) __attribute__((weak));
 #endif
 
 namespace {
-static const char kAmazonRootCa1[] PROGMEM =
-    "-----BEGIN CERTIFICATE-----\n"
-    "MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF\n"
-    "ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6\n"
-    "b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL\n"
-    "MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv\n"
-    "b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj\n"
-    "ca9HgFB0fW7Y14h29Jlo91ghYPl0hAEvrAIthtOgQ3pOsqTQNroBvo3bSMgHFzZM\n"
-    "9O6II8c+6zf1tRn4SWiw3te5djgdYZ6k/oI2peVKVuRF4fn9tBb6dNqcmzU5L/qw\n"
-    "IFAGbHrQgLKm+a/sRxmPUDgH3KKHOVj4utWp+UhnMJbulHheb4mjUcAwhmahRWa6\n"
-    "VOujw5H5SNz/0egwLX0tdHA114gk957EWW67c4cX8jJGKLhD+rcdqsq08p8kDi1L\n"
-    "93FcXmn/6pUCyziKrlA4b9v7LWIbxcceVOF34GfID5yHI9Y/QCB/IIDEgEw+OyQm\n"
-    "jgSubJrIqg0CAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC\n"
-    "AYYwHQYDVR0OBBYEFIQYzIU07LwMlJQuCFmcx7IQTgoIMA0GCSqGSIb3DQEBCwUA\n"
-    "A4IBAQCY8jdaQZChGsV2USggNiMOruYou6r4lK5IpDB/G/wkjUu0yKGX9rbxenDI\n"
-    "U5PMCCjjmCXPI6T53iHTfIUJrU6adTrCC2qJeHZERxhlbI1Bjjt/msv0tadQ1wUs\n"
-    "N+gDS63pYaACbvXy8MWy7Vu33PqUXHeeE6V/Uq2V8viTO96LXFvKWlJbYK8U90vv\n"
-    "o/ufQJVtMVT8QtPHRh8jrdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU\n"
-    "5MsI+yMRQ+hDKXJioaldXgjUkK642M4UwtBV8ob2xJNDd2ZhwLnoQdeXeGADbkpy\n"
-    "rqXRfboQnoZsG4q5WTP468SQvvG5\n"
-    "-----END CERTIFICATE-----\n";
 
 static inline void ota_cooperative_yield(unsigned long& last_yield_ms, unsigned long interval_ms = 20) {
   unsigned long now_ms = millis();
@@ -283,7 +263,14 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     HTTPClient http;
     
     HttpCtx() {
-      client.setInsecure();  // TODO: Phase 2 - add proper certificate validation
+      // This is the connection that pulls the actual firmware image, so it must
+      // validate the peer like every other OTA call site. The SHA256 check
+      // against the (CA-pinned) manifest still backstops integrity downstream.
+#if OTA_TLS_INSECURE_DEBUG
+      client.setInsecure();
+#else
+      client.setCACert(kAmazonRootCa1);
+#endif
       // Note: client.setTimeout() should be set AFTER connect() succeeds
       // Do NOT set timeout here - will be set after http.begin() succeeds
     }

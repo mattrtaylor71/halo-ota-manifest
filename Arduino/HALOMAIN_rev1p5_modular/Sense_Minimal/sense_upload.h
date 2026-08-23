@@ -112,16 +112,12 @@ static bool http_post_json_with_retries(const char* url,
                                         uint32_t deadline_ms) {
   // Release camera DMA reservation to defragment internal SRAM for TLS.
   bool dma_was_reserved_post = (g_camera_dma_reserve != nullptr);
-  if (dma_was_reserved_post) {
-    heap_caps_free(g_camera_dma_reserve);
-    g_camera_dma_reserve = nullptr;
-  }
+  if (dma_was_reserved_post) camera_dma_reserve_release("presign_post");
   struct DmaGuardPost {
     bool should_reacquire;
     ~DmaGuardPost() {
-      if (should_reacquire && !g_camera_dma_reserve) {
-        g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
-            CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+      if (should_reacquire) {
+        camera_dma_reserve_acquire("presign_post");
       }
     }
   } dma_guard_post{dma_was_reserved_post};
@@ -244,16 +240,12 @@ static bool http_get_with_retries(const char* url,
                                   uint32_t deadline_ms) {
   // Release camera DMA reservation to defragment internal SRAM for TLS.
   bool dma_was_reserved_get = (g_camera_dma_reserve != nullptr);
-  if (dma_was_reserved_get) {
-    heap_caps_free(g_camera_dma_reserve);
-    g_camera_dma_reserve = nullptr;
-  }
+  if (dma_was_reserved_get) camera_dma_reserve_release("presign_get");
   struct DmaGuardGet {
     bool should_reacquire;
     ~DmaGuardGet() {
-      if (should_reacquire && !g_camera_dma_reserve) {
-        g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
-            CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+      if (should_reacquire) {
+        camera_dma_reserve_acquire("presign_get");
       }
     }
   } dma_guard_get{dma_was_reserved_get};

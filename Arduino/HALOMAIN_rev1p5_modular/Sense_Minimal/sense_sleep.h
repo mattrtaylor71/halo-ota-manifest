@@ -32,7 +32,7 @@
  *   - ota_configure_timer_wakeup(), ota_get_timer_delta_s()
  *   - deinit_camera(), camera_power_disable(), camera_power_hold_enable()
  *     from sense_camera.h
- *   - mqttClient, wifiClient, current_job, op_worker_task_handle
+ *   - current_job, op_worker_task_handle
  */
 
 #ifndef SENSE_SLEEP_H
@@ -181,10 +181,22 @@ static uint32_t sleep_deny_retry_ms(const char* reason, unsigned long now_ms) {
 
 // ── Deep sleep wakeup configuration ─────────────────────────────────
 
-static void sense_config_deep_sleep_wakeup(bool enable_ext0, uint32_t fallback_timer_s) {
+// Arm the wake sources. `timer_s` is now applied in BOTH branches.
+//
+// It previously applied only when ext0 was DISABLED; the enabled branch (the
+// normal case) called ota_configure_timer_wakeup() instead and ignored the
+// caller's value entirely. So a timer computed by the caller — including the
+// nightly 02:00 maintenance wake — silently never armed on the path the device
+// actually takes. ESP32 supports multiple simultaneous wake sources, so ext0
+// and the timer coexist: tap OR timer, whichever comes first.
+//
+// The caller guarantees timer_s > 0 (see the wake-timer block in
+// sense_enter_deep_sleep), so "no wake source at all" is no longer reachable.
+static void sense_config_deep_sleep_wakeup(bool enable_ext0, uint32_t timer_s) {
   // Configure WAKE_GPIO for deep sleep wake on LOW (LCD pulses LOW)
   wake_pin_configure_rtc_input_inactive_pull();
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+
   if (enable_ext0) {
     rtc_gpio_init(WAKE_GPIO);
     rtc_gpio_set_direction(WAKE_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
@@ -192,16 +204,17 @@ static void sense_config_deep_sleep_wakeup(bool enable_ext0, uint32_t fallback_t
     rtc_gpio_pulldown_dis(WAKE_GPIO);
     Serial.printf("[SENSE] RTC wake pin configured GPIO%d\n", WAKE_GPIO);
     esp_sleep_enable_ext0_wakeup(WAKE_GPIO, WAKE_LEVEL);
-    ota_configure_timer_wakeup();
     Serial.printf("[SENSE] Wake EXT0 configured: GPIO%d level=%d\n", WAKE_GPIO, WAKE_LEVEL);
+  }
+
+  if (timer_s > 0) {
+    esp_sleep_enable_timer_wakeup((uint64_t)timer_s * 1000000ULL);
+    Serial.printf("[SENSE] Wake timer armed: %lus (%.2fh) ext0=%d\n",
+                  (unsigned long)timer_s, timer_s / 3600.0, enable_ext0 ? 1 : 0);
   } else {
-    if (fallback_timer_s > 0) {
-      esp_sleep_enable_timer_wakeup((uint64_t)fallback_timer_s * 1000000ULL);
-      Serial.printf("[SENSE] Wake EXT0 disabled; timer fallback_s=%lu\n",
-                    (unsigned long)fallback_timer_s);
-    } else {
-      Serial.println("[SENSE] Wake EXT0 disabled; no timer fallback");
-    }
+    // Should be unreachable — the caller always supplies a timer. Loud because
+    // sleeping with no wake source bricks the device until someone taps it.
+    Serial.println("[SENSE] WARNING: no timer armed - device wakes only on tap");
   }
 }
 
@@ -345,6 +358,18 @@ static void uart_send_wifi_diag_summary() {
 // ── Deep sleep entry ────────────────────────────────────────────────
 
 static void sense_enter_deep_sleep(SenseSleepKind kind) {
+#ifdef STRESS_TEST_NO_SLEEP
+  // Bench builds must stay on the USB bus. The only previous guard was in the
+  // INPUT_SLEEP handler (Sense_Minimal.ino), which left every other path to
+  // this function — idle timeout, sleep coordinator, post-op — free to sleep
+  // and drop the Sense's USB CDC mid-test. That is what silently killed the
+  // third spool run: the transfer had not failed, the port had gone away.
+  // Gating the single chokepoint covers all callers.
+  static uint32_t s_no_sleep_suppressed = 0;
+  Serial.printf("[DEV] deep sleep suppressed x%lu kind=%d (STRESS_TEST_NO_SLEEP=1)\n",
+                (unsigned long)(++s_no_sleep_suppressed), (int)kind);
+  return;
+#endif
   Serial.println("========================================");
   Serial.println("[SENSE] Preparing for DEEP SLEEP...");
   Serial.println("========================================");
@@ -518,18 +543,47 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     }
   }
 
+  // Retire SNTP before the flush hands DNS to upload_worker_task. Same task
+  // that started it, so no cross-thread lwIP call. Without this a pending SNTP
+  // DNS callback fires INLINE on the worker's resolve and panics the board
+  // mid-upload, destroying the capture (see sense_time.h).
+  sense_ntp_stop_if_time_valid("pre_sleep_flush");
+
   // --- Upload flush window: drain pending uploads before sleep ---
   // User may have done captures during this wake cycle. The upload_worker_task
   // runs on Core 1 and processes the queue independently. Give it time to
   // finish before we tear down WiFi.
   {
-    const unsigned long UPLOAD_FLUSH_TIMEOUT_MS = 30000;  // 30s max
+    // Open the deferred-upload gate. Normal (non-dish) uploads are held for the
+    // whole awake session so their TLS handshakes cannot fragment the DMA region
+    // the camera needs — see uploads_held_for_session() in Sense_Minimal.ino.
+    // THIS is the moment they are released: the user has stopped, the camera is
+    // about to be torn down, and the full internal heap is available.
+    g_upload_flush_requested = true;
+
+    // Budget must scale with what is actually queued.
+    //
+    // A flat 30s was fine when uploads went out during the session and at most
+    // one was ever pending here. Deferring them to sleep means the whole
+    // session's captures arrive at once — measured 2026-08-21: 5 captures, each
+    // upload ~6s, flush hit 30s with one still in flight, the device slept, and
+    // that photo was LOST (up_ok=4, spool=0). Deferral created that path, so the
+    // budget has to cover it.
+    const uint32_t pending_now = upload_queue_count() +
+                                 (upload_inflight ? 1 : 0) +
+                                 (upload_worker_has_parked_job ? 1 : 0);
+    const unsigned long UPLOAD_FLUSH_TIMEOUT_MS =
+        (pending_now <= 1) ? 30000UL
+                           : (15000UL * (unsigned long)pending_now > 180000UL
+                                  ? 180000UL                       // hard ceiling: 3 min
+                                  : 15000UL * (unsigned long)pending_now);
     const unsigned long UPLOAD_FLUSH_LOG_INTERVAL_MS = 2000;
     unsigned long flush_start = millis();
     unsigned long last_log = 0;
     uint32_t initial_count = upload_queue_count();
     bool has_parked = upload_worker_has_parked_job;
-    bool had_pending = (initial_count > 0 || upload_inflight || has_parked);
+    bool had_pending = (initial_count > 0 || upload_inflight || has_parked ||
+                        upload_worker_holding_in_place);
 
     if (had_pending) {
       Serial.printf("[SLEEP_UPLOAD_FLUSH] start pending=%lu inflight=%d parked=%d\n",
@@ -537,15 +591,17 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     }
 
     while (had_pending &&
-           (upload_queue_count() > 0 || upload_inflight || upload_worker_has_parked_job) &&
+           (upload_queue_count() > 0 || upload_inflight || upload_worker_has_parked_job ||
+            upload_worker_holding_in_place) &&
            (millis() - flush_start) < UPLOAD_FLUSH_TIMEOUT_MS) {
       // Log progress periodically
       if ((millis() - last_log) >= UPLOAD_FLUSH_LOG_INTERVAL_MS) {
         last_log = millis();
-        Serial.printf("[SLEEP_UPLOAD_FLUSH] waiting queue=%lu inflight=%d parked=%d elapsed=%lums\n",
+        Serial.printf("[SLEEP_UPLOAD_FLUSH] waiting queue=%lu inflight=%d parked=%d held=%d elapsed=%lums\n",
                       (unsigned long)upload_queue_count(),
                       upload_inflight ? 1 : 0,
                       upload_worker_has_parked_job ? 1 : 0,
+                      upload_worker_holding_in_place ? 1 : 0,
                       millis() - flush_start);
       }
       delay(100);  // Yield to upload_worker_task on Core 1
@@ -569,6 +625,25 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
         }
       }
 #endif
+      // SPIFFS could not take it. For a real capture it never can: the spool
+      // partition is 173,441 B and images are 177-189 KB, so upload_persist_save()
+      // always hits skip_save (measured: len=189246 avail=173441 required=254858).
+      // Before this fallback existed the code below simply freed the buffer and the
+      // photo was gone — PSRAM does not survive deep sleep. Spool it to the LCD's
+      // 480MB SD card instead. ~16s at 115200, paid only here on the way to sleep,
+      // after the user has already been told "Logged!".
+      if (!parked_saved &&
+          upload_worker_parked_job.image_buf &&
+          upload_worker_parked_job.image_len > 0) {
+        Serial.println("[SLEEP_UPLOAD_FLUSH] SPIFFS full — spooling to LCD SD card");
+        parked_saved = sense_spool_image_to_lcd(upload_worker_parked_job,
+                                                upload_worker_parked_job.image_buf,
+                                                upload_worker_parked_job.image_len);
+        if (parked_saved) {
+          uart_send_sense_diag("upload", "sleep_parked_sd", upload_worker_parked_job.mode,
+                               (int32_t)upload_worker_parked_job.job_id, "spooled_to_sd");
+        }
+      }
       if (!parked_saved) {
         Serial.println("[SLEEP_UPLOAD_FLUSH] WARNING: parked job could NOT be persisted");
         uart_send_sense_diag("upload", "sleep_parked_drop", upload_worker_parked_job.mode,
@@ -581,6 +656,42 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
       upload_worker_has_parked_job = false;
     }
 
+    // Rescue anything STILL QUEUED after the flush budget expired.
+    //
+    // The parked-job block above only ever handled ONE job, which was correct
+    // when uploads went out during the session and at most one could be pending
+    // here. Deferring them to sleep means a whole session can be queued, and on
+    // 2026-08-21 a flush timeout left one in flight and one queued — up_ok=4 of 5
+    // captures, spool=0, PSRAM does not survive deep sleep, photo GONE.
+    //
+    // Anything we cannot upload goes to the SD card instead of being dropped.
+    {
+      UploadJob leftover = {};
+      uint32_t rescued = 0, lost = 0;
+      while (upload_queue != NULL &&
+             xQueueReceive(upload_queue, &leftover, 0) == pdTRUE) {
+        bool saved = false;
+        if (leftover.image_buf && leftover.image_len > 0) {
+          Serial.printf("[SLEEP_UPLOAD_FLUSH] rescuing queued job_id=%lu mode=%s len=%u -> SD\n",
+                        (unsigned long)leftover.job_id, leftover.mode,
+                        (unsigned)leftover.image_len);
+          saved = sense_spool_image_to_lcd(leftover, leftover.image_buf, leftover.image_len);
+          uart_send_sense_diag("upload", saved ? "sleep_queued_sd" : "sleep_queued_drop",
+                               leftover.mode, (int32_t)leftover.job_id,
+                               saved ? "spooled_to_sd" : "PHOTO_LOST");
+        }
+        if (saved) rescued++; else lost++;
+        if (leftover.image_buf) {
+          free(leftover.image_buf);
+          leftover.image_buf = nullptr;
+        }
+      }
+      if (rescued || lost) {
+        Serial.printf("[SLEEP_UPLOAD_FLUSH] leftover rescue: spooled=%lu lost=%lu\n",
+                      (unsigned long)rescued, (unsigned long)lost);
+      }
+    }
+
     if (had_pending) {
       uint32_t remaining = upload_queue_count();
       Serial.printf("[SLEEP_UPLOAD_FLUSH] done remaining=%lu inflight=%d elapsed=%lums %s\n",
@@ -591,16 +702,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     }
   }
 
-  // 1. Disconnect MQTT if connected (active connections can prevent sleep)
-#ifndef HALO_SENSE_PROD_WRAPPER
-  if (mqttClient.connected()) {
-    Serial.println("[SENSE] Disconnecting MQTT before sleep...");
-    mqttClient.disconnect();
-    delay(100);  // Give MQTT time to clean up
-  }
-#endif
-
-  // 2. Shut down Wi-Fi + BT before deep sleep
+  // 1. Shut down Wi-Fi + BT before deep sleep
   if (!sleep_allowed_now("pre_wifi_off", NULL)) {
     sleep_notify_late_block("pre_wifi_off");
     return;
@@ -649,11 +751,51 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
                 gpio_get_level(CAM_PWDN_GPIO),
                 g_cam_pwdn_hold_enabled ? 1 : 0);
 
-  // Preserve the OTA/scheduled timer even if EXT0 is disabled late in sleep entry.
+  // ── Wake timer: ALWAYS arm one ────────────────────────────────────────
+  //
+  // THE RULE: a device must never sleep without a next wake armed. The previous
+  // form fell through to 0 whenever the OTA orchestrator had nothing scheduled
+  // and the wake pin was healthy — i.e. the normal case — so the device slept
+  // with NO timer and could only be revived by a physical tap. On a mostly-off
+  // device in someone's kitchen there is no human who knows to do that, and a
+  // missed nightly window could never self-heal.
+  //
+  // Baseline is now the 02:00 local maintenance wake (NightlySchedule.h, which
+  // handles DST properly — "tomorrow" is not now+86400, and 02:00 does not
+  // exist on spring-forward day). Anything sooner takes precedence.
   uint32_t ota_timer_delta_s = ota_get_timer_delta_s();
-  uint32_t timer_delta_s = ota_timer_delta_s > 0
-                               ? ota_timer_delta_s
-                               : (wake_pin_stuck ? WAKE_PIN_FAILSAFE_TIMER_S : 0);
+  uint32_t nightly_s = halo_seconds_until_maintenance((time_t)sense_now_epoch());
+  if (nightly_s == 0) {
+    // No usable wall clock. Wake on a plain interval anyway so the device gets
+    // a chance to re-sync time and try again, rather than sleeping forever.
+    nightly_s = HALO_MAINTENANCE_FALLBACK_S;
+    Serial.println("[SLEEP] no usable wall clock - arming fallback interval");
+  }
+#ifdef HALO_MAINT_TEST_S
+  // Bench override: collapse the nightly wake to a few seconds so the ARM ->
+  // SLEEP -> TIMER-FIRES -> RE-ARM cycle can be exercised in a minute instead of
+  // a day. Deliberately independent of STRESS_TEST_NO_SLEEP, because this test
+  // needs the device to ACTUALLY sleep. The local-hour arithmetic it bypasses is
+  // verified separately (host tests + the on-device `nextwake` command).
+  if (HALO_MAINT_TEST_S > 0) {
+    Serial.printf("[SLEEP] HALO_MAINT_TEST_S override: %ds instead of %lus\n",
+                  (int)HALO_MAINT_TEST_S, (unsigned long)nightly_s);
+    nightly_s = (uint32_t)HALO_MAINT_TEST_S;
+  }
+#endif
+  uint32_t timer_delta_s = nightly_s;
+  if (ota_timer_delta_s > 0 && ota_timer_delta_s < timer_delta_s) {
+    timer_delta_s = ota_timer_delta_s;
+  }
+  if (wake_pin_stuck && WAKE_PIN_FAILSAFE_TIMER_S < timer_delta_s) {
+    timer_delta_s = WAKE_PIN_FAILSAFE_TIMER_S;
+  }
+  Serial.printf("[SLEEP] wake timer: nightly=%lus ota=%lus chosen=%lus\n",
+                (unsigned long)nightly_s, (unsigned long)ota_timer_delta_s,
+                (unsigned long)timer_delta_s);
+  // Close the wake-cycle record before actually sleeping. An entry left open on
+  // the next boot means the device never got here — panic, hang or brownout.
+  wakelog_end_cycle(timer_delta_s, ext0_allowed, (uint16_t)g_spool_last_known_depth);
   sense_config_deep_sleep_wakeup(ext0_allowed, timer_delta_s);
   Serial.printf("[SLEEP_DIAG] wake_sources ext0_gpio=%d ext0_level=%d ext0_enabled=%d timer_delta_s=%lu ota_timer_delta_s=%lu wake_pin_stuck=%d kind=%d\n",
                 WAKE_GPIO,

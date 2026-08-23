@@ -28,20 +28,23 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
   if (reason_out) {
     *reason_out = NULL;
   }
+#if HALO_DEV_NO_SLEEP
+  // Bench builds never idle-sleep, so USB-CDC stays enumerated and every reflash
+  // is instant — no tap-to-wake, no cable reseat. This is a GATE, not a removal:
+  // the whole sleep routine below is still compiled and still exercised the
+  // moment the flag goes back to 0, so it cannot rot while we iterate on the UI.
+  // NEVER ship with this set. See docs/HALO_UI_DESIGN.md and the build header.
+  if (reason_out) *reason_out = "dev_no_sleep";
+  return false;
+#endif
   // Test mode: block all sleep for automated testing
   if (g_test_mode_active) {
-    if (millis() < g_test_mode_expire_ms) {
+    if ((long)(millis() - g_test_mode_expire_ms) < 0) {   // wrap-safe
+      test_mode_sync_remaining();  // so a reboot resumes, not re-arms
       if (reason_out) *reason_out = "test_mode";
       return false;
     } else {
-      // Auto-expire
-      g_test_mode_active = false;
-      Preferences prefs;
-      if (prefs.begin("test_cfg", false)) {
-        prefs.remove("test_mode");
-        prefs.end();
-      }
-      Serial.println("[TEST_MODE] auto-expired (1 hour elapsed)");
+      test_mode_clear("budget elapsed");
     }
   }
   if (wake_timer_wait_mode) {
@@ -54,6 +57,14 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
   }
   if (provisioning_input_locked()) {
     if (reason_out) *reason_out = "provisioning";
+    return false;
+  }
+  // Never sleep on top of a user action the Sense has not acknowledged. Going to
+  // sleep here would discard the retransmit slot and silently lose the tap —
+  // precisely the failure lcd_link_ack.h exists to eliminate. Self-limiting: a
+  // slot is retired after ~2s either way, so this delays sleep, never blocks it.
+  if (link_ack_inflight()) {
+    if (reason_out) *reason_out = "link_unacked";
     return false;
   }
   if (now_ms < sense_awake_grace_until_ms) {
@@ -92,6 +103,28 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
       if (reason_out) *reason_out = "ota_stay_awake";
       return false;
     }
+  }
+  // An image spool from the Sense is in flight — do not sleep through it.
+  //
+  // This is the whole reason the SD spool never worked for a real capture. A
+  // 173KB photo takes ~25s over the 115200 UART (measured 6,982 B/s with
+  // 512-byte chunks and a synchronous ACK each), but the LCD's idle timeout is
+  // 10s. The Sense blocks its own sleep for the duration
+  // ([SLEEP_BLOCK] reason=spool_transfer); the LCD had no equivalent guard, so
+  // it hit idle_timeout mid-transfer, stopped servicing the receive and started
+  // the sleep handshake. Both ends then timed out:
+  //     Sense: [IMG_SPOOL] job=19 ack timeout at seq=187 ... result=FAIL
+  //     LCD:   [IMG_RX] abort job=19 reason=frame_timeout
+  // and the capture was reported PHOTO_LOST — the exact data loss the spool
+  // exists to prevent. Measured 2026-08-21, reproducible.
+  if (g_img_rx_active) {
+    if (reason_out) *reason_out = "spool_rx";
+    return false;
+  }
+  // Same for the drain direction (LCD -> Sense).
+  if (g_spool_tx_active) {
+    if (reason_out) *reason_out = "spool_tx";
+    return false;
   }
   if (now_ms < stay_awake_until_ms) {
     if (reason_out) *reason_out = "stay_awake";
@@ -398,7 +431,6 @@ static void ui_reset_lvgl_objects() {
   debug_label_ui = NULL;
   debug_btn_back = NULL;
   debug_btn_back_label = NULL;
-  meal_result_screen = NULL;
   expiry_choice_quantity_label = NULL;
   ship_expiry_choice_qty_prefix = NULL;
   ship_expiry_choice_prompt = NULL;
@@ -408,15 +440,6 @@ static void ui_reset_lvgl_objects() {
   ship_expiry_choice_skip_label = NULL;
   ship_expiry_choice_add_btn = NULL;
   ship_expiry_choice_add_label = NULL;
-  meal_calories_label = NULL;
-  meal_description_label = NULL;
-  meal_protein_value_label = NULL;
-  meal_protein_name_label = NULL;
-  meal_carbs_value_label = NULL;
-  meal_carbs_name_label = NULL;
-  meal_fat_value_label = NULL;
-  meal_fat_name_label = NULL;
-  meal_recommendation_label = NULL;
   delete_menu = NULL;
   delete_item_btn = NULL;
   delete_item_label = NULL;
@@ -464,8 +487,6 @@ static void ui_reset_lvgl_objects() {
   menu_screen_visible = false;
   buttons_visible = false;
   status_reset_visible = false;
-  touch_used_to_dismiss_meal = false;
-  meal_result_shown_time = 0;
   status_screen_shown_time = 0;
   logged_screen_shown_time = 0;
   delete_cooldown_until = 0;

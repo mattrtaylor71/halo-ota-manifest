@@ -759,7 +759,7 @@ static bool ensure_time_valid(const char* reason, uint32_t timeout_ms) {
     }
   }
   if (!sntp_started) {
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+    sense_ntp_begin();   // configTime(0,0,..) would reset TZ to UTC; see sense_time.h
     sntp_started = true;
     Serial.printf("[TLS_GUARD] SNTP init reason=%s\n", reason ? reason : "unknown");
   }

@@ -2,6 +2,8 @@
 #include "ProvisioningState.h"
 #include "UartProto.h"
 #include "Log.h"
+#include "BuildFlags.h"            // OTA_TLS_INSECURE_DEBUG
+#include "../shared/AmazonRootCa.h"
 #include "Truth.h"
 #include "WifiGuard.h"  // WiFi guard to prevent "STA not started" errors
 #include "WifiUtils.h"  // hardResetSta not used here (we keep AP); disconnect + wait to avoid "sta is connecting" race
@@ -937,8 +939,15 @@ bool ProvisioningManager::tryClaimOwnerId() {
 
   HTTPClient http;
   WiFiClientSecure secure_client;
+  // The owner claim binds this device to a user account and has no integrity
+  // backstop the way the OTA path does (no manifest SHA to fall back on), so
+  // the peer must be validated.
+#if OTA_TLS_INSECURE_DEBUG
   secure_client.setInsecure();
-  
+#else
+  secure_client.setCACert(kAmazonRootCa1);
+#endif
+
   if (!http.begin(secure_client, url)) {
     claim_in_progress = false;
     setLastError("Claim failed (HTTP begin)");
@@ -953,7 +962,9 @@ bool ProvisioningManager::tryClaimOwnerId() {
   http.end();
   claim_in_progress = false;
   
-  DynamicJsonDocument resp_doc(256);
+  // 384, not 256: the response now carries an optional POSIX TZ string alongside
+  // owner_id, and a truncated parse would silently drop it.
+  DynamicJsonDocument resp_doc(384);
   bool resp_ok = false;
   if (response.length() > 0) {
     DeserializationError err = deserializeJson(resp_doc, response);
@@ -969,6 +980,25 @@ bool ProvisioningManager::tryClaimOwnerId() {
     }
     if (resp_doc.containsKey("error")) {
       error_str = resp_doc["error"].as<String>();
+    }
+    // Optional POSIX TZ from the backend, e.g. "EST5EDT,M3.2.0,M11.1.0".
+    //
+    // The nightly maintenance wake is scheduled at 02:00 LOCAL. Without this the
+    // device uses its compiled-in default (US Pacific), so a user in New York got
+    // their update check at 05:00 and one in London at 10:00 — harmless to the
+    // device, wrong for the person. Accepts "timezone" or "tz"; anything absent
+    // or empty leaves the existing value alone rather than clobbering it.
+    const char* tz_str = "";
+    if (resp_doc.containsKey("timezone")) {
+      tz_str = resp_doc["timezone"] | "";
+    } else if (resp_doc.containsKey("tz")) {
+      tz_str = resp_doc["tz"] | "";
+    }
+    if (tz_str && tz_str[0]) {
+      ProvisioningState::saveTimezone(tz_str);
+      LOG_INFO("[PROVISION] Timezone from claim: %s", tz_str);
+    } else {
+      LOG_INFO("[PROVISION] Claim carried no timezone — keeping current/default");
     }
   }
   LOG_INFO("[PROVISION] Claim response http=%d ok=%d owner_id_present=%d owner_id=%s error=%s",
@@ -1001,15 +1031,19 @@ bool ProvisioningManager::tryClaimOwnerId() {
   if (error_str == "device_already_claimed") {
     setLastError("Device already linked");
     claim_completed = true;
+    ProvisioningState::clearOwnerCode();  // Claim terminal — clear stale code so owner_id isn't suppressed
   } else if (error_str == "invalid_code") {
     setLastError("Setup code not recognized");
     claim_completed = true;
+    ProvisioningState::clearOwnerCode();
   } else if (error_str == "expired_code") {
     setLastError("Setup code expired");
     claim_completed = true;
+    ProvisioningState::clearOwnerCode();
   } else if (error_str == "code_already_used") {
     setLastError("Setup code already used");
     claim_completed = true;
+    ProvisioningState::clearOwnerCode();
   } else if (error_str == "rate_limited") {
     setLastError("Rate limited, try again");
   } else if (http_code >= 400) {

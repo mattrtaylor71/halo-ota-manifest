@@ -57,7 +57,7 @@ static void update_menu_display() {
       }
       if (i == menu_selected_index) {
         // Selected item - brighter white or bold
-        lv_obj_set_style_text_color(menu_item_labels[i], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+        lv_obj_set_style_text_color(menu_item_labels[i], lv_color_hex(COL_WHITE), LV_PART_MAIN);
         lv_obj_set_style_text_opa(menu_item_labels[i], LV_OPA_COVER, LV_PART_MAIN);
         // Could add background highlight or make font larger/bolder
         // For now, we'll add a subtle background highlight
@@ -67,7 +67,7 @@ static void update_menu_display() {
         lv_obj_set_style_pad_all(menu_item_labels[i], 8, LV_PART_MAIN);  // Padding for highlight
       } else {
         // Unselected item - white text, no background
-        lv_obj_set_style_text_color(menu_item_labels[i], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+        lv_obj_set_style_text_color(menu_item_labels[i], lv_color_hex(COL_WHITE), LV_PART_MAIN);
         lv_obj_set_style_text_opa(menu_item_labels[i], LV_OPA_70, LV_PART_MAIN);  // Slightly transparent
         lv_obj_set_style_bg_opa(menu_item_labels[i], LV_OPA_TRANSP, LV_PART_MAIN);  // No background
         lv_obj_set_style_pad_all(menu_item_labels[i], 0, LV_PART_MAIN);  // No padding
@@ -113,9 +113,6 @@ static void show_menu_screen() {
   // Hide all other screens
   if (list_container != NULL) {
     lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (meal_result_screen != NULL) {
-    lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
   }
   if (status_screen != NULL) {
     lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
@@ -417,7 +414,7 @@ static void delete_item_btn_handler(lv_event_t * e) {
     strncpy(tx_msg.id, item_id_to_delete, sizeof(tx_msg.id) - 1);
     tx_msg.has_id = true;
     if (uart_tx_queue != NULL) {
-      xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+      uart_tx_enqueue(&tx_msg, "menu");
       Serial.printf("[DELETE] Sent delete request to Sense board for ID: %s\n", item_id_to_delete);
     }
     

@@ -65,9 +65,6 @@ void dump_system_truth(const char* reason);
 #define CAMERA_MODEL_XIAO_ESP32S3
 #include "esp_camera.h"  // Camera support
 #include "camera_pins.h"  // Camera pin definitions
-#ifndef HALO_SENSE_PROD_WRAPPER
-#include <PubSubClient.h>  // MQTT support (dev builds only; production uses MqttClient.cpp)
-#endif
 
 #ifdef HALO_SENSE_PROD_WRAPPER
 // Provisioning integration (Sense prod wrapper)
@@ -158,17 +155,56 @@ static const int WAKE_ACTIVE_LEVEL = WAKE_LEVEL;
 static const int WAKE_INACTIVE_LEVEL = (WAKE_LEVEL == 0) ? 1 : 0;
 static const unsigned long WAKE_PIN_INACTIVE_STABLE_MS = 50;
 static const unsigned long WAKE_PIN_STABLE_WAIT_MS = 200;
-RTC_DATA_ATTR static uint8_t g_timer_wake_armed = 0;
-RTC_DATA_ATTR static uint8_t g_rtc_clean_shutdown = 0;
-RTC_DATA_ATTR static char g_rtc_last_stage[24] = "";
-RTC_DATA_ATTR static int32_t g_rtc_last_stage_code = 0;
-RTC_DATA_ATTR static uint32_t g_rtc_last_stage_uptime_ms = 0;
-RTC_DATA_ATTR static uint32_t g_rtc_crash_count = 0;
-RTC_DATA_ATTR static uint32_t g_rtc_last_crash_reason = 0;
-RTC_DATA_ATTR static uint32_t g_rtc_last_crash_wake_cause = 0;
-RTC_DATA_ATTR static char g_rtc_last_crash_stage[24] = "";
-RTC_DATA_ATTR static int32_t g_rtc_last_crash_stage_code = 0;
-RTC_DATA_ATTR static uint32_t g_rtc_last_crash_stage_uptime_ms = 0;
+RTC_DATA_ATTR static uint8_t g_timer_wake_armed = 0;   // deep sleep only — .rtc.data is fine
+
+// Crash forensics: RTC_NOINIT_ATTR, *not* RTC_DATA_ATTR (fixed 2026-08-20).
+//
+// These exist to describe a crash, and a crash is a full reset. `.rtc.data` is
+// INITIALISED data — the startup code restores it from the image on every reset —
+// so every one of these was wiped by the panic reboot before the code that reads
+// them ever ran. Concretely, diag_record_crash_boot() runs on the boot AFTER the
+// crash and copies g_rtc_last_stage into g_rtc_last_crash_stage; that breadcrumb
+// was already back to "" by then, and g_rtc_crash_count++ started from 0 every
+// time, so it could never exceed 1. The diagnostics were destroyed by the exact
+// event they were written to explain.
+//
+// Proven empirically on the sibling case: g_cam_wedge_restarts had the same
+// attribute and reported code=1 on eight consecutive self-heal restarts, never 2.
+//
+// `.rtc_noinit` is not initialised at all, so it carries across a reset. It holds
+// garbage after a power cycle, hence the magic below.
+#define RTC_DIAG_MAGIC 0x44494147u   // 'DIAG'
+RTC_NOINIT_ATTR static uint32_t g_rtc_diag_magic;
+RTC_NOINIT_ATTR static uint8_t  g_rtc_clean_shutdown;
+RTC_NOINIT_ATTR static char     g_rtc_last_stage[24];
+RTC_NOINIT_ATTR static int32_t  g_rtc_last_stage_code;
+RTC_NOINIT_ATTR static uint32_t g_rtc_last_stage_uptime_ms;
+RTC_NOINIT_ATTR static uint32_t g_rtc_crash_count;
+RTC_NOINIT_ATTR static uint32_t g_rtc_last_crash_reason;
+RTC_NOINIT_ATTR static uint32_t g_rtc_last_crash_wake_cause;
+RTC_NOINIT_ATTR static char     g_rtc_last_crash_stage[24];
+RTC_NOINIT_ATTR static int32_t  g_rtc_last_crash_stage_code;
+RTC_NOINIT_ATTR static uint32_t g_rtc_last_crash_stage_uptime_ms;
+
+// Must run before anything reads or writes the above. Power-on leaves
+// `.rtc_noinit` as garbage; the magic is what separates "fresh device" from
+// "rebooted after a crash, breadcrumbs intact".
+static void rtc_diag_init() {
+  if (g_rtc_diag_magic == RTC_DIAG_MAGIC) {
+    return;   // carried across a reset — this is the case that was broken
+  }
+  g_rtc_diag_magic = RTC_DIAG_MAGIC;
+  g_rtc_clean_shutdown = 0;
+  g_rtc_last_stage[0] = '\0';
+  g_rtc_last_stage_code = 0;
+  g_rtc_last_stage_uptime_ms = 0;
+  g_rtc_crash_count = 0;
+  g_rtc_last_crash_reason = 0;
+  g_rtc_last_crash_wake_cause = 0;
+  g_rtc_last_crash_stage[0] = '\0';
+  g_rtc_last_crash_stage_code = 0;
+  g_rtc_last_crash_stage_uptime_ms = 0;
+}
 static const unsigned long WAKE_PIN_MITIGATION_MS = 20;
 static const uint32_t WAKE_PIN_FAILSAFE_TIMER_S = 15;
 static const uint32_t SENSE_MAX_SLEEP_TIMER_S = 0;  // Disabled — GPIO39 is now clean
@@ -199,7 +235,6 @@ static const unsigned long LINK_HB_INTERVAL_MS = 4000;
 static unsigned long last_link_hb_ms = 0;
 
 // ── Dish result timing ───────────────────────────────────────────────
-static const uint32_t DISH_RESULT_TIMEOUT_MS = 60000;  // Wait up to 60s for HTTP final result
 
 // ── Wi-Fi ───────────────────────────────────────────────────────────
 const char* WIFI_SSID = "Garage Member";
@@ -256,8 +291,156 @@ static const uint32_t CAMERA_PREFLIGHT_BUDGET_MS = 1000;
 static const uint32_t CAMERA_INIT_SETTLE_DELAY_MS = 50;
 static const uint8_t CAMERA_INIT_WARMUP_FRAMES = 3;
 static const uint32_t CAMERA_INIT_WARMUP_DELAY_MS = 30;
+// How long init_camera() waits for an in-flight HTTP request to finish before
+// it touches WiFi. Tearing the interface down under a live socket frees lwIP's
+// pbufs while the upload task is blocked in recv(), which panics the board
+// (InstrFetchProhibited in esp_pbuf_free). 1.5s covers a normal request tail
+// without making the user wait; past that we skip the teardown rather than
+// crash. See init_camera() in sense_camera.h.
+// Reverted to 1500 after measurement (2026-08-21). Raising it to 5000 was based
+// on "a parked upload is holding the camera's DMA block" — which is FALSE:
+// across a 12-capture soak the drain succeeded 5/5 ("HTTP drained — safe to free
+// DMA"), WiFi was torn down, and dma_largest was STILL 15860 against a 16384
+// need. The upload is not the holder, so a longer window buys nothing.
+static const uint32_t CAMERA_HTTP_DRAIN_MAX_MS = 1500;
 static const size_t CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES = 24 * 1024;
-static const size_t CAMERA_DMA_RESERVE_BYTES = 16384;  // Camera's largest single DMA allocation
+static const size_t CAMERA_DMA_RESERVE_BYTES = 16384;
+// How long to wait for contiguous DMA to come back before retrying camera init.
+// The immediate retry was measured to be useless: dma_largest was IDENTICAL
+// (15860) before and after the WiFi teardown, and 15860 < 16384 is precisely why
+// init failed. The memory DOES return (steady state 17396) once the parked
+// background upload finishes — it just is not back yet at retry time.
+// 500ms, not 3000: a 3s wait was measured 0-for-3 (largest stayed 15348/15860
+// against a 16384 need for the full 3 seconds). The block is held by a background
+// upload that runs for ~30s, so waiting is not going to win — but a short check
+// costs little and the log line it emits is the diagnostic that matters.
+static const uint32_t CAMERA_DMA_RECOVER_MAX_MS = 500;
+
+// Defer the post-capture camera deinit to the START of the next capture.
+//
+// MEASURED EFFECT: camera init failures 20-27 per soak -> 0. Same harness, same
+// modes, 10 captures across 2 boots (i.e. genuinely multiple captures per boot,
+// which is the case that used to fail ~60% of the time).
+//
+// WHY IT WORKS — and it is NOT the reason this flag was first written. The op
+// worker already deinits at the start of a capture
+// ("SCAN: Camera already initialized - deinitializing first"), so skipping the
+// post-capture deinit does not keep the camera alive; it MOVES the teardown to
+// immediately before the next init. That is the whole fix: the camera's 16KB DMA
+// block is now freed and re-claimed back to back, with nothing in between. It used
+// to be freed after capture N, then the upload's TLS handshake fragmented the
+// region, and capture N+1 had to find a fresh contiguous 16KB in a heap that no
+// longer had one (~40KB free, largest 15,860).
+//
+// The reuse path in init_camera() therefore never fires today. It is kept because
+// it is correct if that pre-deinit is ever removed — but do not assume it runs.
+//
+// Root cause it addresses (measured 2026-08-21): the camera needs ONE contiguous
+// 16,384-byte internal DMA block, and the first TLS handshake of a boot leaves
+// the region permanently fragmented (~40KB free, largest 15,860). So the FIRST
+// capture of a boot always worked (6/6) and later ones in the same session failed
+// ~60% — because each capture tore the camera down and the next had to re-acquire
+// that block out of a heap TLS had already carved up.
+//
+// Deinit-per-capture is not required for correctness: sense_sleep.h already
+// deinits on the way to sleep ("sleep path camera still initialized - deinit
+// first"), so the camera never survives into deep sleep either way. Holding it
+// initialised for the ~10-40s awake window costs some current; failing every
+// second capture costs the user their photo.
+// OFF (2026-08-21). It fixed the camera and broke the device.
+//
+// With it on: camera init failures 20-27 -> 0 across two soaks. But the camera's
+// 16KB DMA block is then still held during the upload, and the Sense ran out of
+// heap — 3 aborts in 12 captures, decoded as:
+//     console_write -> uart_write -> _lock_acquire_recursive
+//                   -> lock_init_generic -> abort()
+// i.e. it could not allocate a MUTEX for a printf. A failed capture reports an
+// honest error and the user retries; an abort reboots the device mid-operation
+// and loses whatever was in flight. The trade is strictly bad.
+//
+// This is the third cheap fix to fail, and they all fail the same way: the camera
+// needs ~16KB contiguous internal DMA, a TLS handshake needs ~25-30KB, and there
+// is roughly 40KB. They cannot overlap. No amount of re-ordering the teardown
+// makes two things fit in the space for one — the only real fix is to stop them
+// overlapping in TIME, which is exactly the spool-first design in lcd_sdspool.h.
+#ifndef HALO_CAMERA_KEEP_INIT
+#define HALO_CAMERA_KEEP_INIT 0
+#endif  // Camera's largest single DMA allocation
+
+// ── DMA reserve: release/re-acquire, instrumented ──────────────────────────
+//
+// The reserve exists to hold the ONE contiguous 16KB DMA block that
+// esp_camera_init() needs, so WiFi/TLS cannot fragment it away between
+// captures. Margin is thin: the largest free DMA block measures ~17,396 bytes
+// against a 16,384-byte requirement, i.e. about 1KB. Lose the reserve and the
+// next camera init is a coin flip.
+//
+// Five sites released it and four re-acquired it, each open-coded. THREE
+// released with no log at all, and ALL FOUR discarded the re-acquire result --
+// so a failed re-acquire left the region unprotected with zero evidence, and
+// the next init failed with a bare 0xffffffff. On 2026-08-20 that presented as
+// a ~1-in-12 capture failure whose log showed no "DMA reservation released"
+// line before the failing init -- because the pointer was already null and the
+// guarded release had silently done nothing.
+//
+// These helpers replace the open-coded blocks so every transition is logged and
+// a failed re-acquire is loud. The retry matters as much as the log: TLS
+// teardown frees internal SRAM slightly after the socket closes, so an
+// immediate retry often succeeds where the first attempt did not.
+static void camera_dma_reserve_release(const char* who) {
+  if (!g_camera_dma_reserve) return;
+  heap_caps_free(g_camera_dma_reserve);
+  g_camera_dma_reserve = nullptr;
+  Serial.printf("[DMA_RESERVE] released by=%s bytes=%u largest_now=%u\n",
+                who ? who : "?", (unsigned)CAMERA_DMA_RESERVE_BYTES,
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+}
+
+static bool camera_dma_reserve_acquire(const char* who) {
+  if (g_camera_dma_reserve) return true;
+  for (int attempt = 1; attempt <= 3; ++attempt) {
+    g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+        CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (g_camera_dma_reserve) {
+      if (attempt > 1) {
+        Serial.printf("[DMA_RESERVE] acquired by=%s at=%p attempt=%d\n",
+                      who ? who : "?", g_camera_dma_reserve, attempt);
+      }
+      return true;
+    }
+    if (attempt < 3) delay(20);
+  }
+  // Loud on purpose. This is the state that makes the NEXT camera init fail,
+  // and it used to be completely invisible.
+  Serial.printf("[DMA_RESERVE][WARN] re-acquire FAILED by=%s largest=%u need=%u "
+                "- next camera init is at risk\n",
+                who ? who : "?",
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+                (unsigned)CAMERA_DMA_RESERVE_BYTES);
+  return false;
+}
+
+// Tear WiFi down before every camera init "just in case" DMA is short.
+// OFF by default: the check that drove it reads free DMA while the 16KB reserve
+// is still held, so it fired on every capture and starved uploads of a usable
+// connection. init_camera() already retries with quiesce_network_for_camera()
+// when a DMA shortage is real. See sense_camera.h for the measurement.
+#ifndef CAMERA_PREEMPTIVE_WIFI_KILL
+#define CAMERA_PREEMPTIVE_WIFI_KILL 0
+#endif
+
+// Defined HERE, not next to the deferral logic further down, because
+// sense_can_sleep_now() tests it and sits ~400 lines above that code. Left where
+// it was, `#if HALO_DEFER_UPLOADS_TO_SLEEP` in the sleep guard would expand to 0
+// with no warning and silently restore the bug it is there to prevent.
+#ifndef HALO_DEFER_UPLOADS_TO_SLEEP
+#define HALO_DEFER_UPLOADS_TO_SLEEP 1
+#endif
+
+// Declared HERE rather than beside the deferral logic further down, because
+// sense_op_queue.h is included ~800 lines before that and needs to test it: once
+// the sleep flush is running there is no foreground left to yield to.
+static volatile bool g_upload_flush_requested = false;
 static const uint32_t CAMERA_NETWORK_QUIESCE_DELAY_MS = 50;
 static const uint32_t CAMERA_CAPTURE_SETTLE_MS = 30;
 static const uint32_t CAMERA_WARMUP_DELAY_FAST_MS = 30;
@@ -274,46 +457,11 @@ static const uint32_t CAMERA_CAPTURE_BUDGET_FAST_MS = 4000;
 static const uint32_t CAMERA_CAPTURE_BUDGET_SLOW_MS = 8000;
 enum CameraProfile { CAM_PROFILE_NORMAL = 0, CAM_PROFILE_LOW_LIGHT = 1, CAM_PROFILE_FLASH = 2, CAM_PROFILE_LABEL = 3 };
 
-#ifndef HALO_SENSE_PROD_WRAPPER
-// ── MQTT Configuration (PubSubClient — dev builds only) ────────────────────
+// awsEndpoint is retained for DNS pre-resolution in sense_http.h only.
+// The MQTT client, its result-topic subscription and the dish/nutrition
+// result path were deleted 2026-08-21 -- the nutrition feature is gone and
+// dish is now a plain capture-and-log like check-in and discard.
 const char* awsEndpoint = "arq86ma48kw9j-ats.iot.us-east-1.amazonaws.com";
-const char* RESULT_TOPIC_TEMPLATE = "trepo/%s/%s/jobs/%s/result";
-static unsigned long mqtt_wait_deadline = 0;
-static bool mqtt_subscribed = false;
-static String current_scan_job_id = "";
-static String current_result_topic = "";
-static String subscribed_result_topic = "";
-static volatile bool waiting_for_mqtt_result = false;
-static uint32_t active_dish_job_id = 0;
-static uint32_t current_result_local_job_id = 0;
-static char current_result_mode[16] = "";
-#else
-// Production stubs — PubSubClient MQTT removed to save ~30KB internal SRAM.
-// These variables are referenced by upload cleanup paths but always no-op.
-// awsEndpoint still needed for DNS pre-resolution in sense_http.h.
-const char* awsEndpoint = "arq86ma48kw9j-ats.iot.us-east-1.amazonaws.com";
-static unsigned long mqtt_wait_deadline = 0;
-static volatile bool waiting_for_mqtt_result = false;
-static uint32_t active_dish_job_id = 0;
-static uint32_t current_result_local_job_id = 0;
-static char current_result_mode[16] = "";
-static String current_scan_job_id = "";
-static inline void mqtt_clear_result_subscription() {}
-static inline void mqtt_subscribe_result_topic_if_needed() {}
-#endif
-struct DishTimingTrace {
-  uint32_t sense_job_id;
-  uint32_t ui_wait_start_ms;
-  uint32_t upload_start_ms;
-  uint32_t presign_start_ms;
-  uint32_t presign_end_ms;
-  uint32_t put_start_ms;
-  uint32_t put_end_ms;
-  uint32_t mqtt_refresh_start_ms;
-  uint32_t mqtt_refresh_end_ms;
-  uint32_t result_wait_start_ms;
-};
-static DishTimingTrace g_dish_timing = {};
 
 // ── Owner/Provisioning Helpers ─────────────────────────────────────
 static void load_owner_id_or_default(char* out, size_t out_len) {
@@ -363,7 +511,7 @@ static String build_runtime_ota_topic() {
 }
 
 #ifndef HALO_SENSE_PROD_WRAPPER
-// AWS IoT Certificates (PubSubClient — dev builds only)
+// Amazon Root CA 1 -- public, used for HTTPS peer validation
 const char* rootCA = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
@@ -387,61 +535,19 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 -----END CERTIFICATE-----
 )EOF";
 
-const char* deviceCert = R"KEY(
------BEGIN CERTIFICATE-----
-MIIDWjCCAkKgAwIBAgIVAKUaKokE9Z0B7oRmoWGE1ZKzA76EMA0GCSqGSIb3DQEB
-CwUAME0xSzBJBgNVBAsMQkFtYXpvbiBXZWIgU2VydmljZXMgTz1BbWF6b24uY29t
-IEluYy4gTD1TZWF0dGxlIFNUPVdhc2hpbmd0b24gQz1VUzAeFw0yNDA3MDYwNTM2
-NTFaFw00OTEyMzEyMzU5NTlaMB4xHDAaBgNVBAMME0FXUyBJb1QgQ2VydGlmaWNh
-dGUwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC5ahrAj9IBu88TZ3tE
-pm1gKP2ffZuoWUWEVGfMcZTKl6D9tOQHT0mg4D/LjafVSxBCYj9rIwdWVs+rW8sn
-jNJN0zwaUdfl5lbmVdl4v+ipLBgLrHM7jQ91zu8tlzNl8bT3eN1a6NflbHbT3iz6
-9Romai8wUbGpYALSWCSpAx4+gHJBuUCl8gYZy9c/DgqmS37lIH8gpv8KQR8/UYSw
-LTGe6VXpiwhadNysA/MSwFf1IBxgYbQIIkFvgl9Hj2hO6/eekJegKULukE/h+vMq
-421nNJDvIbh3TU1o0lz3JWkZkxmFKcVH4AvkG3ryVU2gj8+twxXLcaMuJ/sM6rPS
-5aDJAgMBAAGjYDBeMB8GA1UdIwQYMBaAFJyChrq7fy4KVIEdjHeSVhooY6w+MB0G
-A1UdDgQWBBSA/FyJTuOFzM2z1TTFyKll7p4UTjAMBgNVHRMBAf8EAjAAMA4GA1Ud
-DwEB/wQEAwIHgDANBgkqhkiG9w0BAQsFAAOCAQEALNpaEzo0VekKuS1iMxpQsWfw
-OR97M6vqLaWY7C/WFSVPwSCFk/hA/XTZSe7LfXFpl/BndQiR2A1fOPAZ/NbFhlkD
-WYYQexeRGemiI9+SJoqXVB6sVUj9BoJq4fvcLIRy3ewLPYsYiQRKzveOBDhxrppS
-Mz+YeEBIcJGSmzTUhopK+wlk2Fkg+j3sKiOKfINTbZMnoAGvU3I9QWV/PzCsBOIf
-dHEvyUnVZ0ebdAFR8RxNCUyaVHLMh1d5t6OrCtbdl9WdDrmPrwirfClkrOsyZKN7
-YwOY3IVRy4cx4mOFweWeZ/KZvu2azYIrfCFcsEJVPUl2+Tn+bbM4J40ADnLB9w==
------END CERTIFICATE-----
-)KEY";
+// No device credentials live in this file, and none should ever be added.
+//
+// An AWS IoT client certificate and its RSA private key were once inlined here
+// and reached a PUBLIC repo (branch lcd-backlight-binary, 2026-04-14). The cert
+// has since been revoked and deleted. MQTT itself is gone as of 2026-08-21, so
+// there is no longer any consumer for device credentials at all -- if one is
+// ever reintroduced it must load them from MqttSecrets.local.cpp, which is
+// git-ignored (.gitignore: **/MqttSecrets.local.*). tools/check_secrets.sh
+// enforces this.
+//
+// rootCA above is retained on purpose -- it is the public Amazon Root CA 1 and
+// sense_http.h uses it to validate HTTPS peers. It is not a secret.
 
-const char* privateKey = R"KEY(
------BEGIN RSA PRIVATE KEY-----
-MIIEowIBAAKCAQEAuWoawI/SAbvPE2d7RKZtYCj9n32bqFlFhFRnzHGUypeg/bTk
-B09JoOA/y42n1UsQQmI/ayMHVlbPq1vLJ4zSTdM8GlHX5eZW5lXZeL/oqSwYC6xz
-O40Pdc7vLZczZfG093jdWujX5Wx2094s+vUaJmovMFGxqWAC0lgkqQMePoByQblA
-pfIGGcvXPw4Kpkt+5SB/IKb/CkEfP1GEsC0xnulV6YsIWnTcrAPzEsBX9SAcYGG0
-CCJBb4JfR49oTuv3npCXoClC7pBP4frzKuNtZzSQ7yG4d01NaNJc9yVpGZMZhSnF
-R+AL5Bt68lVNoI/PrcMVy3GjLif7DOqz0uWgyQIDAQABAoIBAAIVDvfapaEfWtP8
-9YVv2Qqbaz2/S2A4oG88A25oWCNuUICI54atfUYxPoYqsRfUH/qe39d0LUDq+KoT
-/dQT4Mi+9o3VHXeXfqJXlHmmrhY4SIzZAvJIQ0QvbsA0Un9yl3WwBcxfkQ0iirMW
-a6rl1cVYq+7++9/LFD0IgGDliBFrmu/s0job5XNyYV7mkFzM7LvSeCQ9xtMiwa0B
-MFURj6RbU1jS5fP51/nFnJ+3Zm9GUkf/tqT6YJbBepsIUXydNBOwhUZWFbz0IWb0
-7iIWZ6FGRNt6yS1YExwsxzsc2tJSi0foRLeXgzGjhNB9WaYUy/v1P2BFqdaL6D3y
-t1bQe4ECgYEA9ExpPeP3Ush1j3S3AoXh9QsFrLZjT+BCU3uNsEma+FRwo1pPO0w5
-vlOYslKsd4PGhumnUOMCVQyrH9XH4YJqJqxW8zcOO4dIR/gDAAq6Y63xtB6mYfKE
-dtCiOjf1iKhbPo3JuumkZc8R6A9hcmjZVJHf+g/+oVZFPpvBmCE9aQMCgYEAwkuo
-TkKhz19PCiCfoshP9h0qI48pkwVFeF6YO/abtzuGtq5z4OzpDGRjdoyXTWzpvQEq
-Kdxr5m1Ag3DDLAouGPvBp5c9ySEQ81yis3egF7+OpI3Swv7IrijsKyHwmGFwV1S/
-0sO35a6HVEZfol81wzG4NaNvfZirgVynROaWt0MCgYA+ObxQxGE518+B89Ots9Zj
-KSSP4oEXVmLuirkDXyw29qMeKKGn0/mdTgPF4CMH6ivGL3ursbblXO21lSltel95
-bEpVdv+MECBMHJL/Drx9KVA4ddohdrlg3jGELL7AyUk8fLcWge6a9Ax2lHxYvPYm
-gWWQd0R/ac8HbHr6OfU/awKBgDBKn7V76D3joYCR5TuPcBhq3UtjTOEG4WJumIXm
-4IMlX3FOYOzZ1X7IANS5Uu3ikSHyBSnMaGEobG1+/HOYwCZjhJmEBM5V0qG6N5JF
-vFvKt8h8m5LtwrFO6Iw77lHhfgumu9rF3JJQ08AFkcWIxpMSa4ehbJeZ9566ibSd
-X36DAoGBAMvVUYoO9UDxTlpUv8Bps5YbdOM8zG5r7QwfaPLzvmAuL1fyewDnfGzS
-woQmfUu2XsmY27PLqWRngqzv8kOuwIgUMaevxbMjG0yvb5GQIuqVuq9T4yesKTfV
-XoIKKh5tJj0rxpbpDZXgiTSQ0isFwzPrkTPGuRdSyx7n/0q98u/d
------END RSA PRIVATE KEY-----
-)KEY";
-
-WiFiClientSecure wifiClient;
-PubSubClient mqttClient(wifiClient);
 #endif
 
 #include "sense_ops.h"
@@ -516,18 +622,15 @@ static bool put_to_presigned_url(const String& url,
                                  size_t len,
                                  const char* contentType,
                                  uint32_t job_id = 0,
-                                 bool allow_abort = false,
-                                 bool* aborted_for_dish = NULL,
                                  uint32_t deadline_ms = 0,
                                  bool* aborted_for_budget = NULL);
-static void uart_send_ui_meal_result(int kcal, const char* meal_summary, int health_score, const char* recommendation, const char* mode = NULL, float protein_g = 0.0, float carbs_g = 0.0, float fat_g = 0.0, float confidence = 0.0, uint32_t job_id = 0);
 // Forward declarations — sense_sleep.h (late include)
 static void sleep_send_deny_and_clear(const char* reason, unsigned long now_ms);
 static bool wake_pin_is_active_level(int level);
 static void wake_pin_configure_rtc_input_inactive_pull();
 static uint32_t sleep_deny_retry_ms(const char* reason, unsigned long now_ms);
 
-enum UiEvtType { UI_EVT_STATUS, UI_EVT_LIST_UPDATE, UI_EVT_MEAL_RESULT, UI_EVT_VOICE_ITEMS, UI_EVT_ERROR };
+enum UiEvtType { UI_EVT_STATUS, UI_EVT_LIST_UPDATE, UI_EVT_VOICE_ITEMS, UI_EVT_ERROR };
 
 struct UiEvent {
   UiEvtType type;
@@ -545,11 +648,20 @@ struct UiEvent {
 static QueueHandle_t op_queue = NULL;
 static QueueHandle_t ui_event_queue = NULL;
 static volatile bool foreground_active = false;
+#if HALO_SPOOL_TEST
+static uint8_t g_test_fail_uploads = 0;   // bench: force N upload failures
+#endif
 static OpJob current_job = {OP_LIST_REFRESH, PRI_BG, 0, 0, OP_IDLE, false, "", ""};
+// ONE upload queue for every mode.
+//
+// Dish used to have its own queue, dequeued first and unconditionally -- ahead
+// of the deferral gate. That was priority scaffolding for the nutrition result
+// a user waited on, and it outlived the feature: measured 2026-08-21, a dish
+// capture still ran a full presign+PUT mid-session and so still fragmented the
+// internal DMA region that esp_camera_init() needs (SHIP_CHECKLIST §6). Dish is
+// a plain capture-and-log now, so it queues and defers exactly like the rest.
 static QueueHandle_t upload_queue = NULL;
-static QueueHandle_t upload_queue_dish = NULL;
 static const uint8_t UPLOAD_QUEUE_MAX = 10;
-static const uint8_t UPLOAD_QUEUE_DISH_MAX = 10;
 static const uint8_t OP_QUEUE_MAX = 20;
 static TaskHandle_t upload_worker_task_handle = NULL;
 static bool scan_ui_inflight = false;
@@ -645,9 +757,23 @@ static int g_selected_index = -1;
 static SemaphoreHandle_t g_list_mutex = NULL;
 
 #include "sense_time.h"
+#include "sense_captrace.h"
+// True while the Sense is STREAMING an image out to the LCD. Suppresses this
+// board's own JSON TX so a periodic SENSE_DIAG cannot land inside the COBS
+// frames it is transmitting.
+static bool g_img_spool_tx_active = false;
+#include "sense_img_spool.h"  // spool captures to the LCD SD card (Step 4)
 #include "sense_diag.h"
 #include "sense_errlog.h"
+// True while the SD-spool drain is streaming an image back from the LCD over
+// COBS. Declared here rather than in sense_spool_drain.h because
+// pump_uart_rx_once() (sense_uart.h, included next) must stand down while it is
+// set, and that header comes long before the drain's.
+static bool g_spool_owns_uart = false;
+
 #include "sense_uart.h"
+// After sense_uart.h: the relay uses uart_send_sense_diag().
+#include "sense_wakelog.h"   // per-wake-cycle history that survives deep sleep
 
 // Record error locally AND forward to LCD for NVS persistence.
 // Defined here (not in sense_diag.h) because it depends on both
@@ -702,9 +828,6 @@ static void diag_record_error_persistent(const char* stage, int32_t code, const 
 #include "sense_http.h"
 #include "sense_wifi.h"
 #include "sense_upload.h"
-#ifndef HALO_SENSE_PROD_WRAPPER
-#include "sense_mqtt.h"
-#endif
 #include "sense_voice.h"
 #include "sense_list.h"
 #include "sense_camera.h"
@@ -1065,6 +1188,21 @@ static bool sense_can_sleep_now(const char** reason) {
   if (guardian_force_sleep) {
     return true;
   }
+  // An SD-spool transfer is in flight — do not sleep through it.
+  //
+  // A 184KB drain takes ~24s at 115200, but a maintenance wake is only ~10-14s,
+  // so the device slept mid-transfer EVERY time: four attempts each died at
+  // exactly seq=155 / 79,360 bytes after ~14s. That looks data-dependent until
+  // you check the rate (5,673 B/s x 14s = 79KB) and realise it is failing at a
+  // TIME, not at a byte.
+  //
+  // Bounded by the drain's own deadlines (SPOOL_DRAIN_FRAME_TIMEOUT_MS per frame,
+  // 60s for the whole transfer), and it yields immediately to any user action via
+  // sense_spool_drain_yield_to_user(), so this can delay sleep but never hold it.
+  if (g_spool_owns_uart || g_img_spool_tx_active) {
+    if (reason) *reason = "spool_transfer";
+    return false;
+  }
 #ifdef HALO_SENSE_PROD_WRAPPER
   if (g_lcd_ota_request_active) {
     if (reason) *reason = "lcd_ota_pending";
@@ -1093,15 +1231,21 @@ static bool sense_can_sleep_now(const char** reason) {
     if (background_sleep_bypass_active) {
       return true;
     }
+#if HALO_DEFER_UPLOADS_TO_SLEEP
+    // Deliberately NOT a sleep blocker under deferral.
+    //
+    // Queued uploads are the expected steady state here -- they are held on
+    // purpose until sleep, and the PRE-SLEEP FLUSH is the only thing that drains
+    // them. Blocking sleep on a non-empty queue therefore blocks the drain, and
+    // background_force_defer() then fired after 10s and DESTROYED the capture
+    // (`sleep_drop ... queue_not_persisted`). Measured 2026-08-21: one photo lost
+    // this way, and only ever with EXACTLY ONE job queued, because the
+    // force-defer path skips itself when count != 1 -- which is why the 4-deep
+    // sessions all passed and hid it. Sleeping IS the drain.
+#else
     if (reason) *reason = "upload_queue";
     return false;
-  }
-  if (waiting_for_mqtt_result) {
-    if (background_sleep_bypass_active) {
-      return true;
-    }
-    if (reason) *reason = "result_pending";
-    return false;
+#endif
   }
   // Keep the device awake while the user is on the LCD shopping-list screen so
   // list refresh/delete hit a live WiFi connection instantly (no cold reconnect).
@@ -1133,12 +1277,11 @@ static bool sense_can_sleep_now(const char** reason) {
 }
 
 static void log_sleep_flags(const char* where) {
-  Serial.printf("[SLEEP_FLAGS] where=%s http=%d upload=%d q=%lu result=%d\n",
+  Serial.printf("[SLEEP_FLAGS] where=%s http=%d upload=%d q=%lu\n",
                 where ? where : "",
                 http_inflight ? 1 : 0,
                 upload_inflight ? 1 : 0,
-                (unsigned long)upload_queue_count(),
-                waiting_for_mqtt_result ? 1 : 0);
+                (unsigned long)upload_queue_count());
 }
 
 static bool sleep_block_should_log(const char* reason, const char* where, const char* op) {
@@ -1166,13 +1309,12 @@ static bool sleep_allowed_now(const char* where, const char** reason_out) {
   const char* reason = NULL;
   if (!sense_can_sleep_now(&reason)) {
     if (sleep_block_should_log(reason ? reason : "net_inflight", where, "net")) {
-      Serial.printf("[SLEEP_BLOCK] reason=%s where=%s http=%d upload=%d q=%lu result=%d\n",
+      Serial.printf("[SLEEP_BLOCK] reason=%s where=%s http=%d upload=%d q=%lu\n",
                     reason ? reason : "net_inflight",
                     where ? where : "",
                     http_inflight ? 1 : 0,
                     upload_inflight ? 1 : 0,
-                    (unsigned long)upload_queue_count(),
-                    waiting_for_mqtt_result ? 1 : 0);
+                    (unsigned long)upload_queue_count());
     }
     if (reason_out) *reason_out = reason;
     return false;
@@ -1223,23 +1365,14 @@ static bool sleep_background_force_ready(unsigned long now_ms, const char* reaso
       }
       return false;
     }
-    Serial.printf("[SLEEP] background_force_defer reason=%s where=%s elapsed_ms=%lu upload=%d q=%lu result=%d http=%d\n",
+    Serial.printf("[SLEEP] background_force_defer reason=%s where=%s elapsed_ms=%lu upload=%d q=%lu http=%d\n",
                   reason,
                   where ? where : "",
                   elapsed_ms,
                   upload_inflight ? 1 : 0,
                   (unsigned long)upload_queue_count(),
-                  waiting_for_mqtt_result ? 1 : 0,
                   http_inflight ? 1 : 0);
     sleep_defer_queued_background_uploads();
-    if (waiting_for_mqtt_result) {
-      waiting_for_mqtt_result = false;
-      mqtt_wait_deadline = 0;
-      current_scan_job_id = "";
-      mqtt_clear_result_subscription();
-      clear_active_dish_job(current_result_local_job_id, "sleep_force_defer");
-      current_result_local_job_id = 0;
-    }
     background_sleep_bypass_active = true;
   }
   return true;
@@ -1436,7 +1569,20 @@ extern "C" bool halo_uart_link_recent(unsigned long max_age_ms) {
   unsigned long now_ms = millis();
   unsigned long rx_age = (last_uart_rx_ms > 0) ? (now_ms - last_uart_rx_ms) : 0xFFFFFFFFUL;
   unsigned long limit_ms = max_age_ms > 0 ? max_age_ms : LINK_RECENT_MS;
-  return link_synced && last_uart_rx_ms > 0 && rx_age < limit_ms;
+  // Deliberately NOT gated on link_synced.
+  //
+  // link_synced only becomes true when the LCD sends SYNC, and after a TIMER
+  // wake the LCD does not know the Sense woke at all -- so it never sends one.
+  // That made this predicate permanently false on the nightly maintenance path,
+  // which is precisely where it is load-bearing: the PRE_SLEEP LCD firmware
+  // query is gated on it, so the Sense could never learn the LCD's version and
+  // therefore could never decide the LCD needed an update.
+  //
+  // Recent RX is strictly stronger evidence than the SYNC flag anyway -- the
+  // flag can be minutes stale while rx_age answers the actual question, "have
+  // we heard from the LCD lately". The sibling sense_link_recent() (sense_sleep.h)
+  // already treats recent RX alone as sufficient; this now matches it.
+  return last_uart_rx_ms > 0 && rx_age < limit_ms;
 }
 
 static bool sense_idle_mode_active() {
@@ -1449,9 +1595,6 @@ static bool sense_idle_mode_active() {
   if (current_job.state != OP_IDLE && current_job.state != OP_DONE) {
     return false;
   }
-  if (waiting_for_mqtt_result) {
-    return false;
-  }
   if (sleep_requested) {
     return false;
   }
@@ -1461,6 +1604,10 @@ static bool sense_idle_mode_active() {
 
 static void service_boot_wifi_connect(unsigned long now_ms) {
   service_wifi_maintenance(now_ms);
+  // Retire SNTP as soon as the clock is good. Must run on THIS task: stopping
+  // SNTP is itself a raw-lwIP call, and the whole point is to keep those off
+  // upload_worker_task. See sense_ntp_stop_if_time_valid() for the panic.
+  sense_ntp_stop_if_time_valid("wifi_service");
 }
 
 // (voice functions removed — see sense_voice.h)
@@ -1479,9 +1626,6 @@ static void service_boot_wifi_connect(unsigned long now_ms) {
 static const char* sense_device_state_name() {
   if (sleep_requested || sleep_coord_requested || sleep_sm_state != SLEEP_SM_IDLE) {
     return "PRE_SLEEP";
-  }
-  if (waiting_for_mqtt_result) {
-    return "BACKGROUND_RESULT_WAIT";
   }
   if (upload_inflight || upload_queue_count() > 0) {
     return "BACKGROUND_UPLOAD";
@@ -1502,18 +1646,65 @@ static const char* sense_device_state_name() {
 // (sleep_defer_queued_background_uploads, allocate_upload_buffer,
 //  queue_upload_job, queue_voice_upload_job removed — see sense_upload_queue.h)
 #include "sense_upload_queue.h"
+// Must follow sense_upload_queue.h: the drain hands fetched images to
+// queue_upload_job(). Pulls spooled captures back off the LCD's SD card so they
+// actually reach the backend instead of sitting there durably and uselessly.
+#include "sense_spool_drain.h"
+
+// ── Defer normal uploads until the device is going to sleep ──────────────
+//
+// WHY: esp_camera_init() needs ONE contiguous 16,384-byte internal DMA block; a
+// TLS handshake needs ~25-30KB of the same memory; there is ~40KB. The first
+// handshake of a boot fragments the region permanently (largest run drops to
+// 15,860 — 524 bytes short), so every capture after the first in a session fails
+// ~60%. Four narrower fixes were tried; two made it worse (SHIP_CHECKLIST §6).
+// The only thing that works is to stop capture and TLS overlapping IN TIME.
+//
+// Capture already returns before any upload — the image sits in PSRAM and the UI
+// says "Logged!" immediately — so nothing user-facing waits on this.
+//
+// NO MODE IS EXEMPT. Dish used to be, because a dish upload was followed by the
+// AI nutrition result the user sat watching. That feature is gone, and the
+// exemption outlived it: measured 2026-08-21, dish still bypassed this gate via
+// its own priority queue and still ran presign+PUT mid-session, which is exactly
+// the TLS-during-capture this flag exists to prevent. One queue, one gate, all
+// modes.
+// (HALO_DEFER_UPLOADS_TO_SLEEP is defined near the top of this file, above
+// sense_can_sleep_now() -- that guard needs it and is ~400 lines earlier.)
+
+// (g_upload_flush_requested is declared near the top of this file -- see there.)
+static unsigned long g_upload_hold_since_ms = 0;
+
+// Never hold so long, or so many, that we risk losing the user's captures:
+// PSRAM does not survive power loss, so these bound the exposure.
+static const unsigned long UPLOAD_HOLD_MAX_MS = 10UL * 60UL * 1000UL;  // 10 min
+static const uint32_t UPLOAD_HOLD_HIGHWATER = 8;                       // of UPLOAD_QUEUE_MAX=10
+
+static bool uploads_held_for_session(const char** why_out) {
+#if !HALO_DEFER_UPLOADS_TO_SLEEP
+  if (why_out) *why_out = "disabled";
+  return false;
+#else
+  if (g_upload_flush_requested) { if (why_out) *why_out = "flush_requested"; return false; }
+  const uint32_t n = upload_queue_count();
+  if (n == 0) { g_upload_hold_since_ms = 0; if (why_out) *why_out = "empty"; return false; }
+  if (n >= UPLOAD_HOLD_HIGHWATER) { if (why_out) *why_out = "highwater"; return false; }
+  if (g_upload_hold_since_ms == 0) g_upload_hold_since_ms = millis();
+  if ((millis() - g_upload_hold_since_ms) > UPLOAD_HOLD_MAX_MS) {
+    if (why_out) *why_out = "max_age";
+    return false;
+  }
+  if (why_out) *why_out = "session_active";
+  return true;
+#endif
+}
 
 static void upload_worker_task(void *arg) {
   Serial.println("[UPLOAD] Background upload task started");
   for (;;) {
     UploadJob job = {};
     bool got_job = false;
-    bool hold_normal = dish_upload_pending();
-    if (upload_queue_dish != NULL &&
-        xQueueReceive(upload_queue_dish, &job, pdMS_TO_TICKS(20)) == pdTRUE) {
-      got_job = true;
-    } else if (upload_worker_has_parked_job &&
-               (scan_mode_is_dish(upload_worker_parked_job.mode) || !hold_normal)) {
+    if (upload_worker_has_parked_job && !uploads_held_for_session(NULL)) {
       job = upload_worker_parked_job;
       upload_worker_has_parked_job = false;
       Serial.printf("[UPLOAD_QUEUE] resume_parked job_id=%lu mode=%s voice=%d stage=%s parked_ms=%lu q=%lu\n",
@@ -1526,26 +1717,37 @@ static void upload_worker_task(void *arg) {
       upload_worker_parked_stage = "idle";
       upload_worker_parked_at_ms = 0;
       got_job = true;
-    } else if (!hold_normal && upload_queue != NULL &&
-               xQueueReceive(upload_queue, &job, pdMS_TO_TICKS(200)) == pdTRUE) {
+    } else if (!uploads_held_for_session(NULL) && upload_queue != NULL &&
+               // NON-BLOCKING on purpose. This used to wait 200ms, which raced the
+               // hold gate above it: the gate is evaluated while the queue is still
+               // empty (so it opens), and then the blocking receive picks up the job
+               // that arrives during the wait. That let the FIRST upload of every
+               // session through — the one whose TLS handshake fragments the DMA
+               // region and breaks every later capture. With a 0 timeout the gate and
+               // the receive see the same queue state.
+               xQueueReceive(upload_queue, &job, 0) == pdTRUE) {
       got_job = true;
-    } else if (hold_normal) {
-      static unsigned long last_hold_log_ms = 0;
-      unsigned long now_ms = millis();
-      if (now_ms - last_hold_log_ms > 2000) {
-        Serial.println("[UPLOAD_QUEUE] hold normal uploads (dish_scan_inflight)");
-        last_hold_log_ms = now_ms;
+    } else if (uploads_held_for_session(NULL)) {
+      static unsigned long last_defer_log_ms = 0;
+      const unsigned long now_ms = millis();
+      if (now_ms - last_defer_log_ms > 5000) {
+        const char* why = "session_active";
+        (void)uploads_held_for_session(&why);
+        Serial.printf("[UPLOAD_DEFER] holding %lu upload(s) until sleep (%s, held_ms=%lu)\n",
+                      (unsigned long)upload_queue_count(), why,
+                      g_upload_hold_since_ms ? (unsigned long)(now_ms - g_upload_hold_since_ms) : 0UL);
+        last_defer_log_ms = now_ms;
       }
-      vTaskDelay(pdMS_TO_TICKS(20));
+      vTaskDelay(pdMS_TO_TICKS(100));
+    } else if (!got_job) {
+      // The normal-queue receive no longer blocks, so pace the loop here.
+      vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (got_job) {
       if (!job.image_buf || job.image_len == 0) {
         Serial.println(job.is_voice ? "[VOICE_QUEUE] job missing audio buffer"
                                     : "[UPLOAD] job missing image buffer");
         diag_record_error(job.is_voice ? "voice_upload" : "upload", -1, "missing_buffer");
-        if (scan_mode_is_dish(job.mode)) {
-          clear_active_dish_job(job.job_id, "missing_buffer");
-        }
         continue;
       }
       if (park_upload_job_if_foreground_active(job, "dequeued")) {
@@ -1597,12 +1799,10 @@ static void upload_worker_task(void *arg) {
       const bool is_check = scan_mode_is_check(job.mode);
       const bool is_discard = scan_mode_is_discard(job.mode);
       const bool is_dish = scan_mode_is_dish(job.mode);
-      uint32_t presign_deadline_ms = is_dish ? job_deadline_ms : (millis() + BACKGROUND_UPLOAD_PRESIGN_BUDGET_MS);
-      if (is_dish) {
-        g_dish_timing = {};
-        g_dish_timing.sense_job_id = job.job_id;
-        g_dish_timing.upload_start_ms = job_start_ms;
-      }
+      // Same budget for every mode. Dish used to get the long foreground deadline
+      // because a user was waiting on its nutrition result; that feature is gone.
+      uint32_t presign_deadline_ms = millis() + BACKGROUND_UPLOAD_PRESIGN_BUDGET_MS;
+      (void)is_dish;
       Serial.printf("[UPLOAD] start job_id=%lu mode=%s len=%u q=%lu\n",
                     (unsigned long)job.job_id,
                     job.mode,
@@ -1615,25 +1815,6 @@ static void upload_worker_task(void *arg) {
       Serial.printf("[UPLOAD] mem_free heap=%u psram=%u\n",
                     (unsigned)ESP.getFreeHeap(),
                     (unsigned)psram_free);
-      bool deferred_for_dish = false;
-
-      if (is_dish) {
-        active_dish_job_id = job.job_id;
-      }
-
-      if (!is_dish && dish_upload_pending()) {
-        bool requeued = false;
-        if (upload_queue && xQueueSendToFront(upload_queue, &job, pdMS_TO_TICKS(10)) == pdTRUE) {
-          requeued = true;
-        }
-        if (requeued) {
-          Serial.println("[UPLOAD_QUEUE] preempt normal upload for dish");
-          upload_inflight = false;
-          vTaskDelay(pdMS_TO_TICKS(20));
-          continue;
-        }
-        Serial.println("[UPLOAD_QUEUE] preempt failed, continuing normal upload");
-      }
 
       const uint32_t backoff_ms[] = {500, 1500, 3500};
       const uint8_t max_retries = 3;
@@ -1642,9 +1823,6 @@ static void upload_worker_task(void *arg) {
       for (uint8_t attempt = 0; attempt < max_retries; ++attempt) {
         if (!upload_wait_for_foreground_clear_in_place(job, "presign", presign_deadline_ms, &budget_exhausted)) {
           break;
-        }
-        if (is_dish && attempt == 0 && g_dish_timing.presign_start_ms == 0) {
-          g_dish_timing.presign_start_ms = millis();
         }
         uint32_t remaining_ms = deadline_remaining_ms(presign_deadline_ms);
         if (remaining_ms < ACTION_MIN_REMAINING_MS) {
@@ -1655,20 +1833,6 @@ static void upload_worker_task(void *arg) {
           diag_record_error("upload_presign", -1, "timeout");
           budget_exhausted = true;
           break;
-        }
-        if (!is_dish && dish_upload_pending()) {
-          bool requeued = false;
-          if (upload_queue && xQueueSendToFront(upload_queue, &job, pdMS_TO_TICKS(10)) == pdTRUE) {
-            requeued = true;
-          }
-          if (requeued) {
-            Serial.println("[UPLOAD_QUEUE] preempt before presign for dish");
-            upload_inflight = false;
-            vTaskDelay(pdMS_TO_TICKS(20));
-            deferred_for_dish = true;
-            break;
-          }
-          Serial.println("[UPLOAD_QUEUE] preempt failed, continuing presign");
         }
         uint32_t tls_timeout = clamp_timeout_ms(15000, presign_deadline_ms);
         if (tls_timeout < ACTION_MIN_REMAINING_MS) {
@@ -1695,13 +1859,6 @@ static void upload_worker_task(void *arg) {
         presign_success = is_check ? get_presign_checkin(upload_presign, expiry, job.quantity, &job.camera_meta, presign_deadline_ms)
                                    : get_presign(upload_presign, job.mode, expiry, job.add_to_shopping_list, &job.camera_meta, presign_deadline_ms);
         if (presign_success) {
-          if (is_dish) {
-            g_dish_timing.presign_end_ms = millis();
-            Serial.printf("[TIMING][DISH] job_id=%lu presign_ms=%lu upload_start_to_presign_ms=%lu\n",
-                          (unsigned long)job.job_id,
-                          (unsigned long)(g_dish_timing.presign_end_ms - g_dish_timing.presign_start_ms),
-                          (unsigned long)(g_dish_timing.presign_end_ms - g_dish_timing.upload_start_ms));
-          }
           break;
         }
         Serial.printf("[UPLOAD] presign_failed attempt=%u\n", (unsigned)attempt + 1);
@@ -1714,18 +1871,12 @@ static void upload_worker_task(void *arg) {
         }
         vTaskDelay(pdMS_TO_TICKS(backoff));
       }
-      if (deferred_for_dish) {
-        continue;
-      }
       if (budget_exhausted) {
         if (is_dish) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
         }
         upload_persist_handle_failure(job, "presign_timeout");
         free(job.image_buf);
-        if (is_dish) {
-          clear_active_dish_job(job.job_id, "presign_timeout");
-        }
         upload_inflight = false;
         continue;
       }
@@ -1736,9 +1887,6 @@ static void upload_worker_task(void *arg) {
         diag_record_action_event("upload", job.mode, "err", "presign", -1);
         upload_persist_handle_failure(job, "presign_fail");
         free(job.image_buf);
-        if (is_dish) {
-          clear_active_dish_job(job.job_id, "presign_fail");
-        }
         upload_inflight = false;
         continue;
       }
@@ -1772,20 +1920,6 @@ static void upload_worker_task(void *arg) {
           budget_exhausted = true;
           break;
         }
-        if (!is_dish && dish_upload_pending()) {
-          bool requeued = false;
-          if (upload_queue && xQueueSendToFront(upload_queue, &job, pdMS_TO_TICKS(10)) == pdTRUE) {
-            requeued = true;
-          }
-          if (requeued) {
-            Serial.println("[UPLOAD_QUEUE] preempt before PUT for dish");
-            upload_inflight = false;
-            vTaskDelay(pdMS_TO_TICKS(20));
-            deferred_for_dish = true;
-            break;
-          }
-          Serial.println("[UPLOAD_QUEUE] preempt failed, continuing PUT");
-        }
         uint32_t tls_timeout = clamp_timeout_ms(15000, put_deadline_ms);
         if (tls_timeout < ACTION_MIN_REMAINING_MS) {
           presign_set_error_text("Upload timeout");
@@ -1804,48 +1938,21 @@ static void upload_worker_task(void *arg) {
           vTaskDelay(pdMS_TO_TICKS(backoff));
           continue;
         }
-        bool aborted_for_dish = false;
         bool aborted_for_budget = false;
         diag_note_stage("upload_put", 0);
-        if (is_dish && attempt == 0 && g_dish_timing.put_start_ms == 0) {
-          g_dish_timing.put_start_ms = millis();
-        }
         upload_success = put_to_presigned_url(upload_presign.put_url,
                                               job.image_buf,
                                               job.image_len,
                                               upload_presign.content_type.length() ? upload_presign.content_type.c_str() : "image/jpeg",
                                               job.job_id,
-                                              !is_dish,
-                                              &aborted_for_dish,
                                               put_deadline_ms,
                                               &aborted_for_budget);
-        if (aborted_for_dish) {
-          bool requeued = false;
-          if (upload_queue && xQueueSendToFront(upload_queue, &job, pdMS_TO_TICKS(10)) == pdTRUE) {
-            requeued = true;
-          }
-          if (requeued) {
-            Serial.println("[UPLOAD_QUEUE] preempt mid-PUT for dish");
-            upload_inflight = false;
-            vTaskDelay(pdMS_TO_TICKS(20));
-            deferred_for_dish = true;
-            break;
-          }
-          Serial.println("[UPLOAD_QUEUE] preempt mid-PUT failed, continuing");
-        }
         if (aborted_for_budget) {
           presign_set_error_text("Upload timeout");
           budget_exhausted = true;
           break;
         }
         if (upload_success) {
-          if (is_dish) {
-            g_dish_timing.put_end_ms = millis();
-            Serial.printf("[TIMING][DISH] job_id=%lu put_ms=%lu upload_total_ms=%lu\n",
-                          (unsigned long)job.job_id,
-                          (unsigned long)(g_dish_timing.put_end_ms - g_dish_timing.put_start_ms),
-                          (unsigned long)(g_dish_timing.put_end_ms - g_dish_timing.upload_start_ms));
-          }
           break;
         }
         presign_set_error_text("Network error. Tap to retry.");
@@ -1859,45 +1966,72 @@ static void upload_worker_task(void *arg) {
         }
         vTaskDelay(pdMS_TO_TICKS(backoff));
       }
-      if (deferred_for_dish) {
-        continue;
-      }
       if (budget_exhausted) {
         if (is_dish) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
-          waiting_for_mqtt_result = false;
-          mqtt_wait_deadline = 0;
-          current_scan_job_id = "";
-          mqtt_clear_result_subscription();
         }
         diag_record_action_event("upload", job.mode, "err", "timeout", -1);
         upload_persist_handle_failure(job, "put_timeout");
         free(job.image_buf);
-        if (is_dish) {
-          clear_active_dish_job(job.job_id, "put_timeout");
-        }
         upload_inflight = false;
         continue;
       }
+#if HALO_SPOOL_TEST
+      if (g_test_fail_uploads > 0 && upload_success) {
+        g_test_fail_uploads--;
+        upload_success = false;
+        Serial.println("[FAILUPLOAD] forcing this upload to FAIL (bench)");
+      }
+#endif
       if (!upload_success) {
         if (is_dish) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
-          waiting_for_mqtt_result = false;
-          mqtt_wait_deadline = 0;
-          current_scan_job_id = "";
-          mqtt_clear_result_subscription();
         }
         diag_record_action_event("upload", job.mode, "err", "put_fail", -1);
-        upload_persist_handle_failure(job, "put_fail");
-        free(job.image_buf);
-        if (is_dish) {
-          clear_active_dish_job(job.job_id, "put_fail");
+        // Tell the LCD. Upload outcome was previously Sense-local: only sleep-path
+        // upload events crossed the link, so neither the LCD's error log nor
+        // anything watching the link could tell whether a user's capture actually
+        // reached the backend. That is the single most important fact about a
+        // capture after the shutter, and it was invisible.
+        uart_send_sense_diag("upload", "put_fail", job.mode, (int32_t)job.job_id,
+                             "upload_failed");
+        // If this came off the SD spool, KEEP the slot: the card still holds the
+        // only copy of the image.
+        sense_spool_on_upload_result(job.job_id, false);
+        if (g_cycle_uploads_fail < 0xFFFF) g_cycle_uploads_fail++;
+        // Try to KEEP the photo before dropping it.
+        //
+        // This path previously went straight to free() with no persistence
+        // attempt whatsoever — not SPIFFS, not the SD card. A failed upload
+        // therefore destroyed the user's capture outright, which is the exact
+        // loss the SD spool was built to prevent; the spool was only ever wired
+        // into the sleep path. Verified on the bench: a forced upload failure
+        // left `upload=0 q=0` at sleep entry and an empty card.
+        //
+        // upload_persist_handle_failure() tries SPIFFS first and falls back to
+        // the LCD's SD card when the partition cannot hold the image — which for
+        // a real capture is always (173,441 B partition, ~150 KB images needing
+        // roughly double to write).
+        if (!job.is_voice) {
+          upload_persist_handle_failure(job, "put_fail");
         }
+        free(job.image_buf);
         upload_inflight = false;
         continue;
       }
 
       diag_record_action_event("upload", job.mode, "ok", "put", 0);
+      // Success is reported for the same reason as failure above: it is what
+      // makes "did this photo get there?" answerable from the LCD side, and it
+      // is the completion signal the SD-spool drain needs before it may delete
+      // the only remaining copy of an image.
+      uart_send_sense_diag("upload", "put_ok", job.mode, (int32_t)job.job_id,
+                           job.from_persisted ? "replayed" : "direct");
+      // Confirmed at the backend — only NOW may the SD slot be deleted. Deleting
+      // at queue time would regress straight back to losing photos, since SPIFFS
+      // still cannot hold a real capture.
+      sense_spool_on_upload_result(job.job_id, true);
+      if (g_cycle_uploads_ok < 0xFFFF) g_cycle_uploads_ok++;
       if (job.from_persisted) {
         upload_persist_delete();
         upload_persist_note_event("retry_uploaded", job.mode, g_upload_persist_cached_count, job.retries);
@@ -1906,14 +2040,6 @@ static void upload_worker_task(void *arg) {
                       (unsigned long)job.job_id,
                       (unsigned)job.retries,
                       (unsigned)g_upload_persist_cached_count);
-      }
-
-      if (is_dish) {
-        waiting_for_mqtt_result = false;
-        mqtt_wait_deadline = 0;
-        current_scan_job_id = "";
-        mqtt_clear_result_subscription();
-        clear_active_dish_job(job.job_id, "upload_complete");
       }
 
       free(job.image_buf);
@@ -1965,7 +2091,7 @@ static bool net_ready_for_tls(const char* reason, uint32_t timeout_ms, const cha
 #include "sense_upload_exec.h"
 
 // (wait_for_dish_result_http, get_presign_checkin, put_to_presigned_url,
-//  uart_send_ui_meal_result removed — see sense_upload_exec.h)
+//  uart_send_ui_meal_result deleted 2026-08-21 with the nutrition feature)
 
 // ── UART Message Parsing ───────────────────────────────────────────
 static bool parse_input_message(const char* json_str) {
@@ -2010,7 +2136,41 @@ static bool parse_input_message(const char* json_str) {
                                strcmp(type, "INPUT_PING") != 0;
   if (is_user_input_message) {
     cancel_pending_sleep_for_user_action(type);
+    // Someone is using the device. Abandon any in-flight background drain so the
+    // link and the CPU belong to them immediately; the image stays on the SD
+    // card and the drain retries once things are quiet again.
+    sense_spool_drain_yield_to_user();
+
+    const uint32_t in_msg_id = (uint32_t)(doc["msg_id"] | 0);
+
+    // Ack BEFORE doing any work. The LCD retransmits on a 400ms timer, and some
+    // of these handlers queue jobs or touch the camera; acking afterwards would
+    // race the retry and generate duplicate traffic for no reason.
+    uart_send_input_ack(in_msg_id);
+
+    // Suppress the repeat ACTION for a msg_id we have already handled. The LCD
+    // replays the original bytes when an ACK is lost, so this is what stops one
+    // tap becoming two captures. The re-ack above still goes out — the LCD is
+    // retrying precisely because it did not hear us.
+    if (sense_input_seen_recently(in_msg_id)) {
+      g_input_dupes_suppressed++;
+      Serial.printf("[UART] duplicate %s msg_id=%lu suppressed (retransmit, total=%lu)\n",
+                    type, (unsigned long)in_msg_id,
+                    (unsigned long)g_input_dupes_suppressed);
+      return true;
+    }
+    sense_input_mark_seen(in_msg_id);
   }
+  // Drain replies from the LCD (what is spooled / ready to stream).
+  if (strcmp(type, "SPOOL_LIST") == 0) {
+    sense_spool_on_list(doc);
+    return true;
+  }
+  if (strcmp(type, "SPOOL_FETCH_READY") == 0) {
+    sense_spool_on_fetch_ready(doc);
+    return true;
+  }
+
   if (strcmp(type, "LCD_DIAG") == 0) {
     const char* wake = doc["wake"] | "";
     const char* screen = doc["screen"] | "";
@@ -2399,6 +2559,9 @@ static bool parse_input_message(const char* json_str) {
     int menu_index = doc["menu_index"] | -1;
     const char* requested_mode = "";
     Serial.printf("[UART] Menu item selected: %s (index %d)\n", menu_item, menu_index);
+    // Start the Sense half of the capture trace, keyed on the LCD's msg_id so
+    // both boards' logs correlate on the same id.
+    sense_captrace_begin((uint32_t)(doc["msg_id"] | 0), menu_item);
     bool is_scan_menu_item = (strcmp(menu_item, "Dish") == 0 ||
                               strcmp(menu_item, "Discard") == 0 ||
                               strcmp(menu_item, "Check-in") == 0);
@@ -2410,29 +2573,23 @@ static bool parse_input_message(const char* json_str) {
       requested_mode = "check-in";
     }
     if (is_scan_menu_item && scan_request_pending_for_mode(requested_mode)) {
-      Serial.printf("[SCAN] ignore menu select item=%s requested_mode=%s current_mode=%s state=%d upload=%d q=%lu result=%d user_state=%s device_state=%s\n",
+      Serial.printf("[SCAN] ignore menu select item=%s requested_mode=%s current_mode=%s state=%d upload=%d q=%lu user_state=%s device_state=%s\n",
                     menu_item,
                     requested_mode,
                     current_job.mode,
                     (int)current_job.state,
                     upload_inflight ? 1 : 0,
                     (unsigned long)upload_queue_count(),
-                    waiting_for_mqtt_result ? 1 : 0,
                     sense_user_state_name(),
                     sense_device_state_name());
       uart_send_ui_toast("Capture already in progress");
       return true;
     }
     
-    // Handle "Dish" selection - trigger SCAN operation (meal nutrition)
+    // Handle "Dish" selection. Dish is a plain capture-and-log, identical to
+    // check-in and discard -- the nutrition feature it used to feed is gone.
     if (strcmp(menu_item, "Dish") == 0) {
-      Serial.println("[UART] Dish selected - queuing SCAN operation for meal nutrition");
-      if (dish_upload_pending()) {
-        Serial.printf("[DISH] ignore new selection active_job_id=%lu\n",
-                      (unsigned long)active_dish_job_id);
-        uart_send_ui_toast("Dish already in progress");
-        return true;
-      }
+      Serial.println("[UART] Dish selected - queuing SCAN operation");
       if (op_queue != NULL) {
         OpJob job = {OP_SCAN, PRI_USER, get_next_msg_id(), millis(), OP_IDLE, false, "", ""};
         strncpy(job.mode, "dish", sizeof(job.mode) - 1);
@@ -2440,9 +2597,7 @@ static bool parse_input_message(const char* json_str) {
         job.quantity = 1;
         job.add_to_shopping_list = false;
         if (enqueue_op_job(job, true, "menu_select_dish")) {
-          active_dish_job_id = job.job_id;
-          Serial.printf("[DISH] active job_id=%lu source=menu_select\n", (unsigned long)job.job_id);
-          Serial.println("[OP] SCAN job queued for meal nutrition (dish mode)");
+          Serial.println("[OP] SCAN job queued (dish mode)");
         } else {
           Serial.println("[OP] Failed to queue SCAN job (queue full?)");
         }
@@ -3017,8 +3172,12 @@ static void op_worker_task(void *arg) {
               esp_camera_fb_return(fb);
               fb = nullptr;
               Serial.println("[CAM_PWR] capture complete");
+#if HALO_CAMERA_KEEP_INIT
+              Serial.println("[OP_WORKER] SCAN: camera KEPT initialised (deinit deferred to sleep)");
+#else
               Serial.println("[OP_WORKER] SCAN: Powering down camera after capture...");
               deinit_camera();
+#endif
             }
           }
               
@@ -3144,8 +3303,12 @@ static void op_worker_task(void *arg) {
                 esp_camera_fb_return(fb);
                 fb = nullptr;
                 Serial.println("[CAM_PWR] capture complete");
+#if HALO_CAMERA_KEEP_INIT
+                Serial.println("[OP_WORKER] SCAN: camera KEPT initialised (deinit deferred to sleep)");
+#else
                 Serial.println("[OP_WORKER] SCAN: Powering down camera after capture...");
                 deinit_camera();
+#endif
               }
             }
           }
@@ -3231,9 +3394,6 @@ static void op_worker_task(void *arg) {
           Serial.println("[OP_WORKER] SCAN: Upload deferred to background");
         }
 scan_exit:
-        if (is_dish_mode && !dish_handed_off_to_upload) {
-          clear_active_dish_job(job.job_id, "scan_exit_no_upload");
-        }
         scan_ui_inflight_set(false, "scan_complete");
         if (is_dish_mode) {
           dish_scan_inflight_set(false, "scan_complete");
@@ -3290,6 +3450,31 @@ void setup() {
                 (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMinFreeHeap());
   print_wakeup_diagnostics(HALO_BOARD_NAME);
+  // Set TZ before anything computes a local time. Nothing set it previously, so
+  // the process TZ was whatever the runtime happened to leave — observed
+  // flipping between PST8PDT and UTC0DST0 between two calls seconds apart. The
+  // Validate the crash-forensics RTC block before anything reads or writes it.
+  // Must precede diag_record_crash_boot() and wakelog_begin_cycle(), both of
+  // which consume these values.
+  rtc_diag_init();
+
+  // nightly maintenance wake is defined in LOCAL time, so an unset TZ moves it
+  // by whole hours. Backend-supplied zone will override this at owner-claim.
+  // Prefer the zone the backend gave us at claim time; fall back to the compiled
+  // default. Persisted in NVS, so it survives reboots and deep sleep and is
+  // applied on EVERY boot — not just the one where the claim happened, which is
+  // the only boot that would otherwise have the right local time.
+  {
+    char saved_tz[64];
+    if (ProvisioningState::loadTimezone(saved_tz, sizeof(saved_tz)) && saved_tz[0]) {
+      sense_set_timezone(saved_tz);
+    } else {
+      sense_set_timezone(nullptr);   // default until the backend supplies one
+    }
+  }
+  // Open a wake-cycle record. Early, so a crash later in setup() still leaves an
+  // un-closed entry that the next boot reports as "NEVER SLEPT".
+  wakelog_begin_cycle(sense_now_epoch(), (uint8_t)esp_reset_reason());
 #ifdef HALO_SENSE_PROD_WRAPPER
   halo_prod_pre_setup();
 #endif
@@ -3401,14 +3586,13 @@ void setup() {
   op_queue = xQueueCreate(OP_QUEUE_MAX, sizeof(OpJob));
   ui_event_queue = xQueueCreate(20, sizeof(UiEvent));
   upload_queue = xQueueCreate(UPLOAD_QUEUE_MAX, sizeof(UploadJob));
-  upload_queue_dish = xQueueCreate(UPLOAD_QUEUE_DISH_MAX, sizeof(UploadJob));
   if (op_queue == NULL || ui_event_queue == NULL) {
     Serial.println("ERROR: Failed to create operation queues!");
   } else {
     Serial.println("[SETUP] Operation queues created");
   }
-  if (upload_queue == NULL || upload_queue_dish == NULL) {
-    Serial.println("ERROR: Failed to create upload queues!");
+  if (upload_queue == NULL) {
+    Serial.println("ERROR: Failed to create upload queue!");
   }
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
   upload_persist_setup();
@@ -3628,8 +3812,174 @@ void loop() {
             parse_input_message(usb_rx_line);
           } else if (strcmp(usb_rx_line, "errors") == 0) {
             sense_errlog_dump(Serial);
+          } else if (strcmp(usb_rx_line, "wakelog") == 0) {
+            wakelog_dump();
           } else if (strcmp(usb_rx_line, "clearerrors") == 0) {
             sense_errlog_clear();
+#if HALO_SPOOL_TEST
+          } else if (strcmp(usb_rx_line, "nextwake") == 0) {
+            // Verify the nightly maintenance timer against the DEVICE's real
+            // clock and TZ. The host tests prove the arithmetic (DST, month
+            // ends, spring-forward); only hardware can prove the epoch actually
+            // survives deep sleep and that TZ is what we think it is.
+            const uint32_t now_epoch = sense_now_epoch();
+            const uint32_t secs = halo_seconds_until_maintenance((time_t)now_epoch);
+            time_t nowt = (time_t)now_epoch;
+            struct tm lt; char nowbuf[32] = "<no clock>";
+            if (now_epoch && localtime_r(&nowt, &lt)) {
+              strftime(nowbuf, sizeof(nowbuf), "%Y-%m-%d %H:%M:%S", &lt);
+            }
+            char wakebuf[32] = "<fallback>";
+            if (secs) {
+              time_t w = nowt + (time_t)secs;
+              struct tm wt;
+              if (localtime_r(&w, &wt)) strftime(wakebuf, sizeof(wakebuf), "%Y-%m-%d %H:%M:%S", &wt);
+            }
+            Serial.printf("[NEXTWAKE] epoch=%lu local=\"%s\" TZ=%s -> in %lus (%.2fh) at \"%s\"%s\n",
+                          (unsigned long)now_epoch, nowbuf,
+                          getenv("TZ") ? getenv("TZ") : "<unset>",
+                          (unsigned long)secs, secs / 3600.0, wakebuf,
+                          secs ? "" : "  [would use fallback interval]");
+          } else if (strcmp(usb_rx_line, "draintest") == 0) {
+            // Fetch the oldest spooled image back and verify it byte-for-byte,
+            // WITHOUT queueing an upload (the spooltest payload is synthetic and
+            // would become a junk check-in in the real account).
+            sense_spool_drain_force(true);
+          } else if (strcmp(usb_rx_line, "drainreal") == 0) {
+            // Full drain including the upload. Only for a slot holding a REAL
+            // capture — this does write to the backend.
+            sense_spool_drain_force(false);
+          } else if (strncmp(usb_rx_line, "failupload", 10) == 0) {
+            // Force the NEXT upload to fail so the spool-to-SD fallback in
+            // sense_sleep.h runs for a REAL capture. Since the WiFi teardown fix,
+            // uploads finish in ~2s and cannot be raced by forcing a sleep —
+            // making the upload genuinely fail is the only way onto that path.
+            {
+              const char* a = usb_rx_line + 10;
+              while (*a == ' ') a++;
+              int n = atoi(a);
+              g_test_fail_uploads = (uint8_t)(n > 0 ? n : 3);
+            }
+            // Default 3: one failure is not enough to reach the spool path,
+            // because the retry succeeds and the job never survives to sleep.
+            Serial.printf("[FAILUPLOAD] next %u upload(s) will be forced to fail\n",
+                          (unsigned)g_test_fail_uploads);
+#if HALO_CAM_STALL_TEST
+          } else if (strncmp(usb_rx_line, "camstall", 8) == 0) {
+            // "camstall N" — make the next N camera grabs overrun their bound.
+            // N survives the self-heal restart (RTC), so N=1 tests recovery and
+            // a large N tests the restart budget running out.
+            {
+              const char* a = usb_rx_line + 8;
+              while (*a == ' ') a++;
+              const int n = atoi(a);
+              g_bench_cam_stall = (uint32_t)(n > 0 ? n : 1);
+            }
+            Serial.printf("[CAM_STALL_TEST] next %lu grab(s) will stall (restarts so far=%lu/%d)\n",
+                          (unsigned long)g_bench_cam_stall,
+                          (unsigned long)g_cam_wedge_restarts,
+                          (int)CAMERA_GRAB_WEDGE_RESTART_MAX);
+          } else if (strncmp(usb_rx_line, "camwedge", 8) == 0) {
+            // "camwedge N" — seed the wedge-restart counter.
+            //
+            // The counter is RTC-backed so it survives the self-heal restart,
+            // but NOT the reset that opening this very port causes — so letting
+            // it climb naturally and then reading the result is self-defeating:
+            // the act of observing zeroes it. Seeding it reaches the two
+            // branches that only depend on its VALUE (budget exhausted, and
+            // budget retired by a good frame) without needing it to survive
+            // anything. The increment path is verified separately by a real
+            // stall.
+            {
+              const char* a = usb_rx_line + 8;
+              while (*a == ' ') a++;
+              g_cam_wedge_restarts = (uint32_t)strtoul(a, NULL, 10);
+            }
+            Serial.printf("[CAM_STALL_TEST] wedge restart counter seeded to %lu/%d\n",
+                          (unsigned long)g_cam_wedge_restarts,
+                          (int)CAMERA_GRAB_WEDGE_RESTART_MAX);
+#endif
+          } else if (strcmp(usb_rx_line, "crashme") == 0) {
+            // Induce a REAL panic so the crash-forensics path can be verified.
+            //
+            // diag_record_crash_boot() only fires for PANIC / INT_WDT / TASK_WDT /
+            // WDT / BROWNOUT — an ordinary esp_restart() is ESP_RST_SW and is not
+            // counted, so the camera self-heal restarts do NOT exercise this. There
+            // was no way to produce a genuine crash on demand, which is exactly why
+            // this path stayed unverified while the bug in it went unnoticed.
+            diag_note_stage("crashme_test", 4242);
+            Serial.println("[CRASHTEST] inducing a panic via abort() - expect ESP_RST_PANIC");
+            Serial.flush();
+            delay(150);   // let the line leave the UART before the chip goes down
+            abort();
+          } else if (strcmp(usb_rx_line, "crashinfo") == 0) {
+            // Read the record back. These now live in .rtc_noinit, so unlike the
+            // old RTC_DATA_ATTR versions they survive both the crash AND the reset
+            // that opening this very port causes.
+            Serial.printf("[CRASHINFO] count=%lu last_reason=%lu last_wake=%lu "
+                          "last_stage=\"%s\" stage_code=%ld stage_uptime_ms=%lu "
+                          "cur_stage=\"%s\"\n",
+                          (unsigned long)g_rtc_crash_count,
+                          (unsigned long)g_rtc_last_crash_reason,
+                          (unsigned long)g_rtc_last_crash_wake_cause,
+                          g_rtc_last_crash_stage,
+                          (long)g_rtc_last_crash_stage_code,
+                          (unsigned long)g_rtc_last_crash_stage_uptime_ms,
+                          g_rtc_last_stage);
+          } else if (strncmp(usb_rx_line, "settz", 5) == 0) {
+            // "settz <POSIX TZ>" — stand in for the backend until it returns a
+            // zone at claim time, so the CONSUMPTION path (persist -> reload on
+            // boot -> apply -> nightly wake recomputed in the new local time) can
+            // be tested for real rather than just compiled.
+            // e.g.  settz EST5EDT,M3.2.0,M11.1.0
+            {
+              const char* a = usb_rx_line + 5;
+              while (*a == ' ') a++;
+              if (*a) {
+                ProvisioningState::saveTimezone(a);
+                sense_set_timezone(a);
+                Serial.printf("[SETTZ] saved+applied tz=%s (reboot to prove it reloads)\n", a);
+              } else {
+                char cur[64];
+                const bool have = ProvisioningState::loadTimezone(cur, sizeof(cur));
+                Serial.printf("[SETTZ] stored=%s active=%s\n",
+                              have ? cur : "<none>", g_tz_current);
+              }
+            }
+          } else if (strncmp(usb_rx_line, "dropacks", 8) == 0) {
+            // "dropacks N" — swallow the next N INPUT_ACKs so the LCD retransmits
+            // a message we already acted on, exercising duplicate suppression.
+            const char* arg = usb_rx_line + 8;
+            while (*arg == ' ') arg++;
+            g_test_drop_acks = (uint32_t)atoi(arg);
+            if (g_test_drop_acks == 0) g_test_drop_acks = 1;
+            Serial.printf("[ACKTEST] will drop the next %lu INPUT_ACK(s)\n",
+                          (unsigned long)g_test_drop_acks);
+          } else if (strcmp(usb_rx_line, "spooltest") == 0) {
+            // Bench-only: prove the SD image spool actually runs, without having
+            // to engineer a WiFi failure plus a sleep to reach the real trigger
+            // in sense_sleep.h. Uses the same send path the sleep handler calls.
+            const size_t TEST_LEN = 180 * 1024;   // real captures are 177-189KB
+            uint8_t* t = (uint8_t*)heap_caps_malloc(TEST_LEN, MALLOC_CAP_SPIRAM);
+            if (!t) {
+              Serial.println("[SPOOLTEST] alloc failed");
+            } else {
+              // Deterministic pattern so the received file can be verified
+              // byte-for-byte, not merely by length.
+              for (size_t i = 0; i < TEST_LEN; i++) t[i] = (uint8_t)((i * 31 + 7) & 0xFF);
+              Serial.printf("[SPOOLTEST] sending %u bytes\n", (unsigned)TEST_LEN);
+              // Synthesise a job so the test exercises the same metadata path
+              // production uses — otherwise the sidecar would go untested.
+              UploadJob tj = {};
+              tj.job_id = 999999;
+              snprintf(tj.mode, sizeof(tj.mode), "%s", "spooltest");
+              tj.quantity = 1;
+              tj.image_len = TEST_LEN;
+              bool ok = sense_spool_image_to_lcd(tj, t, TEST_LEN);
+              Serial.printf("[SPOOLTEST] RESULT=%s\n", ok ? "PASS" : "FAIL");
+              free(t);
+            }
+#endif
           }
         }
         usb_rx_len = 0;
@@ -3684,6 +4034,32 @@ void loop() {
 
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
   upload_persist_maybe_replay();
+
+  // SD-spool drain. Pump first (an in-flight transfer owns the UART and must be
+  // serviced promptly), then consider starting a new one. Both are no-ops unless
+  // the device is idle, WiFi is up and the queue is clear — background work must
+  // never compete with someone standing at the device.
+  sense_spool_receive_pump();
+  sense_spool_drain_tick();
+
+  // Relay the wake history once the link is up, exactly once per boot. Deferred
+  // to here rather than setup() because the LCD may not be listening yet, and a
+  // report nobody receives is worse than none — it looks like the feature works.
+  {
+    // Deliberately NOT gated on link_synced.
+    //
+    // link_synced only becomes true when the LCD sends SYNC, and after a TIMER
+    // wake the LCD does not know the Sense woke at all — so it never sends one
+    // and the gate could never open on the maintenance path this exists to
+    // report. Two full test cycles produced no output for exactly that reason.
+    // uart_send_sense_diag() does not require sync (the ota_sched and wifi diags
+    // arrive fine without it), so a short settle delay is the only thing needed.
+    static bool s_wakelog_relayed = false;
+    if (!s_wakelog_relayed && millis() > 5000) {
+      s_wakelog_relayed = true;
+      wakelog_report_to_lcd();
+    }
+  }
 #endif
 
   if (!guardian_force_sleep && GUARDIAN_FORCE_SLEEP_MS > 0) {
@@ -3748,12 +4124,6 @@ void loop() {
     }
   }
   
-#ifndef HALO_SENSE_PROD_WRAPPER
-  // Process MQTT messages (needed for SCAN operation results — dev builds only)
-  if (mqttClient.connected()) {
-    mqttClient.loop();
-  }
-#endif
   
   // Poll wake GPIO to detect wake pulses (even when already awake)
   // This allows LCD to wake Sense board even if Sense is already awake
@@ -3983,17 +4353,10 @@ void loop() {
         if (elapsed_ms >= PRE_SLEEP_BLOCK_MAX_MS) {
           Serial.printf("[SLEEP] pre_sleep_cap_hit forcing_sleep elapsed_ms=%lu\n",
                         elapsed_ms);
-#ifndef HALO_SENSE_PROD_WRAPPER
-          if (mqttClient.connected()) {
-            Serial.println("[SLEEP] forcing MQTT disconnect (pre_sleep_cap)");
-            mqttClient.disconnect();
-            delay(100);
-          }
-#endif
           OtaIntent::clearDesired();
           pre_sleep_block_start_ms = 0;
         } else {
-          Serial.println("[SENSE] Inactivity timeout ignored (OTA/MQTT pending)");
+          Serial.println("[SENSE] Inactivity timeout ignored (OTA pending)");
           last_lcd_communication = now_ms;
           goto loop_end;
         }
@@ -4147,6 +4510,29 @@ loop_end:
                   rx_age,
                   tx_age);
   }
+
+  // NO idle re-arm of the camera DMA reserve. This was tried on 2026-08-21 and
+  // REVERTED the same day; do not reintroduce it without reading this.
+  //
+  // The idea was sound-looking: the reserve is absent at camera-init time in ~95%
+  // of captures, so re-acquire it whenever the device looks idle. It did fix that
+  // -- exposure went 95% -> 0% over 24 captures. It also broke uploads.
+  //
+  //   presign HTTP 200:  41/41 before  ->  6/25 after
+  //
+  // A TLS handshake needs ~25-30KB CONTIGUOUS internal RAM, which is the entire
+  // reason the upload/presign guards RELEASE this 16KB block before handshaking.
+  // "Idle" is not mutually exclusive with an upload in flight -- uploads run in
+  // the background after current_job reports DONE -- so the re-arm raced those
+  // guards and grabbed the block back mid-handshake. The logs interleave exactly
+  // that: PRESIGN attempt= / re-armed while idle / HTTP_FAIL label=PRESIGN.
+  //
+  // Gating on http_inflight/upload_inflight is NOT sufficient: the presign retry
+  // loop spans several seconds with gaps where those flags are clear.
+  //
+  // Trade accepted: a camera init that fails ~1 in 12 reports an honest error and
+  // the next capture works. A failed upload can LOSE THE PHOTO outright (observed:
+  // "SD spool FAILED ... saved=0"). Protecting the upload is worth more.
 
 #ifdef HALO_SENSE_PROD_WRAPPER
   halo_prod_loop();

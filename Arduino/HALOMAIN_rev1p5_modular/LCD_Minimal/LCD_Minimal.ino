@@ -13,10 +13,52 @@
 
 typedef struct app_event_t app_event_t;
 
+// ── Bench/dev switch ───────────────────────────────────────────────────────
+// 1 = never idle-sleep, so the USB port stays up and reflashing is instant.
+// Gated at the single chokepoint (lcd_sleep_intent_allowed) — the sleep routine
+// stays fully compiled, so flipping this back to 0 restores real behaviour with
+// no code to re-integrate. MUST be 0 for anything that ships or goes to OTA.
+#ifndef HALO_DEV_NO_SLEEP
+#define HALO_DEV_NO_SLEEP 0
+#endif
+
+// ── Quiet soak builds ──────────────────────────────────────────────────────
+// 1 = suppress the high-frequency periodic chatter (heartbeats, sleep polls,
+// wake-pin ticks, link summaries) while KEEPING [CAPTRACE], errors and state
+// transitions. Everything else is unchanged.
+//
+// This is not cosmetic. On USB-Serial-JTAG a write blocks when no host drains
+// the FIFO, which stalls the LVGL task and freezes the whole UI — and `Serial`
+// reports connected whenever the CABLE is plugged in, so an `if (Serial)` guard
+// does NOT avoid it. A long unattended soak with a chatty build is therefore one
+// detached monitor away from a wedged board; that is how the LCD was wedged on
+// 2026-08-16 and again on 2026-08-20 (both needed a power cycle - even esptool
+// could not reach the ROM, and the 45s freeze watchdog did not recover it).
+//
+// CORRECTION 2026-08-20: this comment used to claim setTxTimeoutMs(0) does not
+// avoid it either. That is wrong for core 3.3.8 — see the detailed note at
+// Serial.begin() in setup(), where it is now set. Reducing log volume is still
+// worthwhile, but it is no longer the only line of defence.
+#ifndef HALO_QUIET_SOAK
+#define HALO_QUIET_SOAK 0
+#endif
+#if HALO_QUIET_SOAK
+#define HALO_CHATTY_PRINTF(...) do { } while (0)
+#else
+#define HALO_CHATTY_PRINTF(...) Serial.printf(__VA_ARGS__)
+#endif
+#if HALO_DEV_NO_SLEEP
+#warning "HALO_DEV_NO_SLEEP=1 - bench build, device will NOT sleep. Do not ship."
+#endif
+
 #include "lcd_bsp.h"
 #include "cst816.h"
 #include "lcd_bl_pwm_bsp.h"
 #include "lcd_config.h"
+#include "lcd_theme.h"       // Trepo design system: palette, type, primitives, layout audit
+#include "lcd_captrace.h"    // end-to-end capture trace (diagnoses the capturing-screen strand)
+#include "lcd_freeze_wdt.h"  // system watchdog: a frozen LCD must reboot, not brick
+#include "lcd_sdspool.h"    // SD spool for capture images (Step 4)
 #include "bidi_switch_knob.h"
 #include "user_config.h"
 #include "ui_screen_registry.h"
@@ -260,6 +302,53 @@ static bool ship_mode_is_dish(const char* op, const char* mode);
 // ── Test Mode (automated testing, disables sleep) ──────────────────
 static bool g_test_mode_active = false;
 static unsigned long g_test_mode_expire_ms = 0;
+
+// Test mode is deliberately NVS-persisted so it survives the reboot a bench
+// USB reflash causes — otherwise the LCD deep-sleeps ~20s after wake and drops
+// off the bus mid-session. The budget must still be bounded though: re-arming a
+// fresh hour on every boot meant a unit power-cycled more often than hourly
+// never slept again. So the REMAINING budget rides in RTC memory (survives deep
+// sleep and SW/external reset, lost on power-off) and is spent down across
+// reboots. A cold power-on clears the flag outright — that ends the session.
+#define TEST_MODE_BUDGET_MS   3600000UL   // 1 hour of actual running time
+#define TEST_MODE_RTC_MAGIC   0x544D0DE1UL
+RTC_DATA_ATTR static uint32_t g_test_mode_rtc_magic = 0;
+RTC_DATA_ATTR static uint32_t g_test_mode_remaining_ms = 0;
+
+// Clear every trace of test mode (RAM + RTC + NVS).
+static void test_mode_clear(const char* why) {
+  g_test_mode_active = false;
+  g_test_mode_expire_ms = 0;
+  g_test_mode_rtc_magic = 0;
+  g_test_mode_remaining_ms = 0;
+  Preferences prefs;
+  if (prefs.begin("test_cfg", false)) {
+    prefs.remove("test_mode");
+    prefs.end();
+  }
+  Serial.printf("[TEST_MODE] cleared (%s)\n", why ? why : "");
+}
+
+// Arm test mode for `budget_ms` and mirror it into RTC + NVS.
+static void test_mode_arm(uint32_t budget_ms) {
+  g_test_mode_active = true;
+  g_test_mode_expire_ms = millis() + budget_ms;
+  g_test_mode_rtc_magic = TEST_MODE_RTC_MAGIC;
+  g_test_mode_remaining_ms = budget_ms;
+  Preferences prefs;
+  if (prefs.begin("test_cfg", false)) {
+    prefs.putBool("test_mode", true);
+    prefs.end();
+  }
+}
+
+// Spend down the RTC budget so a reboot resumes where we left off instead of
+// re-arming a full hour. Cheap; safe to call from the sleep-intent hot path.
+static void test_mode_sync_remaining() {
+  if (!g_test_mode_active) return;
+  long left = (long)(g_test_mode_expire_ms - millis());   // wrap-safe
+  g_test_mode_remaining_ms = (left > 0) ? (uint32_t)left : 0;
+}
 
 // ── Double-Buffered List State ──────────────────────────────────────
 // Active: UI reads this only (rendered on screen)
@@ -917,8 +1006,6 @@ static unsigned long last_wake_time = 0;  // Track when we last woke from sleep
 static bool just_woke_up = false;  // Flag to track if we just woke from sleep (for UI reset)
 // last_user_activity_ms is the single source of activity timing
 static const unsigned long USER_WAKE_HOLD_MS = 10000;
-static unsigned long meal_result_shown_time = 0;  // Track when meal result screen was shown
-static const unsigned long MEAL_RESULT_TIMEOUT_MS = 10000;  // 10 seconds timeout for meal result screen
 static volatile bool provisioning_active = false;  // Suppress sleep while provisioning UI is active
 static volatile bool provision_qr_waiting = false;
 static volatile bool provision_qr_exit_headless = false;
@@ -1063,6 +1150,13 @@ static const unsigned long OTA_LOCK_TIMEOUT_MS = 1800000; // 30 min auto-unlock 
 static const unsigned long OTA_UNLOCK_GRACE_MS = 45000;   // keep LCD awake after unlock
 static volatile bool ota_check_requested = false;
 static volatile bool ota_check_pending = false;
+// How long an unfinished OTA *check* may hold the screen awake.
+//
+// The check is a manifest fetch, normally seconds. The real binary transfer is
+// guarded separately by g_lcd_ota_uart_receiving, which is tested first and is
+// not subject to this deadline -- so capping the check cannot truncate an OTA.
+static const unsigned long OTA_CHECK_BLOCK_MAX_MS = 120000;
+static unsigned long g_ota_check_block_since_ms = 0;
 static unsigned long ota_stay_awake_until_ms = 0;
 static const unsigned long OTA_STAY_AWAKE_MS = 20000;
 // Set by the OTA_LOCK handler (= millis() + LCD_OTA_LOCK_STAY_AWAKE_MS). While
@@ -1148,11 +1242,16 @@ static int deleted_item_count = 0;
 // ── Touch Detection ────────────────────────────────────────────────────
 static bool touch_pressed = false;
 static unsigned long touch_press_time = 0;
+// Furthest (squared) distance the finger strayed from its press point during the
+// current press. The raw touch path dispatches a "tap" on RELEASE but using the
+// PRESS coordinates, and it had no branch at all for a held finger — so a drag
+// was indistinguishable from a tap and every scroll could fire a tap action.
+// Tracking this while the finger is down is what makes the two separable.
+static uint32_t touch_move_max_d2 = 0;
 static uint16_t touch_press_x = 0;  // Store X coordinate when touch is pressed
 static uint16_t touch_press_y = 0;  // Store Y coordinate when touch is pressed
 static const unsigned long LONG_PRESS_THRESHOLD_MS = 500;  // 500ms for long press
 static bool long_press_sent = false;  // Track if long press event already sent
-static bool touch_used_to_dismiss_meal = false;  // Track if touch was used to dismiss meal result screen
 static bool touch_wake_only_pending = false;  // First tap on idle-dark screen wakes only
 
 // ── UI Elements ────────────────────────────────────────────────────
@@ -1366,16 +1465,6 @@ static result_args_t g_result_pending = {false, "", ""};
 static ScreenId g_current_screen_id = SCREEN_UNKNOWN;
 
 // ── Meal Result Screen ──────────────────────────────────────────────
-static lv_obj_t *meal_result_screen = NULL;
-static lv_obj_t *meal_calories_label = NULL;  // Large calories at top
-static lv_obj_t *meal_description_label = NULL;  // Meal description
-static lv_obj_t *meal_protein_value_label = NULL;  // Protein value (e.g., "30g")
-static lv_obj_t *meal_protein_name_label = NULL;  // Protein name (e.g., "Protein")
-static lv_obj_t *meal_carbs_value_label = NULL;  // Carbs value (e.g., "30g")
-static lv_obj_t *meal_carbs_name_label = NULL;  // Carbs name (e.g., "Carbs")
-static lv_obj_t *meal_fat_value_label = NULL;  // Fat value (e.g., "0g")
-static lv_obj_t *meal_fat_name_label = NULL;  // Fat name (e.g., "Fat")
-static lv_obj_t *meal_recommendation_label = NULL;  // Recommendation at bottom
 
 // ── Menu Buttons ────────────────────────────────────────────────────
 static lv_obj_t *delete_menu = NULL;  // Menu overlay for delete button
@@ -1414,7 +1503,7 @@ static const char** menu_items_current = menu_items_main;
 static int menu_item_count = MENU_MAIN_ITEM_COUNT;
 static int menu_selected_index = 0;  // Currently selected menu item
 static bool menu_screen_visible = false;  // Track if menu screen is showing
-// NOTE: discard_mode_active removed - we now use mode from UI_STATUS/UI_MEAL_RESULT messages
+// NOTE: discard_mode_active removed - we now use mode from UI_STATUS messages
 
 // ── Menu Screen ──────────────────────────────────────────────────────
 static lv_obj_t *menu_screen = NULL;  // Full-screen menu overlay
@@ -1554,6 +1643,19 @@ static lv_obj_t *logged_label = NULL;  // "Logged!" text label
 static unsigned long logged_screen_shown_time = 0;  // Track when logged screen was shown
 static const unsigned long LOGGED_SCREEN_TIMEOUT_MS = 2000;  // 2 seconds timeout
 
+// The result screen carries a Retry button, so it lingers longer than the plain
+// error screen's 3s -- but it must still expire. It is not a sleep-eligible
+// screen, so any screen without a deadline pins the panel awake until the
+// 5-minute guardian force-sleep.
+static const unsigned long RESULT_SCREEN_TIMEOUT_MS = 10000;
+
+
+// Last-resort net for the user-feedback screens (VOICE_ACK / LOGGED / RESULT).
+// Every one of them arms its own deadline; this catches the case where that
+// deadline is cleared or never armed by a path added later. Longer than all
+// three so it never pre-empts them, far shorter than the guardian's 5 minutes.
+static const unsigned long UI_FEEDBACK_STRAND_MS = 15000;
+
 // ── Expiration Date Entry Screen (for Check-in mode) ───────────────────
 static lv_obj_t *expiry_screen = NULL;  // Screen for entering expiration date
 static lv_obj_t *expiry_title_label = NULL;
@@ -1661,7 +1763,6 @@ typedef enum {
   EVT_RENDER_ACTIVE_LIST,
   EVT_TOGGLE_BUTTONS,
   EVT_VOICE_ITEMS_ADDED,  // Optimistic voice items added - refresh UI without swapping
-  EVT_SHOW_MEAL_RESULT,  // Show meal result screen
   EVT_MENU_SELECTED,  // Menu item selected
   EVT_SHOW_PROVISION_QR,
   EVT_HIDE_PROVISION_QR,
@@ -1674,6 +1775,7 @@ typedef enum {
   EVT_START_GLOWING,  // From UART: UI task calls start_glowing_animation(reason)
   EVT_UI_STATUS_IDLE, // From UART: UI task calls set_status_reset_visible(false), stop_glowing if needed
   EVT_REFRESH_TIMEOUT, // Refresh stuck inflight too long: stop glowing, show "Couldn't refresh", re-render existing list
+  EVT_LINK_SEND_FAILED, // Sense never acked a user-intent message after all retries: resolve the screen with an honest error
   EVT_SHIP_UI_STATUS, // From UART: Ship menu UI_STATUS -> update overlay/result
   EVT_SHIP_UI_TOAST,
   EVT_SHIP_VOICE_JSON,
@@ -1698,14 +1800,6 @@ typedef struct app_event_t {
     char glow_reason[32];  // For EVT_START_GLOWING
     char ship_toast[64];
     struct {
-      int calories;
-      float protein_g;
-      float carbs_g;
-      float fat_g;
-      char meal_summary[256];
-      char recommendation[256];
-    } meal_result;
-    struct {
       char ssid[33];
       char password[65];
       char url[64];
@@ -1727,6 +1821,11 @@ typedef struct app_event_t {
 
 static QueueHandle_t app_event_queue = NULL;
 
+// Must precede lcd_uart.h: the send helpers there register every user-intent
+// message with the ack tracker. Placed after app_event_queue/app_event_t so a
+// give-up can post EVT_LINK_SEND_FAILED to the UI task instead of touching LVGL
+// from Core 0.
+#include "lcd_link_ack.h"
 #include "lcd_uart.h"
 
 #ifdef HALO_LCD_PROD_WRAPPER
@@ -1981,16 +2080,43 @@ static void update_wifi_on_pending_state() {
 
 // Forward declarations — functions defined later in this .ino
 static void ship_menu_handle_ui_status(const JsonDocument& doc);
-static void ui_apply_ship_meal_result(const JsonDocument& doc);
 static void deferred_awake_tx_service();
 static void cancel_pending_sleep_for_user_input(const char* reason);
 static void send_sense_ping();
 static void start_sense_wake_handshake();
 
+static bool s_lcd_diag_sent_this_cycle = false;
+
 static void lcd_send_diag_pre_sleep() {
-  StaticJsonDocument<256> doc;
+  // Once per boot. The LCD deep-sleeps, so setup() re-runs on every wake and
+  // this static resets naturally — VERIFIED, not assumed: consecutive cycles
+  // logged wake=COLD_BOOT then wake=EXT0 with the SD probe re-running each time.
+  //
+  // Do NOT reset this from resetActivityTimer(): that fires on every inbound
+  // UI_STATUS, which turned one report per session into 18 sends across 3 cycles
+  // — wasted bandwidth on a 11.5 kB/s link that image spooling needs.
+  //
+  // This used to run only at the very end of the sleep sequence, AFTER the Sense
+  // had already answered SLEEP_READY and gone to deep sleep — so it was shouted
+  // into the void. Measured 2026-08-21: the LCD sent LCD_DIAG 19 times and the
+  // Sense received it ONCE (5%), and that one only because an upload happened to
+  // be keeping it awake. It is now also called from notify_sense_sleep(), while
+  // the Sense is provably still listening; this flag keeps it to one send.
+  if (s_lcd_diag_sent_this_cycle) return;
+  s_lcd_diag_sent_this_cycle = true;
+
+  lcd_sd_health_probe("diag");   // no-op if already probed this boot
+
+  StaticJsonDocument<384> doc;
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = "LCD_DIAG";
+  // SD health: sd=0 means the photo-loss safety net is inert on this unit.
+  doc["sd"] = g_sd_probe_ok ? 1 : 0;
+  doc["sd_ms"] = g_sd_probe_ms;
+  if (g_sd_spool_writes || g_sd_spool_write_fails) {
+    doc["sd_w"] = g_sd_spool_writes;
+    doc["sd_wf"] = g_sd_spool_write_fails;
+  }
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   const char* wake = lcd_wake_cause_label();
@@ -2289,9 +2415,9 @@ static void expiry_apply_segment_style(lv_obj_t* button, lv_obj_t* label, bool a
   if (!button || !label) {
     return;
   }
-  lv_color_t bg = active ? lv_color_hex(0x1F4D2B) : lv_color_hex(0xFFFFFF);
-  lv_color_t border = active ? lv_color_hex(0x1F4D2B) : lv_color_hex(0x1A1A1A);
-  lv_color_t text = active ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x1A1A1A);
+  lv_color_t bg = active ? lv_color_hex(COL_GREEN) : lv_color_hex(COL_WHITE);
+  lv_color_t border = active ? lv_color_hex(COL_GREEN) : lv_color_hex(COL_DARK);
+  lv_color_t text = active ? lv_color_hex(COL_WHITE) : lv_color_hex(COL_DARK);
   lv_obj_set_style_bg_color(button, bg, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_color(button, border, LV_PART_MAIN);
@@ -2494,14 +2620,22 @@ static const char* sense_state_name(SenseState state) {
 }
 
 static void sense_state_set(SenseState next, const char* reason) {
+  // Enforce the invariant BEFORE the unchanged-state early return.
+  //
+  // "not awake" and sense_awake_confirmed=true must never coexist. The clearing
+  // below used to sit after the early return, so a redundant
+  // sense_state_set(SENSE_ASLEEP) — the common case, since the state is usually
+  // already ASLEEP — silently skipped it. Anything that had set the flag
+  // directly then stayed disagreeing with the enum indefinitely, and two
+  // consumers act on that enum (the wake-probe decision and scroll handling).
+  if (next != SENSE_AWAKE) {
+    sense_awake_confirmed = false;
+  }
   if (sense_state == next) {
     return;
   }
   sense_state = next;
   sense_awake_estimate = (sense_state == SENSE_AWAKE);
-  if (sense_state != SENSE_AWAKE) {
-    sense_awake_confirmed = false;
-  }
   Serial.printf("[SENSE_STATE] state=%s reason=%s missed=%u\n",
                 sense_state_name(sense_state),
                 reason ? reason : "unknown",
@@ -2726,7 +2860,7 @@ static void lcd_log_state(unsigned long now_ms,
   bool changed = (strcmp(state, last_lcd_state) != 0) ||
                  (strcmp(reason, last_lcd_state_reason) != 0);
   if (changed || (now_ms - last_lcd_state_log_ms) >= LCD_STATE_LOG_INTERVAL_MS) {
-    Serial.printf("[LCD_STATE] now=%lu state=%s reason=%s idle_age_ms=%lu timeout_ms=%lu\n",
+    HALO_CHATTY_PRINTF("[LCD_STATE] now=%lu state=%s reason=%s idle_age_ms=%lu timeout_ms=%lu\n",
                   now_ms,
                   state,
                   reason[0] ? reason : "-",
@@ -2746,7 +2880,7 @@ static void log_sleep_decision(unsigned long now_ms,
                                bool eligible,
                                const char* reason) {
   if ((now_ms - last_sleep_decision_log_ms) > 1000) {
-    Serial.printf("[SLEEP_DECISION] screen=%s home_age=%lu eligible=%d reason=%s\n",
+    HALO_CHATTY_PRINTF("[SLEEP_DECISION] screen=%s home_age=%lu eligible=%d reason=%s\n",
                   screen ? screen : "UNKNOWN",
                   home_age_ms,
                   eligible ? 1 : 0,
@@ -2775,8 +2909,35 @@ static bool sleep_blocked_for_ota() {
     return true;
   }
   if (ota_check_requested || ota_check_pending) {
+    // This branch used to be an unconditional `return true` -- the only one here
+    // without a stale-flag escape, while the branches either side of it both had
+    // one. If the Sense set the flag and then slept (or the exchange simply never
+    // completed) the LCD was pinned awake FOREVER with a lit AMOLED. Observed
+    // 2026-08-21: 10+ minutes of "[SLEEP] blocked (ota_pending)" with the Sense
+    // asleep the whole time, and it only recovered when the USB port was opened
+    // and reset the board. On a "mostly off" device that is a flat battery.
+    if (sense_state == SENSE_ASLEEP && !ota_locked && !g_lcd_ota_uart_receiving) {
+      ota_check_requested = false;
+      ota_check_pending = false;
+      g_ota_check_block_since_ms = 0;
+      Serial.println("[SLEEP] stale ota_check flags cleared (sense_asleep)");
+      return false;
+    }
+    // Belt and braces: even with the Sense awake, a check that never finishes
+    // must not hold the screen indefinitely.
+    if (g_ota_check_block_since_ms == 0) {
+      g_ota_check_block_since_ms = now_ms;
+    } else if ((now_ms - g_ota_check_block_since_ms) > OTA_CHECK_BLOCK_MAX_MS) {
+      Serial.printf("[SLEEP] ota_check block expired after %lums - allowing sleep\n",
+                    (unsigned long)(now_ms - g_ota_check_block_since_ms));
+      ota_check_requested = false;
+      ota_check_pending = false;
+      g_ota_check_block_since_ms = 0;
+      return false;
+    }
     return true;
   }
+  g_ota_check_block_since_ms = 0;
   if (now_ms < ota_stay_awake_until_ms) {
     // If Sense went to sleep without OTA_LOCK, the OTA request was missed — don't block.
     // EXCEPTION: a fresh OTA_LOCK window means the Sense is mid self-OTA reboot and
@@ -2997,7 +3158,7 @@ static void refresh_sm_on_awake_proof(const char* source) {
     tx_msg_t tx_msg = {};
     strncpy(tx_msg.type, "INPUT_WAKE", sizeof(tx_msg.type) - 1);
     if (uart_tx_queue != NULL) {
-      xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+      uart_tx_enqueue(&tx_msg, "main");
     }
     refresh_wake_sent = true;
     refresh_last_wake_send_ms = millis();
@@ -3054,7 +3215,6 @@ static bool sense_rx_type_is_awake_proof(const char* type) {
          strcmp(type, "WIFI_CREDS") == 0 ||
          strcmp(type, "WIFI_ON") == 0 ||
          strcmp(type, "UI_LIST") == 0 ||
-         strcmp(type, "UI_MEAL_RESULT") == 0 ||
          strcmp(type, "UI_VOICE_ITEMS") == 0 ||
          strcmp(type, "PROVISION_QR") == 0 ||
          strcmp(type, "PROVISION_STATUS") == 0 ||
@@ -3354,11 +3514,51 @@ static void lcd_force_wake_sense(const char* reason) {
 }
 
 static void deferred_awake_tx_service() {
-  if (!deferred_awake_tx_valid || g_in_light_sleep || sense_ready_for_control_tx()) {
+  if (!deferred_awake_tx_pending() || g_in_light_sleep) {
     return;
   }
 
-  const char* reason = tx_msg_wake_reason(&deferred_awake_tx_msg);
+  // The Sense is reachable again — flush everything that was waiting, oldest
+  // first, so two user actions can never swap order.
+  if (sense_ready_for_control_tx()) {
+    uint8_t flushed = 0;
+    while (deferred_awake_tx_pending()) {
+      tx_msg_t m = deferred_ring_oldest()->msg;
+      deferred_ring_pop_oldest();
+      tx_msg_send_now(&m);
+      flushed++;
+    }
+    deferred_awake_tx_last_ping_ms = 0;
+    Serial.printf("[UART] deferred_flushed n=%u (sense ready)\n", (unsigned)flushed);
+    return;
+  }
+
+  // Abandon messages the Sense will never take. Each entry ages independently,
+  // so one unwakeable message cannot pin newer ones behind it. Give up, say so
+  // loudly — a reported failure beats an invisible stall, and the ack layer
+  // turns it into a visible error for anything user-facing.
+  while (deferred_awake_tx_pending()) {
+    deferred_tx_entry_t* e = deferred_ring_oldest();
+    if (e->since_ms == 0 ||
+        (long)(millis() - e->since_ms) <= (long)DEFERRED_AWAKE_TX_MAX_MS) {
+      break;   // oldest is still within its deadline, so all newer ones are too
+    }
+    Serial.printf("[UART_TX_ABANDON] type=%s waited=%lums awake=%d synced=%d "
+                  "rx_age_ms=%lu ring=%u - giving up, unblocking TX queue\n",
+                  e->msg.type,
+                  millis() - e->since_ms,
+                  sense_awake_confirmed ? 1 : 0,
+                  link_synced ? 1 : 0,
+                  last_sense_rx_ms > 0 ? (millis() - last_sense_rx_ms) : 0xFFFFFFFFUL,
+                  (unsigned)deferred_ring_count);
+    deferred_ring_pop_oldest();
+  }
+  if (!deferred_awake_tx_pending()) {
+    deferred_awake_tx_last_ping_ms = 0;
+    return;
+  }
+
+  const char* reason = tx_msg_wake_reason(&deferred_ring_oldest()->msg);
   sense_wake_explicit_request = true;
   maybe_extend_sense_awake_grace(reason);
   lcd_maybe_pulse_sense_int(reason);
@@ -3374,7 +3574,7 @@ static void deferred_awake_tx_service() {
     unsigned long rx_age_ms = last_sense_rx_ms > 0 ? (now_ms - last_sense_rx_ms) : 0xFFFFFFFFUL;
     unsigned long proof_age_ms = last_proof_of_life_ms > 0 ? (now_ms - last_proof_of_life_ms) : 0xFFFFFFFFUL;
     Serial.printf("[UART] waiting_awake_proof type=%s reason=%s awake=%d synced=%d rx_age_ms=%lu proof_age_ms=%lu\n",
-                  deferred_awake_tx_msg.type,
+                  deferred_ring_oldest()->msg.type,
                   reason,
                   sense_awake_confirmed ? 1 : 0,
                   link_synced ? 1 : 0,
@@ -3426,7 +3626,7 @@ static void send_sense_ping() {
   unsigned long now_ms = millis();
   unsigned long min_ping_interval_ms = SENSE_PING_MIN_INTERVAL_MS;
   if (!sense_awake_confirmed ||
-      deferred_awake_tx_valid ||
+      deferred_awake_tx_pending() ||
       wake_retry_until_ms > 0 ||
       refresh_state == REFRESH_WAKE_PENDING) {
     min_ping_interval_ms = REFRESH_WAKE_PING_INTERVAL_MS;
@@ -3549,9 +3749,38 @@ static void lcd_errlog_store_with_context(const char* board, const char* area,
 
 
 // ── Arduino lifecycle ──────────────────────────────────────────────
+
 void setup() {
   print_wakeup_diagnostics(HALO_BOARD_NAME);
   Serial.begin(115200);
+  // Make the USB console non-blocking, as the Sense already does.
+  //
+  // On USB-Serial-JTAG a write BLOCKS when the TX ring fills and no host is
+  // draining it. That is what hard-wedged this board on 2026-08-16 and again on
+  // 2026-08-20 — port still enumerating, zero bytes out, esptool unable to sync,
+  // and (measured) NOT recovered by the 45s freeze watchdog, because the panic
+  // path needs the same blocked console. Both times it took a physical power
+  // cycle.
+  //
+  // The mitigation until now was HALO_QUIET_SOAK (log less). This addresses the
+  // mechanism instead. In core 3.3.8 HWCDC::write, tx_timeout_ms == 0 makes the
+  // lock acquire non-blocking AND turns the ring-buffer send into
+  // `xRingbufferSend(..., 0)`, which returns immediately when full and breaks
+  // out of the send loop rather than waiting:
+  //     while (connected && to_send) {
+  //       if (xRingbufferSend(..., tx_timeout_ms / portTICK_PERIOD_MS) != pdTRUE) break;
+  //
+  // The trade is that console output is DROPPED instead of stalling the caller
+  // when nothing is reading. That is the right trade here: a dropped log line
+  // costs a diagnostic, a blocked write costs the board. Production is unaffected
+  // either way — with no cable attached the !isCDC_Connected() path already
+  // discards output.
+  //
+  // NOTE: the block comment at the top of this file previously asserted that
+  // setTxTimeoutMs(0) "does not avoid it". The core source above contradicts
+  // that, and the Sense has run with it since the shopping-list refresh hang was
+  // traced to exactly this blocking behaviour.
+  Serial.setTxTimeoutMs(0);
   delay(100);
   boot_ms = millis();
   guardian_awake_start_ms = boot_ms;
@@ -3561,6 +3790,28 @@ void setup() {
   waiting_for_sense_cmds = true;
   waiting_for_sense_logged = false;
   
+  // Install the GPIO ISR service HERE, at boot, instead of letting the first
+  // attachInterrupt() do it lazily.
+  //
+  // The only attachInterrupt() on this board arms the teardown touch watch
+  // (lcd_sleep.h) during the sleep transition, and the Arduino core installs the
+  // ISR service on first use — so on EVERY boot the install happened mid-sleep.
+  // gpio_install_isr_service() binds the ISR to a core via the IPC task, and
+  // ipc1's small stack overflowed when an interrupt landed inside its
+  // heap_caps_malloc. Decoded backtrace:
+  //
+  //   ipc_task -> gpio_isr_register_on_core_static -> esp_intr_alloc
+  //            -> heap_caps_malloc -> _xt_context_save -> STACK CANARY (ipc1)
+  //
+  // Measured 2026-08-21: 1 panic per 12 wake/sleep cycles, reproducible, and
+  // still present with the SD probe compiled out (so not that). Doing the install
+  // at boot puts it in a far quieter interrupt environment — no UI task, no UART
+  // traffic, no LVGL timers — and out of the sleep path entirely.
+  {
+    const esp_err_t isr_rc = gpio_install_isr_service(ARDUINO_ISR_FLAG);
+    Serial.printf("[GPIO_ISR] install rc=%d (%s)\n", (int)isr_rc, esp_err_to_name(isr_rc));
+  }
+
   Serial.println("LCD ESP32-S3: booting...");
   Serial.println("[BOOT] safe_mode_timeout_flush_disabled=1");
   if (kFirmwareVersion && kFirmwareVersion[0]) {
@@ -3757,13 +4008,24 @@ void setup() {
   // Restore test mode from NVS (survives OTA reboots)
   {
     Preferences prefs;
+    bool flag = false;
     if (prefs.begin("test_cfg", true)) {
-      g_test_mode_active = prefs.getBool("test_mode", false);
-      if (g_test_mode_active) {
-        g_test_mode_expire_ms = millis() + 3600000; // 1 hour from boot
-        Serial.println("[TEST_MODE] restored from NVS (1 hour window)");
-      }
+      flag = prefs.getBool("test_mode", false);
       prefs.end();
+    }
+    if (flag) {
+      // Resume the leftover budget rather than re-arming a fresh hour. A stale
+      // RTC magic means we lost power since the flag was set, which ends the
+      // bench session — clear it so the device sleeps normally again.
+      if (g_test_mode_rtc_magic == TEST_MODE_RTC_MAGIC && g_test_mode_remaining_ms > 0) {
+        test_mode_arm(g_test_mode_remaining_ms);
+        Serial.printf("[TEST_MODE] restored from NVS (%lu ms budget left)\n",
+                      (unsigned long)g_test_mode_remaining_ms);
+      } else {
+        test_mode_clear(g_test_mode_rtc_magic == TEST_MODE_RTC_MAGIC
+                            ? "budget exhausted"
+                            : "power cycled since it was set");
+      }
     }
   }
 
@@ -3786,7 +4048,25 @@ void setup() {
   }
 
   // Create UART task (Core 0 - handles TX/RX) early
-  xTaskCreatePinnedToCore(uart_task, "uart_task", 8192, NULL, 2, NULL, 0);
+  // 12KB, not 8KB: uart_task parses JSON on this stack and now also handles the
+  // spool drain handshake and the ack/retransmit service. At 8KB it tripped the
+  // stack canary ("Stack canary watchpoint triggered (uart_task)") once those
+  // handlers were added, which panics the LCD with a corrupted backtrace that
+  // looks like an unrelated fault. The oversized locals are static now too; this
+  // is the headroom so the next handler added here does not repeat it.
+  // Arm the freeze watchdog BEFORE creating uart_task.
+  //
+  // It was originally armed after, and uart_task's self-subscribe then ran while
+  // g_freeze_wdt_ready was still false and returned silently — leaving the one
+  // task whose death bricks the board completely unprotected, while ui_task
+  // (created later) subscribed fine. The boot log said so:
+  //     [FREEZE_WDT] armed timeout=45000ms
+  //     [FREEZE_WDT] subscribe ui_task: ok        <- and no uart_task line
+  // esp_task_wdt_init() only requires the scheduler to be running, which it is
+  // inside setup(), so arming first is safe and removes the ordering trap.
+  lcd_freeze_wdt_init();
+
+  xTaskCreatePinnedToCore(uart_task, "uart_task", 12288, NULL, 2, NULL, 0);
   
   // Initialize app state (double-buffered)
   g_active.count = 0;
@@ -3861,6 +4141,21 @@ void setup() {
 }
 
 void loop() {
+  // Report diagnostics (incl. SD health) on the way UP, not on the way down.
+  //
+  // Pre-sleep reporting does not work: the Sense sleeps on its own schedule and
+  // usually beats the LCD to it, so anything sent during the LCD's sleep
+  // sequence is lost. Measured 2026-08-21 — 19 sent / 1 received, and still
+  // 2 sent / 0 received after moving it earlier within that sequence.
+  //
+  // Driven from loop(), NOT from sense_state_set(): that runs on uart_task, and
+  // an 85ms probe (or a multi-second timeout on a dead card) would stall UART RX
+  // — the LCD has only ~89ms of RX headroom at 115200 before bytes are dropped.
+  if (!s_lcd_diag_sent_this_cycle && sense_state == SENSE_AWAKE && g_ui_initialized) {
+    lcd_sd_health_probe("sense_awake");
+    lcd_send_diag_pre_sleep();
+  }
+
   // safe mode: disable timeout/force-ready flush path (LVGL finish only via SPI done)
   if (lcd_bsp_display_reset_requested()) {
       Serial.println("[LCD_FLUSH] display reset requested (flush failures exceeded threshold)");
@@ -4133,7 +4428,6 @@ void loop() {
       touch_press_y = 0;
       long_press_sent = false;
       ship_ai_touch_active = false;
-      touch_used_to_dismiss_meal = false;
       touch_ignore_until = now + 300;
       scroll_ignore_until = now + 150;
       user_activity_bump("touch_wake_only");
@@ -4151,25 +4445,13 @@ void loop() {
     touch_press_time = now;
     touch_press_x = touch_x;  // Store coordinates for later use
     touch_press_y = touch_y;  // Store coordinates for later use
+    touch_move_max_d2 = 0;    // new gesture: reset the drag tracker
     long_press_sent = false;
     Serial.printf("[TOUCH] Touch pressed at (%d, %d) - stored as (%d, %d)\n", touch_x, touch_y, touch_press_x, touch_press_y);
     haptic_pulse();
     resetActivityTimer();
     
-    // Hide meal result screen if visible (user touched, return to main menu)
-    if (meal_result_screen != NULL && !lv_obj_has_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN)) {
-      Serial.println("[TOUCH] Meal result screen visible - returning to main menu");
-      lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
-      meal_result_shown_time = 0;  // Reset timeout
-      show_ship_main_menu();
-      lv_timer_handler();
-      // Reset activity timer since user is interacting
-      resetActivityTimer();
-      // Mark that this touch was used to dismiss meal result (prevent button toggle)
-      touch_used_to_dismiss_meal = true;
-    } else {
-      // Touch not used to dismiss meal result
-      touch_used_to_dismiss_meal = false;
+    {
       if (ui_screen_state == SCREEN_HOME && ship_menu_screen_state == SHIP_MENU_SCREEN_MAIN) {
         uint16_t check_x = 359 - touch_press_x;
         uint16_t check_y = 359 - touch_press_y;
@@ -4189,6 +4471,16 @@ void loop() {
         }
       }
     }
+  } else if (touch_detected && touch_pressed) {
+    // Finger still down — track how far it has travelled from the press point.
+    // This branch did not exist before, which is precisely why a scroll could
+    // not be told apart from a tap: the release handler dispatches using the
+    // PRESS coordinates, so comparing them to anything downstream always
+    // measured zero movement. Squared distance keeps it integer-only.
+    int dx = (int)touch_x - (int)touch_press_x;
+    int dy = (int)touch_y - (int)touch_press_y;
+    uint32_t d2 = (uint32_t)(dx * dx + dy * dy);
+    if (d2 > touch_move_max_d2) touch_move_max_d2 = d2;
   } else if (!touch_detected && touch_pressed) {
     // Touch just released
     unsigned long press_duration = now - touch_press_time;
@@ -4198,7 +4490,6 @@ void loop() {
       touch_wake_only_pending = false;
       long_press_sent = false;
       ship_ai_touch_active = false;
-      touch_used_to_dismiss_meal = false;
       Serial.printf("[TOUCH] wake_only release duration_ms=%lu\n", press_duration);
       resetActivityTimer();
       example_lvgl_unlock();
@@ -4361,7 +4652,7 @@ void loop() {
           tx_msg_t tx_msg = {};
           strncpy(tx_msg.type, "INPUT_RESET_WIFI", sizeof(tx_msg.type) - 1);
           if (uart_tx_queue != NULL) {
-            xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+            uart_tx_enqueue(&tx_msg, "main");
           }
         }
       } else if (expiry_handle_touch(check_x, check_y)) {
@@ -4576,12 +4867,8 @@ void loop() {
         // Menu not visible - handle normal touch behavior
         // Brief touch - send event to UI task to toggle buttons (LVGL must be called from UI task)
         // BUT: Ignore if we're in delete cooldown period (prevents re-showing buttons after delete)
-        // BUT: Also ignore if touch was used to dismiss meal result screen (prevents unwanted button toggle)
         if (millis() < delete_cooldown_until) {
           Serial.printf("[TOUCH] Brief touch ignored (delete cooldown active)\n");
-        } else if (touch_used_to_dismiss_meal) {
-          Serial.printf("[TOUCH] Brief touch ignored (used to dismiss meal result)\n");
-          touch_used_to_dismiss_meal = false;  // Reset flag
         } else {
           Serial.printf("[TOUCH] Brief touch detected (%lums) - toggling menu buttons\n", press_duration);
           if (app_event_queue != NULL) {
@@ -4595,7 +4882,7 @@ void loop() {
       tx_msg_t tx_msg = {};
       strncpy(tx_msg.type, "INPUT_TOUCH", sizeof(tx_msg.type) - 1);
       if (uart_tx_queue != NULL) {
-        xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+        uart_tx_enqueue(&tx_msg, "main");
       }
     } else if (was_long_press) {
       // Long press was active - send END message
@@ -4603,7 +4890,7 @@ void loop() {
       tx_msg_t tx_msg = {};
       strncpy(tx_msg.type, "INPUT_LONG_PRESS_END", sizeof(tx_msg.type) - 1);
       if (uart_tx_queue != NULL) {
-        xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+        uart_tx_enqueue(&tx_msg, "main");
       }
       
       // Hide solid halo when long press ends
@@ -4617,9 +4904,6 @@ void loop() {
         // Hide list and other screens
         if (list_container != NULL) {
           lv_obj_add_flag(list_container, LV_OBJ_FLAG_HIDDEN);
-        }
-        if (meal_result_screen != NULL) {
-          lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
         }
         // Show status screen with "On it!"
         status_screen_use_text("On it!");
@@ -4678,7 +4962,7 @@ void loop() {
       tx_msg_t tx_msg = {};
       strncpy(tx_msg.type, "INPUT_LONG_PRESS_START", sizeof(tx_msg.type) - 1);
       if (uart_tx_queue != NULL) {
-        xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+        uart_tx_enqueue(&tx_msg, "main");
       }
       
       // Show solid halo for long press
@@ -4780,16 +5064,6 @@ void loop() {
     resetActivityTimer();
   }
   
-  // Check if meal result screen has been showing for 30 seconds - auto-hide it
-  if (meal_result_screen != NULL && !lv_obj_has_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN) &&
-      meal_result_shown_time > 0 && (millis() - meal_result_shown_time) > MEAL_RESULT_TIMEOUT_MS) {
-    Serial.println("[LOOP] Meal result screen timeout (10s) - returning home and sleeping");
-    lv_obj_add_flag(meal_result_screen, LV_OBJ_FLAG_HIDDEN);
-    meal_result_shown_time = 0;  // Reset timeout
-    show_ship_main_menu();
-    enterLightSleep();
-  }
-
   // While waiting for the provisioning QR, periodically keep the Sense awake so
   // its SoftAP stays up and the QR can actually arrive. lcd_force_wake_sense()
   // pulses GPIO39 UNCONDITIONALLY -- even if sense_awake_confirmed is stale (the
@@ -4909,7 +5183,7 @@ void loop() {
         tx_msg_t tx_msg = {};
         strncpy(tx_msg.type, "INPUT_PING", sizeof(tx_msg.type) - 1);
         if (uart_tx_queue != NULL) {
-          xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+          uart_tx_enqueue(&tx_msg, "main");
         }
         last_wifi_keepalive_ms = now_wk;
       }
@@ -4924,7 +5198,7 @@ void loop() {
       tx_msg_t tx_msg = {};
       strncpy(tx_msg.type, "INPUT_PING", sizeof(tx_msg.type) - 1);
       if (uart_tx_queue != NULL) {
-        xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+        uart_tx_enqueue(&tx_msg, "main");
       }
       last_lcd_keepalive_ms = now_keepalive;
     }
@@ -5080,7 +5354,7 @@ void loop() {
       tx_msg_t tx_msg = {};
       strncpy(tx_msg.type, "INPUT_WAKE", sizeof(tx_msg.type) - 1);
       if (uart_tx_queue != NULL) {
-        xQueueSend(uart_tx_queue, &tx_msg, pdMS_TO_TICKS(10));
+        uart_tx_enqueue(&tx_msg, "main");
       }
       refresh_pulse_count++;
       refresh_last_pulse_ms = now;
@@ -5125,6 +5399,23 @@ void loop() {
                     (unsigned long)last_proof_of_life_ms,
                     (unsigned long)pol_age,
                     inflight ? 1 : 0);
+      // Standing guard on the one invariant that governs "is the Sense awake?".
+      //
+      // sense_state and sense_awake_confirmed are two encodings of the same
+      // fact, and they HAD drifted: SYNC_ACK and UI_STATUS set the flag directly
+      // without touching the enum, and sense_state_set() early-returned on an
+      // unchanged state so nothing reconciled them. Two consumers act on the
+      // enum (the wake-probe decision and scroll handling), so the drift changed
+      // behaviour while every log still looked healthy.
+      //
+      // Both sources are fixed, but "fixed" is a claim and this is evidence: if
+      // they ever disagree again the device says so, in the field, instead of it
+      // being inferred from behaviour months later.
+      if (sense_state != SENSE_AWAKE && sense_awake_confirmed) {
+        Serial.printf("[STATE_DISAGREE] state=%s but awake_confirmed=1 "
+                      "(invariant broken - a writer bypassed sense_state_set)\n",
+                      sense_state_name(sense_state));
+      }
     }
   }
 
@@ -5264,7 +5555,7 @@ void loop() {
       goto loop_continue;
     }
     // Test mode: block all sleep for automated testing
-    if (g_test_mode_active && millis() < g_test_mode_expire_ms) {
+    if (g_test_mode_active && (long)(millis() - g_test_mode_expire_ms) < 0) {  // wrap-safe
       log_sleep_decision(now_ms, screen_name, home_age_ms, false, "test_mode");
       goto loop_continue;
     }
@@ -5526,6 +5817,34 @@ void loop() {
       if (now_ms - last_sleep_retry_log_ms > 5000) {
         unsigned long remaining_ms = sleep_retry_allowed_ms - now_ms;
         Serial.printf("[SLEEP] retry_backoff remaining_ms=%lu\n", remaining_ms);
+        last_sleep_retry_log_ms = now_ms;
+      }
+      goto loop_continue;
+    }
+    // An image spool from the Sense is in flight — do not sleep through it.
+    //
+    // THIS is the path that killed every spool attempt. There are two sleep
+    // routes on the LCD: the ui_should_sleep()/[SLEEP_DECISION] evaluation in
+    // lcd_activity.h, and this inactivity timeout in loop(). Guarding only the
+    // former is not enough — measured 2026-08-21, [SLEEP_DECISION] correctly
+    // returned eligible=0 while this path went to sleep anyway:
+    //     [SLEEP_DECISION] screen=HOME eligible=0 reason=home_age_lt_timeout
+    //     [LOOP] Inactivity timeout - entering sleep...
+    //     [IMG_RX] abort job=22 reason=frame_timeout
+    //
+    // A 175KB photo needs ~25s over the 115200 UART (512-byte chunks, one ACK
+    // each) but the LCD idles out in ~10s, so a real capture could NEVER be
+    // spooled — it was reported PHOTO_LOST every time. The Sense already blocks
+    // its own sleep for this ([SLEEP_BLOCK] reason=spool_transfer).
+    // Both directions: RX = Sense->LCD spool of a new capture, TX = LCD->Sense
+    // drain of a previously spooled one. Each takes ~18s at 115200 and each
+    // dies the same way if the LCD sleeps through it:
+    //     RX:    [IMG_RX] abort ... reason=frame_timeout  -> PHOTO_LOST
+    //     drain: [SPOOL_DRAIN] reset state=3 reason=frame_timeout
+    if (g_img_rx_active || g_spool_tx_active) {
+      if (now_ms - last_sleep_retry_log_ms > 5000) {
+        Serial.printf("[SLEEP] deferred: spool %s in flight\n",
+                      g_img_rx_active ? "receive (spool_rx)" : "drain (spool_tx)");
         last_sleep_retry_log_ms = now_ms;
       }
       goto loop_continue;

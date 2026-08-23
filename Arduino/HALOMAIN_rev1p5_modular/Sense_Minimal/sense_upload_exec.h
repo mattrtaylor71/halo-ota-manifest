@@ -1,8 +1,10 @@
 /*
  * sense_upload_exec.h
  *
- * Upload execution: check-in presign, S3 PUT upload, dish result
- * HTTP polling, and UI meal result message.
+ * Upload execution: check-in presign and S3 PUT upload.
+ *
+ * The dish-result HTTP poller and the UI meal-result message were deleted
+ * 2026-08-21 with the nutrition feature. Dish is now a plain capture-and-log.
  *
  * Extracted from Sense_Minimal.ino as modularization Step 16.
  *
@@ -16,319 +18,17 @@
  *     parse_url_parts() from sense_upload.h
  *   - clamp_timeout_ms(), deadline_remaining_ms(), deadline_expired() from sense_http.h
  *   - append_camera_meta_json(), log_camera_meta_for_presign() from sense_camera.h
- *   - scan_ui_status_emit(), clear_active_dish_job(), flow_step(),
- *     dish_upload_pending() from sense_scan.h
+ *   - scan_ui_status_emit(), flow_step() from sense_scan.h
  *   - uart_send_ui_toast() from sense_uart_msg.h
  *   - uart_send_sense_diag() from sense_diag.h
  *   - load_owner_id_or_default(), load_runtime_device_id()
  *   - CHECKIN_API_BASE_URL, CHECKIN_PRESIGN_ENDPOINT, API_KEY, BEARER_TOKEN
- *   - current_job (OpJob), waiting_for_mqtt_result, mqtt_wait_deadline,
- *     current_scan_job_id, current_result_local_job_id, current_result_mode,
- *     DISH_RESULT_TIMEOUT_MS, ACTION_MIN_REMAINING_MS
- *   - g_dish_timing (DishTimingTrace)
- *   - mqtt_clear_result_subscription() from sense_mqtt.h
+ *   - current_job (OpJob), ACTION_MIN_REMAINING_MS
  */
 
 #ifndef SENSE_UPLOAD_EXEC_H
 #define SENSE_UPLOAD_EXEC_H
 
-// Forward declaration (defined later in this header)
-static void uart_send_ui_meal_result(int kcal, const char* meal_summary, int health_score, const char* recommendation, const char* mode, float protein_g, float carbs_g, float fat_g, float confidence, uint32_t job_id);
-
-// ── Dish result URL builder ───────────────────────────────────────
-
-static String build_dish_result_url(const char* user_id, const char* device_id, const char* job_id) {
-  if (!user_id || user_id[0] == '\0' ||
-      !device_id || device_id[0] == '\0' ||
-      !job_id || job_id[0] == '\0') {
-    return String();
-  }
-  return String(CHECKIN_API_BASE_URL) + "/dish/result?user_id=" + String(user_id) +
-         "&device_id=" + String(device_id) +
-         "&job_id=" + String(job_id);
-}
-
-// ── Dish result poll delay ────────────────────────────────────────
-
-static uint32_t dish_result_poll_delay_ms(const JsonDocument& doc, uint32_t fallback_ms) {
-  uint32_t poll_after_ms = doc["poll_after_ms"] | fallback_ms;
-  if (poll_after_ms < 250) {
-    poll_after_ms = 250;
-  }
-  if (poll_after_ms > 5000) {
-    poll_after_ms = 5000;
-  }
-  return poll_after_ms;
-}
-
-// ── Wait for dish result via HTTP polling ─────────────────────────
-
-static bool wait_for_dish_result_http(const UploadJob& job,
-                                      const PresignReply& presign,
-                                      uint32_t job_deadline_ms) {
-  auto clear_wait_state = [&]() {
-    waiting_for_mqtt_result = false;
-    mqtt_wait_deadline = 0;
-    current_scan_job_id = "";
-    mqtt_clear_result_subscription();
-  };
-
-  char owner_id[64] = {0};
-  char device_id[32] = {0};
-  load_owner_id_or_default(owner_id, sizeof(owner_id));
-  load_runtime_device_id(device_id, sizeof(device_id));
-
-  String result_url = presign.result_url;
-  if (result_url == "null") {
-    result_url = "";
-  }
-  if (result_url.length() == 0) {
-    result_url = build_dish_result_url(owner_id, device_id, presign.job_id.c_str());
-  }
-  if (result_url.length() == 0) {
-    Serial.println("[RESULT_HTTP] missing result_url");
-    scan_ui_status_emit("ERROR", "Dish result URL missing", job.mode, job.job_id, true);
-    diag_record_error("result_http", -1, "missing_result_url");
-    diag_record_action_event("result", job.mode, "err", "missing_url", -1);
-    clear_wait_state();
-    clear_active_dish_job(job.job_id, "http_missing_result_url");
-    return false;
-  }
-
-  uint32_t remaining_ms = deadline_remaining_ms(job_deadline_ms);
-  uint32_t max_wait_ms = (remaining_ms < DISH_RESULT_TIMEOUT_MS) ? remaining_ms : DISH_RESULT_TIMEOUT_MS;
-  if (max_wait_ms < ACTION_MIN_REMAINING_MS) {
-    scan_ui_status_emit("ERROR", "Analysis timeout", job.mode, job.job_id, true);
-    diag_record_error("result_http", -1, "timeout_budget");
-    diag_record_action_event("result", job.mode, "err", "timeout_budget", -1);
-    clear_wait_state();
-    clear_active_dish_job(job.job_id, "http_timeout_budget");
-    return false;
-  }
-
-  clear_wait_state();
-  waiting_for_mqtt_result = true;  // Reused as generic dish-result wait state.
-  mqtt_wait_deadline = millis() + max_wait_ms;
-  scan_ui_status_emit("RESULT_WAITING", "AI working its magic", job.mode, job.job_id, false);
-  flow_step(job.job_id, "RESULT_WAITING");
-  g_dish_timing.mqtt_refresh_start_ms = millis();
-  g_dish_timing.mqtt_refresh_end_ms = millis();
-  g_dish_timing.result_wait_start_ms = millis();
-
-  const uint32_t local_job_id = current_result_local_job_id ? current_result_local_job_id : job.job_id;
-  const char* result_mode = current_result_mode[0] ? current_result_mode : job.mode;
-  bool had_fast_result = false;
-  bool fast_emitted = false;
-  uint32_t wait_start = millis();
-
-  Serial.printf("[RESULT_HTTP] start job_id=%s timeout_ms=%lu url=%s\n",
-                presign.job_id.c_str(),
-                (unsigned long)max_wait_ms,
-                result_url.c_str());
-  Serial.printf("[TIMING][DISH] job_id=%lu result_http_setup_ms=%lu upload_to_wait_ms=%lu wait_budget_ms=%lu\n",
-                (unsigned long)job.job_id,
-                (unsigned long)(g_dish_timing.mqtt_refresh_end_ms - g_dish_timing.mqtt_refresh_start_ms),
-                (unsigned long)(g_dish_timing.result_wait_start_ms - g_dish_timing.put_end_ms),
-                (unsigned long)max_wait_ms);
-
-  while (waiting_for_mqtt_result &&
-         !deadline_expired(job_deadline_ms) &&
-         (millis() - wait_start) < max_wait_ms) {
-    int http_code = 0;
-    String resp_body;
-    if (!http_get_with_retries(result_url.c_str(),
-                               http_code,
-                               resp_body,
-                               "DISH_RESULT",
-                               API_KEY,
-                               BEARER_TOKEN,
-                               job.job_id,
-                               job_deadline_ms)) {
-      if (http_code == 404) {
-        scan_ui_status_emit("ERROR", "Unknown dish job", job.mode, job.job_id, true);
-        diag_record_error("result_http", http_code, "unknown_job");
-        diag_record_action_event("result", job.mode, "err", "http_404", http_code);
-        clear_wait_state();
-        clear_active_dish_job(job.job_id, "http_unknown_job");
-        return false;
-      }
-      if (http_code == 401 || http_code == 403) {
-        scan_ui_status_emit("ERROR", "Dish auth failed", job.mode, job.job_id, true);
-        diag_record_error("result_http", http_code, "auth");
-        diag_record_action_event("result", job.mode, "err", "http_auth", http_code);
-        clear_wait_state();
-        clear_active_dish_job(job.job_id, "http_auth_error");
-        return false;
-      }
-      if (http_code >= 400 && http_code < 500) {
-        scan_ui_status_emit("ERROR", "Dish result failed", job.mode, job.job_id, true);
-        diag_record_error("result_http", http_code, "client_error");
-        diag_record_action_event("result", job.mode, "err", "http_client", http_code);
-        clear_wait_state();
-        clear_active_dish_job(job.job_id, "http_client_error");
-        return false;
-      }
-
-      uint32_t retry_delay_ms = clamp_timeout_ms(had_fast_result ? 1500UL : 1000UL, job_deadline_ms);
-      Serial.printf("[RESULT_HTTP] transient_error code=%d delay_ms=%lu had_fast=%d\n",
-                    http_code,
-                    (unsigned long)retry_delay_ms,
-                    had_fast_result ? 1 : 0);
-      if (retry_delay_ms == 0) {
-        break;
-      }
-      vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
-      continue;
-    }
-
-    DynamicJsonDocument doc(6144);
-    DeserializationError err = deserializeJson(doc, resp_body);
-    if (err) {
-      uint32_t retry_delay_ms = clamp_timeout_ms(had_fast_result ? 1500UL : 1000UL, job_deadline_ms);
-      Serial.printf("[RESULT_HTTP] parse_error=%s delay_ms=%lu\n",
-                    err.c_str(),
-                    (unsigned long)retry_delay_ms);
-      if (retry_delay_ms == 0) {
-        break;
-      }
-      vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
-      continue;
-    }
-
-    const char* state = doc["state"] | "";
-    const char* phase = doc["phase"] | "";
-    const char* latest_phase = doc["latest_phase"] | "";
-    const char* pipeline_stage = doc["pipeline_stage"] | "";
-    bool is_terminal = doc["is_terminal"] | false;
-    bool is_pending = strcmp(state, "pending") == 0 || strcmp(phase, "pending") == 0;
-    bool is_fast = strcmp(phase, "fast") == 0 ||
-                   (!is_terminal && strcmp(latest_phase, "fast") == 0 && strcmp(state, "ready") == 0);
-    bool is_final = strcmp(phase, "final") == 0 ||
-                    is_terminal ||
-                    strcmp(latest_phase, "final") == 0 ||
-                    (strcmp(state, "ready") == 0 && strcmp(pipeline_stage, "DONE") == 0);
-    uint32_t poll_after_ms = dish_result_poll_delay_ms(doc, is_fast ? 1500UL : 1000UL);
-
-    Serial.printf("[RESULT_HTTP] job_id=%s state=%s phase=%s latest=%s terminal=%d stage=%s poll_after_ms=%lu\n",
-                  presign.job_id.c_str(),
-                  state,
-                  phase,
-                  latest_phase,
-                  is_terminal ? 1 : 0,
-                  pipeline_stage,
-                  (unsigned long)poll_after_ms);
-
-    if (is_pending) {
-      vTaskDelay(pdMS_TO_TICKS(poll_after_ms));
-      continue;
-    }
-
-    if (!is_fast && !is_final) {
-      const char* msg = doc["message"] | "";
-      if (msg && msg[0]) {
-        uart_send_ui_toast(msg);
-      }
-      vTaskDelay(pdMS_TO_TICKS(poll_after_ms));
-      continue;
-    }
-
-    const char* meal_summary = doc["meal_summary"] | "";
-    const char* summary = doc["summary"] | "";
-    const char* dish_name = doc["dish_name"] | "";
-    String summary_text;
-    if (meal_summary && meal_summary[0]) {
-      summary_text = meal_summary;
-    } else if (summary && summary[0]) {
-      summary_text = summary;
-    } else if (dish_name && dish_name[0]) {
-      summary_text = dish_name;
-    }
-
-    int calories = doc["calories"] | 0;
-    if (doc["calories"].isNull()) {
-      calories = doc["kcal"] | 0;
-    }
-    float protein_g = doc["protein_g"] | 0.0f;
-    float carbs_g = doc["carbs_g"] | 0.0f;
-    float fat_g = doc["fat_g"] | 0.0f;
-    float confidence = doc["confidence"] | 0.0f;
-    int health_score = doc["health_score"] | 0;
-    const char* recommendation = doc["recommendation"] | "";
-
-    if (summary_text.length() > 0 && (is_final || !fast_emitted)) {
-      uart_send_ui_meal_result(calories,
-                               summary_text.c_str(),
-                               health_score,
-                               (recommendation && recommendation[0]) ? recommendation : NULL,
-                               result_mode,
-                               protein_g,
-                               carbs_g,
-                               fat_g,
-                               confidence,
-                               local_job_id);
-    } else if (summary_text.length() == 0) {
-      const char* msg = doc["message"] | "";
-      if (msg && msg[0]) {
-        uart_send_ui_toast(msg);
-      }
-    }
-
-    if (is_fast) {
-      had_fast_result = true;
-      if (summary_text.length() > 0) {
-        fast_emitted = true;
-      }
-      diag_record_action_event("result", job.mode, "ok", "http_fast", 0);
-      uint32_t result_now_ms = millis();
-      Serial.printf("[TIMING][DISH] job_id=%lu result_http_fast total_ms=%lu post_upload_to_result_ms=%lu result_wait_loop_ms=%lu ui_wait_ms=%lu\n",
-                    (unsigned long)g_dish_timing.sense_job_id,
-                    (unsigned long)(g_dish_timing.upload_start_ms ? (result_now_ms - g_dish_timing.upload_start_ms) : 0),
-                    (unsigned long)(g_dish_timing.put_end_ms ? (result_now_ms - g_dish_timing.put_end_ms) : 0),
-                    (unsigned long)(g_dish_timing.result_wait_start_ms ? (result_now_ms - g_dish_timing.result_wait_start_ms) : 0),
-                    (unsigned long)(g_dish_timing.ui_wait_start_ms ? (result_now_ms - g_dish_timing.ui_wait_start_ms) : 0));
-      clear_wait_state();
-      clear_active_dish_job(job.job_id, "http_fast_result");
-      Serial.println("[RESULT_HTTP] dish result processed (fast)");
-      return true;
-    }
-
-    diag_record_action_event("result", job.mode, "ok", "http_final", 0);
-    uint32_t result_now_ms = millis();
-    Serial.printf("[TIMING][DISH] job_id=%lu result_http_final total_ms=%lu post_upload_to_result_ms=%lu result_wait_loop_ms=%lu ui_wait_ms=%lu\n",
-                  (unsigned long)g_dish_timing.sense_job_id,
-                  (unsigned long)(g_dish_timing.upload_start_ms ? (result_now_ms - g_dish_timing.upload_start_ms) : 0),
-                  (unsigned long)(g_dish_timing.put_end_ms ? (result_now_ms - g_dish_timing.put_end_ms) : 0),
-                  (unsigned long)(g_dish_timing.result_wait_start_ms ? (result_now_ms - g_dish_timing.result_wait_start_ms) : 0),
-                  (unsigned long)(g_dish_timing.ui_wait_start_ms ? (result_now_ms - g_dish_timing.ui_wait_start_ms) : 0));
-    clear_wait_state();
-    clear_active_dish_job(job.job_id, "http_result_final");
-    Serial.println("[RESULT_HTTP] dish result processed (final)");
-    return true;
-  }
-
-  uint32_t timeout_now_ms = millis();
-  Serial.printf("[TIMING][DISH] job_id=%lu timeout total_ms=%lu post_upload_wait_ms=%lu result_wait_loop_ms=%lu ui_wait_ms=%lu had_fast=%d\n",
-                (unsigned long)job.job_id,
-                (unsigned long)(timeout_now_ms - g_dish_timing.upload_start_ms),
-                (unsigned long)(timeout_now_ms - g_dish_timing.put_end_ms),
-                (unsigned long)(timeout_now_ms - g_dish_timing.result_wait_start_ms),
-                (unsigned long)(g_dish_timing.ui_wait_start_ms ? (timeout_now_ms - g_dish_timing.ui_wait_start_ms) : 0),
-                had_fast_result ? 1 : 0);
-  clear_wait_state();
-  if (had_fast_result) {
-    diag_record_action_event("result", job.mode, "ok", "http_fast_timeout", 0);
-    clear_active_dish_job(job.job_id, "http_fast_timeout");
-    Serial.println("[RESULT_HTTP] final timeout -> keeping last fast result");
-    return true;
-  }
-
-  scan_ui_status_emit("ERROR", "Analysis timeout", job.mode, job.job_id, true);
-  diag_record_error("result_http", -1, "timeout");
-  diag_record_action_event("result", job.mode, "err", "timeout", -1);
-  clear_active_dish_job(job.job_id, "http_result_timeout");
-  Serial.println("[RESULT_HTTP] dish result timeout");
-  return false;
-}
 
 // ── Check-in presign ──────────────────────────────────────────────
 
@@ -426,8 +126,6 @@ static bool put_to_presigned_url(const String& url,
                                  size_t len,
                                  const char* contentType,
                                  uint32_t job_id,
-                                 bool allow_abort,
-                                 bool* aborted_for_dish,
                                  uint32_t deadline_ms,
                                  bool* aborted_for_budget) {
   Serial.printf("[UPLOAD] Starting PUT to S3, size: %u bytes\n", len);
@@ -437,27 +135,16 @@ static bool put_to_presigned_url(const String& url,
   // contiguous DMA region during TLS handshake. Camera is not used during
   // uploads; re-acquire at function exit via RAII guard.
   bool dma_was_reserved = (g_camera_dma_reserve != nullptr);
-  if (dma_was_reserved) {
-    heap_caps_free(g_camera_dma_reserve);
-    g_camera_dma_reserve = nullptr;
-    Serial.println("[UPLOAD] Camera DMA reservation released for TLS headroom");
-  }
+  if (dma_was_reserved) camera_dma_reserve_release("upload_put");
   // RAII guard: re-acquire DMA reservation on any return path
   struct DmaGuard {
     bool should_reacquire;
     ~DmaGuard() {
-      if (should_reacquire && !g_camera_dma_reserve) {
-        g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
-            CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-        if (g_camera_dma_reserve) {
-          Serial.printf("[UPLOAD] Camera DMA reservation re-acquired at %p\n", g_camera_dma_reserve);
-        }
+      if (should_reacquire) {
+        camera_dma_reserve_acquire("upload_put");
       }
     }
   } dma_guard{dma_was_reserved};
-  if (aborted_for_dish) {
-    *aborted_for_dish = false;
-  }
   if (aborted_for_budget) {
     *aborted_for_budget = false;
   }
@@ -467,13 +154,6 @@ static bool put_to_presigned_url(const String& url,
     }
     presign_set_error_text("Upload timeout");
     diag_record_error("upload_put", -1, "deadline_expired");
-    return false;
-  }
-  if (allow_abort && dish_upload_pending()) {
-    if (aborted_for_dish) {
-      *aborted_for_dish = true;
-    }
-    Serial.println("[UPLOAD] abort before connect (dish preempt)");
     return false;
   }
   uint32_t effective_job = job_id;
@@ -510,7 +190,31 @@ static bool put_to_presigned_url(const String& url,
   WiFiClientSecure tls;
   for (put_attempt = 1; put_attempt <= put_max_attempts; put_attempt++) {
     tls.stop();
-    tls.setInsecure();
+    // Validate the peer for the photo upload too.
+    //
+    // This was setInsecure() while presign, MQTT and the OTA paths all validated
+    // — the one leg carrying user photo data was the one not checking who it was
+    // talking to. The presigned URL is obtained over a validated channel, so this
+    // was not wide open, but "the URL is secret" is not peer authentication.
+    //
+    // tls_configure() is the same helper the rest of the HTTP path uses: cert
+    // bundle when available, else the pinned Amazon Root CA 1 (byte-identical to
+    // the OTA/provisioning cert). S3 presigned URLs are Amazon-fronted, so that
+    // chain validates.
+    //
+    // Heap is logged either side because THIS path has a heap-exhaustion panic
+    // history (the AES-DMA fault fixed in 6.1.815) and validation costs more than
+    // setInsecure. If free heap or the largest DMA block collapses here, revert.
+    const uint32_t heap_before = ESP.getFreeHeap();
+    // Peer validation stays ON. A/B tested 2026-08-21: reverting this to
+    // setInsecure() made camera init failures WORSE (45 vs 20 baseline), so the
+    // cert bundle is not what fragments the DMA region. No reason to weaken it.
+    tls_configure(tls, "upload_put");
+    Serial.printf("[UPLOAD_TLS] validated heap_before=%lu after=%lu delta=%ld dma_largest=%u\n",
+                  (unsigned long)heap_before,
+                  (unsigned long)ESP.getFreeHeap(),
+                  (long)ESP.getFreeHeap() - (long)heap_before,
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
     uint32_t tls_timeout = clamp_timeout_ms(60000, deadline_ms);
     if (tls_timeout < ACTION_MIN_REMAINING_MS) {
       if (aborted_for_budget) {
@@ -574,17 +278,6 @@ static bool put_to_presigned_url(const String& url,
         Serial.println("[UPLOAD] abort during PUT (foreground user action)");
         diag_record_error("upload_put", -1, "foreground_preempt");
         uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "foreground_preempt");
-        tls.stop();
-        http_queue_unlock("UPLOAD_PUT", effective_job);
-        return false;
-      }
-      if (allow_abort && dish_upload_pending()) {
-        if (aborted_for_dish) {
-          *aborted_for_dish = true;
-        }
-        Serial.println("[UPLOAD] abort during PUT (dish preempt)");
-        diag_record_error("upload_put", -1, "dish_preempt");
-        uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "dish_preempt");
         tls.stop();
         http_queue_unlock("UPLOAD_PUT", effective_job);
         return false;
@@ -672,34 +365,5 @@ static bool put_to_presigned_url(const String& url,
   return success;
 }
 
-// ── UI meal result message ────────────────────────────────────────
-
-static void uart_send_ui_meal_result(int kcal, const char* meal_summary, int health_score, const char* recommendation, const char* mode, float protein_g, float carbs_g, float fat_g, float confidence, uint32_t job_id) {
-  StaticJsonDocument<1024> doc;
-  doc["ver"] = PROTOCOL_VERSION;
-  doc["type"] = "UI_MEAL_RESULT";
-  doc["msg_id"] = get_next_msg_id();
-  doc["ts"] = millis();
-  doc["calories"] = kcal;
-  doc["protein_g"] = protein_g;
-  doc["carbs_g"] = carbs_g;
-  doc["fat_g"] = fat_g;
-  doc["confidence"] = confidence;
-  if (meal_summary != NULL && strlen(meal_summary) > 0) {
-    doc["meal_summary"] = meal_summary;
-  }
-  if (recommendation != NULL && strlen(recommendation) > 0) {
-    doc["recommendation"] = recommendation;
-  }
-  if (mode != NULL && strlen(mode) > 0) {
-    doc["mode"] = mode;
-  }
-  if (job_id != 0) {
-    doc["job_id"] = job_id;
-  }
-  String output;
-  serializeJson(doc, output);
-  uart_send_json(output.c_str());
-}
 
 #endif // SENSE_UPLOAD_EXEC_H

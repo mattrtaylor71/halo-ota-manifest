@@ -9,7 +9,7 @@
  * Prerequisites (must be declared before #include "sense_op_queue.h"):
  *   - freertos/FreeRTOS.h, freertos/semphr.h, freertos/task.h
  *   - OpJob, UploadJob structs from sense_ops.h
- *   - op_queue, upload_queue, upload_queue_dish queue handles
+ *   - op_queue, upload_queue queue handles
  *   - foreground_active, scan_ui_inflight, dish_scan_inflight
  *   - current_job (OpJob)
  *   - last_input_wake_ms, last_user_activity_ms, last_lcd_communication
@@ -94,14 +94,34 @@ static bool foreground_priority_reason_is_transient(const char* reason) {
 
 // ── Foreground wait / park / requeue ──────────────────────────────
 
+// True while the worker is holding a DEQUEUED job in its own stack frame.
+//
+// Without this the job is invisible: it is out of the queue, not parked, and not
+// inflight, so the sleep flush saw "nothing pending", logged DRAINED and slept --
+// and deep sleep wipes the PSRAM the image lives in. Measured 2026-08-21:
+// 15 captures, 12 uploads, 3 destroyed exactly this way, with every gate green.
+static volatile bool upload_worker_holding_in_place = false;
+
 static bool upload_wait_for_foreground_window(const UploadJob& job,
                                               const char* initial_reason,
                                               uint32_t max_wait_ms) {
   if (!foreground_priority_reason_is_transient(initial_reason)) {
     return false;
   }
+  // The sleep flush IS the moment to upload. The transient reasons are all
+  // proxies for "the user is mid-interaction", and the loudest of them,
+  // recent_lcd_link, is guaranteed true during pre-sleep because the sleep
+  // handshake is itself LCD traffic -- so this held almost every single-capture
+  // session right at the point it needed to drain.
+  if (g_upload_flush_requested) {
+    return true;
+  }
   unsigned long start_ms = millis();
   unsigned long last_log_ms = 0;
+  struct HoldFlag {
+    HoldFlag()  { upload_worker_holding_in_place = true;  }
+    ~HoldFlag() { upload_worker_holding_in_place = false; }
+  } hold_flag;
   while ((millis() - start_ms) < max_wait_ms) {
     const char* active_reason = NULL;
     if (!foreground_priority_active(millis(), &active_reason)) {
@@ -109,6 +129,9 @@ static bool upload_wait_for_foreground_window(const UploadJob& job,
     }
     if (!foreground_priority_reason_is_transient(active_reason)) {
       return false;
+    }
+    if (g_upload_flush_requested) {
+      return true;   // sleep flush opened while we were holding
     }
     unsigned long now_ms = millis();
     if (last_log_ms == 0 || (now_ms - last_log_ms) >= 700UL) {
