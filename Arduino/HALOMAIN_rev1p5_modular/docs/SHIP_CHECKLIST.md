@@ -235,6 +235,38 @@ the Sense port vanishing is the only honest sleep signal.
 
 ## 6. Known-open at time of writing
 
+- **§5 on-device sanity re-run on 6.2.0 (2026-08-22): PASS on every fault gate.**
+  Device reports `fw=6.2.0`. 9 captures / 9 enqueued / device `up_ok` 9 /
+  `up_fail` 0 / dropped 0 / refusals 0 / UI strand events 0, every flush
+  `DRAINED`. 0 panics, 0 stack canary, 0 camera-init failures, 0 `killing WiFi`,
+  0 aborts. `linkstats failed=0 overflow=0`. OTA channel resolves to
+  **halo-ota-prod**.
+
+  `ship_sanity.py` reported "7/12 returned to menu", which is a **harness
+  scoring artifact, not a UI fault**: the LCD logged 14 `to=SHIP_MAIN_MENU`
+  transitions and zero `UI_STRAND` events, and several failures carry
+  `done_at=0.3s` — the harness matching a stale DONE left in its buffer rather
+  than the capture it just injected. Score §5 against the Sense's own
+  `enq`/`up_ok` per boot and the LCD's strand counter; treat the 12/12 tally as
+  advisory until the harness is fixed.
+
+- **`[FREEZE_WDT] armed` and `subscribe uart_task` never appear in the boot log**,
+  while `subscribe ui_task: ok` does. This is a LOGGING gap, not a missing
+  watchdog: `subscribe` returns silently unless `g_freeze_wdt_ready` is true, so
+  the ui_task line proves `init()` succeeded — and `uart_task` is created AFTER
+  `lcd_freeze_wdt_init()`, so it cannot have hit the not-ready path. The two
+  missing lines are printed before USB CDC enumerates and are dropped by
+  `Serial.setTxTimeoutMs(0)`. Worth re-emitting the watchdog state once USB is up
+  so §5 can verify it instead of inferring it.
+
+- **After a flash, both boards stay busy for 5–10 minutes** and the Sense does
+  **not enumerate USB** while it does. The LCD sits in `state=OTA
+  reason=ota_stay_awake` receiving `MAINT_KEEPALIVE`. Taps in this window look
+  like they "do nothing" — they do not: the LCD logs `[TOUCH] Touch pressed` and
+  `sense_state=AWAKE`, so there is simply nothing to wake. **Judging awake/asleep
+  by the USB port is wrong in this state.** Wait for both ports to disappear
+  before starting any harness.
+
 - **Full 30-cycle soak PASSES on the current build (2026-08-22).**
   `captures 30 / device up_ok 30 / up_fail 0 / dropped 0 / hold_in_place 0 /
   panics 0 / camera-init failures 0 / flushes DRAINED 30 / slept 30`.
