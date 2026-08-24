@@ -50,7 +50,7 @@ Every failing check prints its reason. Common ones:
 | `reports None, expected 8MB — NOT writing` | Could not confirm which board is which, so it refused to flash. Replug and retry. |
 | `not within 420s` | Post-flash maintenance cycle ran long. Retry with `--no-flash`. |
 | `LCD write failed` | The LCD slept mid-test. It retries automatically; if persistent, replug. |
-| `Captures present in S3 — 0 new` | Photos never reached the cloud. Check WiFi and the AWS profile. |
+| `Captures present in S3 — 0 new` | Photos never reached the cloud. Check WiFi and the AWS profile. If the device log shows `PUT status: 200`, the photos DID upload and the tester is looking in the wrong bucket — check which bucket the presign returned. |
 
 Reports and images: `tools/eol_results/` (one JSON + serial log per unit).
 
@@ -64,3 +64,17 @@ Reports and images: `tools/eol_results/` (one JSON + serial log per unit).
 - `tools/factory_test/` (localhost:9095) is the deeper bench rig — per-wire
   INT/UART checks, PWDN heat safety, EOL test firmware. Use it when
   investigating a hardware fault; use this for production flow.
+
+## Backend went to production 2026-08-24
+
+The presign API now hands back `trepo-grocery-{uploads,discards}-prod`. The
+station checks prod **and** dev, so a unit on older firmware still verifies.
+
+This bit once: a healthy unit reported FAIL with "0 new originals" while its own
+log showed three `PUT status: 200`. The uploads were fine — they had gone to the
+new prod buckets and the tester was still watching dev. **If the device says it
+uploaded, check which bucket the presign returned before suspecting the unit.**
+
+Related: identity is read from the SENSE only. The LCD reports its own
+`device_id`, and S3 keys are built from the Sense's — mixing them made a run
+report the LCD's id and then find nothing filed under it.

@@ -36,7 +36,12 @@ SENSE_SKETCH = f"{REPO}/halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.i
 LCD_SKETCH = f"{REPO}/halo_ota_demo/firmware/halo_lcd_prod/halo_lcd_prod.ino"
 SENSE_BUILD, LCD_BUILD = "/tmp/halo_sense_ship", "/tmp/halo_lcd_ship"
 AWS_PROFILE = "trepo"
-BUCKETS = ["trepo-grocery-uploads-dev", "trepo-grocery-discards-dev"]
+# The backend moved to production on 2026-08-24 (buckets created 11:07 PDT) and
+# the presign API now hands back -prod URLs. Both sets are checked: a unit on
+# older firmware, or a backend rollback, still verifies instead of false-failing.
+# This tester reported FAIL on a perfectly good unit for exactly that reason.
+BUCKETS = ["trepo-grocery-uploads-prod", "trepo-grocery-discards-prod",
+           "trepo-grocery-uploads-dev", "trepo-grocery-discards-dev"]
 OUT = os.path.join(REPO, "tools", "eol_results")
 
 steps = []
@@ -70,6 +75,26 @@ def identify(exclude=()):
         elif sz == "16MB" and "lcd" not in found:
             found["lcd"] = p
     return found
+
+def nudge_lcd(port):
+    """Reset the LCD by opening its port with DTR asserted.
+
+    After a flash the LCD pins ITSELF awake (state=OTA, reason=ota_stay_awake)
+    and the Sense is awake-but-not-enumerating behind it, so the unit is
+    unreachable: there is no Sense port to talk to, and a tap does nothing
+    because nothing is asleep. Resetting the LCD drops it out of that state and
+    the unit settles into normal sleep, after which a tap works. Right after a
+    flash this reset costs nothing.
+    """
+    if not port or not os.path.exists(port):
+        return False
+    try:
+        h = serial.Serial(); h.port = port; h.baudrate = 115200
+        h.timeout = 1; h.open(); time.sleep(1.5); h.close()   # DTR asserted = reset
+        return True
+    except Exception:
+        return False
+
 
 # ───────────────────────── serial plumbing ─────────────────────────
 class Tap:
@@ -233,15 +258,24 @@ def main():
     print("\n[1] identify boards (by flash size, not port number)")
     ports = identify(exclude=(actuator,) if actuator else ())
     if "sense" not in ports or "lcd" not in ports:
-        print("     incomplete — tapping to wake and retrying")
+        print("     incomplete — waking and retrying")
         try:
             import tapctl
             tp = tapctl.Tapper(verbose=False)
-            if tp.sketch_alive():
-                for _ in range(6):
+            alive = tp.sketch_alive()
+            for i in range(8):
+                # If the LCD is present but the Sense is not, the unit is very
+                # likely mid maintenance-cycle with the LCD holding itself awake.
+                # Tapping cannot fix that; resetting the LCD can.
+                if "lcd" in ports and "sense" not in ports and i % 2 == 1:
+                    print("     LCD up but Sense missing — resetting LCD")
+                    nudge_lcd(ports["lcd"]); time.sleep(10)
+                elif alive:
                     tp.stroke_once(); time.sleep(8)
-                    ports = identify(exclude=(actuator,) if actuator else ())
-                    if "sense" in ports and "lcd" in ports: break
+                else:
+                    time.sleep(8)
+                ports = identify(exclude=(actuator,) if actuator else ())
+                if "sense" in ports and "lcd" in ports: break
             tp.close()
         except Exception as e:
             print(f"     no actuator available ({e}) — tap the screen or replug")
@@ -307,40 +341,59 @@ def main():
 
     up = os.path.exists(sense_port)
     if not up:
-        print("     waiting for the post-flash maintenance cycle to finish...")
+        print("     waiting out the post-flash maintenance cycle...")
         t0 = time.time()
-        settled = False
+        tp = None
+        try:
+            import tapctl
+            _c = tapctl.Tapper(verbose=False)
+            tp = _c if _c.sketch_alive() else None
+        except Exception:
+            tp = None
+        last_tap = last_nudge = -999.0
         while time.time() - t0 < a.timeout_wake:
             if os.path.exists(sense_port):
-                up = True; break                      # came back on its own
-            if not unit_ports():
-                settled = True; break                 # asleep -> tappable
+                up = True; break
+            now = time.time() - t0
+            # Tap on a timer rather than waiting for a "settled" state.
+            # During maintenance the Sense is awake-but-not-enumerated, so a tap
+            # does nothing -- but the moment maintenance ends and it sleeps, a
+            # tap is exactly what brings it back. Tapping early costs nothing.
+            if tp and now - last_tap > 20:
+                try: tp.stroke_once()
+                except Exception: pass
+                last_tap = now
+            # The LCD pins ITSELF awake (state=OTA reason=ota_stay_awake) for the
+            # whole window, so "both boards asleep" NEVER happens -- the previous
+            # settle check waited for that and hung the station for 420s. Opening
+            # the LCD's port asserts DTR and resets it, dropping it out of that
+            # state; right after a flash that reset costs nothing.
+            if now > 45 and now - last_nudge > 75 and os.path.exists(lcd_port):
+                print(f"     {now:.0f}s — resetting the LCD out of ota_stay_awake")
+                nudge_lcd(lcd_port)
+                last_nudge = now
             time.sleep(2)
-        if settled:
-            print(f"     unit settled after {time.time()-t0:.0f}s — tapping to wake")
-            try:
-                import tapctl
-                tp = tapctl.Tapper(verbose=False)
-                for _ in range(6):
-                    tp.stroke_once()
-                    w = time.time()
-                    while time.time() - w < 12:
-                        if os.path.exists(sense_port): up = True; break
-                        time.sleep(0.25)
-                    if up: break
-                tp.close()
-            except Exception:
-                pass
+        if tp:
+            try: tp.close()
+            except Exception: pass
     step("Sense enumerated", up, sense_port if up else f"not within {a.timeout_wake}s")
     if not up:
         return summarise(label, None, open_image=False)
     sen, lcd = Tap(sense_port), Tap(lcd_port)
     time.sleep(6)
 
-    both = sen.text() + lcd.text()
-    fw = sorted(set(re.findall(r"fw=([0-9]+\.[0-9]+\.[0-9]+)", both)))
+    # Read identity from the SENSE ONLY. The LCD reports its own device_id, and
+    # S3 keys are built from the Sense's -- taking whichever matched first made a
+    # run report the LCD's id and then find "0 new objects" for it.
+    sense_txt = sen.text()
+    fw = sorted(set(re.findall(r"fw=([0-9]+\.[0-9]+\.[0-9]+)", sense_txt)))
+    if not fw:
+        # A freshly reset board may not reprint its banner; ask it.
+        sen.send({"ver": 1, "type": "INPUT_PING", "msg_id": 4242, "ts": 1000})
+        sen.wait(r"fw=[0-9]", 12, 0)
+        fw = sorted(set(re.findall(r"fw=([0-9]+\.[0-9]+\.[0-9]+)", sen.text())))
     step("Firmware version reported", bool(fw), ", ".join(fw) or "not seen")
-    dev = re.search(r"device_id=(halo-[0-9a-z-]+)", both)
+    dev = re.search(r"device_id=(halo-[0-9a-z-]+)", sen.text())
     device_id = dev.group(1) if dev else None
     step("Device ID", bool(device_id), device_id or "not seen yet")
 
@@ -421,7 +474,7 @@ def main():
     step("Device upload count", upfail == 0, f"up_ok={upok} up_fail={upfail}")
 
     if not device_id:
-        m = re.search(r"device_id=(halo-[0-9a-z-]+)", txt)
+        m = re.search(r"device_id=(halo-[0-9a-z-]+)", txt)   # txt = Sense log
         device_id = m.group(1) if m else None
 
     # 7. S3 truth --------------------------------------------------------
