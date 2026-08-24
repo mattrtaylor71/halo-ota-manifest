@@ -235,6 +235,30 @@ the Sense port vanishing is the only honest sleep signal.
 
 ## 6. Known-open at time of writing
 
+- **Stress tests PASS on 6.2.0 (2026-08-24).** Two abuse patterns, both clean.
+
+  *Burst, one boot, past the deferral high-water.* 11 Dish captures back to back
+  in a **single boot**: `captures 11 / up_ok 11 / up_fail 0 / dropped 0 /
+  spooled 0 / camera-init failures 0 / panics 0`, accounted 11/11. The queue
+  climbed 1→10, the high-water released at depth 8 exactly as designed, and
+  **4 presigns + 3 PUTs ran mid-session** — yet `dma_largest` held at 17,396 on
+  every sample and there were zero `not held at camera_init` warnings. The 12th
+  capture was honestly REFUSED at `q=10` (`UPLOAD_QUEUE_MAX`), which is correct:
+  refuse, never silently drop.
+
+  **This supersedes "one reliable capture per boot" (§6 camera entry).** That
+  limit is gone. Mid-session TLS no longer poisons the camera's DMA block.
+
+  *Input flood + teardown taps.* 24 menu selects fired in ~1s bursts during
+  active captures: 3 captures taken, **21 honest refusals**, 0 lost, 0 panics.
+  4 taps delivered during sleep teardown: no panic, no UI strand, device still
+  slept.
+
+  Detection note: a per-capture "in-session TLS" column read `-` throughout even
+  though uploads *were* running mid-session. Uploads run asynchronously on the
+  worker, so they land outside the capture's log window. Correlate uploads
+  against the flush boundary, not against a capture segment.
+
 - **§5 on-device sanity re-run on 6.2.0 (2026-08-22): PASS on every fault gate.**
   Device reports `fw=6.2.0`. 9 captures / 9 enqueued / device `up_ok` 9 /
   `up_fail` 0 / dropped 0 / refusals 0 / UI strand events 0, every flush
