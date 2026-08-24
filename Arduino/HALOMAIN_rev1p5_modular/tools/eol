@@ -1,0 +1,8 @@
+#!/bin/bash
+# HALO EOL station launcher. Runs from anywhere.
+#   eol                 test one unit (flash + full test)
+#   eol --loop          station mode: unit after unit
+#   eol --build         rebuild firmware after a code change
+#   eol --no-flash      test what is already on the unit
+cd "$(dirname "$0")/.." || exit 1
+exec python3 tools/eol_station.py "$@"

@@ -167,13 +167,51 @@ def main():
     ap.add_argument("--no-flash", action="store_true")
     ap.add_argument("--serial", default="")
     ap.add_argument("--timeout-wake", type=int, default=420)
+    ap.add_argument("--loop", action="store_true",
+                    help="station mode: test unit after unit until you quit")
+    ap.add_argument("--no-open", action="store_true",
+                    help="do not open the captured image in Preview")
+    ap.add_argument("--build", action="store_true",
+                    help="compile both boards, then exit (run once after a firmware change)")
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     label = a.serial or time.strftime("%H%M%S")
 
+    if a.build:
+        print("Compiling both boards (this takes a couple of minutes)...")
+        rc = 0
+        for nm, fqbn, build, sk in [("Sense", SENSE_FQBN, SENSE_BUILD, SENSE_SKETCH),
+                                    ("LCD", LCD_FQBN, LCD_BUILD, LCD_SKETCH)]:
+            r = subprocess.run(["arduino-cli", "compile", "--fqbn", fqbn,
+                                "--build-path", build, sk],
+                               capture_output=True, text=True, timeout=900, cwd=REPO)
+            line = [l for l in r.stdout.split("\n") if "Sketch uses" in l]
+            print(f"  {nm}: {'OK  ' + line[0].strip() if line else 'FAILED'}")
+            if r.returncode != 0:
+                rc = 1
+                print(r.stderr[-800:])
+        return rc
+
     print("=" * 68)
     print(f"HALO EOL STATION{'  — unit ' + a.serial if a.serial else ''}")
     print("=" * 68)
+
+    # Preflight: fail loudly HERE, not 4 minutes into a unit.
+    problems = []
+    if not os.path.exists(ET):
+        problems.append(f"esptool not found at {ET}")
+    if not a.no_flash:
+        for nm, b, sk in [("Sense", SENSE_BUILD, SENSE_SKETCH), ("LCD", LCD_BUILD, LCD_SKETCH)]:
+            if not os.path.exists(os.path.join(b, os.path.basename(sk).replace(".ino", ".ino.bin"))):
+                problems.append(f"{nm} firmware not built in {b} — run: {sys.argv[0]} --build")
+    r = subprocess.run(["aws", "sts", "get-caller-identity", "--profile", AWS_PROFILE],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        problems.append(f"AWS profile '{AWS_PROFILE}' not usable — S3 verification will fail")
+    if problems:
+        print("\n  PREFLIGHT PROBLEMS:")
+        for q in problems: print(f"    - {q}")
+        print()
 
     # 0/1. wake + identify ------------------------------------------------
     # Counting /dev/cu.usbmodem* is NOT a wake check: the tap actuator is itself
@@ -211,7 +249,7 @@ def main():
     step("LCD detected (16MB)", "lcd" in ports, ports.get("lcd", "not found"))
     if "sense" not in ports or "lcd" not in ports:
         print("\n  Cannot continue without both boards.")
-        return summarise(label, None)
+        return summarise(label, None, open_image=False)
     sense_port, lcd_port = ports["sense"], ports["lcd"]
 
     # 2. flash -----------------------------------------------------------
@@ -295,7 +333,7 @@ def main():
                 pass
     step("Sense enumerated", up, sense_port if up else f"not within {a.timeout_wake}s")
     if not up:
-        return summarise(label, None)
+        return summarise(label, None, open_image=False)
     sen, lcd = Tap(sense_port), Tap(lcd_port)
     time.sleep(6)
 
@@ -413,9 +451,18 @@ def main():
 
     sen.stop.set(); lcd.stop.set()
     with open(os.path.join(OUT, f"eol_{label}_sense.log"), "w") as f: f.write(txt)
-    return summarise(label, shot, device_id)
+    return summarise(label, shot, device_id, open_image=not a.no_open)
 
-def summarise(label, shot, device_id=None):
+GRN, RED, BLD, RST = "\033[92m", "\033[91m", "\033[1m", "\033[0m"
+
+def banner(verdict):
+    c = GRN if verdict == "PASS" else RED
+    bar = "#" * 60
+    print(f"\n{c}{BLD}{bar}")
+    print(f"##{('UNIT ' + verdict).center(56)}##")
+    print(f"{bar}{RST}\n")
+
+def summarise(label, shot, device_id=None, open_image=True):
     print("\n" + "=" * 68)
     print("EOL VERDICT" + (f" — {device_id}" if device_id else ""))
     print("=" * 68)
@@ -424,13 +471,48 @@ def summarise(label, shot, device_id=None):
         if ok is False: print(f"  FAIL  {n}  {d}")
     print(f"\n  {sum(1 for s in steps if s[1] is True)} passed, {len(hard)} failed")
     verdict = "PASS" if not hard else "FAIL"
-    print(f"\n  ==> UNIT {verdict}")
-    if shot: print(f"  image: {shot}")
+    banner(verdict)
+    if shot:
+        print(f"  image: {shot}")
+        if open_image:
+            # Show the operator the photo the unit actually took. A camera can
+            # pass every programmatic check and still be out of focus, tinted or
+            # pointed at nothing -- only a human eye catches that.
+            try: subprocess.run(["open", shot], timeout=15)
+            except Exception: pass
     with open(os.path.join(OUT, f"eol_{label}.json"), "w") as f:
         json.dump({"label": label, "device_id": device_id, "verdict": verdict,
                    "image": shot,
                    "steps": [{"name": n, "ok": o, "detail": d} for n, o, d in steps]}, f, indent=2)
     return 0 if verdict == "PASS" else 1
 
+def _run_once():
+    steps.clear()
+    return main()
+
 if __name__ == "__main__":
+    if "--loop" in sys.argv:
+        n_pass = n_fail = 0
+        try:
+            while True:
+                print("\n" + "=" * 68)
+                print(f"  STATION READY   passed:{n_pass}  failed:{n_fail}")
+                print("=" * 68)
+                try:
+                    sn = input("  Plug in a unit, enter its serial (blank = auto), or 'q' to quit: ").strip()
+                except EOFError:
+                    break
+                if sn.lower() in ("q", "quit", "exit"):
+                    break
+                argv = [x for x in sys.argv[1:] if x != "--loop"]
+                if sn:
+                    argv += ["--serial", sn]
+                sys.argv = [sys.argv[0]] + argv
+                rc = _run_once()
+                if rc == 0: n_pass += 1
+                else: n_fail += 1
+        except KeyboardInterrupt:
+            pass
+        print(f"\n  session totals — passed:{n_pass}  failed:{n_fail}\n")
+        sys.exit(0)
     sys.exit(main())
