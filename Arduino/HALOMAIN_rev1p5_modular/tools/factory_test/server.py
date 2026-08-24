@@ -551,12 +551,21 @@ def wait_for_new_s3(bucket, top_prefix, owner_id, device_id, before_keys, timeou
 
 
 def wait_for_upload(drainer, timeout=45):
-    """Confirm the upload from the device's OWN serial: watch the LCD-relayed
-    SENSE_DIAG for an UPLOAD_PUT success (HTTP 200). This needs no device_id and
-    no S3 query, fires within ~10s of the capture (so the device doesn't idle-
-    sleep), and is a direct device confirmation that S3 accepted the PUT.
-    Opportunistically captures the real device_id/owner_id from the OTA-sched
-    URL. Returns (ok, device_id, owner_id)."""
+    """Learn device_id/owner_id from serial, and catch an upload if one happens.
+
+    DO NOT use this as the upload gate any more. Since firmware 6.2.0 uploads are
+    DEFERRED to the pre-sleep flush (see HALO_DEFER_UPLOADS_TO_SLEEP): nothing is
+    uploaded while the user is active, because a TLS handshake mid-session
+    fragments the contiguous DMA block esp_camera_init() needs.
+
+    The factory suite runs the capture steps under `testmode`, which holds the
+    device awake for an hour — so the flush NEVER runs and UPLOAD_PUT NEVER
+    appears. Waiting for it here failed 100% of the time on 6.2.0. Upload
+    verification now happens in the Sleep Test step, where the drain actually
+    occurs. This function is kept for ID discovery and as an opportunistic catch
+    (a burst big enough to hit the queue high-water does upload in-session).
+
+    Returns (ok, device_id, owner_id)."""
     deadline = time.time() + timeout
     dev = own = None
     while time.time() < deadline:
@@ -1836,17 +1845,18 @@ def run_test_suite(config):
         # ── Step: Dish Upload (confirmed from the device's serial: UPLOAD_PUT 200) ──
         if timing:
             step += 1
-            emit_step(step, "Dish Upload", "running", "Confirming upload (PUT 200) from device...")
-            ok, ddev, down = wait_for_upload(drainer, 45)
+            emit_step(step, "Dish Upload", "running", "Queued (uploads deferred to sleep)...")
+            ok, ddev, down = wait_for_upload(drainer, 12)
             if ddev and device_id == "unknown":
                 device_id = ddev
             if down and owner_id == "unknown":
                 owner_id = down
-            if ok:
-                emit_step(step, "Dish Upload", "pass",
-                          f"Upload confirmed (UPLOAD_PUT 200)" + (f"; device={device_id}" if device_id != "unknown" else ""))
-            else:
-                emit_step(step, "Dish Upload", "fail", "No UPLOAD_PUT success on serial within 45s")
+            # NOT a gate: 6.2.0 defers uploads to the pre-sleep flush, and this
+            # suite is holding the device awake in testmode. Verified at Sleep Test.
+            emit_step(step, "Dish Upload", "pass",
+                      ("uploaded in-session (queue high-water)" if ok
+                       else "queued — deferred to sleep flush, verified at Sleep Test")
+                      + (f"; device={device_id}" if device_id != "unknown" else ""))
 
         time.sleep(3)
 
@@ -1863,12 +1873,11 @@ def run_test_suite(config):
         # ── Step: Discard Upload (serial confirm) ──
         if timing:
             step += 1
-            emit_step(step, "Discard Upload", "running", "Confirming upload (PUT 200) from device...")
-            ok, _, _ = wait_for_upload(drainer, 45)
-            if ok:
-                emit_step(step, "Discard Upload", "pass", "Upload confirmed (UPLOAD_PUT 200)")
-            else:
-                emit_step(step, "Discard Upload", "fail", "No UPLOAD_PUT success on serial within 45s")
+            emit_step(step, "Discard Upload", "running", "Queued (uploads deferred to sleep)...")
+            ok, _, _ = wait_for_upload(drainer, 12)
+            emit_step(step, "Discard Upload", "pass",
+                      "uploaded in-session (queue high-water)" if ok
+                      else "queued — deferred to sleep flush, verified at Sleep Test")
 
         time.sleep(3)
 
@@ -1903,8 +1912,28 @@ def run_test_suite(config):
         time.sleep(1)
         lcd.write(b"testmodeoff\n")
         time.sleep(1)
-        drainer.stop()
-        lcd.close()
+        # Keep the drainer running: releasing testmode is what lets the device
+        # sleep, and the pre-sleep flush -- the ONLY place deferred uploads are
+        # sent -- happens in the window between here and the port disappearing.
+        # Closing the link first (as this did before 6.2.0) threw away the very
+        # evidence that the captures reached S3.
+        flush_seen = {"drained": False, "put": 0, "up_ok": 0}
+        def _watch_flush():
+            while True:
+                ln = drainer.get_line(timeout=0.3)
+                if ln is None:
+                    if not os.path.exists(lcd_port):
+                        return
+                    continue
+                if "DRAINED" in ln:
+                    flush_seen["drained"] = True
+                if "PUT status: 200" in ln or ("UPLOAD_PUT" in ln and "code=200" in ln):
+                    flush_seen["put"] += 1
+                m = re.search(r"up_ok=(\d+)", ln)
+                if m:
+                    flush_seen["up_ok"] += int(m.group(1))
+        _fw = threading.Thread(target=_watch_flush, daemon=True)
+        _fw.start()
         # Wait up to ~90s for the device to sleep — after a burst of captures +
         # uploads + OTA-schedule fetch, the sleep coordinator legitimately needs
         # the WiFi/upload work to drain before it powers down, and on a WEAK
@@ -1919,10 +1948,30 @@ def run_test_suite(config):
             if i == 50:
                 emit_step(step, "Sleep Test", "running", "Still draining activity (weak-signal units sleep slower), waiting...")
             time.sleep(0.5)
+        time.sleep(2)
+        try:
+            drainer.stop()
+        except Exception:
+            pass
+        try:
+            lcd.close()
+        except Exception:
+            pass
         if sleep_ok:
             emit_step(step, "Sleep Test", "pass", "Device went to sleep (port disappeared)")
         else:
             emit_step(step, "Sleep Test", "fail", "Device still awake after testmodeoff (90s)")
+
+        # ── Step: Deferred uploads drained (the real upload gate on 6.2.0) ──
+        step += 1
+        emit_step(step, "Uploads drained at sleep", "running", "Checking flush...")
+        _d = (f"flush DRAINED={flush_seen['drained']} "
+              f"PUT200={flush_seen['put']} up_ok={flush_seen['up_ok']}")
+        if flush_seen["up_ok"] > 0 or flush_seen["put"] > 0:
+            emit_step(step, "Uploads drained at sleep", "pass", _d)
+        else:
+            emit_step(step, "Uploads drained at sleep", "fail",
+                      _d + " — no upload seen during the pre-sleep flush")
 
         time.sleep(5)
 
