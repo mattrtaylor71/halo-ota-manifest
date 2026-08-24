@@ -8,7 +8,12 @@
 
 #define HALO_SENSE_PROD_WRAPPER 1
 #define HALO_SENSE_UPLOAD_PERSISTENCE 1
+// Overridable from the build command, like the other bench flags. It was an
+// unconditional #define, which silently beat --build-property -DOTA_TEST_BUILD=1
+// and made the OTA_NOW test hook impossible to enable.
+#ifndef OTA_TEST_BUILD
 #define OTA_TEST_BUILD 0
+#endif
 #define HALO_MQTT_ALWAYS_ON 1
 #define HALO_UART_SEND_WIFI_PASS 1
 
@@ -3240,12 +3245,36 @@ void halo_prod_pre_sleep() {
   }
 
   bool ota_allowed = SenseOtaPolicy::allowOtaWorkNow("pre_sleep");
-  if (ota_allowed && OtaIntent::shouldUpdateNow()) {
+  // An EXPLICIT request must run the check even when nothing is "desired" yet.
+  //
+  // This used to be gated on OtaIntent::shouldUpdateNow() alone, which is
+  // `desired_sense > current`. desired_sense only ever gets set by the cloud, so
+  // the device would fetch the manifest ONLY if it already knew a newer version
+  // existed -- and the manifest is the thing that would have told it. Circular:
+  // nothing could ever discover an update on this path.
+  //
+  // Worse, it failed SILENTLY. `ota_allowed` is true, so the else-if below did
+  // not fire either; the log showed "[OTA_POLICY] allow=1 why=pre_sleep" and then
+  // nothing at all, which is why this took so long to find (2026-08-24).
+  //
+  // g_ota_check_requested is what UART OTA_CHECK sets, and it was not consulted
+  // here, so that command could never do anything. The nightly path (see
+  // maybeRunOtaCheck("nightly")) is deliberately UNCONDITIONAL and is left alone
+  // -- discovery on the nightly wake is the intended design.
+  const bool ota_explicitly_requested =
+      g_ota_check_requested || mqtt_ota_check_requested || OtaIntent::getOtaIntentActive();
+  if (ota_allowed && (OtaIntent::shouldUpdateNow() || ota_explicitly_requested)) {
+    Serial.printf("[OTA_PRESLEEP] running check (desired=%d requested=%d)\n",
+                  OtaIntent::shouldUpdateNow() ? 1 : 0,
+                  ota_explicitly_requested ? 1 : 0);
     g_ota_check_done = false;
     g_ota_skip_logged = false;
     maybeRunOtaCheck("pre_sleep", true);
   } else if (!ota_allowed) {
     Serial.println("[OTA_POLICY] maintenance_only skip ota_check (not in window)");
+  } else {
+    // Say so. A path that decides NOT to check must not be invisible.
+    Serial.println("[OTA_PRESLEEP] skip: nothing desired and no check requested");
   }
   mqtt_set_allowed(false);
 
@@ -3855,6 +3884,24 @@ void maybeRunOtaCheck(const char* reason) {
     return;
   }
   maybeRunOtaCheck(reason, true);
+}
+
+// On-demand OTA check requested over UART (LCD forwards type=OTA_CHECK).
+//
+// Until 6.2.0 this arrived and was dropped -- the Sense printed
+// "[PROTO] Unknown type: OTA_CHECK". The on-demand path used to be an MQTT
+// command, and MQTT was deleted, leaving the nightly timer wake as the only
+// possible trigger. Policy still decides: this REQUESTS a check, it does not
+// force a download while the user is busy.
+static void halo_request_ota_check(const char* why, bool allow_reboot) {
+  const char* reason = (why && *why) ? why : "uart_cmd";
+  if (SenseOtaPolicy::allowOtaWorkNow(reason)) {
+    g_ota_check_requested = true;
+    LOG_INFO("[OTA_INTENT] reason=%s result=1 allow_reboot=%d (uart)", reason,
+             allow_reboot ? 1 : 0);
+  } else {
+    LOG_INFO("[OTA_POLICY] skip manifest/ota (maintenance-only) reason=%s", reason);
+  }
 }
 
 static void handle_mqtt_commands() {

@@ -625,6 +625,11 @@ static bool put_to_presigned_url(const String& url,
                                  uint32_t deadline_ms = 0,
                                  bool* aborted_for_budget = NULL);
 // Forward declarations — sense_sleep.h (late include)
+#ifdef HALO_SENSE_PROD_WRAPPER
+// Implemented in halo_sense_prod.ino (needs SenseOtaPolicy + g_ota_check_requested,
+// both of which are declared after this file is included).
+static void halo_request_ota_check(const char* why, bool allow_reboot);
+#endif
 static void sleep_send_deny_and_clear(const char* reason, unsigned long now_ms);
 static bool wake_pin_is_active_level(int level);
 static void wake_pin_configure_rtc_input_inactive_pull();
@@ -2889,6 +2894,27 @@ static bool parse_input_message(const char* json_str) {
       g_list_screen_active = false;
       Serial.println("[LIST_ACTIVE] state=0");
     }
+  } else if (strcmp(type, "OTA_CHECK") == 0) {
+    // On-demand OTA check.
+    //
+    // The LCD has forwarded this message for a long time and the Sense answered
+    // "[PROTO] Unknown type: OTA_CHECK" -- it was never handled. That went
+    // unnoticed because the on-demand path used to live in MQTT
+    // (MQTT_CMD_OTA_CHECK), and MQTT was deleted in 6.2.0, so the ONLY remaining
+    // trigger was the nightly timer wake. There was no way to ask a device to
+    // check for an update, which matters for support and for testing.
+    //
+    // Policy still decides. allowOtaWorkNow() enforces the maintenance-only
+    // design, so this REQUESTS a check rather than forcing one; it does not
+    // become a way to start a download while the user is mid-capture.
+#ifdef HALO_SENSE_PROD_WRAPPER
+    // Routed through a wrapper-provided function: this file is #included BEFORE
+    // SenseOtaPolicy.h and g_ota_check_requested exist, so it cannot touch them
+    // directly.
+    halo_request_ota_check(doc["reason"] | "uart_cmd", doc["allow_reboot"] | false);
+#else
+    Serial.println("[OTA_CHECK] ignored (not a prod build)");
+#endif
   } else {
     Serial.printf("[PROTO] Unknown type: %s\n", type);
   }
