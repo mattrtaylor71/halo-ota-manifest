@@ -196,6 +196,9 @@ def main():
                     help="station mode: test unit after unit until you quit")
     ap.add_argument("--no-open", action="store_true",
                     help="do not open the captured image in Preview")
+    ap.add_argument("--factory", action="store_true",
+                    help="FACTORY mode for units going to customers: full erase + "
+                         "merged image, leaves the unit VIRGIN (unprovisioned)")
     ap.add_argument("--build", action="store_true",
                     help="compile both boards, then exit (run once after a firmware change)")
     a = ap.parse_args()
@@ -287,7 +290,33 @@ def main():
     sense_port, lcd_port = ports["sense"], ports["lcd"]
 
     # 2. flash -----------------------------------------------------------
-    if not a.no_flash:
+    if a.factory:
+        print("\n[2] FACTORY flash (erase + full image -> virgin unit)")
+        # arduino-cli upload PRESERVES NVS, which is wrong here: a unit going to a
+        # customer must carry no owner, no WiFi creds and no OTA state. Only
+        # erase-flash clears NVS. Erasing is board-agnostic so it needs no
+        # identity; the WRITE does, and the erase run reports the MAC itself --
+        # a separate --no-stub flash-id probe is what wedged the Sense in ROM
+        # download mode on 2026-08-24, so it is deliberately not used here.
+        for board, port, merged, want in [
+            ("sense", sense_port, f"{SENSE_BUILD}/halo_sense_prod.ino.merged.bin", "8MB"),
+            ("lcd",   lcd_port,   f"{LCD_BUILD}/halo_lcd_prod.ino.merged.bin",     "16MB")]:
+            if not os.path.exists(merged):
+                step(f"Factory flash {board}", False, f"no merged image at {merged}"); continue
+            r1 = subprocess.run([ET, "--port", port, "--chip", "esp32s3", "erase-flash"],
+                                capture_output=True, text=True, timeout=300)
+            if "erased successfully" not in r1.stdout:
+                step(f"Erase {board}", False, "erase failed"); continue
+            mac = re.search(r"MAC:\s+(\S+)", r1.stdout)
+            step(f"Erase {board} (NVS wiped)", True, mac.group(1) if mac else "")
+            r2 = subprocess.run([ET, "--port", port, "--chip", "esp32s3",
+                                 "write-flash", "0x0", merged],
+                                capture_output=True, text=True, timeout=600)
+            ok = "Hash of data verified" in r2.stdout
+            step(f"Factory flash {board}", ok, "full image, hash verified" if ok else "write failed")
+        print("\n    settling after factory flash")
+        time.sleep(45)
+    elif not a.no_flash:
         print("\n[2] flash  (verify size + write in ONE job, both boards in parallel)")
         # Sequential flashing loses a race: an idle board re-enumerates and
         # deep-sleeps in the gap between being identified and being written, and
@@ -449,8 +478,33 @@ def main():
             time.sleep(2)
             lcd.send({"ver": 1, "type": "INPUT_DISCARD_OPTIONS",
                       "add_to_shopping_list": False, "msg_id": 7900 + i, "ts": 1000})
-        step(f"{mode} UI reached Logged", lcd.wait(r"SHIP_LOGGED|phase=DONE", 60, ml), "")
+        # A VIRGIN unit sits on the provisioning QR screen, so the normal
+        # capture UI (HOLD_STILL -> LOGGED) never runs. Asserting it there fails
+        # a perfectly good unit. On a provisioned unit it is a real check.
+        if a.factory:
+            step(f"{mode} UI flow", None, "n/a on a virgin unit (setup screen)")
+        else:
+            step(f"{mode} UI reached Logged", lcd.wait(r"SHIP_LOGGED|phase=DONE", 60, ml), "")
         time.sleep(5)
+
+    if a.factory:
+        # A virgin unit has no owner_id, so presign cannot succeed and NOTHING
+        # should reach S3. Verifying the camera is still worthwhile -- it proves
+        # the sensor, the DMA reserve and the LCD flow -- but the pass criteria
+        # are different, and the unit must ship UNPROVISIONED.
+        txt = sen.text()
+        step("Unit is UNPROVISIONED (ready for customer)",
+             "provisioned=0" in txt, "provisioned=0" if "provisioned=0" in txt else "still provisioned!")
+        step("Setup AP broadcasting", "ap_setup" in txt or "Trepo-Halo-" in txt)
+        step("Camera captured locally", taken == len(modes), f"{taken}/{len(modes)}")
+        step("No panics", len(re.findall(r"Guru Meditation|Stack canary|"
+                                         r"reset_reason=ESP_RST_PANIC|assert failed:", txt)) == 0)
+        step("No camera init failures",
+             len(re.findall(r"Camera initialization FAILED", txt)) == 0)
+        sen.stop.set(); lcd.stop.set()
+        with open(os.path.join(OUT, f"eol_{label}_sense.log"), "w") as f: f.write(txt)
+        print("\n    (S3 verification skipped: a virgin unit has no owner to upload for)")
+        return summarise(label, None, device_id, open_image=False)
 
     # 6. sleep + deferred flush -----------------------------------------
     print("\n[6] sleep + deferred upload flush")

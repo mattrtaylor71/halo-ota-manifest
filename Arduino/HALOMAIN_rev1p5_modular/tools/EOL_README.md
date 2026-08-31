@@ -1,6 +1,31 @@
 # HALO EOL test station
 
-## Running it
+## Flashing units for CUSTOMERS
+
+```bash
+./tools/eol --factory --serial <unit-serial>
+```
+
+Use this for anything going to a home. It does a full **erase** of both boards
+and writes the complete image, so the unit ships **virgin** — no owner, no WiFi
+credentials, no OTA state — and the customer provisions it themselves.
+
+`--factory` is not the same as a normal flash. `arduino-cli upload` deliberately
+PRESERVES NVS, so a normal flash leaves the previous owner's identity on the
+device. Only an erase clears it.
+
+What it checks (18): both boards identified by flash size, erase confirmed per
+board (MAC reported), full image written with hash verified, boots at the right
+version, LCD<->Sense link alive, all three capture modes work, **unit is
+UNPROVISIONED with the setup AP broadcasting**, no panics, no camera failures.
+
+S3 verification is skipped on purpose: a virgin unit has no owner, so presign
+cannot succeed and nothing should reach the cloud. The capture check still proves
+the sensor, the DMA reserve and the LCD flow. Likewise the "UI reached Logged"
+check is skipped — a virgin unit sits on the provisioning QR screen, so the
+capture UI never runs and asserting it would fail a perfectly good unit.
+
+## Running it (already-provisioned units)
 
 **Double-click `HALO EOL Test.command` on the Desktop.** That is the whole job.
 
