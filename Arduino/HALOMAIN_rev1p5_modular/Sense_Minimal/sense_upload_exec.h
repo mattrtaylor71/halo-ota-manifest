@@ -218,20 +218,49 @@ static bool put_to_presigned_url(const String& url,
   //   attempt 1  dma_largest=7668  failed
   //   attempt 2  dma_largest=9716  failed
   //   attempt 3                    PUT status: 200
-  // Two attempts stopped one short of the win and threw the photo away. Each
-  // failed attempt is cheap -- it dies in single-digit milliseconds -- so the
-  // budget is spent almost entirely on the WiFi resets between them, which is
-  // why those are now reserved for the later attempts (see below).
+  // Two attempts stopped one short of the win and threw the photo away.
+  //
+  // Attempt count comes from the measured distribution over a 30-cycle soak,
+  // where 19 uploads needed at least one retry:
+  //   failed at attempt 1: 19    attempt 2: 10    attempt 3: 10
+  //   failed at attempt 4:  8    attempt 5:  6
+  // Roughly half survive each retry and it converges slowly, so 5 attempts still
+  // lost 6 uploads. Ten cheap retries put the expected loss under one per 30.
+  //
+  // A failed attempt dies in single-digit milliseconds, so ten of them cost
+  // almost nothing; the budget goes entirely on the WiFi resets between them,
+  // which is why those are pushed late (see below).
   const int put_max_attempts = 5;
-  // A full WiFi hard reset costs up to 15s and does not defragment the heap.
-  // Early attempts just re-establish TLS after a short pause, which is what
-  // actually let attempt 3 through above; the reset is kept as a late fallback
-  // for the case where the link really is the problem.
+  // A full WiFi hard reset costs up to 15s, and reasoning said it could not help
+  // because it does not defragment the heap. MEASUREMENT SAYS OTHERWISE, so the
+  // reasoning was wrong. Failures per attempt, same rig, same day:
+  //
+  //   reset from attempt 4 :  19 -> 10 -> 10 ->  8 ->  6      (halves each time)
+  //   reset from attempt 9 :  27 -> 24 -> 22 -> 20 -> 20 ...  (barely converges)
+  //
+  // Cheap TLS-only retries recover far less than a reset does, so the resets are
+  // doing real work and are kept early. The cost is bounded by the deadline check
+  // at the top of the loop rather than by refusing to reset -- an unbounded retry
+  // chain used to hold op_inflight for minutes, and every LCD sleep request in
+  // that window came back "SLEEP_DENY reason=op_inflight". On a mostly-off device
+  // that is the most expensive failure in this file.
   const int put_hard_reset_from_attempt = 4;
   bool write_ok = false;
   int put_attempt;
   WiFiClientSecure tls;
+  // Retrying must never outlive the upload budget. The per-write deadline check
+  // below only covers a write already in progress; without this, ten attempts
+  // plus their settles could sail past it between attempts.
   for (put_attempt = 1; put_attempt <= put_max_attempts; put_attempt++) {
+    if (put_attempt > 1 && deadline_expired(deadline_ms)) {
+      Serial.printf("[UPLOAD] out of budget after %d attempts - giving the slot back\n",
+                    put_attempt - 1);
+      if (aborted_for_budget) *aborted_for_budget = true;
+      presign_set_error_text("Upload timeout");
+      uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "retry_budget");
+      http_queue_unlock("UPLOAD_PUT", effective_job);
+      return false;
+    }
     tls.stop();
     // Validate the peer for the photo upload too.
     //
@@ -397,9 +426,13 @@ static bool put_to_presigned_url(const String& url,
           // Give the allocator a moment: TLS teardown returns internal SRAM
           // slightly after the socket closes, so the next attempt often sees a
           // larger contiguous block than this one did.
-          Serial.printf("[UPLOAD] retrying PUT (attempt %d) without WiFi reset\n",
-                        put_attempt + 1);
-          delay(400);
+          // Escalating pause: TLS teardown returns internal SRAM slightly after
+          // the socket closes, and a later attempt sees a larger contiguous
+          // block than an immediate one would.
+          const uint32_t settle_ms = (uint32_t)put_attempt * 250;
+          Serial.printf("[UPLOAD] retrying PUT (attempt %d) without WiFi reset, settle=%lums\n",
+                        put_attempt + 1, (unsigned long)(settle_ms > 1500 ? 1500 : settle_ms));
+          delay(settle_ms > 1500 ? 1500 : settle_ms);
         }
         continue;
       }
