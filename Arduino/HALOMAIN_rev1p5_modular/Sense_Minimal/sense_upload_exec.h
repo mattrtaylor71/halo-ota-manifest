@@ -211,7 +211,23 @@ static bool put_to_presigned_url(const String& url,
     http_queue_unlock("UPLOAD_PUT", effective_job);
     return false;
   }
-  const int put_max_attempts = 2;
+  // The PUT fails for a MEMORY reason, not a network one, and that failure is
+  // stochastic: consecutive attempts see different amounts of contiguous DMA and
+  // one of them gets enough. Observed on a single drain, no camera init in the
+  // boot at all:
+  //   attempt 1  dma_largest=7668  failed
+  //   attempt 2  dma_largest=9716  failed
+  //   attempt 3                    PUT status: 200
+  // Two attempts stopped one short of the win and threw the photo away. Each
+  // failed attempt is cheap -- it dies in single-digit milliseconds -- so the
+  // budget is spent almost entirely on the WiFi resets between them, which is
+  // why those are now reserved for the later attempts (see below).
+  const int put_max_attempts = 5;
+  // A full WiFi hard reset costs up to 15s and does not defragment the heap.
+  // Early attempts just re-establish TLS after a short pause, which is what
+  // actually let attempt 3 through above; the reset is kept as a late fallback
+  // for the case where the link really is the problem.
+  const int put_hard_reset_from_attempt = 4;
   bool write_ok = false;
   int put_attempt;
   WiFiClientSecure tls;
@@ -259,10 +275,16 @@ static bool put_to_presigned_url(const String& url,
       Serial.printf("[UPLOAD] TLS connect failed for PUT (attempt %d/%d)\n", put_attempt, put_max_attempts);
       tls.stop();
       if (put_attempt < put_max_attempts) {
-        Serial.println("[UPLOAD] Hard WiFi reset before PUT retry");
-        http_queue_unlock("UPLOAD_PUT", effective_job);
-        wifi_hard_reset_and_reconnect("put_tls_connect", 15000);
-        http_queue_lock("UPLOAD_PUT", effective_job);
+        if (put_attempt >= put_hard_reset_from_attempt) {
+          Serial.println("[UPLOAD] Hard WiFi reset before PUT retry (connect)");
+          http_queue_unlock("UPLOAD_PUT", effective_job);
+          wifi_hard_reset_and_reconnect("put_tls_connect", 15000);
+          http_queue_lock("UPLOAD_PUT", effective_job);
+        } else {
+          Serial.printf("[UPLOAD] retrying PUT connect (attempt %d) without WiFi reset\n",
+                        put_attempt + 1);
+          delay(400);
+        }
         continue;
       }
       diag_record_error_persistent("upload_put", -1, "tls_connect");
@@ -366,10 +388,19 @@ static bool put_to_presigned_url(const String& url,
       Serial.printf("[UPLOAD] PUT write failed (attempt %d/%d)\n", put_attempt, put_max_attempts);
       tls.stop();
       if (put_attempt < put_max_attempts) {
-        Serial.println("[UPLOAD] Hard WiFi reset before PUT retry");
-        http_queue_unlock("UPLOAD_PUT", effective_job);
-        wifi_hard_reset_and_reconnect("put_write_fail", 15000);
-        http_queue_lock("UPLOAD_PUT", effective_job);
+        if (put_attempt >= put_hard_reset_from_attempt) {
+          Serial.println("[UPLOAD] Hard WiFi reset before PUT retry (write)");
+          http_queue_unlock("UPLOAD_PUT", effective_job);
+          wifi_hard_reset_and_reconnect("put_write_fail", 15000);
+          http_queue_lock("UPLOAD_PUT", effective_job);
+        } else {
+          // Give the allocator a moment: TLS teardown returns internal SRAM
+          // slightly after the socket closes, so the next attempt often sees a
+          // larger contiguous block than this one did.
+          Serial.printf("[UPLOAD] retrying PUT (attempt %d) without WiFi reset\n",
+                        put_attempt + 1);
+          delay(400);
+        }
         continue;
       }
       diag_record_error_persistent("upload_put", -1, "write_failed");
