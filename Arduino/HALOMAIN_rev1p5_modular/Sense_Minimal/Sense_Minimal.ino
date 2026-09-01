@@ -420,6 +420,7 @@ static bool camera_dma_reserve_acquire(const char* who) {
   return false;
 }
 
+
 // Tear WiFi down before every camera init "just in case" DMA is short.
 // OFF by default: the check that drove it reads free DMA while the 16KB reserve
 // is still held, so it fired on every capture and starved uploads of a usable

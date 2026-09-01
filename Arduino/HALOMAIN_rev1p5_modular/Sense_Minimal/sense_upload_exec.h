@@ -29,6 +29,16 @@
 #ifndef SENSE_UPLOAD_EXEC_H
 #define SENSE_UPLOAD_EXEC_H
 
+// Bytes handed to tls.write() per call during the S3 PUT body.
+//
+// This is a MEMORY parameter, not a throughput one. Each call becomes one TLS
+// record, and the ESP32-S3 hardware AES needs a contiguous DMA-capable internal
+// block to encrypt it. By upload time the internal heap is already fragmented by
+// the presign handshake, so a large record is the thing that cannot be served.
+#ifndef UPLOAD_TLS_CHUNK_BYTES
+#define UPLOAD_TLS_CHUNK_BYTES 512
+#endif
+
 
 // ── Check-in presign ──────────────────────────────────────────────
 
@@ -161,6 +171,7 @@ static bool put_to_presigned_url(const String& url,
       }
     }
   } dma_guard{dma_was_reserved};
+
   if (aborted_for_budget) {
     *aborted_for_budget = false;
   }
@@ -184,7 +195,7 @@ static bool put_to_presigned_url(const String& url,
   uint16_t port = 0;
   if (!parse_url_parts(url, https, host, port, path)) {
     Serial.println("[UPLOAD] URL parse failed for PUT");
-    diag_record_error_persistent("upload_put", -1, "bad_url");
+    diag_record_error_persistent("upload_put", -1, "bad_url_parse");
     uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "bad_url");
     http_queue_unlock("UPLOAD_PUT", effective_job);
     return false;
@@ -265,18 +276,41 @@ static bool put_to_presigned_url(const String& url,
                                 : "image/jpeg";
     Serial.printf("[UPLOAD] Using Content-Type: %s\n", resolved_ct);
 
-    tls.printf("PUT %s HTTP/1.1\r\n", path.c_str());
+    // Dump the request target in chunks. A presigned S3 path is ~1500 chars and a
+    // single Serial line that long gets truncated in transit, so a truncated URL
+    // and an intact one look the same in the log. Chunking makes the difference
+    // visible, and lets the exact device URL be replayed from a workstation.
+    Serial.printf("[UPLOAD_URL] host=%s port=%u path_len=%u\n",
+                  host.c_str(), (unsigned)port, (unsigned)path.length());
+    for (size_t i = 0; i < path.length(); i += 100) {
+      Serial.printf("[UPLOAD_URL] %03u:%s\n", (unsigned)i,
+                    path.substring(i, i + 100).c_str());
+    }
+
+    // Header writes were fire-and-forget. If the request line already fails to go
+    // out, every body write fails too and the log blames the body -- so check the
+    // first write and report the headers as the failure when that is what it is.
+    const int hdr_written = tls.printf("PUT %s HTTP/1.1\r\n", path.c_str());
     tls.printf("Host: %s\r\n", host.c_str());
     tls.printf("Content-Type: %s\r\n", resolved_ct);
     tls.printf("Content-Length: %u\r\n", (unsigned)len);
     tls.print("Connection: close\r\n\r\n");
+    if (hdr_written <= 0) {
+      char hdr_err[128] = {0};
+      const int hdr_err_code = tls.lastError(hdr_err, sizeof(hdr_err));
+      Serial.printf("[UPLOAD_PUT_FAIL] HEADER write failed rc=%d connected=%d errno=%d "
+                    "tls_err=%d (%s)\n",
+                    hdr_written, (int)tls.connected(), errno, hdr_err_code,
+                    hdr_err[0] ? hdr_err : "-");
+    }
 
     Serial.printf("[UPLOAD] Sending PUT request (attempt %d/%d)...\n", put_attempt, put_max_attempts);
     unsigned long upload_start = millis();
 
     size_t offset = 0;
-    const size_t chunk_size = 2048;
     write_ok = true;
+
+    const size_t chunk_size = UPLOAD_TLS_CHUNK_BYTES;
     while (offset < len) {
       if (deadline_expired(deadline_ms)) {
         if (aborted_for_budget) {
@@ -304,6 +338,21 @@ static bool put_to_presigned_url(const String& url,
       }
       int written = tls.write(buf + offset, to_write);
       if (written <= 0) {
+        // Capture WHY, at the moment it happens. "write returned <=0" is not a
+        // diagnosis -- an mbedtls alloc failure, a peer RST and a timeout all
+        // look identical from here, and they have completely different fixes.
+        char tls_err[128] = {0};
+        const int tls_err_code = tls.lastError(tls_err, sizeof(tls_err));
+        Serial.printf("[UPLOAD_PUT_FAIL] written=%d offset=%u/%u connected=%d errno=%d "
+                      "tls_err=%d (%s)\n",
+                      written, (unsigned)offset, (unsigned)len,
+                      (int)tls.connected(), errno, tls_err_code,
+                      tls_err[0] ? tls_err : "-");
+        Serial.printf("[UPLOAD_PUT_FAIL] heap=%lu internal=%u dma_largest=%u int_largest=%u\n",
+                      (unsigned long)ESP.getFreeHeap(),
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         write_ok = false;
         break;
       }
