@@ -18,6 +18,7 @@
 #define HALO_UART_SEND_WIFI_PASS 1
 
 #include <Arduino.h>
+
 #include <mbedtls/platform.h>
 
 // Coalesce LIST_REFRESH requests (Sense wrapper only)
@@ -4083,9 +4084,23 @@ void halo_prod_loop() {
   } else {
     g_health_gate.markWifiDisconnected();
   }
-  if (g_post_provision_list_refresh_pending && wifi_connected) {
+  // Wait for setup mode to END before the first list refresh.
+  //
+  // This used to fire the moment WiFi connected, which is while the SoftAP and
+  // its HTTP server are STILL UP -- so a TLS handshake ran with AP+STA both
+  // active. Internal heap fell to ~18 KB and mbedtls aborted inside a printf
+  // (lock_init_generic could not allocate a mutex): the device rebooted and the
+  // user's first capture was destroyed (2026-08-31).
+  //
+  // The OTA post_provision check directly above already waits for exactly this
+  // ("defer post_provision check until setup mode ends"); the list refresh did
+  // not, and it is the one that runs first. Deferring also stops the capture
+  // queueing behind a 16s list fetch, which is what made the first check-in take
+  // ~10s to reach the shutter.
+  if (g_post_provision_list_refresh_pending && wifi_connected &&
+      !g_provisioning_manager.isSetupModeActive()) {
     g_post_provision_list_refresh_pending = false;
-    LOG_INFO("[PROVISION] Connected - requesting initial list refresh");
+    LOG_INFO("[PROVISION] Connected + setup mode ended - requesting initial list refresh");
     request_list_refresh("post_provision", true);
   }
   if (wifi_connected && !last_wifi_connected) {
@@ -4761,3 +4776,25 @@ void halo_prod_setup() {
 
 }
 
+// ── loop task stack ───────────────────────────────────────────────────────
+//
+// At the END of the file on purpose. This is a STATEMENT, and the Arduino .ino
+// preprocessor inserts its auto-generated prototypes immediately before the
+// FIRST statement in the file. Anywhere earlier drags that point ahead of the
+// types those prototypes mention -- near the includes it broke
+// WiFiClientSecure, after the include block it broke OtaReportExtras. At the
+// end the first statement is unchanged and nothing moves.
+//
+// WHY 16 KB: maybeRunOtaCheck() -- manifest fetch, TLS handshake, mbedTLS --
+// runs on loopTask. At the Arduino default 8 KB it overflows. On 2026-08-31 the
+// FIRST check-in after provisioning panicked with
+//     Stack canary watchpoint triggered (loopTask)
+// during the post_provision manifest fetch, while the capture sat at
+// WAITING_INPUT for the expiry date. The reset wiped the image out of PSRAM:
+// the user's first ever capture was lost and the UI looked like it had hung.
+//
+// Same failure and same fix as the LCD's uart_task (8 KB -> 12 KB after it
+// tripped the identical canary parsing JSON). TLS needs more headroom than
+// JSON. Note mbedTLS is pointed at PSRAM for its HEAP (see TLS_PSRAM) -- that
+// does nothing for STACK, which is always internal.
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);

@@ -245,6 +245,29 @@ static void delete_item_from_api(const char* item_id) {
   }
   request_body += "}";
 
+  // Free the camera's 16 KB internal-DMA reserve for the duration of this TLS
+  // handshake, and take it back on every exit path.
+  //
+  // WHY: an mbedtls AES-DMA handshake needs a large slice of INTERNAL SRAM, and
+  // that is the same scarce pool the camera reserve sits in. During the
+  // post-provisioning burst -- SoftAP still tearing down, WiFi reconnecting,
+  // LIST_REFRESH and the OTA manifest fetch both wanting TLS -- internal heap
+  // fell to ~18 KB and the handshake could not even allocate a mutex for a
+  // printf: lock_init_generic -> abort(), device rebooted, and the user's first
+  // capture was destroyed (2026-08-31).
+  //
+  // The OTA path already does this ("[OTA] Camera DMA reservation released for
+  // TLS headroom"); the list path did not, and it is the one that runs first
+  // after provisioning. Measured margin: the synthetic repro bottomed out at
+  // ~20.5 KB versus the ~18.4 KB crash, so returning 16 KB here is ample.
+  struct ListTlsDmaGuard {
+    bool held;
+    ListTlsDmaGuard() : held(g_camera_dma_reserve != nullptr) {
+      if (held) camera_dma_reserve_release("list_tls");
+    }
+    ~ListTlsDmaGuard() { if (held) camera_dma_reserve_acquire("list_tls"); }
+  } list_tls_dma_guard;
+
   // Create HTTPS client
   WiFiClientSecure client;
   HTTPClient http;
@@ -318,6 +341,29 @@ static void delete_item_from_api(const char* item_id) {
 // Other paths (OTA/uploads) keep using WIFI_CONNECT_TIMEOUT_MS unchanged.
 static const uint32_t LIST_FETCH_WIFI_BUDGET_MS = 6000;
 
+// Minimum INTERNAL heap required before starting a TLS handshake.
+//
+// Below roughly this, an mbedtls AES-DMA handshake cannot complete and the
+// failure is vicious: it aborts inside a printf (lock_init_generic cannot
+// allocate its mutex), so the device dies with no useful message and reboots,
+// destroying whatever was in PSRAM. Measured: crash at ~18.4 KB internal,
+// healthy runs sit at ~20.5-21 KB. Refusing at 24 KB keeps a real margin and,
+// crucially, turns an abort into a retryable skip with a log line.
+static const size_t LIST_TLS_MIN_INTERNAL_HEAP = 24 * 1024;
+
+static bool list_tls_heap_ok(const char* why) {
+  const size_t internal_free =
+      heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (internal_free >= LIST_TLS_MIN_INTERNAL_HEAP) {
+    return true;
+  }
+  Serial.printf("[LIST_TLS] SKIP %s: internal heap %u < %u — refusing handshake "
+                "(would abort in printf)\n",
+                why ? why : "", (unsigned)internal_free,
+                (unsigned)LIST_TLS_MIN_INTERNAL_HEAP);
+  return false;
+}
+
 static void fetch_shopping_list_from_api() {
   if (WiFi.status() != WL_CONNECTED) {
     // Bounded, no-hard-reset connect attempt. ensure_wifi_connected() does NOT
@@ -336,6 +382,10 @@ static void fetch_shopping_list_from_api() {
                   (unsigned long)(millis() - wifi_start_ms));
   }
 
+  if (!list_tls_heap_ok("fetch_shopping_list")) {
+    list_refresh_fail("low_internal_heap");
+    return;
+  }
   Serial.println("\n=== Fetching Shopping List from Trepo API ===");
 
   // Build JSON request body
@@ -389,6 +439,29 @@ static void fetch_shopping_list_from_api() {
                              int& tls_err,
                              String& tls_err_str) -> int {
     unsigned long start_ms = millis();
+    // Free the camera's 16 KB internal-DMA reserve for the duration of this TLS
+    // handshake, and take it back on every exit path.
+    //
+    // WHY: an mbedtls AES-DMA handshake needs a large slice of INTERNAL SRAM, and
+    // that is the same scarce pool the camera reserve sits in. During the
+    // post-provisioning burst -- SoftAP still tearing down, WiFi reconnecting,
+    // LIST_REFRESH and the OTA manifest fetch both wanting TLS -- internal heap
+    // fell to ~18 KB and the handshake could not even allocate a mutex for a
+    // printf: lock_init_generic -> abort(), device rebooted, and the user's first
+    // capture was destroyed (2026-08-31).
+    //
+    // The OTA path already does this ("[OTA] Camera DMA reservation released for
+    // TLS headroom"); the list path did not, and it is the one that runs first
+    // after provisioning. Measured margin: the synthetic repro bottomed out at
+    // ~20.5 KB versus the ~18.4 KB crash, so returning 16 KB here is ample.
+    struct ListTlsDmaGuard {
+      bool held;
+      ListTlsDmaGuard() : held(g_camera_dma_reserve != nullptr) {
+        if (held) camera_dma_reserve_release("list_tls");
+      }
+      ~ListTlsDmaGuard() { if (held) camera_dma_reserve_acquire("list_tls"); }
+    } list_tls_dma_guard;
+
     WiFiClientSecure req_client;
     HTTPClient req_http;
     req_client.setInsecure();
