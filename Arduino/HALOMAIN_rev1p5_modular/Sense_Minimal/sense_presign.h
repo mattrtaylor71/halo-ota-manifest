@@ -20,6 +20,13 @@
 #ifndef SENSE_PRESIGN_H
 #define SENSE_PRESIGN_H
 
+// Capacity for parsing a presign RESPONSE. Prod returns ~1858 bytes today
+// (put_url ~1614). 4 KB leaves room for the signature growing without another
+// silent truncation. See the note at the parse sites.
+#ifndef PRESIGN_RESPONSE_DOC_BYTES
+#define PRESIGN_RESPONSE_DOC_BYTES 4096
+#endif
+
 // Forward declaration for .ino function called by get_presign
 static bool scan_mode_is_discard(const char* mode);
 
@@ -78,7 +85,23 @@ static bool do_presign_request_simple(const char* url,
   Serial.printf("[PRESIGN] HTTP %d\n", http_code);
   if (resp_body.length()) Serial.println("[PRESIGN] Body: " + resp_body);
 
-  StaticJsonDocument<768> r;
+  // Presign responses are parsed on the HEAP, not a 768-byte stack buffer.
+  //
+  // The production backend returns ~1858 bytes -- the presigned put_url alone is
+  // ~1614 chars of signed query string. StaticJsonDocument<768> silently ran out
+  // of capacity, put_url came back TRUNCATED, and the PUT to the malformed URL
+  // failed in 3 ms. Roughly half of all uploads failed this way
+  // (2026-09-01 soak: 6 of 15 cycles) with a healthy-looking "Presign OK" first.
+  //
+  // Dev used to return short URLs, which is why this only appeared after the
+  // prod cutover. Sizing to the real response plus headroom, on the heap so a
+  // 3 KB buffer does not eat task stack. A short response costs nothing extra --
+  // DynamicJsonDocument allocates what it needs.
+  DynamicJsonDocument r(PRESIGN_RESPONSE_DOC_BYTES);
+  if (resp_body.length() + 256 > PRESIGN_RESPONSE_DOC_BYTES) {
+    Serial.printf("[PRESIGN] WARN response %u bytes vs %u capacity -- may truncate\n",
+                  (unsigned)resp_body.length(), (unsigned)PRESIGN_RESPONSE_DOC_BYTES);
+  }
   auto err = deserializeJson(r, resp_body);
   if (err) {
     Serial.print("[PRESIGN] JSON parse error: ");
@@ -187,7 +210,23 @@ static bool do_presign_request(const char* base_url,
   Serial.printf("[PRESIGN] HTTP %d\n", http_code);
   if (resp_body.length()) Serial.println("[PRESIGN] Body: " + resp_body);
 
-  StaticJsonDocument<768> r;
+  // Presign responses are parsed on the HEAP, not a 768-byte stack buffer.
+  //
+  // The production backend returns ~1858 bytes -- the presigned put_url alone is
+  // ~1614 chars of signed query string. StaticJsonDocument<768> silently ran out
+  // of capacity, put_url came back TRUNCATED, and the PUT to the malformed URL
+  // failed in 3 ms. Roughly half of all uploads failed this way
+  // (2026-09-01 soak: 6 of 15 cycles) with a healthy-looking "Presign OK" first.
+  //
+  // Dev used to return short URLs, which is why this only appeared after the
+  // prod cutover. Sizing to the real response plus headroom, on the heap so a
+  // 3 KB buffer does not eat task stack. A short response costs nothing extra --
+  // DynamicJsonDocument allocates what it needs.
+  DynamicJsonDocument r(PRESIGN_RESPONSE_DOC_BYTES);
+  if (resp_body.length() + 256 > PRESIGN_RESPONSE_DOC_BYTES) {
+    Serial.printf("[PRESIGN] WARN response %u bytes vs %u capacity -- may truncate\n",
+                  (unsigned)resp_body.length(), (unsigned)PRESIGN_RESPONSE_DOC_BYTES);
+  }
   auto err = deserializeJson(r, resp_body);
   if (err) {
     Serial.print("[PRESIGN] JSON parse error: ");
