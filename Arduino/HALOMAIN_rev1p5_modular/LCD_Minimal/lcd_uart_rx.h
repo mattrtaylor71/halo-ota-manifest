@@ -280,6 +280,26 @@ static void uart_process_received_message(const char* json_str) {
                (unsigned long)(cm["x"] | 0));
     }
     g_img_rx_meta_epoch = (uint32_t)(doc["epoch"] | 0);
+
+    // Do not go to sleep while receiving someone's photo.
+    //
+    // This handler did not touch the activity timer, so a transfer that started
+    // as the LCD was winding down could be dropped mid-flight -- and the Sense
+    // only spools AFTER an upload has already failed, with PSRAM about to be
+    // wiped by deep sleep, so losing it here destroys the capture outright
+    // (observed as spool_failed / PHOTO_LOST). A 180KB image is ~24s at 115200;
+    // 60s covers it with margin and then expires on its own, so this holds the
+    // screen up for a transfer without ever pinning it awake.
+    resetActivityTimer();
+    {
+      unsigned long until = millis() + 60000UL;
+      if (until > ota_stay_awake_until_ms) ota_stay_awake_until_ms = until;
+    }
+    if (g_sleep_transition) {
+      g_sleep_transition = false;
+      Serial.println("[IMG_RX] abort sleep transition (image transfer starting)");
+    }
+
     bool ready = lcd_img_rx_begin(job, len);
     StaticJsonDocument<128> r;
     r["ver"] = PROTOCOL_VERSION;

@@ -232,6 +232,15 @@ static void sense_spool_drain_reset(const char* why) {
   }
   g_spool_state = SPOOL_IDLE;
   g_spool_owns_uart = false;
+  // Auto-clear the probe flag here, so it can only ever be true for the single
+  // request it was set for. It used to persist for the rest of the boot: the
+  // once-per-wake probe set it and nothing cleared it, so every LATER drain --
+  // the forced bench one included -- came back "reason=probe" and reset instead
+  // of fetching. That silently disabled the drain outright:
+  //   [DRAINTEST] forced drain (verify_only=0)
+  //   [SPOOL_DRAIN] probe: depth=40
+  //   [SPOOL_DRAIN] reset state=1 reason=probe
+  g_spool_probe_only = false;
   g_spool_slot = g_spool_len = g_spool_got = 0;
   g_spool_next_seq = 0;
   g_spool_next_try_ms = millis() + SPOOL_DRAIN_INTERVAL_MS;

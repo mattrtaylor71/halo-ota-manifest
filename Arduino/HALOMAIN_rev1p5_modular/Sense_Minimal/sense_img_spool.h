@@ -38,9 +38,9 @@ static uint32_t g_img_spool_failed = 0;
 //
 // Blocking by design: it runs on the sleep path, where the alternative is
 // losing the photo. Caller should have already told the user "Logged!".
-static bool sense_spool_image_to_lcd(const UploadJob& job,
-                                     const uint8_t* buf,
-                                     size_t len) {
+static bool sense_spool_image_to_lcd_once(const UploadJob& job,
+                                          const uint8_t* buf,
+                                          size_t len) {
   if (!buf || len == 0) return false;
   const uint32_t job_id = job.job_id;
   const char* mode = job.mode;
@@ -195,4 +195,65 @@ static bool sense_spool_image_to_lcd(const UploadJob& job,
                 (unsigned long)ms, ms ? (unsigned long)(off * 1000UL / ms) : 0UL);
   if (ok) g_img_spool_sent++; else g_img_spool_failed++;
   return ok;
+}
+
+// Retrying wrapper. THIS is what callers use.
+//
+// A failed spool is not a failed retry -- it is a DESTROYED CAPTURE. Spooling
+// only ever runs after the upload has already failed, PSRAM does not survive the
+// deep sleep that follows, and the SPIFFS partition (173,441 B) cannot hold a
+// 150-190 KB image. So this call is the last thing standing between a user's
+// photo and nothing at all, and it was a single shot with a 3s timeout:
+//   [UPLOAD_PERSIST] SD spool FAILED for job_id=7
+//   {"event":"spool_failed","label":"dish","detail":"PHOTO_LOST"}
+//
+// Two reasons it missed, both addressed here:
+//
+// 1. The LCD was on its way to sleep. Spooling happens at pre-sleep, which is
+//    exactly when the LCD is winding down, and its IMG_XFER_BEGIN handler does
+//    not reset the activity timer. MAINT_KEEPALIVE does -- it holds the LCD up
+//    and explicitly aborts a sleep transition -- and it is already deployed on
+//    every LCD, so this works without an LCD reflash.
+// 2. One transient miss was fatal. Now it is not.
+#ifndef SENSE_IMG_SPOOL_ATTEMPTS
+#define SENSE_IMG_SPOOL_ATTEMPTS 3
+#endif
+
+static void sense_spool_hold_lcd_awake() {
+  StaticJsonDocument<128> k;
+  k["ver"] = PROTOCOL_VERSION;
+  k["type"] = "MAINT_KEEPALIVE";
+  k["msg_id"] = (uint32_t)millis();
+  k["ts"] = (uint32_t)millis();
+  k["request_id"] = "img_spool";
+  String out; serializeJson(k, out);
+  // Written straight to lcdSerial like the handshake below, not via
+  // uart_send_json(): sense_uart.h is included AFTER this header. Bare '\n' for
+  // the same reason the IMG_XFER_BEGIN write uses one -- println() emits "\r\n"
+  // and the stray byte corrupts the first COBS frame.
+  lcdSerial.print(out); lcdSerial.print('\n'); lcdSerial.flush();
+  delay(60);   // let the LCD act on it before the transfer handshake
+}
+
+static bool sense_spool_image_to_lcd(const UploadJob& job,
+                                     const uint8_t* buf,
+                                     size_t len) {
+  for (int attempt = 1; attempt <= SENSE_IMG_SPOOL_ATTEMPTS; attempt++) {
+    sense_spool_hold_lcd_awake();
+    if (sense_spool_image_to_lcd_once(job, buf, len)) {
+      if (attempt > 1) {
+        Serial.printf("[IMG_SPOOL] job=%lu recovered on attempt %d\n",
+                      (unsigned long)job.job_id, attempt);
+      }
+      return true;
+    }
+    if (attempt < SENSE_IMG_SPOOL_ATTEMPTS) {
+      Serial.printf("[IMG_SPOOL] job=%lu attempt %d/%d failed - retrying\n",
+                    (unsigned long)job.job_id, attempt, SENSE_IMG_SPOOL_ATTEMPTS);
+      delay(400);
+    }
+  }
+  Serial.printf("[IMG_SPOOL] job=%lu FAILED after %d attempts - capture will be lost\n",
+                (unsigned long)job.job_id, SENSE_IMG_SPOOL_ATTEMPTS);
+  return false;
 }
