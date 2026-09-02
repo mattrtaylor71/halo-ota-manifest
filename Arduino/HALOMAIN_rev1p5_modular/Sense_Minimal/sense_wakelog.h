@@ -40,7 +40,30 @@ typedef struct {
   uint8_t  reset_reason;
   uint8_t  ext0_armed;
   uint8_t  closed;           // 0 = cycle still open (device died before sleeping)
+  uint8_t  drain_end;        // why a spool drain wake stopped (WakeDrainEnd)
 } wakelog_entry_t;
+
+// Why a drain wake ended. A drain wake is by definition unobserved -- attaching
+// USB to watch it resets the Sense (reset_reason=11) and turns it into a cold
+// boot -- so the only way to find out what one did is to have it write down the
+// answer before it sleeps.
+enum WakeDrainEnd : uint8_t {
+  WAKE_DRAIN_NONE = 0,       // not a drain wake
+  WAKE_DRAIN_EMPTY,          // card reported empty
+  WAKE_DRAIN_BUDGET,         // spent its time budget
+  WAKE_DRAIN_USER,           // a capture or foreground action took over
+  WAKE_DRAIN_ACTIVE,         // still draining when the cycle closed
+};
+static uint8_t g_cycle_drain_end = WAKE_DRAIN_NONE;
+static const char* wakelog_drain_end_str(uint8_t v) {
+  switch (v) {
+    case WAKE_DRAIN_EMPTY:  return "empty";
+    case WAKE_DRAIN_BUDGET: return "budget";
+    case WAKE_DRAIN_USER:   return "user";
+    case WAKE_DRAIN_ACTIVE: return "active";
+    default:                return "-";
+  }
+}
 
 RTC_DATA_ATTR static wakelog_entry_t g_wakelog[WAKELOG_SLOTS];
 RTC_DATA_ATTR static uint16_t g_wakelog_head = 0;    // next slot to write
@@ -124,6 +147,7 @@ static void wakelog_begin_cycle(uint32_t epoch_now, uint8_t reset_reason) {
   e->reset_reason = reset_reason;
   e->closed = 0;
   g_cycle_uploads_ok = g_cycle_uploads_fail = g_cycle_captures = 0;
+  g_cycle_drain_end = WAKE_DRAIN_NONE;
   Serial.printf("[WAKELOG] cycle %u opened cause=%s reset=%u epoch=%lu\n",
                 (unsigned)g_wakelog_total, wakelog_cause_name(e->wake_cause),
                 (unsigned)reset_reason, (unsigned long)epoch_now);
@@ -143,15 +167,17 @@ static void wakelog_end_cycle(uint32_t timer_s, bool ext0, uint16_t spool_depth)
   e->uploads_fail = g_cycle_uploads_fail;
   e->captures = g_cycle_captures;
   e->spool_depth = spool_depth;
+  e->drain_end = g_cycle_drain_end;
   e->closed = 1;
   const uint16_t closed_slot = g_wakelog_head;
   g_wakelog_head = (uint16_t)((g_wakelog_head + 1) % WAKELOG_SLOTS);
   if (g_wakelog_total < 0xFFFF) g_wakelog_total++;
   wakelog_nvs_store(e, closed_slot);   // survives a power cut, unlike RTC
-  Serial.printf("[WAKELOG] cycle closed awake=%lums timer=%lus ext0=%d cap=%u up_ok=%u up_fail=%u spool=%u\n",
+  Serial.printf("[WAKELOG] cycle closed awake=%lums timer=%lus ext0=%d cap=%u up_ok=%u up_fail=%u spool=%u drain=%s\n",
                 (unsigned long)e->awake_ms, (unsigned long)timer_s, ext0 ? 1 : 0,
                 (unsigned)e->captures, (unsigned)e->uploads_ok,
-                (unsigned)e->uploads_fail, (unsigned)spool_depth);
+                (unsigned)e->uploads_fail, (unsigned)spool_depth,
+                wakelog_drain_end_str(e->drain_end));
 }
 
 // Relay the wake history to the LCD over UART.
@@ -189,13 +215,14 @@ static void wakelog_report_to_lcd() {
   for (uint16_t i = 0; i < show; i++) {
     const uint16_t idx = (uint16_t)((g_wakelog_head + WAKELOG_SLOTS - show + i) % WAKELOG_SLOTS);
     const wakelog_entry_t* e = &g_wakelog[idx];
-    char det[96];
+    char det[128];
     snprintf(det, sizeof(det),
-             "awake=%lums timer=%lus ext0=%u cap=%u ok=%u fail=%u spool=%u%s",
+             "awake=%lums timer=%lus ext0=%u cap=%u ok=%u fail=%u spool=%u drain=%s%s",
              (unsigned long)e->awake_ms, (unsigned long)e->timer_armed_s,
              (unsigned)e->ext0_armed, (unsigned)e->captures,
              (unsigned)e->uploads_ok, (unsigned)e->uploads_fail,
-             (unsigned)e->spool_depth, e->closed ? "" : " NEVER_SLEPT");
+             (unsigned)e->spool_depth, wakelog_drain_end_str(e->drain_end),
+             e->closed ? "" : " NEVER_SLEPT");
     uart_send_sense_diag("wakelog", wakelog_cause_name(e->wake_cause),
                          "CYCLE", (int32_t)e->epoch, det);
   }

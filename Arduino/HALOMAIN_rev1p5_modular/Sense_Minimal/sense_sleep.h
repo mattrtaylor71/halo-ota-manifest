@@ -787,6 +787,21 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   if (ota_timer_delta_s > 0 && ota_timer_delta_s < timer_delta_s) {
     timer_delta_s = ota_timer_delta_s;
   }
+  // Captures still on the SD card earn a short wake to come back and send them.
+  // Reads cached state only -- deliberately no UART traffic on this path.
+#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
+  // A drain wake that is still open at sleep time (nothing ended it) is closed
+  // here so its outcome and backoff are still recorded.
+  if (g_spool_drain_wake) {
+    sense_spool_drain_wake_finish(WAKE_DRAIN_ACTIVE);
+  }
+  if (sense_spool_wants_early_wake() && SPOOL_DRAIN_WAKE_S < timer_delta_s) {
+    timer_delta_s = SPOOL_DRAIN_WAKE_S;
+    Serial.printf("[SPOOL_DRAIN] arming a %us drain wake (depth=%u barren=%u)\n",
+                  (unsigned)SPOOL_DRAIN_WAKE_S, (unsigned)g_spool_last_known_depth,
+                  (unsigned)g_spool_barren_wakes);
+  }
+#endif
   if (wake_pin_stuck && WAKE_PIN_FAILSAFE_TIMER_S < timer_delta_s) {
     timer_delta_s = WAKE_PIN_FAILSAFE_TIMER_S;
   }

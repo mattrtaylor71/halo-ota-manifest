@@ -1117,6 +1117,12 @@ static bool warmup_and_capture(camera_fb_t*& fb, bool fast_profile) {
 
     Serial.printf("[CAMERA] SUCCESS: Captured %u bytes (%dx%d) elapsed_ms=%lu\n",
                   out->len, out->width, out->height, (unsigned long)(millis() - start_ms));
+    // g_cycle_captures was declared, reset and logged, but NOTHING ever
+    // incremented it -- every wake log has reported cap=0 since the counter was
+    // added, including on wakes that captured and uploaded fine. Beyond the bad
+    // telemetry it left "did a person use the device this wake?" unanswerable,
+    // which the spool drain needs in order to stay off a user's wake.
+    if (g_cycle_captures < 0xFFFF) g_cycle_captures++;
     return true;
   };
 

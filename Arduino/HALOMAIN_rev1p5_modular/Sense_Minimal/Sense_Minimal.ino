@@ -776,6 +776,12 @@ static bool g_img_spool_tx_active = false;
 // pump_uart_rx_once() (sense_uart.h, included next) must stand down while it is
 // set, and that header comes long before the drain's.
 static bool g_spool_owns_uart = false;
+// True for the whole of a wake whose purpose is emptying the SD spool. Declared
+// here rather than in sense_spool_drain.h for the same reason as the flag above:
+// sense_can_sleep_now() has to test it and is defined long before that header.
+static bool g_spool_drain_wake = false;
+static uint32_t g_spool_drain_wake_start_ms = 0;
+static uint32_t g_spool_drain_wake_ok_at_start = 0;
 
 #include "sense_uart.h"
 // After sense_uart.h: the relay uses uart_send_sense_diag().
@@ -1207,6 +1213,21 @@ static bool sense_can_sleep_now(const char** reason) {
   // sense_spool_drain_yield_to_user(), so this can delay sleep but never hold it.
   if (g_spool_owns_uart || g_img_spool_tx_active) {
     if (reason) *reason = "spool_transfer";
+    return false;
+  }
+  // A drain wake has to survive long enough to actually drain.
+  //
+  // The guard above only holds once a transfer has STARTED, and on a drain wake
+  // nothing has started yet: WiFi is still associating and the depth probe is
+  // still out. The inactivity timer won every time -- measured drain wakes were
+  // 13-16s long and recovered nothing, while a single transfer needs ~16s on its
+  // own, so the card sat at 35 images through repeated wakes.
+  //
+  // Bounded by SPOOL_DRAIN_WAKE_BUDGET_MS and released the moment a capture or
+  // any foreground activity appears (see sense_spool_drain_wake_active), so this
+  // delays sleep on a wake nobody is waiting on, and never on a user's.
+  if (g_spool_drain_wake) {
+    if (reason) *reason = "spool_drain_wake";
     return false;
   }
 #ifdef HALO_SENSE_PROD_WRAPPER
@@ -3587,6 +3608,25 @@ void setup() {
       delay(50);
     }
     ota_on_timer_wake();
+    // A timer wake is the one boot with no user waiting and no camera init, so
+    // it is where the SD spool gets emptied. Whether there is anything to empty
+    // is answered by the probe once the link and WiFi are up.
+#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
+    // Deliberately NOT gated on lcd_active.
+    //
+    // It was, and that silently disabled the whole feature: lcd_active only
+    // means the LCD said something within 2s of boot, which it does on virtually
+    // every wake. Every 300s drain wake fired, stayed up 13-15s, drained nothing
+    // and logged drain=- because the flag was never set. "The LCD is talking" is
+    // not "a person is using the device" -- the real guard for that is a capture
+    // or foreground activity, which sense_spool_drain_wake_active() checks and
+    // which releases the wake immediately.
+    g_spool_drain_wake = true;
+    g_spool_drain_wake_start_ms = millis();
+    g_spool_drain_wake_ok_at_start = g_spool_drained_ok;
+    Serial.printf("[SPOOL_DRAIN] timer wake - eligible to drain the SD spool (lcd_active=%d)\n",
+                  lcd_active ? 1 : 0);
+#endif
   } else {
     Serial.println("[SENSE] Cold boot");
   }
@@ -4067,6 +4107,13 @@ void loop() {
   // the device is idle, WiFi is up and the queue is clear — background work must
   // never compete with someone standing at the device.
   sense_spool_receive_pump();
+  // Learn how deep the card is, once per wake. Cheap, and it is what decides
+  // whether we bother waking early to empty it.
+  sense_spool_probe_tick();
+  // On a wake whose whole purpose is draining, pull slots back to back.
+  sense_spool_drain_wake_tick();
+  // The opportunistic tick stays for the case where the device happens to be
+  // idle with WiFi up anyway. It rarely fires; the drain wake is the real path.
   sense_spool_drain_tick();
 
   // Relay the wake history once the link is up, exactly once per boot. Deferred
