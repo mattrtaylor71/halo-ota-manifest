@@ -7,6 +7,11 @@
  */
 
 #define HALO_SENSE_PROD_WRAPPER 1
+// Backend rejects report_type="window_armed" with 400 invalid_field. Off until
+// that changes; see the call site for why leaving it on is actively harmful.
+#ifndef HALO_OTA_REPORT_WINDOW_ARMED
+#define HALO_OTA_REPORT_WINDOW_ARMED 0
+#endif
 #define HALO_SENSE_UPLOAD_PERSISTENCE 1
 // Overridable from the build command, like the other bench flags. It was an
 // unconditional #define, which silently beat --build-property -DOTA_TEST_BUILD=1
@@ -4156,11 +4161,26 @@ void halo_prod_loop() {
         sync_pending_maintenance_to_lcd("awake_sched_fetch");
       }
 
-      // Telemetry: emit ONE "window_armed" report per newly-armed request_id so
-      // the cloud can see the device picked up a maintenance window (the rich
-      // payload already carries request_id / maint_start_epoch / fw / lcd_fw).
-      // De-dupe on request_id so repeated awake fetches of the same window
-      // don't spam. WiFi is already up on this path.
+      // "window_armed" telemetry is DISABLED: the backend rejects it outright.
+      //
+      //   [OTA_REPORT] window_armed failed code=400
+      //   resp={"ok": false, "error": "invalid_field", "field": "report_type"}
+      //
+      // Observed 4 times in a 19-cycle soak, every single attempt. It is
+      // vestigial telemetry from the maintenance-window orchestrator the nightly
+      // redesign replaced, and the backend has moved on -- "pre_sleep" reports
+      // from the same function still return 200, so this is the value, not the
+      // endpoint.
+      //
+      // Worse than a harmless failure: the de-dupe below only records the
+      // request_id ON SUCCESS, so a permanently-failing report is retried on
+      // EVERY awake schedule fetch rather than once. Each attempt is a full TLS
+      // handshake on the pre-sleep path -- which is precisely where contiguous
+      // internal SRAM is scarcest and where the S3 upload has to get its own
+      // handshake moments later (see the DMA starvation work in this repo).
+      //
+      // Re-enable only alongside a backend that accepts the value.
+#if HALO_OTA_REPORT_WINDOW_ARMED
       {
         static char s_last_armed_report_request_id[64] = {0};
         MaintenanceWindow armed_mw;
@@ -4177,6 +4197,7 @@ void halo_prod_loop() {
           }
         }
       }
+#endif
     }
   }
   // ------------------------------------------------------------------------
