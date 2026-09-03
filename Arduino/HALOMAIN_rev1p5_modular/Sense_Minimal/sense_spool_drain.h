@@ -28,6 +28,11 @@
 #ifndef SPOOL_DRAIN_INTERVAL_MS
 #define SPOOL_DRAIN_INTERVAL_MS 30000   // how often to ask when idle
 #endif
+// How soon to re-check after a TRANSIENT block (an upload still in flight).
+// Deliberately short: the whole opportunity is a few seconds wide.
+#ifndef SPOOL_DRAIN_RETRY_MS
+#define SPOOL_DRAIN_RETRY_MS 1500
+#endif
 #ifndef SPOOL_DRAIN_REPLY_TIMEOUT_MS
 #define SPOOL_DRAIN_REPLY_TIMEOUT_MS 4000
 #endif
@@ -103,6 +108,13 @@ static bool g_spool_probe_done = false;
 // sat on the card. An unanswered probe means we do not know, and not knowing
 // must not be treated as good news.
 static bool g_spool_probe_answered = false;
+// At most ONE recovered image per wake. The cost of a drain is ~16s of UART plus
+// an upload, and stretching a user's wake is how this feature previously did
+// harm: a 246s wake meant the device was still awake when the next tap arrived,
+// so that tap's capture became the SECOND camera init of the same boot -- which
+// this hardware cannot do -- and CAMERA_FAIL appeared on healthy cycles. One
+// slot per wake bounds the damage; a backlog clears over several wakes.
+static bool g_spool_drained_this_wake = false;
 static uint8_t g_spool_probe_attempts = 0;
 static uint32_t g_spool_probe_next_ms = 0;
 #ifndef SPOOL_PROBE_MAX_ATTEMPTS
@@ -294,9 +306,19 @@ static void sense_spool_drain_tick() {
   if (g_spool_state != SPOOL_IDLE) return;
   if (g_spool_next_try_ms && (int32_t)(now - g_spool_next_try_ms) < 0) return;
   if (!sense_spool_drain_conditions_ok()) {
-    g_spool_next_try_ms = now + SPOOL_DRAIN_INTERVAL_MS;
+    // SHORT retry, not the long idle throttle.
+    //
+    // This is why the drain never ran on a real duty cycle. The conditions fail
+    // early in every wake for a completely transient reason -- the upload we
+    // just made is still in flight -- and arming a 30s throttle for that meant
+    // the device went back to sleep (~10s after idle) long before it expired.
+    // The window this feature actually wants is the few seconds AFTER the
+    // upload finishes and BEFORE sleep, on a wake where the user has just
+    // touched the screen so the LCD is definitely awake to answer.
+    g_spool_next_try_ms = now + SPOOL_DRAIN_RETRY_MS;
     return;
   }
+  if (g_spool_drained_this_wake) return;   // one per wake, see the flag above
 
   StaticJsonDocument<128> d;
   d["ver"] = PROTOCOL_VERSION;
@@ -633,6 +655,7 @@ static void sense_spool_on_upload_result(uint32_t job_id, bool ok) {
     String out; serializeJson(d, out);
     uart_send_json(out.c_str());
     g_spool_drained_ok++;
+    g_spool_drained_this_wake = true;   // that is this wake's one image
     Serial.printf("[SPOOL_DRAIN] slot=%lu uploaded - asked LCD to delete (total %lu)\n",
                   (unsigned long)g_drain_slot_inflight, (unsigned long)g_spool_drained_ok);
   } else {
