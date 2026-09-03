@@ -3621,11 +3621,20 @@ void setup() {
     // not "a person is using the device" -- the real guard for that is a capture
     // or foreground activity, which sense_spool_drain_wake_active() checks and
     // which releases the wake immediately.
+    // Gated on the feature actually being ON. It was not, and this still armed
+    // on EVERY timer wake -- including the nightly 02:00 one -- so the device
+    // held itself awake for the full 90s drain budget and recovered nothing:
+    //   detail="awake=105070ms timer=150s cap=0 ok=0 spool=0 drain=budget"
+    // Five for five on the 2026-09-02 unplugged test. On a mostly-off device
+    // that is ~95s of pointless radio-on every single night, and it delays the
+    // nightly update check that the wake actually exists to run.
+#if SPOOL_DRAIN_WAKE_ENABLED
     g_spool_drain_wake = true;
     g_spool_drain_wake_start_ms = millis();
     g_spool_drain_wake_ok_at_start = g_spool_drained_ok;
     Serial.printf("[SPOOL_DRAIN] timer wake - eligible to drain the SD spool (lcd_active=%d)\n",
                   lcd_active ? 1 : 0);
+#endif
 #endif
   } else {
     Serial.println("[SENSE] Cold boot");
