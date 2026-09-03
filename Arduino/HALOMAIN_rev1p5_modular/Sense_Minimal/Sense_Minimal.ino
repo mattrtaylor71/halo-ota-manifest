@@ -283,6 +283,17 @@ static const int CAMERA_PREFLIGHT_LUMA_HIGH = 220;
 static const int CAMERA_PREFLIGHT_GREEN_RATIO_PCT = 140;  // G > 1.4x avg(R,B)
 static int32_t g_camera_last_init_err = 0;
 static uint8_t* g_camera_dma_reserve = nullptr;
+// While true, nothing may re-bank the 16KB camera reserve.
+//
+// The OTA path frees it deliberately to make room for the download, but other
+// components restore it behind OTA's back -- the provisioning TLS RAII guard
+// re-acquires on every scope exit, and it runs during an OTA check. Measured
+// result: the applier's own heap gate rejected the update EVERY time,
+//   [OTA_WRITE][ERROR] Insufficient heap for OTA: free_heap=37800, required>=40960
+// which is only ~3KB short of the 16KB that had just been handed back. The Sense
+// could update the LCD but could never update ITSELF -- a device in a home would
+// have been permanently un-updatable.
+static bool g_dma_reserve_suppressed = false;
 static const uint32_t CAMERA_UI_CAPTURE_DELAY_MS = 0;
 static const uint32_t CAMERA_PREFLIGHT_SETTLE_MS = 40;
 static const uint8_t CAMERA_PREFLIGHT_WARMUP_FRAMES = 2;
@@ -398,6 +409,13 @@ static void camera_dma_reserve_release(const char* who) {
 
 static bool camera_dma_reserve_acquire(const char* who) {
   if (g_camera_dma_reserve) return true;
+  if (g_dma_reserve_suppressed) {
+    // An OTA owns this memory right now. The device reboots when it finishes,
+    // and setup() re-banks the reserve, so refusing here costs nothing.
+    Serial.printf("[DMA_RESERVE] re-acquire SUPPRESSED by=%s (ota in progress)\n",
+                  who ? who : "?");
+    return false;
+  }
   for (int attempt = 1; attempt <= 3; ++attempt) {
     g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
         CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);

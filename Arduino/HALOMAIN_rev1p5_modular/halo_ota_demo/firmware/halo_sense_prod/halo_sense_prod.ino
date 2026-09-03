@@ -3542,6 +3542,11 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   g_ota_check_done = true;
   // Release camera DMA reservation to free 16KB of internal SRAM for TLS.
   // Camera is not used during OTA. Device reboots after OTA, re-reserving in setup().
+  // Hold it released for the WHOLE check, not just this instant. Freeing it here
+  // was not enough: the provisioning TLS guard re-acquires on scope exit and runs
+  // during the check, so by the time the applier tested the heap the 16KB was
+  // back and the update was rejected every single time.
+  g_dma_reserve_suppressed = true;
   if (g_camera_dma_reserve) {
     heap_caps_free(g_camera_dma_reserve);
     g_camera_dma_reserve = nullptr;
@@ -3576,6 +3581,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     ota_set_last_result("manifest_url_invalid");
     release_waiting_lcd_ota("manifest_url_invalid");
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     clear_intent_once();
     return;
   }
@@ -3595,6 +3601,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     ota_set_last_result("manifest_fetch_fail");
     release_waiting_lcd_ota("manifest_fetch_fail");
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
     mqtt_force_connect();
     clear_intent_once();
@@ -3610,6 +3617,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     ota_set_last_result("board_mismatch");
     release_waiting_lcd_ota("board_mismatch");
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
     mqtt_force_connect();
     clear_intent_once();
@@ -3621,6 +3629,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     ota_set_last_result("bin_url_disallowed");
     release_waiting_lcd_ota("bin_url_disallowed");
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
     mqtt_force_connect();
     clear_intent_once();
@@ -3638,6 +3647,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("up_to_date");
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     if (!g_lcd_ota_task_running) {
       mqtt_set_allowed(true);
       mqtt_force_connect();
@@ -3656,6 +3666,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("downgrade_blocked");
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     if (!g_lcd_ota_task_running) {
       mqtt_set_allowed(true);
       mqtt_force_connect();
@@ -3685,6 +3696,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("rollout_min_version");
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     if (!g_lcd_ota_task_running) {
       mqtt_set_allowed(true);
       mqtt_force_connect();
@@ -3708,6 +3720,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       release_waiting_lcd_ota("rollout_skip");
       maybe_trigger_lcd_ota_check();
       g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
       if (!g_lcd_ota_task_running) {
         mqtt_set_allowed(true);
         mqtt_force_connect();
@@ -3729,6 +3742,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota(result);
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     if (!g_lcd_ota_task_running) {
       mqtt_set_allowed(true);
       mqtt_force_connect();
@@ -3876,6 +3890,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     send_ota_uart_message("OTA_UNLOCK");
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     return;
   }
   ota_set_last_result("apply_success");

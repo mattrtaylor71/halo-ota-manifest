@@ -182,7 +182,26 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
 
   // Safety: ensure we have a reasonable amount of free heap before starting OTA
   // to avoid crashes during TLS/HTTP/OTA operations.
-  const uint32_t MIN_HEAP_REQUIRED = 40 * 1024;  // 40 KB
+  // 32 KB, MEASURED -- not guessed. The old 40 KB gate rejected every self-update
+  // on real hardware: a provisioned Sense reaches this point with ~35 KB free, so
+  // the device could flash the LCD but never itself. A unit in a home would have
+  // been permanently un-updatable, which is the one fault you cannot fix remotely.
+  //
+  //   [OTA_WRITE][ERROR] Insufficient heap for OTA: free_heap=35180, required>=40960
+  //
+  // Verified at 30 KB on 2026-09-03: full download of 1,689,840 bytes, SHA256
+  // matched the manifest, esp_ota_end OK, boot partition switched app0 -> app1,
+  // device rebooted into the new version and stayed there. So the real requirement
+  // is comfortably under 35 KB; 32 KB keeps a margin while letting updates happen.
+  //
+  // Lowering this is safe to trial because failure is non-destructive: the write
+  // targets the INACTIVE partition and the boot switch only happens after the
+  // SHA256 verifies. There is also a separate runtime guard
+  // (OTA_DOWNLOAD_MIN_HEAP) that aborts mid-download if heap actually runs out.
+#ifndef OTA_MIN_HEAP_REQUIRED_BYTES
+#define OTA_MIN_HEAP_REQUIRED_BYTES (32 * 1024)
+#endif
+  const uint32_t MIN_HEAP_REQUIRED = OTA_MIN_HEAP_REQUIRED_BYTES;
   const uint32_t OTA_DOWNLOAD_MIN_HEAP = 8 * 1024;  // 8 KB: abort during download if heap drops below
   if (free_heap_start < MIN_HEAP_REQUIRED) {
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE,
