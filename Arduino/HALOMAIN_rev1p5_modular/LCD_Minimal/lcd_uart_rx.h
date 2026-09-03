@@ -290,7 +290,16 @@ static void uart_process_received_message(const char* json_str) {
     // (observed as spool_failed / PHOTO_LOST). A 180KB image is ~24s at 115200;
     // 60s covers it with margin and then expires on its own, so this holds the
     // screen up for a transfer without ever pinning it awake.
-    resetActivityTimer();
+    // Stay AWAKE, but go DARK. These are separate things and conflating them was
+    // a mistake: the first version called resetActivityTimer(), which is the
+    // "a human touched me" signal, so the panel stayed lit at full brightness
+    // for the whole 60s window. The user has finished with the device and walked
+    // away by this point -- a screen glowing on the counter while a background
+    // upload finishes reads as "it failed to turn off", not "it is working".
+    //
+    // ota_stay_awake_until_ms alone is enough to hold sleep off
+    // (lcd_can_sleep_now checks it independently of the activity timer), so the
+    // transfer completes with the panel powered down and the backlight at 0.
     {
       unsigned long until = millis() + 60000UL;
       if (until > ota_stay_awake_until_ms) ota_stay_awake_until_ms = until;
@@ -299,6 +308,9 @@ static void uart_process_received_message(const char* json_str) {
       g_sleep_transition = false;
       Serial.println("[IMG_RX] abort sleep transition (image transfer starting)");
     }
+    // Must follow the abort above: lcd_set_idle_screen_dark() no-ops while a
+    // sleep transition is in flight.
+    lcd_set_idle_screen_dark(true, "img_transfer");
 
     bool ready = lcd_img_rx_begin(job, len);
     StaticJsonDocument<128> r;
