@@ -527,6 +527,15 @@ static void uart_process_received_message(const char* json_str) {
                   age_ms,
                   sense_awake_confirmed ? 1 : 0,
                   link_synced ? 1 : 0);
+    // Optional live Sense identity proves the running image after OTA without
+    // opening Sense USB (which changes its wake/reset behavior).
+    Serial.printf("[UART] FW_INFO sense_build=%s running=%s state=%s boot=%s wake=%d reset=%d\n",
+                  doc["sense_build"] | "?",
+                  doc["sense_running_part"] | "?",
+                  doc["sense_running_state"] | "UNKNOWN",
+                  doc["sense_boot_part"] | "?",
+                  doc["sense_wake_cause"] | -1,
+                  doc["sense_reset_reason"] | -1);
     // Re-send INPUT_OTA_CHECK if LCD manual override is still active
     // (original send was lost because Sense was in deep sleep)
     if (lcd_manual_ota_override_active()) {

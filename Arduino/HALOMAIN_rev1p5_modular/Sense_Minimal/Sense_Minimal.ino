@@ -20,6 +20,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <esp_sleep.h>
+#include <esp_ota_ops.h>
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <esp_mac.h>
@@ -78,6 +79,7 @@ void halo_prod_loop();
 void halo_prod_pre_sleep();
 void halo_prod_reset_wifi();
 bool halo_prod_should_delay_sleep();
+bool halo_prod_boot_ota_pending();
 void halo_prod_on_lcd_message(const char* type);
 void halo_prod_on_lcd_wifi_creds_ack(const char* status, int err_code);
 void halo_prod_on_lcd_wifi_on_ack();
@@ -1142,12 +1144,42 @@ static void uart_send_fw_info(bool do_lcd_query = true) {
     lcd_fw_age_s = (millis() - query_start_ms) / 1000UL;
   }
 
-  StaticJsonDocument<320> doc;
+  // Include the Sense's LIVE OTA state on both paths. A reported version alone
+  // cannot prove that the running image passed rollback validation. These
+  // additive fields let the LCD USB diagnostics inspect it without attaching
+  // Sense USB (which changes the reset/wake evidence).
+  const esp_partition_t* sense_running = esp_ota_get_running_partition();
+  const esp_partition_t* sense_boot = esp_ota_get_boot_partition();
+  const char* sense_state = "UNKNOWN";
+  esp_ota_img_states_t sense_ota_state;
+  if (sense_running && esp_ota_get_state_partition(sense_running, &sense_ota_state) == ESP_OK) {
+    switch (sense_ota_state) {
+      case ESP_OTA_IMG_NEW: sense_state = "NEW"; break;
+      case ESP_OTA_IMG_PENDING_VERIFY: sense_state = "PENDING_VERIFY"; break;
+      case ESP_OTA_IMG_VALID: sense_state = "VALID"; break;
+      case ESP_OTA_IMG_INVALID: sense_state = "INVALID"; break;
+      case ESP_OTA_IMG_ABORTED: sense_state = "ABORTED"; break;
+      case ESP_OTA_IMG_UNDEFINED: sense_state = "UNDEFINED"; break;
+      default: break;
+    }
+  }
+
+  StaticJsonDocument<640> doc;
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = "FW_INFO";
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   doc["sense_fw"] = get_sense_fw_version();
+#ifdef HALO_SENSE_PROD_WRAPPER
+  doc["sense_build"] = kBuildId ? kBuildId : "unknown";
+#else
+  doc["sense_build"] = "unknown";
+#endif
+  doc["sense_running_part"] = sense_running ? sense_running->label : "?";
+  doc["sense_running_state"] = sense_state;
+  doc["sense_boot_part"] = sense_boot ? sense_boot->label : "?";
+  doc["sense_wake_cause"] = (int)esp_sleep_get_wakeup_cause();
+  doc["sense_reset_reason"] = (int)esp_reset_reason();
   if (do_lcd_query) {
     if (lcd_ok && lcd_fw_buf[0] != '\0') {
       doc["lcd_fw"]            = lcd_fw_buf;
@@ -1249,6 +1281,10 @@ static bool sense_can_sleep_now(const char** reason) {
     return false;
   }
 #ifdef HALO_SENSE_PROD_WRAPPER
+  if (halo_prod_boot_ota_pending()) {
+    if (reason) *reason = "ota_boot_pending";
+    return false;
+  }
   if (g_lcd_ota_request_active) {
     if (reason) *reason = "lcd_ota_pending";
     return false;

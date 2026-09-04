@@ -306,6 +306,14 @@ static bool g_ota_check_requested = false;
 static bool g_ota_apply_in_progress = false;
 static bool g_ota_skip_logged = false;
 static bool g_ota_check_in_progress = false;
+// One bounded automatic check per timer boot, or to heal a persisted LCD debt.
+// Keep this independent of the retired maintenance-window mode flags.
+static bool g_boot_ota_pending = false;
+static uint32_t g_boot_ota_deadline_ms = 0;
+static uint32_t g_boot_ota_next_try_ms = 0;
+static bool g_boot_ota_time_sync_started = false;
+static bool g_boot_ota_begin_reported = false;
+static const char* g_boot_ota_reason = "nightly";
 static volatile bool g_manual_ota_override = false;
 static unsigned long g_manual_ota_override_until_ms = 0;
 static const unsigned long MANUAL_OTA_OVERRIDE_TTL_MS = 5UL * 60UL * 1000UL;
@@ -1638,7 +1646,7 @@ static bool should_block_sleep_for_ota(bool* apply_active,
   bool manifest_flag = g_ota_check_in_progress;
   bool scheduled_flag = (OtaIntent::getOtaIntentActive() && !g_ota_check_done) ||
                         g_ota_check_requested ||
-                        mqtt_ota_check_requested;
+                        mqtt_ota_check_requested || halo_prod_boot_ota_pending();
   if (apply_active) {
     *apply_active = apply_flag;
   }
@@ -2998,91 +3006,100 @@ static bool load_lcd_ota_result_nvs() {
 }
 
 
-// ── Nightly maintenance (replaces the orchestrator) ───────────────────
-//
-// The whole design, in one sentence: we woke on the 02:00 timer, so check
-// whether an update exists, apply it or not, and go back to sleep.
-//
-// There is no schedule to fetch, no window to arm, revalidate or consume, no
-// cooldown, no intent negotiation and no seven-reason dispatch — a missed night
-// is not an incident, because the next night retries. That is what lets ~842
-// lines and a 407-line orchestrator disappear.
-//
-// maybeRunOtaCheck() already does ALL the real work (manifest fetch, SHA256
-// verify, self-apply, LCD proxy, cloud report); the old orchestrator was almost
-// entirely scheduling wrapped around a call to it. Sleep is NOT forced here:
-// the existing idle path sleeps on its own, and the next 02:00 is armed at
-// sleep entry by sense_enter_deep_sleep().
-static bool g_nightly_maintenance_pending = false;
-static uint32_t g_nightly_deadline_ms = 0;
+// ── Bounded automatic OTA check ─────────────────────────────────────
+// A real timer boot checks for an update. A persisted LCD debt also earns one
+// recovery check on boot. Both use the existing OTA implementation and normal
+// idle sleep; neither bypasses user work, provisioning, or OTA safety guards.
+bool halo_prod_boot_ota_pending() {
+  return g_boot_ota_pending &&
+         (int32_t)(millis() - g_boot_ota_deadline_ms) < 0;
+}
 
-// Call once early in setup(): did the 02:00 timer wake us?
+static void boot_ota_queue(const char* reason) {
+  if (g_boot_ota_pending) return;  // Preserve the actual timer trigger if both apply.
+  g_boot_ota_pending = true;
+  g_boot_ota_deadline_ms = millis() + 120000UL;
+  g_boot_ota_next_try_ms = 0;
+  g_boot_ota_time_sync_started = false;
+  g_boot_ota_begin_reported = false;
+  g_boot_ota_reason = reason;
+  Serial.printf("[BOOT_OTA] check pending reason=%s budget_ms=120000\n", reason);
+}
+
+static void boot_ota_finish(const char* result) {
+  g_boot_ota_pending = false;
+  g_maintenance_mode = false;
+  g_maintenance_handled = true;
+  Serial.printf("[BOOT_OTA] finished reason=%s result=%s\n", g_boot_ota_reason, result);
+}
+
+// Call once early in setup. USB reset / touch wake is not a timer wake.
 static void nightly_maintenance_note_wake() {
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
-    g_nightly_maintenance_pending = true;
-    // Bounded: if WiFi never comes up we still stop waiting and let the device
-    // sleep, rather than burning the battery holding out for a network that is
-    // not there. The next night retries.
-    g_nightly_deadline_ms = millis() + 120000;
-    Serial.println("[NIGHTLY] woke on the maintenance timer - update check pending");
+    boot_ota_queue("nightly");
   }
 }
 
-// Call from loop(). No-op unless a nightly check is pending.
+// Called after normal provisioning/time/health service, independent of the old
+// maintenance flags. A readiness skip keeps the request alive until the bound;
+// a check that began consumes it even if its manifest fetch or update failed.
 static void nightly_maintenance_tick() {
-  if (!g_nightly_maintenance_pending) return;
-
-  if ((int32_t)(millis() - g_nightly_deadline_ms) >= 0) {
-    g_nightly_maintenance_pending = false;
-    Serial.println("[NIGHTLY] no network within the window - skipping, next night retries");
-    uart_send_sense_diag("ota", "nightly_skip", "no_wifi", 0, "deadline");
+  if (!g_boot_ota_pending) return;
+  const bool nightly = strcmp(g_boot_ota_reason, "nightly") == 0;
+  if (g_ota_check_done) {
+    boot_ota_finish("check_already_started");
     return;
   }
-  if (!wifi_is_connected()) return;   // still coming up
-
-  g_nightly_maintenance_pending = false;
-  Serial.println("[NIGHTLY] network up - running the update check");
-  uart_send_sense_diag("ota", "nightly_begin", "timer", 0, "wifi_up");
-
-  // Re-sync the clock BEFORE the update check, so the wake timer armed at sleep
-  // entry is computed from a fresh time rather than a drifted one.
-  //
-  // The RTC drifts over a long sleep — measured ~8.5 min across one night. The
-  // arm then computes "next 02:00" from the stale clock and lands 507s away
-  // instead of ~24h, so the device wakes again 8 minutes later and re-arms
-  // correctly. Self-correcting, but it costs an extra wake every night and the
-  // maintenance actually runs ~02:08.
-  //
-  // Nearly free here: WiFi is already up for the manifest fetch, and the OTA
-  // check that follows gives SNTP several seconds to land before sleep entry
-  // reads the clock.
-  halo_prod_kick_time_sync("nightly");
-  {
-    const uint32_t before = sense_now_epoch();
-    const uint32_t deadline = millis() + 8000;
-    while ((int32_t)(millis() - deadline) < 0 && !is_time_valid()) {
-      delay(100);
-    }
-    const uint32_t after = sense_now_epoch();
-    const int32_t corrected = (int32_t)(after - before);
-    Serial.printf("[NIGHTLY] clock resync: %lu -> %lu (%+ds) valid=%d\n",
-                  (unsigned long)before, (unsigned long)after,
-                  (int)corrected, is_time_valid() ? 1 : 0);
-    if (corrected > 60 || corrected < -60) {
-      uart_send_sense_diag("ota", "clock_corrected", "nightly", corrected,
-                           "rtc_drift_over_sleep");
-    }
+  const uint32_t now_ms = millis();
+  if ((int32_t)(now_ms - g_boot_ota_deadline_ms) >= 0) {
+    uart_send_sense_diag("ota", nightly ? "nightly_skip" : "lcd_recovery_skip",
+                         g_boot_ota_reason, 0, "readiness_deadline");
+    boot_ota_finish("readiness_deadline");
+    return;
   }
-  maybeRunOtaCheck("nightly", true);
-  // g_ota_check_done is set by maybeRunOtaCheck() only when it actually performed
-  // the check. Reporting "checked" unconditionally is how a silent policy skip
-  // masqueraded as a successful nightly run — the wake fired, the log said
-  // checked, and no update check had happened at all.
-  const bool did_check = g_ota_check_done;
-  uart_send_sense_diag("ota", did_check ? "nightly_done" : "nightly_noop",
-                       "timer", did_check ? 1 : 0,
-                       did_check ? "checked" : "SKIPPED_no_check_performed");
-  Serial.printf("[NIGHTLY] update check %s\n", did_check ? "performed" : "SKIPPED");
+  if (g_boot_ota_next_try_ms != 0 &&
+      (int32_t)(now_ms - g_boot_ota_next_try_ms) < 0) return;
+  g_boot_ota_next_try_ms = now_ms + 1000UL;
+
+  // Automatic work must not take the camera/mic/network from a person or run
+  // beside SoftAP provisioning. The true argument below only skips boot delay;
+  // it does not set a force/manual intent.
+  if (sense_action_inflight() || foreground_active || voice_recording_active ||
+      g_list_screen_active ||
+      (op_queue != nullptr && uxQueueMessagesWaiting(op_queue) > 0) ||
+      g_provisioning_manager.isSetupModeActive() ||
+      g_ota_check_in_progress || g_ota_apply_in_progress ||
+      g_lcd_ota_task_running || g_lcd_ota_proxy_owns_uart) return;
+  if (!ProvisioningState::isProvisioned() ||
+      ProvisioningState::getState() != ProvisioningState::STATE_CONNECTED ||
+      !wifiReadyForHttps()) return;
+
+  // Start SNTP once and let regular loop service progress while time becomes
+  // valid. Repeating a blocking wait here would starve health and user input.
+  if (!g_boot_ota_time_sync_started) {
+    g_boot_ota_time_sync_started = true;
+    halo_prod_kick_time_sync(g_boot_ota_reason);
+  }
+  if (!is_time_valid() || !OtaIntent::cooldownAllows()) return;
+
+  if (!g_boot_ota_begin_reported) {
+    g_boot_ota_begin_reported = true;
+    // An OTA reboot precedes wake-log closure: preserve its actual trigger in
+    // the LCD error ring. Once per episode, including guard retries.
+    char detail[96];
+    snprintf(detail, sizeof(detail), "wake=%d reset=%d epoch=%lu reason=%s",
+             (int)esp_sleep_get_wakeup_cause(), (int)esp_reset_reason(),
+             (unsigned long)sense_now_epoch(), g_boot_ota_reason);
+    uart_send_sense_diag_persist("ota", nightly ? "nightly_begin" : "lcd_recovery_begin",
+                                g_boot_ota_reason,
+                                (int32_t)esp_sleep_get_wakeup_cause(), detail);
+  }
+  maybeRunOtaCheck(g_boot_ota_reason, true);
+  if (g_ota_check_done) {
+    uart_send_sense_diag("ota", nightly ? "nightly_done" : "lcd_recovery_done",
+                         g_boot_ota_reason, 1, "check_started");
+    boot_ota_finish("check_started");
+  }
 }
 
 
@@ -3558,17 +3575,6 @@ static bool prod_proxy_lcd_inline() {
 }
 
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
-  // Breadcrumb: record OTA-check entry in the persistent black box (area
-  // "ota_orch") so the manual-OTA decision/handshake trail survives reboots
-  // and is readable later via the LCD error log.
-  {
-    char crumb[96];
-    snprintf(crumb, sizeof(crumb), "reason=%s manual=%d t=%lu",
-             reason ? reason : "(null)",
-             (int)halo_ota_manual_override_active(),
-             (unsigned long)millis());
-    diag_record_error_persistent("ota_orch", 0, crumb);
-  }
   if (g_ota_check_done || g_ota_apply_in_progress) {
     return;
   }
@@ -3646,6 +3652,17 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     return;
   }
 
+  // Record actual check entry after readiness guards, so skipped retries do
+  // not write NVS. The manual-OTA decision/handshake trail survives reboots
+  // and is readable later via the LCD error log.
+  {
+    char crumb[96];
+    snprintf(crumb, sizeof(crumb), "reason=%s manual=%d t=%lu",
+             reason ? reason : "(null)",
+             (int)halo_ota_manual_override_active(),
+             (unsigned long)millis());
+    diag_record_error_persistent("ota_orch", 0, crumb);
+  }
   if (halo_ota_manual_override_active()) {
     manual_ota_override_clear("ota_check_begin");
   }
@@ -3913,12 +3930,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   // sense_lcd_ota_proxy() manages g_lcd_ota_proxy_owns_uart itself (true
   // during COBS streaming, false after); we do not double-manage it.
   bool lcd_proxy_succeeded = false;
-  // FIX A: track whether the LCD actually needed an update this run. When the
-  // LCD is KNOWN behind and its proxy still fails after a retry, the Sense must
-  // NOT self-update ahead of it (that produces a permanent split). Query/
-  // manifest failures leave this false (undetermined) and fall through to the
-  // legacy lcd_ota_due behavior.
-  bool lcd_needed_update = false;
+  // Advance Sense only after positively confirming the LCD is current or its
+  // proxy succeeded. An unanswered query/failed manifest is unresolved too;
+  // assuming success there strands a split just like a failed transfer.
   {
     // Free internal RAM for the LCD download/stream + later Sense apply.
     // MQTT is already stopped (mqtt_stop_for_ota() above) and camera DMA is
@@ -3951,9 +3965,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       snprintf(crumb, sizeof(crumb), "lcd_query_ok lcd_fw=%s t=%lu", lcd_fw, (unsigned long)millis());
       diag_record_error_persistent("ota_orch", 0, crumb);
     } else if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0) {
-      // The LCD is genuinely behind — the Sense MUST NOT advance ahead of it
-      // (FIX A). Mark it owed and proxy with one retry before deciding.
-      lcd_needed_update = true;
+      // The LCD is behind: proxy with one retry before allowing Sense to advance.
       // Breadcrumb: query succeeded; record the LCD fw it reported.
       {
         char crumb[96];
@@ -4021,17 +4033,11 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   LOG_INFO("[OTA] lcd_ota_due=%d (lcd_proxy_succeeded=%d)",
            lcd_proxy_succeeded ? 0 : 1, lcd_proxy_succeeded ? 1 : 0);
 
-  // ── FIX A: split guard ──
-  // Never self-update the Sense ahead of a KNOWN-behind LCD whose proxy failed.
-  // That produces a permanent split (Sense ahead, LCD behind) whose only
-  // "recovery" (lcd_ota_due -> g_maintenance_in_window / g_maintenance_handled)
-  // has no live consumer, so recovery would never run. If the LCD needed an
-  // update and the proxy still failed after the retry above, DEFER the Sense
-  // self-OTA to the next cycle. lcd_ota_due stays set (above); we deliberately
-  // do NOT send OTA_UNLOCK — the LCD stays locked-awake so the very next
-  // manual/nightly OTA can re-attempt the proxy before the Sense advances.
-  if (lcd_needed_update && !lcd_proxy_succeeded) {
-    LOG_ERROR("[OTA] LCD proxy failed after retry — deferring Sense self-OTA to avoid split; will retry next cycle");
+  // Never advance Sense while LCD state is unresolved. Keep the debt in NVS
+  // for the next bounded boot/manual/nightly check, then release the LCD now:
+  // this attempt is over and leaving its update screen locked is not a retry.
+  if (!lcd_proxy_succeeded) {
+    LOG_ERROR("[OTA] LCD unresolved — deferring Sense self-OTA to avoid split; will retry next cycle");
     {
       char crumb[96];
       snprintf(crumb, sizeof(crumb), "sense_apply_deferred lcd_split_guard ver=%s t=%lu",
@@ -4040,8 +4046,8 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     }
     OtaIntent::recordOtaResult("lcd_proxy_failed_defer");
     ota_set_last_result("lcd_proxy_failed_defer");
-    // Return to normal operation but do NOT advance the Sense. No OTA_UNLOCK:
-    // the LCD stays awake for the immediate retry path.
+    // Return to normal operation without advancing Sense.
+    send_ota_uart_message("OTA_UNLOCK");
     mqtt_set_allowed(true);
     mqtt_force_connect();
     clear_intent_once();
@@ -4187,15 +4193,6 @@ void halo_prod_loop() {
   }
 #endif
 
-  if (g_maintenance_mode && !g_maintenance_handled) {
-    // Nightly path runs alongside the old orchestrator for now; it is a no-op
-    // unless the 02:00 timer woke us. The orchestrator is deleted only once
-    // this has been verified on hardware — OTA is the recovery path for a
-    // fielded device, so it does not get replaced on a compile check alone.
-    nightly_maintenance_tick();
-    return;
-  }
-
 
   // Claim-before-MQTT: hold MQTT during SoftAP grace period and post-AP claim retry.
   // MQTT's TLS connection needs ~40KB internal SRAM — keep it off while SoftAP or
@@ -4324,6 +4321,7 @@ void halo_prod_loop() {
 
   g_health_gate.update();
   g_ota_pending_verify_active = g_health_gate.getPendingVerify() && !g_health_gate.getMarkedValid();
+  nightly_maintenance_tick();
   maybe_cancel_manual_ota_unready();
   handle_ota_proof();
   handle_mqtt_commands();
@@ -4927,8 +4925,8 @@ void halo_prod_setup() {
 #endif
 
   if (get_lcd_ota_due_nvs()) {
-    LOG_INFO("[MAINT] lcd_ota_due from NVS (sense rebooted during maintenance)");
-    g_maintenance_mode = true;
+    LOG_INFO("[MAINT] lcd_ota_due from NVS - queueing bounded recovery check");
+    boot_ota_queue("lcd_due");
   }
 
   // Repopulate g_lcd_ota_result / g_lcd_ota_version from a SUCCESSFUL inline

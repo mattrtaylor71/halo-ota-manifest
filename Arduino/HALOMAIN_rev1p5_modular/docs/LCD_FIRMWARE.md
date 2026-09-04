@@ -50,6 +50,21 @@ startup flash, touch/encoder while housekeeping is awake and dark, real OTA plus
 post-reboot continuation, and at least four consecutive failed-handshake sleeps.
 Compilation/static review alone cannot prove panel darkness or physical wake.
 
+## Sense OTA identity through LCD diagnostics (2026-09-04)
+
+`FW_INFO` now prints the optional live Sense fields `sense_build`,
+`sense_running_part`, `sense_running_state`, `sense_boot_part`,
+`sense_wake_cause`, and `sense_reset_reason` on LCD serial. This lets an operator
+check the running image and OTA validation state while Sense USB is unplugged.
+The numeric wake/reset fields are the ESP-IDF enum values from the current Sense
+boot. Older Sense firmware still works: missing identity fields print `?`, state
+prints `UNKNOWN`, and wake/reset print `-1`. The Settings version label and
+existing request/retry behavior are unchanged.
+
+Sense also sends one persisted `nightly_begin` diagnostic with wake/reset/epoch
+when real timer maintenance starts; the existing LCD `errors` ring retains it.
+This distinguishes a timer-triggered check from a later USB-induced reboot.
+
 > **2026-08-21:** The SD spool never worked for a real capture, in either direction, because **the LCD slept through the transfer**. A ~175KB photo needs ~18–22s over the 115200 UART (512-byte chunks, one ACK each); the LCD idles out in 10s. The Sense already blocked its own sleep (`[SLEEP_BLOCK] reason=spool_transfer`); the LCD had no equivalent guard, so it stopped servicing the link mid-transfer and both ends timed out — `[IMG_RX] abort reason=frame_timeout` → `PHOTO_LOST` on receive, `[SPOOL_DRAIN] reset state=3 reason=frame_timeout` on drain.
 >
 > **There are TWO sleep paths on the LCD and both needed the guard:** `lcd_sleep_intent_allowed()` in `lcd_activity.h`, *and* the inactivity timeout in `loop()`. Guarding only the first is not enough — measured, `[SLEEP_DECISION] eligible=0 reason=home_age_lt_timeout` was logged while `[LOOP] Inactivity timeout - entering sleep...` slept anyway. Both now check `g_img_rx_active || g_spool_tx_active`.

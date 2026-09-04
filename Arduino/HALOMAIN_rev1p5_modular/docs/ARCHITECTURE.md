@@ -986,6 +986,27 @@ Use app-only flash (offset 0x10000) to preserve WiFi credentials and NVS state. 
 
 ### OTA Publish Pipeline (publish_both.sh)
 
+**Production slot guard (2026-09-04):** `publish_lcd_ota.py` now reads
+`firmware/halo_lcd_prod/partitions.csv`, requires both OTA app slots, and checks
+the binary against the smaller slot. The current limit is **2,621,440 bytes**;
+the same value goes into `max_slot_bytes` in the manifest. Missing, malformed,
+or incomplete tables fail before upload. The previous publisher used the legacy
+LCD demo table and incorrectly advertised a 6 MiB slot. Offline boundary and
+manifest checks: `python3 -m unittest discover -s halo_ota_demo/tools/ota -p
+'test_publish_lcd_ota.py' -v` (run from the firmware source root).
+
+For a reviewed pair, generate and sync each board's version header immediately
+before its build, finish both production-wrapper builds and artifact checks,
+then publish the explicit prebuilt LCD binary first and Sense second. Both
+publishers accept `--bin`; each uploads its artifact and versioned manifest
+before switching its own latest manifest, then downloads and verifies them.
+There is no atomic two-board manifest switch. This order avoids advertising a
+new Sense release before its LCD target exists. Use `--channel prod --bucket
+halo-ota-prod --region us-east-1 --profile trepo-dev` for the current production
+target. Any `HALO_MAINT_TEST_S` accelerated timer build stays local and must not
+be supplied to either publisher. The wrapper below remains the legacy combined
+compile/publish sequence; it publishes Sense before building LCD.
+
 ```bash
 ./publish_both.sh --version 6.1.315 --channel dev --profile trepo-dev --bucket halo-ota-dev
 ```
@@ -1004,7 +1025,16 @@ Steps:
 - `dev` -- Development channel (S3 bucket: `halo-ota-dev`)
 - `prod` -- Production channel (S3 bucket: `halo-ota-prod`)
 
-Both use the same S3 prefix: `halo/ota/{channel}/{board}/`
+Sense uses `halo/ota/{channel}/manifest_latest.json`; LCD uses
+`halo/ota/{channel}/lcd/manifest_latest.json`.
+
+For device readback without disturbing Sense USB wake behavior, the LCD logs
+the optional `FW_INFO` fields `sense_build`, `sense_running_part`,
+`sense_running_state`, `sense_boot_part`, `sense_wake_cause`, and
+`sense_reset_reason`. The first four identify the running/selected image and
+validation state; the last two report raw ESP-IDF values from that boot. Sense
+also persists one `nightly_begin` wake/reset/epoch breadcrumb through the LCD
+diagnostic ring when timer maintenance starts.
 
 ---
 
