@@ -872,6 +872,7 @@ static void uart_process_received_message(const char* json_str) {
   }
   
   if (strcmp(type, "OTA_LOCK") == 0) {
+    lcd_allow_visible_ui("ota_lock");
     ota_locked = true;
     ota_lock_at_ms = millis();
     if (ota_check_requested) {

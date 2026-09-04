@@ -1,5 +1,55 @@
 # HALO LCD Board Firmware Documentation
 
+## Timer-wake visibility and fallback retries (2026-09-04)
+
+Deep-sleep wake restarts `setup()`; it never resumes after `esp_deep_sleep_start()`.
+The unreachable restoration tail in `enterLightSleep()` has been removed. Setup
+now sets `g_background_wake_dark` for TIMER (including the existing effective-timer
+recovery classification), while cold boot and touch EXT0/EXT1 retain visible UI.
+
+`init_ui_stack()` initializes PWM at **zero before the BSP**, whose final panel
+command is DISPLAY_OFF (`0x28`). The stack and touch/encoder polling still start,
+but panel power and backlight remain off for a background boot, and normal LVGL
+ticks are paused (some existing direct `lv_timer_handler()` calls still run).
+The policy is read again after screen construction because UART `OTA_LOCK` may
+arrive during initialization. Ordinary Home/status/provisioning activity cannot
+release the dark latch. `lcd_set_idle_screen_dark(false)` and positive backlight
+writes respect it; brightness changes also preserve an already-dark screen.
+
+Actual touch or encoder input releases the latch in `ensure_awake_for_ui()`.
+The first touch wakes without activating a control; encoder scrolling retains
+its existing behavior. A touch detected during sleep
+teardown also releases it through `abort_sleep_transition()`. Generic
+`user_activity_bump()` does **not** release it, because some callers are background
+firmware-info retries. `OTA_LOCK`, the UI task's OTA overlay, and the persisted
+post-OTA continuation release the latch explicitly, so an actual update remains
+visible. The overlay repairs panel state after a late OTA/init race as well.
+
+The fallback retry count now lives in `RTC_NOINIT_ATTR` with a magic and range
+check; setup preserves it only across deep-sleep timer boots and resets it on
+other boots. At most three consecutive short fallback sleeps are allowed. The
+count increments, saturating at three, only after the final teardown touch-abort
+check; an aborted sleep spends no retry. Further failures choose the existing
+maintenance/periodic timer without resetting the exhausted episode (an imminent
+maintenance window may still select five seconds). Real touch/encoder input or
+an actual coordinated non-fallback sleep resets the budget. A raw `SLEEP_READY`
+message does not reset it: the existing receiver does not correlate that message
+to a current sleep request, so a delayed message must not replenish retries.
+The touch wake mask and Sense wake line are unchanged.
+
+`[WAKE_POLICY]` reports classification/visibility/retries on serial. The NVS
+error ring stores `wake/POLICY` once per background timer boot
+(wake/reset/dark/retries), so unplugged cycles remain inspectable with `errors`
+after reconnecting USB. Cold/user boots do not add this breadcrumb. No NVS write
+is added after the final teardown touch check; only the tiny RTC counter commit
+runs there. A generic activity update may still cancel a pending sleep, but it
+does not release the background-dark latch or reset the fallback budget.
+
+Validation must exercise cold boot, touch wake, an unplugged timer boot with no
+startup flash, touch/encoder while housekeeping is awake and dark, real OTA plus
+post-reboot continuation, and at least four consecutive failed-handshake sleeps.
+Compilation/static review alone cannot prove panel darkness or physical wake.
+
 > **2026-08-21:** The SD spool never worked for a real capture, in either direction, because **the LCD slept through the transfer**. A ~175KB photo needs ~18–22s over the 115200 UART (512-byte chunks, one ACK each); the LCD idles out in 10s. The Sense already blocked its own sleep (`[SLEEP_BLOCK] reason=spool_transfer`); the LCD had no equivalent guard, so it stopped servicing the link mid-transfer and both ends timed out — `[IMG_RX] abort reason=frame_timeout` → `PHOTO_LOST` on receive, `[SPOOL_DRAIN] reset state=3 reason=frame_timeout` on drain.
 >
 > **There are TWO sleep paths on the LCD and both needed the guard:** `lcd_sleep_intent_allowed()` in `lcd_activity.h`, *and* the inactivity timeout in `loop()`. Guarding only the first is not enough — measured, `[SLEEP_DECISION] eligible=0 reason=home_age_lt_timeout` was logged while `[LOOP] Inactivity timeout - entering sleep...` slept anyway. Both now check `g_img_rx_active || g_spool_tx_active`.
@@ -22,7 +72,7 @@
 - **Encoder:** Rotary encoder on GPIO8 (EC1_A) and GPIO7 (EC1_B)
 - **UART to Sense:** TX=GPIO38, RX=GPIO48, 115200 baud (UART1)
 - **Wake line:** GPIO39 (INT_PIN) -- LCD drives LOW to wake Sense board (Sense EXT0 on GPIO2)
-- **Backlight:** PWM-controlled. "On" maps to a user-adjustable level `g_user_brightness_duty` (0..255, 5% floor); off is 0. Set via the Settings → Backlight screen (knob to adjust, tap to save), persisted in NVS (`lcd_ui`/`brightness`), restored at boot. `lcd_set_backlight_level()` uses `(level>0) ? g_user_brightness_duty : 0`. `backlight_apply_pct(pct)`/`backlight_get_pct()` in lcd_anim.h apply/read it; `backlight_save_to_nvs()`/`backlight_load_pct_from_nvs()` in lcd_persist.h persist it.
+- **Backlight:** PWM-controlled. "On" maps to a user-adjustable level `g_user_brightness_duty` (0..255, 5% floor); off is 0. Set via the Settings → Backlight screen (knob to adjust, tap to save), persisted in NVS (`lcd_ui`/`brightness`), restored at boot. Positive `lcd_set_backlight_level()` writes also require the background-wake dark latch to be released. `backlight_apply_pct(pct)`/`backlight_get_pct()` in lcd_anim.h apply/read it; `backlight_save_to_nvs()`/`backlight_load_pct_from_nvs()` in lcd_persist.h persist it.
 
 ## Architecture Overview
 

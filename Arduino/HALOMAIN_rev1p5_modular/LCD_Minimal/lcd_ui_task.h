@@ -112,8 +112,17 @@ static void ui_task(void *arg) {
     // While OTA screen is active, don't process any screen transitions.
     // Just tick LVGL to keep the display alive and release the lock.
     if (g_ota_screen_active) {
+      lcd_allow_visible_ui("ota_screen");
+      if (g_idle_screen_dark) lcd_set_idle_screen_dark(false, "ota_screen");
+      // OTA_LOCK can arrive while setup is still finishing the dark UI init.
+      // Repair the final panel state here on its owner task as well as the PWM.
+      if (!g_panel_enabled && g_lcd_initialized) {
+        lcd_panel_set_power(true);
+        g_panel_enabled = true;
+      }
+      g_lvgl_running = true;
       // Non-user (timer/maintenance) wakes no longer relight the panel (see the
-      // wake-cause gate in lcd_sleep.h). Guarantee a real OTA is still visible:
+      // boot policy in setup()). Guarantee a real OTA is still visible:
       // whenever the "Updating..." overlay is active but the backlight was left
       // dark by a non-user wake, relight it here. A bare handshake-retry/fallback
       // wake never sets g_ota_screen_active, so it stays dark.

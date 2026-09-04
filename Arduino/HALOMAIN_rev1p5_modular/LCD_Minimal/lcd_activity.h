@@ -514,14 +514,16 @@ static void init_ui_stack(int saved_count) {
   Serial.println("Initializing LCD...");
   init_touch_once();
   haptic_init();
+  // Zero duty BEFORE panel initialization. The BSP leaves display output off
+  // as well; neither GPIO PWM nor the panel's DISPLAY_ON may flash on a timer boot.
+  lcd_bl_pwm_bsp_init(0);
+  g_backlight_initialized = true;
+  g_backlight_duty = 0;
   lcd_lvgl_Init();
   g_lcd_initialized = true;
-  
-  // Initialize backlight PWM (required before using setUpdutySubdivide)
-  lcd_bl_pwm_bsp_init(LCD_PWM_MODE_255);
-  g_backlight_initialized = true;
-  lcd_set_backlight_binary(true, "init_ui");
-  g_panel_enabled = true;
+  g_panel_enabled = false;
+  g_idle_screen_dark = g_background_wake_dark;
+  g_lvgl_running = !g_background_wake_dark;
   
   // Rotate display 180 degrees
   lv_disp_t *disp = lv_disp_get_default();
@@ -540,6 +542,17 @@ static void init_ui_stack(int saved_count) {
   
   // Initialize encoder (knob)
   init_knob_once();
+
+  // Re-read the policy here: OTA_LOCK may arrive on Core 0 during initialization.
+  // A user/OTA release wins over the original boot classification.
+  // BSP already left the panel off: only issue an ON here. A captured false
+  // argument must not switch it off after a concurrent OTA_LOCK switched it on.
+  if (!g_background_wake_dark) {
+    g_idle_screen_dark = false;
+    g_panel_enabled = true;
+    lcd_panel_set_power(true);
+    lcd_set_backlight_binary(true, "init_ui");
+  }
   
   // Create UI task (Core 1 - owns LVGL)
   xTaskCreatePinnedToCore(ui_task, "ui_task", 12288, NULL, 3, &ui_task_handle, 1);
@@ -556,7 +569,7 @@ static void init_ui_stack(int saved_count) {
   // Reset activity timer (to prevent immediate sleep)
   resetActivityTimer();
   
-  g_lvgl_running = true;
+  g_lvgl_running = !g_background_wake_dark;
   g_ui_initialized = true;
   Serial.println("✓ Setup complete - device ready!");
 }

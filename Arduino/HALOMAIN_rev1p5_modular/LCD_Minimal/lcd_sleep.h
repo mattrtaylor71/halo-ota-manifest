@@ -370,22 +370,16 @@ static void enterLightSleep() {
                     g_lcd_maintenance_start_epoch > 0);
   uint64_t maint_now_epoch = 0;
   uint64_t maint_target_epoch = 0;
-  // Bound the short-fallback self-wake loop. Keep the first few quick retries
-  // (the Sense usually becomes reachable within a reboot/upload window), then
-  // stop self-waking on the ~15s fallback timer and drop to the long
-  // maintenance/periodic timer so the device sleeps dark instead of waking
-  // every ~15-30s while the Sense stays busy. A clean (non-fallback) sleep
-  // resets the counter, so a later episode gets a fresh set of quick retries.
-  if (sleep_fallback_timer_sec > 0) {
-    sleep_fallback_consecutive++;
-    if (sleep_fallback_consecutive > SLEEP_FALLBACK_MAX_CONSECUTIVE) {
-      Serial.printf("[SLEEP] fallback_loop_bounded consecutive=%u max=%u -> long_timer\n",
-                    (unsigned)sleep_fallback_consecutive,
-                    (unsigned)SLEEP_FALLBACK_MAX_CONSECUTIVE);
-      sleep_fallback_timer_sec = 0;  // fall through to maintenance/periodic timer below
-    }
-  } else {
-    sleep_fallback_consecutive = 0;
+  // Bound consecutive fallback sleeps across actual deep-sleep resets. Consume
+  // a retry only at the final sleep commit below, after the touch-abort check.
+  // An exhausted episode stays exhausted until coordinated sleep or user input;
+  // choosing the long timer must not itself reset and restart the quick loop.
+  const bool fallback_requested = (sleep_fallback_timer_sec > 0);
+  if (fallback_requested && sleep_fallback_consecutive >= SLEEP_FALLBACK_MAX_CONSECUTIVE) {
+    Serial.printf("[SLEEP] fallback_loop_bounded consecutive=%u max=%u -> long_timer\n",
+                  (unsigned)sleep_fallback_consecutive,
+                  (unsigned)SLEEP_FALLBACK_MAX_CONSECUTIVE);
+    sleep_fallback_timer_sec = 0;
   }
   if (sleep_fallback_timer_sec > 0) {
     sleep_timer_sec = sleep_fallback_timer_sec;
@@ -518,192 +512,19 @@ static void enterLightSleep() {
     gpio_hold_en((gpio_num_t)INT_PIN);
     gpio_deep_sleep_hold_en();
 
+  // Commit the retry episode only once sleep can no longer be aborted. Saturate
+  // so repeated long fallback sleeps cannot wrap and re-enable short retries.
+  if (fallback_requested) {
+    if (sleep_fallback_consecutive < SLEEP_FALLBACK_MAX_CONSECUTIVE) {
+      ++sleep_fallback_consecutive;
+    }
+  } else {
+    sleep_fallback_reset("coordinated_sleep");
+  }
+  sleep_fallback_magic = SLEEP_FALLBACK_MAGIC;
   esp_deep_sleep_start();
   
-  // Execution resumes here after wake
-  Serial.end();
-  delay(10);
-  Serial.begin(115200);
-  delay(50);
-  g_sleep_transition = false;
-  g_lvgl_running = true;
-  Serial.printf("[LCD_SLEEP_DIAG] woke_from_deep_sleep wake_cause=%d wake_pin=%d ms=%lu\n",
-                (int)esp_sleep_get_wakeup_cause(),
-                digitalRead(LCD_WAKE_GPIO),
-                (unsigned long)millis());
-  
-  Serial.println("\n========================================");
-  Serial.println("Woke from DEEP SLEEP!");
-  Serial.println("========================================");
-  
-  // Check for false wakeup
-  unsigned long time_since_sleep_entry = millis() - sleep_entry_time;
-  if (time_since_sleep_entry < WAKE_DEBOUNCE_MS) {
-    Serial.println("[SLEEP] False wakeup detected - going back to sleep...");
-    dummy_x = 0;
-    dummy_y = 0;
-    getTouch(&dummy_x, &dummy_y);
-    for (int i = 0; i < 5; i++) {
-      digitalRead(PIN_EC1_A);
-      digitalRead(PIN_EC1_B);
-      vTaskDelay(pdMS_TO_TICKS(5));  // Use vTaskDelay to yield to other tasks
-    }
-    uint64_t wakeMask = buildWakeMaskForSleep();
-    esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
-    sleep_entry_time = millis();
-    esp_light_sleep_start();
-  }
-
-  if (lcd_wake_pins_active()) {
-    user_activity_since_sleep = true;
-  }
-  
-  // Log wake-up cause
-  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-  int wake_level = digitalRead(LCD_WAKE_GPIO);
-  const char* wake_cause_label = "unknown";
-  if (cause == ESP_SLEEP_WAKEUP_EXT0) {
-    static char gpio_label[16];
-    snprintf(gpio_label, sizeof(gpio_label), "gpio%d", (int)LCD_WAKE_GPIO);
-    wake_cause_label = gpio_label;
-  } else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
-    wake_cause_label = "timer";
-#if defined(ESP_SLEEP_WAKEUP_UART)
-  } else if (cause == ESP_SLEEP_WAKEUP_UART) {
-    wake_cause_label = "uart";
-#endif
-  }
-  Serial.printf("[WAKE] cause=%s level=%d ts=%lu\n",
-                wake_cause_label,
-                wake_level,
-                (unsigned long)millis());
-  if (cause == ESP_SLEEP_WAKEUP_EXT0) {
-    delay(20);
-    int touch_level = digitalRead(HALO_WAKE_GPIO);
-    if (touch_level == HIGH) {
-      Serial.println("[TOUCH] false wake detected");
-      Serial.println("[TOUCH] rejected_noise");
-      uint32_t retry_timer_sec = (sleep_fallback_timer_sec > 0)
-                                   ? sleep_fallback_timer_sec
-                                   : (g_lcd_maintenance_timer_armed && g_lcd_maintenance_wake_in_s > 0)
-                                       ? g_lcd_maintenance_wake_in_s
-                                   : (g_lcd_schedule_timer_armed && g_lcd_schedule_wake_in_s > 0)
-                                       ? g_lcd_schedule_wake_in_s
-                                       : 0;
-      configure_sleep_sources(true, retry_timer_sec);
-      Serial.printf("[LCD_SLEEP] wake_sources=%s false_wake_retry_timer_s=%lu\n",
-                    retry_timer_sec > 0 ? "EXT0_TIMER" : "EXT0_ONLY",
-                    (unsigned long)retry_timer_sec);
-      esp_deep_sleep_start();
-      return;
-    }
-    Serial.println("[TOUCH] validated");
-  }
-  if (cause == ESP_SLEEP_WAKEUP_EXT0) {
-    unsigned long now_ms = millis();
-    unsigned long until = now_ms + 8000;
-    if (until > stay_awake_until_ms) {
-      stay_awake_until_ms = until;
-    }
-  }
-  link_sync_pending = true;
-  bool user_ui_wake = (cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_EXT1);
-  Serial.print("Wake-up cause: ");
-  switch (cause) {
-    case ESP_SLEEP_WAKEUP_EXT1:
-      Serial.println("EXT1 (touch or encoder)");
-      break;
-    default:
-      Serial.println("Unknown");
-      break;
-  }
-  
-  g_in_light_sleep = false;
-  
-  // Track wake time to prevent activity timer reset from background updates
-  last_wake_time = millis();
-  just_woke_up = true;  // Set flag to trigger UI reset on next list render
-  
-  // Clear touch interrupts
-  dummy_x = 0;
-  dummy_y = 0;
-  getTouch(&dummy_x, &dummy_y);
-  vTaskDelay(pdMS_TO_TICKS(10));  // Use vTaskDelay to yield to other tasks
-  getTouch(&dummy_x, &dummy_y);
-  
-  // Clear encoder interrupts
-  for (int i = 0; i < 5; i++) {
-    digitalRead(PIN_EC1_A);
-    digitalRead(PIN_EC1_B);
-    vTaskDelay(pdMS_TO_TICKS(5));  // Use vTaskDelay to yield to other tasks
-  }
-  
-  // Ignore touches for a short period after wake (prevent wake touch from triggering UI)
-  touch_ignore_until = millis() + 300;
-  // Minimal scroll ignore (150ms) - just enough to prevent wake scroll from scrolling
-  scroll_ignore_until = millis() + 150;
-  
-  // Turn backlight back on ONLY for a genuine USER wake (touch/encoder =
-  // EXT0/EXT1). A TIMER wake here is a maintenance or Sense-handshake-retry/
-  // fallback wake — it must stay DARK, otherwise the panel flashes on ~once a
-  // minute while the Sense is busy (post-OTA reboot / mid-upload) as the LCD
-  // wakes on the short fallback timer, retries the handshake, fails, and
-  // re-sleeps. A real OTA still lights the panel via its own path (OTA_LOCK ->
-  // lcd_set_idle_screen_dark(false), lcd_enter_ota_mode "ota_mode", and the
-  // g_ota_screen_active "Updating..." overlay relight in the UI task).
-  if (user_ui_wake) {
-    Serial.println("[WAKE] Turning backlight ON after wake (user wake)");
-    lcd_set_backlight_binary(true, "wake");
-    g_panel_enabled = true;
-  } else {
-    Serial.println("[WAKE] backlight stays OFF (timer/non-user wake)");
-  }
-  vTaskDelay(pdMS_TO_TICKS(50));  // Use vTaskDelay to yield to other tasks
-  
-  // Set flag to trigger UI reset on next list render (state was already cleared before sleep)
-  just_woke_up = true;
-  
-  // Start the Sense wake handshake immediately on user wake so Sense boots
-  // while the LCD restores its own UI state.
-  const char* wake_reason = user_ui_wake ? "user_ui_wake" : "wake_from_sleep";
-  Serial.printf("[WAKE] Requesting Sense wake reason=%s\n", wake_reason);
-  request_sense_wake(wake_reason);
-  if (last_sense_rx_ms == 0 || (millis() - last_sense_rx_ms) > SENSE_RX_STALE_MS) {
-    sense_state_set(SENSE_UNKNOWN, wake_reason);
-  }
-
-  // Load saved list (selected_index was already reset to 0 before sleep)
-  Serial.println("[WAKE] Loading saved list from storage...");
-  int saved_count = 0;
-  // Reduce mutex timeout to prevent long blocking (500ms instead of 1000ms)
-  if (app_state_mutex != NULL && xSemaphoreTake(app_state_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-    saved_count = load_list_from_storage(&g_active);
-
-    // Ensure selected_index is 0 (should already be set from before sleep, but double-check)
-    g_active.selected_index = (saved_count > 0) ? 0 : -1;
-
-    Serial.printf("[WAKE] Loaded %d items, selected_index=%d\n",
-                  saved_count, g_active.selected_index);
-
-    xSemaphoreGive(app_state_mutex);
-
-    // Post event to UI task to render and reset UI (LVGL must be called from UI task)
-    if (saved_count > 0 && app_event_queue != NULL) {
-      app_event_t evt = {EVT_RENDER_ACTIVE_LIST, {.new_count = saved_count}};
-      xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(100));
-      Serial.println("[WAKE] Queued render event for saved list at index 0");
-    } else {
-      Serial.println("[WAKE] No saved list found");
-    }
-  } else {
-    Serial.println("[WAKE] WARNING: Failed to acquire mutex for loading saved list");
-  }
-  
-  // NOTE: We do NOT send INPUT_WAKE here anymore - user must manually trigger refresh via pull-to-refresh
-  
-  vTaskDelay(pdMS_TO_TICKS(200));  // Use vTaskDelay to yield to other tasks
-  
-  Serial.println("LIGHT SLEEP wake handling complete.");
+  // Deep sleep never returns. Wake policy and UI restoration live in setup().
 }
 
 static uint32_t send_input_sleep_message() {
@@ -914,7 +735,8 @@ static bool notify_sense_sleep() {
         touch_ignore_until = millis() + 450;
         scroll_ignore_until = millis() + 200;
         cancel_pending_sleep_for_user_input("pre_sleep_touch");
-        abort_sleep_transition("pre_sleep_touch");
+        abort_sleep_transition("pre_sleep_touch",
+                               fresh_touch || last_scroll_activity_ms > baseline_scroll_activity_ms);
         Serial.println("[SLEEP] abort wait (user_input, no INPUT_WAKE sent)");
         return false;
       }

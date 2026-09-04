@@ -293,6 +293,17 @@ produce the interference cannot catch it.
 
 ### LCD Board Boot Sequence
 
+**Timer visibility (2026-09-04):** deep sleep restarts `setup()`. TIMER/effective
+timer boots initialize the UI and inputs with PWM zero and panel DISPLAY_OFF,
+and keep a background-dark latch until a real touch/encoder event or OTA takes
+over. Cold/touch boots remain visible. The latch also gates later Home/status
+relight paths; keeping the panel dark does not stop UART or input polling. OTA
+and post-OTA continuation explicitly light the display. Short failed-handshake
+fallback retries are retained in validated RTC no-init memory across timer
+boots, capped at three, then use the maintenance/periodic timer. An actual
+non-fallback sleep commit or real user input resets the retry episode. See
+`LCD_FIRMWARE.md` for diagnostics and required unplugged validation.
+
 1. **Serial init** at 115200
 2. **Wake cause classification** -- EXT0 (touch), EXT1 (touch mask), TIMER, cold boot
 3. **Maintenance state restore** -- Check NVS for persisted maintenance window

@@ -207,7 +207,7 @@ static void backlight_apply_pct(int pct) {
   // Apply live only if the backlight is already on (PWM initialized). At boot
   // we only seed g_user_brightness_duty; the first lcd_set_backlight_level(.,"on")
   // brings the panel up at the saved level (avoids flashing the BL on early).
-  if (g_backlight_initialized) {
+  if (g_backlight_initialized && g_backlight_duty > 0 && !g_background_wake_dark) {
     setUpdutySubdivide(duty);
     g_backlight_duty = duty;
   }
@@ -218,9 +218,9 @@ static void backlight_apply_pct(int pct) {
 }
 
 static void lcd_set_backlight_level(int level, const char* reason) {
-  int target = (level > 0) ? g_user_brightness_duty : 0;
+  int target = (level > 0 && !g_background_wake_dark) ? g_user_brightness_duty : 0;
   if (target > 0 && !g_backlight_initialized) {
-    lcd_bl_pwm_bsp_init(LCD_PWM_MODE_255);
+    lcd_bl_pwm_bsp_init(0);
     g_backlight_initialized = true;
   }
   if (g_backlight_initialized) {
@@ -260,7 +260,7 @@ static void lcd_set_idle_screen_dark(bool dark, const char* reason) {
     return;
   }
 
-  if (!g_idle_screen_dark) {
+  if (g_background_wake_dark || !g_idle_screen_dark) {
     return;
   }
   if (!g_panel_enabled) {
@@ -282,6 +282,8 @@ static void lcd_set_idle_screen_dark(bool dark, const char* reason) {
 
 static void ensure_awake_for_ui(const char* reason) {
   // Only call this on real user input (touch/scroll/pull-to-refresh).
+  lcd_allow_visible_ui(reason);
+  sleep_fallback_reset("user_input");
   cancel_pending_sleep_for_user_input(reason);
   if (g_ota_mode_active) {
     if (g_lcd_maintenance_headless) {
@@ -310,6 +312,9 @@ static void ensure_awake_for_ui(const char* reason) {
       g_panel_enabled = true;
     }
     g_lvgl_running = true;
+    // Frames rendered while the panel was off may have been marked clean.
+    // Repaint when the real user makes the display visible.
+    if (lv_is_initialized() && lv_scr_act()) lv_obj_invalidate(lv_scr_act());
     if (app_event_queue != NULL) {
       app_event_t evt = {};
       if (g_active.count > 0) {
@@ -328,7 +333,13 @@ static void ensure_awake_for_ui(const char* reason) {
                 g_lvgl_running ? 1 : 0);
 }
 
-static void abort_sleep_transition(const char* reason) {
+static void abort_sleep_transition(const char* reason, bool user_input = true) {
+  // Pin/teardown callers have real input. The handshake wait can also abort on
+  // generic activity (e.g. a firmware-info retry); that must remain dark.
+  if (user_input) {
+    lcd_allow_visible_ui(reason);
+    sleep_fallback_reset("sleep_aborted_by_touch");
+  }
   Serial.printf("[SLEEP_ABORT] reason=%s in_sleep=%d transition=%d backlight=%d panel_on=%d lvgl_running=%d\n",
                 reason ? reason : "unknown",
                 g_in_light_sleep ? 1 : 0,
@@ -339,7 +350,9 @@ static void abort_sleep_transition(const char* reason) {
   unsigned long now_ms = millis();
   bool need_wake = g_in_light_sleep || g_sleep_transition ||
                    (g_backlight_duty == 0) || !g_panel_enabled || !g_lvgl_running;
-  if (need_wake) {
+  g_sleep_transition = false;
+  g_in_light_sleep = false;
+  if (need_wake && !g_background_wake_dark) {
     g_idle_screen_dark = false;
     if (g_sleep_transition) {
       g_sleep_transition = false;

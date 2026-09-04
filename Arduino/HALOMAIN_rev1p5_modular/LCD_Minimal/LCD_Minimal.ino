@@ -860,6 +860,17 @@ static unsigned long last_user_activity_ms = 0;
 static volatile unsigned long last_scroll_activity_ms = 0;
 static volatile bool scroll_activity_pending = false;
 static bool g_idle_screen_dark = false;
+// Timer housekeeping boots initialize the UI for touch/UART, but stay dark
+// until actual user input or an OTA takes over. Ordinary status/activity
+// updates must not turn a background boot into a visible wake.
+static volatile bool g_background_wake_dark = false;
+
+static void lcd_allow_visible_ui(const char* reason) {
+  if (g_background_wake_dark) {
+    g_background_wake_dark = false;
+    Serial.printf("[WAKE_POLICY] visible reason=%s\n", reason ? reason : "unknown");
+  }
+}
 static unsigned long last_scroll_bump_log_ms = 0;
 #define SCROLL_ACTIVITY_LOG_MS 500
 static unsigned long home_shown_ms = 0;
@@ -911,8 +922,22 @@ static bool sleep_cancelled_by_user_input = false;
 static uint32_t sleep_fallback_timer_sec = 0;
 // After SLEEP_FALLBACK_MAX_CONSECUTIVE quick retries we drop to the long
 // maintenance/periodic timer instead (see enter_deep_sleep timer computation).
-static uint8_t sleep_fallback_consecutive = 0;
 static const uint8_t SLEEP_FALLBACK_MAX_CONSECUTIVE = 3;
+// No initializer: validate before use in setup(). .rtc_noinit avoids the
+// software-reset initialization trap; only a proven deep-sleep timer wake
+// inherits this episode. A cold/user/software boot gets a fresh budget.
+RTC_NOINIT_ATTR static uint32_t sleep_fallback_magic;
+RTC_NOINIT_ATTR static volatile uint8_t sleep_fallback_consecutive;
+static const uint32_t SLEEP_FALLBACK_MAGIC = 0x46424B31;
+
+static void sleep_fallback_reset(const char* reason) {
+  if (sleep_fallback_consecutive != 0) {
+    Serial.printf("[SLEEP] fallback_budget_reset count=%u reason=%s\n",
+                  (unsigned)sleep_fallback_consecutive, reason ? reason : "unknown");
+  }
+  sleep_fallback_consecutive = 0;
+  sleep_fallback_magic = SLEEP_FALLBACK_MAGIC;
+}
 static bool sense_ota_active = false;
 // Forward-declared; true when LCD OTA binary transfer is active (set by lcd_ota_uart.h).
 // Used by sleep_blocked_for_ota() which is defined before the lcd_ota_uart.h include.
@@ -3948,6 +3973,22 @@ void setup() {
   s_wake_cause_label[sizeof(s_wake_cause_label) - 1] = '\0';
   lcd_log_rtc_timer_state(timer_override ? "boot_timer_override" : "boot_pre_eval");
   bool effective_timer_wake = (wake_cause == ESP_SLEEP_WAKEUP_TIMER) || timer_override;
+  g_background_wake_dark = effective_timer_wake;
+  if (!deep_sleep_reset || !effective_timer_wake ||
+      sleep_fallback_magic != SLEEP_FALLBACK_MAGIC ||
+      sleep_fallback_consecutive > SLEEP_FALLBACK_MAX_CONSECUTIVE) {
+    sleep_fallback_reset("boot_new_episode");
+  }
+  Serial.printf("[WAKE_POLICY] wake=%d reset=%d background_dark=%d fallback_count=%u\n",
+                (int)wake_cause, (int)reset_reason,
+                g_background_wake_dark ? 1 : 0, (unsigned)sleep_fallback_consecutive);
+  if (effective_timer_wake) {
+    char detail[64];
+    snprintf(detail, sizeof(detail), "wake=%d reset=%d dark=%d retries=%u",
+             (int)wake_cause, (int)reset_reason, g_background_wake_dark ? 1 : 0,
+             (unsigned)sleep_fallback_consecutive);
+    lcd_errlog_store_with_context("lcd", "wake", "POLICY", (int)wake_cause, detail);
+  }
   g_ship_ota_wake_window = (HALO_SHIP_TEST_MODE != 0) && LCD_SHIP_MODE_OTA &&
                            (wake_cause == ESP_SLEEP_WAKEUP_TIMER ||
                             wake_cause == ESP_SLEEP_WAKEUP_UNDEFINED);
@@ -4155,6 +4196,7 @@ void setup() {
   // successful-OTA reboot — esp_restart() is called without it — so the boot
   // continuation lives here in setup() where boot code actually executes.
   if (lcd_ota_take_continuation_pending()) {
+    lcd_allow_visible_ui("ota_continuation");
     g_ota_screen_active = true;                                  // ui_task draws "Updating…" overlay
     g_ota_continuation_hold_start_ms = millis();                 // for the loop() safety timeout
     ota_stay_awake_until_ms = millis() + OTA_CONTINUATION_HOLD_MS; // block sleep AND keep panel lit
@@ -5984,4 +6026,3 @@ loop_continue:
 
   vTaskDelay(pdMS_TO_TICKS(5));  // Fast loop for smooth LVGL rendering (was 50ms, too slow for animations)
 }
-
