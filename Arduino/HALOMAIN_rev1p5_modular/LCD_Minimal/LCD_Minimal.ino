@@ -909,6 +909,10 @@ static const uint8_t SLEEP_DENY_MAX_COUNT = 10;
 static bool sleep_wait_for_sense_idle = false;
 static bool sleep_cancelled_by_user_input = false;
 static uint32_t sleep_fallback_timer_sec = 0;
+// After SLEEP_FALLBACK_MAX_CONSECUTIVE quick retries we drop to the long
+// maintenance/periodic timer instead (see enter_deep_sleep timer computation).
+static uint8_t sleep_fallback_consecutive = 0;
+static const uint8_t SLEEP_FALLBACK_MAX_CONSECUTIVE = 3;
 static bool sense_ota_active = false;
 // Forward-declared; true when LCD OTA binary transfer is active (set by lcd_ota_uart.h).
 // Used by sleep_blocked_for_ota() which is defined before the lcd_ota_uart.h include.

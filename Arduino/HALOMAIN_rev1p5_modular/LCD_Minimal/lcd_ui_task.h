@@ -112,6 +112,14 @@ static void ui_task(void *arg) {
     // While OTA screen is active, don't process any screen transitions.
     // Just tick LVGL to keep the display alive and release the lock.
     if (g_ota_screen_active) {
+      // Non-user (timer/maintenance) wakes no longer relight the panel (see the
+      // wake-cause gate in lcd_sleep.h). Guarantee a real OTA is still visible:
+      // whenever the "Updating..." overlay is active but the backlight was left
+      // dark by a non-user wake, relight it here. A bare handshake-retry/fallback
+      // wake never sets g_ota_screen_active, so it stays dark.
+      if (g_backlight_duty == 0) {
+        lcd_set_backlight_binary(true, "ota_screen");
+      }
       // OTA overlay — black screen with status text
       bool is_transfer = g_lcd_ota_show_progress && g_lcd_ota_progress_pct >= 0;
       bool need_update = false;

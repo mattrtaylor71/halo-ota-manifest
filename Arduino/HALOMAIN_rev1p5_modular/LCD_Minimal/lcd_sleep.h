@@ -370,6 +370,23 @@ static void enterLightSleep() {
                     g_lcd_maintenance_start_epoch > 0);
   uint64_t maint_now_epoch = 0;
   uint64_t maint_target_epoch = 0;
+  // Bound the short-fallback self-wake loop. Keep the first few quick retries
+  // (the Sense usually becomes reachable within a reboot/upload window), then
+  // stop self-waking on the ~15s fallback timer and drop to the long
+  // maintenance/periodic timer so the device sleeps dark instead of waking
+  // every ~15-30s while the Sense stays busy. A clean (non-fallback) sleep
+  // resets the counter, so a later episode gets a fresh set of quick retries.
+  if (sleep_fallback_timer_sec > 0) {
+    sleep_fallback_consecutive++;
+    if (sleep_fallback_consecutive > SLEEP_FALLBACK_MAX_CONSECUTIVE) {
+      Serial.printf("[SLEEP] fallback_loop_bounded consecutive=%u max=%u -> long_timer\n",
+                    (unsigned)sleep_fallback_consecutive,
+                    (unsigned)SLEEP_FALLBACK_MAX_CONSECUTIVE);
+      sleep_fallback_timer_sec = 0;  // fall through to maintenance/periodic timer below
+    }
+  } else {
+    sleep_fallback_consecutive = 0;
+  }
   if (sleep_fallback_timer_sec > 0) {
     sleep_timer_sec = sleep_fallback_timer_sec;
     timer_reason = "fallback";
@@ -626,10 +643,21 @@ static void enterLightSleep() {
   // Minimal scroll ignore (150ms) - just enough to prevent wake scroll from scrolling
   scroll_ignore_until = millis() + 150;
   
-  // Turn backlight back on
-  Serial.println("[WAKE] Turning backlight ON after wake");
-  lcd_set_backlight_binary(true, "wake");
-  g_panel_enabled = true;
+  // Turn backlight back on ONLY for a genuine USER wake (touch/encoder =
+  // EXT0/EXT1). A TIMER wake here is a maintenance or Sense-handshake-retry/
+  // fallback wake — it must stay DARK, otherwise the panel flashes on ~once a
+  // minute while the Sense is busy (post-OTA reboot / mid-upload) as the LCD
+  // wakes on the short fallback timer, retries the handshake, fails, and
+  // re-sleeps. A real OTA still lights the panel via its own path (OTA_LOCK ->
+  // lcd_set_idle_screen_dark(false), lcd_enter_ota_mode "ota_mode", and the
+  // g_ota_screen_active "Updating..." overlay relight in the UI task).
+  if (user_ui_wake) {
+    Serial.println("[WAKE] Turning backlight ON after wake (user wake)");
+    lcd_set_backlight_binary(true, "wake");
+    g_panel_enabled = true;
+  } else {
+    Serial.println("[WAKE] backlight stays OFF (timer/non-user wake)");
+  }
   vTaskDelay(pdMS_TO_TICKS(50));  // Use vTaskDelay to yield to other tasks
   
   // Set flag to trigger UI reset on next list render (state was already cleared before sleep)

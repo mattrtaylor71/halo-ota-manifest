@@ -531,8 +531,8 @@ Despite the name, this function enters **deep sleep** (not light sleep). Flow:
 3. Set `stay_awake_until_ms` for 8s on touch wake
 4. Clear touch/encoder interrupts
 5. Set ignore periods: touch 300ms, scroll 150ms
-6. Restore backlight and panel
-7. Request Sense wake
+6. **Restore backlight and panel ONLY on a genuine USER wake** (`user_ui_wake` = `cause == ESP_SLEEP_WAKEUP_EXT0 || EXT1`, i.e. touch/encoder). A **TIMER wake** (maintenance or Sense-handshake-retry/fallback) is left **DARK** — the relight (`lcd_set_backlight_binary(true,"wake")` + `g_panel_enabled=true`) is gated on `user_ui_wake`. This stops the ~1/min backlight-flash loop that occurred when the LCD couldn't complete the sleep handshake (Sense busy post-OTA/upload), deep-slept on the short fallback timer, woke, and unconditionally relit. A **real OTA still lights up** via its own paths (OTA_LOCK -> `lcd_set_idle_screen_dark(false)`, `lcd_enter_ota_mode` "ota_mode", and a belt-and-suspenders relight in the UI task's `g_ota_screen_active` "Updating..." overlay block when `g_backlight_duty==0`). A bare handshake-retry wake never sets `g_ota_screen_active`, so it stays dark.
+7. Request Sense wake (handshake still runs on a dark timer wake, then re-sleeps dark)
 8. Load saved list from NVS
 9. Post EVT_RENDER_ACTIVE_LIST to UI task
 
@@ -545,6 +545,8 @@ Despite the name, this function enters **deep sleep** (not light sleep). Flow:
 5. Handle user input cancellation during wait
 6. On SLEEP_DENY: enter low-power wait, track retry
 7. On timeout with no link: fallback timer sleep (15s)
+
+**Bounded fallback loop (anti-flash):** the short fallback-timer sleep (`SLEEP_FALLBACK_TIMER_SEC` = 15s) used to self-wake indefinitely (~every 15-30s) while the Sense stayed busy. The `enterLightSleep` timer computation now counts consecutive fallback sleeps in `sleep_fallback_consecutive`; after `SLEEP_FALLBACK_MAX_CONSECUTIVE` (3) quick retries it drops the fallback and sleeps on the **long maintenance/periodic timer** instead (logs `[SLEEP] fallback_loop_bounded ... -> long_timer`). A clean (non-fallback) sleep resets the counter, so a later episode gets a fresh set of quick retries. This is independent of the `notify_sense_sleep()==false` stay-awake backoff, which already caps at `fail_count >= 3 -> sleep_retry_requires_user` (waits for a user tap).
 
 #### Wake Mask
 
@@ -714,6 +716,7 @@ any intermediate wake). Fix:
 | `SLEEP_DENY_MAX_COUNT` | 10 | Force sleep after N denies |
 | `SLEEP_DENY_RETRY_DEFAULT_MS` | 5000 | Default retry interval after deny |
 | `SLEEP_FALLBACK_TIMER_SEC` | 15 | Timer wake if handshake fails |
+| `SLEEP_FALLBACK_MAX_CONSECUTIVE` | 3 | Max consecutive short-fallback self-wakes before dropping to the long maintenance/periodic timer (anti-flash bound) |
 | `LCD_SLEEP_FALLBACK_TIMER_SEC` | 30 | Fallback timer for certain paths |
 | `LCD_MAINT_WAKE_LEAD_S` | 15 | Lead before window start for absolute self-wake (matches Sense lead) |
 
