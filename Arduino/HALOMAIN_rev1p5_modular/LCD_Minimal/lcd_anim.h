@@ -239,7 +239,7 @@ static void lcd_set_backlight_binary(bool on, const char* reason) {
 
 static void lcd_set_idle_screen_dark(bool dark, const char* reason) {
   if (dark) {
-    if (g_idle_screen_dark || g_sleep_transition || g_in_light_sleep || g_ota_mode_active) {
+    if (g_idle_screen_dark || g_sleep_transition || g_in_light_sleep || g_ota_mode_active || g_ota_screen_active) {
       return;
     }
     if (g_lvgl_running && lv_is_initialized()) {

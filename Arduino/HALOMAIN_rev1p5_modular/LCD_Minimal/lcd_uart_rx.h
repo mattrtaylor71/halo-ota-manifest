@@ -185,6 +185,28 @@ static void uart_process_received_message(const char* json_str) {
 
   // Drain: Sense asking what is waiting on the card.
   if (strcmp(type, "SPOOL_LIST_REQ") == 0) {
+    // UNCONDITIONAL no-mount reply. Mounting the SD card asserts on a NULL SDMMC
+    // semaphore and panics the LCD (queue.c:1709), so we must NEVER touch it —
+    // lcd_sd_spool_count()/lcd_spool_oldest() both call lcd_sd_init(). Answer with
+    // a well-formed zero-count SPOOL_LIST so a Sense still on old firmware (or an
+    // OTA in progress) never hangs waiting, and the card is never mounted.
+    // Gated by LCD_SD_SPOOL_ENABLED (lcd_sdspool.h, currently 0) OR any active OTA.
+    // Re-enable the real listing only after sd_card_Init/SDMMC init is fixed.
+#if !LCD_SD_SPOOL_ENABLED
+    if (true) {
+#else
+    if (lcd_ota_in_progress_for_sd_guard()) {
+#endif
+      static char out_ota[192];
+      snprintf(out_ota, sizeof(out_ota),
+               "{\"ver\":%d,\"type\":\"SPOOL_LIST\",\"msg_id\":%lu,\"ts\":%lu,"
+               "\"count\":0,\"total\":0,\"slot\":0,\"len\":0,\"meta\":null}",
+               PROTOCOL_VERSION, (unsigned long)get_next_msg_id(),
+               (unsigned long)millis());
+      senseSerial.print(out_ota); senseSerial.print('\n'); senseSerial.flush();
+      Serial.println("[SPOOL_TX] list zero-count no-mount (sd_spool_disabled_or_ota) count=0 total=0");
+      return;
+    }
     uint32_t seq = 0, len = 0, total = 0;
     const uint32_t count = lcd_sd_spool_count(&total);
     const bool have = lcd_spool_oldest(&seq, &len);
@@ -670,7 +692,7 @@ static void uart_process_received_message(const char* json_str) {
       // The Sense sends MAINT_WINDOW during pre_sleep sync even after OTA
       // is done — entering headless at that point kills the UI for no reason.
       unsigned long unlock_age = (ota_unlock_received_ms > 0) ? (millis() - ota_unlock_received_ms) : 0xFFFFFFFF;
-      bool recently_unlocked = (unlock_age < 10000);  // within 10s of OTA_UNLOCK
+      bool recently_unlocked = (unlock_age < 45000);  // within 45s of OTA_UNLOCK — a late post-OTA MAINT_WINDOW must not re-arm headless (swallows touch)
       if (!g_lcd_maintenance_active && (g_lcd_maintenance_completed_ms > 0 || recently_unlocked)) {
         // Timer is armed above, just don't re-enter headless mode
         Serial.printf("[UART] MAINT_WINDOW skip headless (completed=%lu unlock_age=%lu)\n",
@@ -912,7 +934,15 @@ static void uart_process_received_message(const char* json_str) {
     // reboot + the post-reboot LCD_OTA_QUERY/proxy. The OTA_LOCK handler set a
     // long stay-awake window for exactly this; preserve it so the normal
     // sleep-decision keeps the LCD awake until the window naturally expires.
-    if (millis() < ota_stay_awake_until_ms) {
+    if (g_ota_continuation_hold_start_ms > 0) {
+      // Post-OTA-reboot continuation hold: OTA_UNLOCK means the LCD already
+      // rebooted and the Sense is done. Clear the stay-awake so the panel
+      // resumes normal idle behavior once Home is shown — otherwise the 180s
+      // continuation window (which CHANGE 1a keys stay-lit off) would pin the
+      // panel lit on Home for up to 3 min after the update finished.
+      ota_stay_awake_until_ms = 0;
+      Serial.println("[OTA] unlock - continuation hold done, clearing stay_awake");
+    } else if (millis() < ota_stay_awake_until_ms) {
       Serial.printf("[OTA] unlock - keep ota_stay_awake remaining %lums (dual-OTA)\n",
                     (unsigned long)(ota_stay_awake_until_ms - millis()));
     } else {
@@ -923,6 +953,16 @@ static void uart_process_received_message(const char* json_str) {
     g_lcd_maintenance_deadline_ms = 0;
     g_ota_mode_active = false;
     ota_unlock_received_ms = millis();
+    // Tear down the post-OTA-reboot "Updating…" continuation hold (if armed on
+    // boot). OTA_UNLOCK is the definitive "Sense is done" signal; from here the
+    // provision_return_home_pending set below returns the LCD to Home.
+    g_ota_continuation_hold_start_ms = 0;
+    // Post-OTA sense-version grace: immediately re-query the Sense FW so
+    // g_sense_fw_version refreshes right after OTA (kills the "--" / "couldn't
+    // find the sensor" the user would otherwise see without opening Settings).
+    // ota_unlock_received_ms is set just above, so request_fw_info picks up the
+    // extended post-OTA retry timeout. Safe on Core 0: this only writes UART.
+    ship_menu_request_fw_info();
     // Clear the manual-OTA override so the INPUT_OTA_CHECK resend loop in loop()
     // stops. Without this, an already-up-to-date manual OTA leaves the override
     // set; the resend condition (override_active() && !ota_locked) keeps firing,

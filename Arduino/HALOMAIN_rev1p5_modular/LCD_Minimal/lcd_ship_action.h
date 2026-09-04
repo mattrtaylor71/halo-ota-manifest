@@ -263,7 +263,15 @@ static void ship_menu_request_fw_info() {
   user_activity_bump("fw_info_request");
   g_fw_info_request_ms = now_ms;
   g_fw_info_last_attempt_ms = now_ms;
-  g_fw_info_retry_deadline_ms = now_ms + FW_INFO_RETRY_TIMEOUT_MS;
+  // Post-OTA grace: shortly after an OTA the Sense is still rebooting/resyncing,
+  // so an 8s deadline gives up and leaves "Sense --". Extend to 45s so the query
+  // keeps retrying through the Sense reboot instead of stranding a stale version.
+  unsigned long fw_info_timeout_ms = FW_INFO_RETRY_TIMEOUT_MS;
+  if (ota_unlock_received_ms > 0 && (now_ms - ota_unlock_received_ms) < 45000) {
+    fw_info_timeout_ms = 45000;
+    Serial.println("[MENU] request_fw_info post-OTA grace — extended retry timeout 45000ms");
+  }
+  g_fw_info_retry_deadline_ms = now_ms + fw_info_timeout_ms;
   g_fw_info_retry_count = 0;
   g_fw_info_response_received = false;
   Serial.printf("[MENU] request_fw_info cached_sense_fw=%s awake=%d sync=%d recent=%d\n",

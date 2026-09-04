@@ -159,7 +159,7 @@ Central UART message dispatcher. Parses JSON, validates protocol fields, routes 
 | `INPUT_OTA_CHECK` | Trigger manual OTA check |
 | `INPUT_WIFI_SCAN` | Scan and report visible APs |
 | `INPUT_WIFI_TEST` | Full WiFi cold-start diagnostic |
-| `SYNC` / `SYNC_ACK` | Link synchronization |
+| `SYNC` / `SYNC_ACK` | Link synchronization. After replying `SYNC_ACK`, the Sense also **pushes `FW_INFO`** via `uart_send_fw_info(false)` (fast, non-blocking) so whenever the LCD (re)connects — including right after its OTA reboot — it immediately receives the current `sense_fw` without having to query |
 | `LINK_HB` | LCD heartbeat received |
 | `LCD_DIAG` | Store LCD diagnostic state |
 | `WIFI_STATUS` | Sync WiFi credentials with LCD |
@@ -340,6 +340,24 @@ covered (`put_fail`, `put_timeout`, `presign_fail`, `presign_timeout`,
 
 **The image buffer may only be freed after this returns.** Any new failure path
 that frees earlier reintroduces silent data loss.
+
+> **SD spool-DRAIN is DISABLED (2026-09-04).** `SPOOL_DRAIN_WAKE_ENABLED` in
+> `sense_spool_drain.h` is set to **0**. That macro now gates **every**
+> `SPOOL_LIST_REQ` emission on the Sense — `sense_spool_drain_tick()`,
+> `sense_spool_probe_tick()`, and the bench `sense_spool_drain_force()`
+> (`draintest`/`drainreal`) all early-return when it is 0 — not just the
+> early-wake arming. Reason: any spool op makes the LCD mount its SD card
+> (`lcd_sd_init()` → `sd_card_Init()` → `esp_vfs_fat_sdmmc_mount()`), which
+> asserts on a NULL SDMMC semaphore (`assert failed: xQueueSemaphoreTake
+> queue.c:1709`) and **panics the LCD**. The Sense still *attempts* the step-2
+> fallback (`sense_spool_image_to_lcd()`), but the LCD now refuses it: its
+> `IMG_XFER_BEGIN` handler calls `lcd_img_rx_begin()` → `lcd_sd_init()`, which
+> is hard-disabled and returns `false`, so the LCD replies `IMG_XFER_READY ok=0`
+> and the Sense keeps the image in RAM (no mount, no crash). Net effect: while
+> this is disabled the SD card is fully out of the loop on both boards, so a
+> failed upload can lose the photo (the pre-spool behaviour) — the accepted
+> tradeoff vs. crashing the LCD. Re-enable only after `sd_card_Init`/SDMMC init
+> is root-caused and fixed.
 
 #### Bounded Frame Grab (`sense_camera_grab.h`)
 
@@ -980,6 +998,10 @@ The partition/state fields are omitted. The LCD Settings screen uses this path b
 
 Observability only; does not affect OTA control flow.
 
+**Proactive `FW_INFO` push (boot + every SYNC).** Beyond the two query-triggered paths above, the Sense now PUSHES `FW_INFO` unsolicited via `uart_send_fw_info(false)` in two places, so the LCD learns the Sense version promptly (especially right after a manual OTA, when the LCD used to fail with "couldn't find the sensor" because the Sense only answered queries and the query landed mid-reboot):
+- **On boot:** `halo_prod_setup()` calls it immediately after `handle_pending_ota_expectation()`. Fast/non-blocking so it never stalls boot.
+- **On every (re)sync:** the `SYNC` handler calls it right after `uart_send_sync_ack()`. This is the key fix — the LCD re-syncs after its OTA reboot, and that SYNC now delivers the new `sense_fw`. Both use `do_lcd_query=false` (never the blocking `true`).
+
 **`sense_lcd_ota_fetch_manifest()`** -- Fetch and parse LCD manifest JSON from S3.
 
 **Cloud-reported `lcd_fw` is the REAL running version (not the manifest):** `truth_get_lcd_fw_version()` returns `g_lcd_ota_version`, which is sourced ONLY from an actual `LCD_OTA_QUERY_RESP` (via `sense_lcd_ota_query()`), never from the OTA manifest. On a successful proxy, the orchestrator clears the cached value (`g_lcd_ota_version[0]='\0'`, `g_lcd_fw_query_ms=0`) instead of writing the assumed manifest version — this previously masked failures by always reporting the target version. The pre-sleep path re-queries the LCD and overwrites the cache with the real booted version when the cache is empty OR stale (`>LCD_FW_QUERY_STALE_MS` = 5 min), provided the UART link is recent and no proxy task is running; `g_lcd_fw_query_ms` (millis) timestamps the last real query.
@@ -987,8 +1009,15 @@ Observability only; does not affect OTA control flow.
 **Successful inline LCD OTA result survives the Sense self-OTA reboot via NVS.** Because the inline LCD proxy is followed immediately by the Sense self-OTA + reboot, the RAM truth globals (`g_lcd_ota_result`/`g_lcd_ota_version`) are wiped before the post-reboot pre_sleep cloud OTA report is built — so a real success used to surface as `last_lcd_ota_result=unknown` / `last_lcd_fw=unknown`. On `"success"` the orchestrator now sets `g_lcd_ota_result="updated"` and calls `set_lcd_ota_result_nvs("updated", lcd_manifest.version)`, persisting to Preferences namespace `"halo"` keys `lcd_ota_res` (11 chars) and `lcd_ota_ver` (11 chars; both <=15 so they don't silently fail). On the next boot, `halo_prod_setup()` calls `load_lcd_ota_result_nvs()` exactly once (co-located with the `get_lcd_ota_due_nvs()` boot check, before any report is built) which repopulates the globals and then **consumes** (removes) the keys — one-shot, so the success is reported once. The post-reboot cloud report therefore shows `last_lcd_ota_result=updated` + `last_lcd_fw=<target>`; the live pre_sleep LCD query then confirms/corrects `lcd_fw` with the real booted version once the LCD is reachable again.
 
 **Dual-board OTA order — LCD proxy FIRST, then Sense self-OTA (`maybeRunOtaCheck()` in `halo_sense_prod.ino`):** When a Sense update is found and ready to apply, the LCD is proxied **inline, before** the Sense self-OTA, while the LCD is still awake from the button press:
-1. Inline (main task, blocking the loop so there is no UART-drain race): `sense_lcd_ota_query()` → `sense_lcd_ota_fetch_manifest(cfg->base_dir, cfg->channel, …)` (via `ota_get_config()`) → `ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0` → `send_ota_uart_message("OTA_LOCK")` + `sense_lcd_ota_proxy(lcd_manifest, lcd_fw)`. Logged as `[OTA_ORCH] lcd proxy result=<res>`. MQTT is already stopped (`mqtt_stop_for_ota()` earlier in the function) and camera DMA already released; the manifest-client connection is released (`g_manifest_client.releaseConnection()`) for TLS headroom. `sense_lcd_ota_proxy()` manages `g_lcd_ota_proxy_owns_uart` itself — not double-managed here. On `"success"` the cached LCD version is invalidated (`g_lcd_ota_version[0]='\0'`, `g_lcd_fw_query_ms=0`).
-2. **Then** `g_ota_applier.applyToOtaPartition(...)` + reboot (success never returns; failure keeps the existing MQTT-reconnect / `OTA_UNLOCK` / `recordOtaResult` path).
+1. Inline (main task, blocking the loop so there is no UART-drain race): `sense_lcd_ota_query()` → `sense_lcd_ota_fetch_manifest(cfg->base_dir, cfg->channel, …)` (via `ota_get_config()`) → `ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0` → `send_ota_uart_message("OTA_LOCK")` + `sense_lcd_ota_proxy(lcd_manifest, lcd_fw)`. Logged as `[OTA_ORCH] lcd proxy result=<res> (attempt=<n>)`. MQTT is already stopped (`mqtt_stop_for_ota()` earlier in the function) and camera DMA already released; the manifest-client connection is released (`g_manifest_client.releaseConnection()`) for TLS headroom. `sense_lcd_ota_proxy()` manages `g_lcd_ota_proxy_owns_uart` itself — not double-managed here. On `"success"` the cached LCD version is invalidated (`g_lcd_ota_version[0]='\0'`, `g_lcd_fw_query_ms=0`). **The update-needed branch sets `lcd_needed_update=true` and proxies with ONE retry** (`for attempt=1..2`): a transient DMA/UART failure on the first attempt does not immediately give up.
+2. **Split guard (FIX A) — the Sense self-OTA is now GATED on LCD-proxy success.** Before `applyToOtaPartition`, if `lcd_needed_update && !lcd_proxy_succeeded` (the LCD was KNOWN behind and its proxy still failed after the retry), the Sense **defers** its self-OTA and returns cleanly instead of rebooting ahead of the LCD. This prevents the permanent split (Sense ahead / LCD behind) that the old code produced — its only recovery, `lcd_ota_due → g_maintenance_in_window`/`g_maintenance_handled`, has no live consumer (those globals are never set true), so recovery never ran. On the defer path: `lcd_ota_due` stays `1` (already set); `OtaIntent::recordOtaResult("lcd_proxy_failed_defer")` + `ota_set_last_result(...)`; MQTT is restored (`mqtt_set_allowed(true)` / `mqtt_force_connect()`); `clear_intent_once()`; **no `OTA_UNLOCK` is sent** (the LCD is deliberately left locked-awake so the immediate next manual/nightly OTA can re-attempt the proxy before the Sense advances). Logged `[OTA] LCD proxy failed after retry — deferring Sense self-OTA to avoid split; will retry next cycle` + breadcrumb `sense_apply_deferred lcd_split_guard`. Query/manifest-fail cases leave `lcd_needed_update=false` (undetermined) and fall through to the legacy `lcd_ota_due` behavior unchanged.
+3. **Otherwise** `g_ota_applier.applyToOtaPartition(...)` + reboot (success never returns; failure keeps the existing MQTT-reconnect / `OTA_UNLOCK` / `recordOtaResult` path).
+
+**`OTA_UNLOCK` is guaranteed on every non-reboot completion/early-return path of `maybeRunOtaCheck()`.** A manual OTA sends `OTA_LOCK` up front (`halo_prod_request_manual_ota()`), so any path that ends WITHOUT a Sense self-apply reboot must release the LCD or it stays stranded on the "Updating…" screen. The pre-existing `release_waiting_lcd_ota()` helper is gated on `g_lcd_ota_request_active`, which is never set true, so it does not actually unlock — explicit `send_ota_uart_message("OTA_UNLOCK")` calls were added:
+- **Manifest-error paths (no LCD proxy ever runs):** `manifest_url_invalid`, `manifest_fetch_fail`, `board_mismatch`, `bin_url_disallowed` — send `OTA_UNLOCK` unconditionally before returning.
+- **Gate/no-update paths that call `maybe_trigger_lcd_ota_check()`:** `downgrade_blocked`, `rollout_min_version`, `rollout_skip`, `apply_blocked` — send `OTA_UNLOCK` **inside** the existing `if (!g_lcd_ota_task_running)` block. When a proxy task DID start, that task sends its own `OTA_UNLOCK` at completion (and the proxy does NOT re-lock, so an early unlock here would strand the stream); guarding on `!g_lcd_ota_task_running` avoids the double-unlock/premature-unlock. A redundant `OTA_UNLOCK` on the LCD is idempotent/harmless.
+- **`up_to_date` path — inline LCD proxy (FIX B), NOT the background task.** When the Sense is already current and only the LCD may be behind, the `version_cmp==0` branch now calls the new static helper **`prod_proxy_lcd_inline()`** instead of `maybe_trigger_lcd_ota_check()`. The background `lcd_ota_proxy_task` DMA-starves and has many skip paths (window/ack gates, `g_lcd_ota_attempted_this_window`), so it frequently never ran — leaving a Sense-ahead/LCD-behind split un-healed. `prod_proxy_lcd_inline()` runs synchronously on the main task with the LCD held awake by `OTA_LOCK`: it does `g_manifest_client.releaseConnection()` → `sense_lcd_ota_query()` → `sense_lcd_ota_fetch_manifest()`; if the LCD is behind it sends `OTA_LOCK` and runs `sense_lcd_ota_proxy()` with ONE retry. On success it clears `lcd_ota_due` (and persists `lcd_ota_result="updated"`); on failure it sets `lcd_ota_due=1` and logs. It does NOT send the final `OTA_UNLOCK` — the caller's existing `if (!g_lcd_ota_task_running)` block does (always taken now, since no background task is spawned). This path directly heals a Sense-ahead/LCD-behind split on the next manual OTA. `maybe_trigger_lcd_ota_check()` is still defined for the nightly/other callers.
+- **Untouched:** the successful Sense self-apply path (reboots; `handle_pending_ota_expectation()` sends `OTA_UNLOCK` post-reboot on version match, unless `lcd_ota_due` is still pending) and the existing apply-failure `OTA_UNLOCK`.
 
 **SCHEDULED maintenance OTA order — LCD proxy FIRST, then Sense self-OTA (`run_maintenance_if_needed()` in `halo_sense_prod.ino`):** The in-window section is ordered the same way as the manual path (LCD first), for the same reason but with a stronger constraint: a scheduled window wakes BOTH boards from their own deep-sleep timers, and the Sense self-OTA download+apply+reboot (~1–3 min) outlasts the LCD's OTA_LOCK/stay-awake budget. If the Sense rebooted first, the rebooted Sense **physically cannot wake the LCD** (GPIO39 is LCD→Sense only) and the LCD has idle-slept → LCD stranded on old fw (`lcd_fw=unknown` / `lcd_ota_result=unknown` after the window). Order:
 1. `send_ota_uart_message("OTA_LOCK")` — keeps the LCD awake/listening for the UART-proxied stream (extends `ota_stay_awake_until_ms`, wakes display from idle-dark, extends the maintenance deadline, blocks the LCD's own autonomous OTA check). Logged `[MAINT_RUN] LCD proxy first (pre-sense-ota)` + `OTA_LOCK sent (lcd proxy first)`.
@@ -1004,9 +1033,11 @@ Observability only; does not affect OTA control flow.
 - `lcd_query_tx` (before the inline `sense_lcd_ota_query`) -- `t=<millis> link_recent=<halo_uart_link_recent(3000)>`
 - `lcd_query_fail` (code `-1`; inline query returned false) -- `t=<millis>`
 - `lcd_query_ok` (query succeeded; emitted on the manifest-fail, update-needed, and up-to-date branches) -- `lcd_fw=<lcd_fw> t=<millis>`
-- `lcd_proxy_start` (before `sense_lcd_ota_proxy`) -- `ver=<lcd_manifest.version> t=<millis>`
-- `lcd_proxy_done` (after `sense_lcd_ota_proxy`) -- `res=<lcd_res> t=<millis>`
+- `lcd_proxy_start` (before each `sense_lcd_ota_proxy` attempt) -- `ver=<lcd_manifest.version> attempt=<n> t=<millis>`
+- `lcd_proxy_done` (after each `sense_lcd_ota_proxy` attempt) -- `res=<lcd_res> attempt=<n> t=<millis>`
+- `sense_apply_deferred` (code `-1`; FIX A split guard — LCD proxy failed after retry, Sense self-OTA skipped) -- `lcd_split_guard ver=<manifest.version> t=<millis>`
 - `sense_apply_start` (before `applyToOtaPartition`) -- `ver=<manifest.version> lcd_due=<!lcd_proxy_succeeded> t=<millis>`
+- `lcd_inline_query_tx` / `lcd_inline_proxy_start` (FIX B `prod_proxy_lcd_inline()` on the `up_to_date` path) -- query TX and per-attempt proxy start for the inline-only-LCD-behind path
 
 These breadcrumbs make the manual-OTA LCD-rendezvous decision/handshake trail visible in the black box even though the Sense reboots on a successful self-OTA.
 

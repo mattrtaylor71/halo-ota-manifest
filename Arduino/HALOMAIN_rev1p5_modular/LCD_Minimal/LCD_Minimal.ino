@@ -457,6 +457,14 @@ static const char* LCD_MAINT_PREF_KEY_DUR = "dur_s";
 static const char* LCD_MAINT_PREF_KEY_GB = "grace_b";
 static const char* LCD_MAINT_PREF_KEY_GA = "grace_a";
 
+// OTA continuation across the LCD's own OTA reboot. A one-shot boolean written
+// right before esp_restart() in lcd_ota_handle_end(); read once on boot to
+// re-show the "Updating…" hold (panel stays lit) until the Sense finishes its
+// own self-flash and sends OTA_UNLOCK. Kept in its OWN namespace (NOT lcd_maint,
+// which gets prefs.clear()'d on OTA complete) so the flag survives the reboot.
+static const char* LCD_OTA_PREF_NAMESPACE = "lcd_ota";
+static const char* LCD_OTA_PREF_KEY_CONT = "ota_cont";
+
 static void lcd_log_rtc_timer_state(const char* reason) {
   Serial.printf("[LCD_RTC] reason=%s maint_armed=%d maint_wake_in_s=%lu maint_remaining_s=%lu sched_armed=%d sched_wake_in_s=%lu sched_next_epoch=%lu wake_label=%s\n",
                 reason ? reason : "unknown",
@@ -622,6 +630,33 @@ static void lcd_persist_maintenance_state(const char* reason) {
                 (unsigned long)g_lcd_maintenance_remaining_s,
                 (unsigned long)g_lcd_maintenance_start_epoch,
                 g_lcd_maintenance_request_id[0] ? g_lcd_maintenance_request_id : "-");
+}
+
+// ── OTA continuation flag (survives the LCD's own OTA reboot) ─────────────
+// One-shot: set true just before esp_restart() in lcd_ota_handle_end(), read +
+// cleared once on boot. Drives the post-reboot "Updating…" stay-lit hold.
+static void lcd_ota_set_continuation_pending(bool pending) {
+  Preferences prefs;
+  if (!prefs.begin(LCD_OTA_PREF_NAMESPACE, false)) {
+    Serial.println("[LCD_OTA_NVS] set_continuation open_failed");
+    return;
+  }
+  prefs.putBool(LCD_OTA_PREF_KEY_CONT, pending);
+  prefs.end();
+  Serial.printf("[LCD_OTA_NVS] ota_continuation_pending=%d\n", pending ? 1 : 0);
+}
+
+static bool lcd_ota_take_continuation_pending() {
+  Preferences prefs;
+  if (!prefs.begin(LCD_OTA_PREF_NAMESPACE, false)) {
+    return false;
+  }
+  bool pending = prefs.getBool(LCD_OTA_PREF_KEY_CONT, false);
+  if (pending) {
+    prefs.putBool(LCD_OTA_PREF_KEY_CONT, false);  // one-shot: clear immediately
+  }
+  prefs.end();
+  return pending;
 }
 
 static bool lcd_restore_persisted_maintenance_state(const char* reason) {
@@ -1144,6 +1179,11 @@ static void haptic_pulse_scroll() {
 // ── OTA Lock (Sense-coordinated) ───────────────────────────────────────
 static volatile bool ota_locked = false;
 static volatile bool g_ota_screen_active = false;  // OTA status screen is showing — block UI overwrite
+// >0 while the post-OTA-reboot "Updating…" hold is active (set on boot when the
+// NVS ota_cont flag was found). Used by the loop() safety timeout so the LCD
+// can't get stuck on "Updating…" forever if OTA_UNLOCK never arrives.
+static unsigned long g_ota_continuation_hold_start_ms = 0;
+static const unsigned long OTA_CONTINUATION_HOLD_MS = 180000;  // 3 min stay-lit + safety timeout
 static unsigned long ota_lock_at_ms = 0;
 static unsigned long ota_unlock_received_ms = 0;
 static const unsigned long OTA_LOCK_TIMEOUT_MS = 1800000; // 30 min auto-unlock (covers sense OTA + reboot)
@@ -3695,6 +3735,18 @@ static void lcd_errlog_store_with_context(const char* board, const char* area,
 #include "lcd_diag.h"
 #include "lcd_ota_uart.h"
 
+// OTA-active predicate for the SD-mount guard (forward-declared in lcd_sdspool.h,
+// which is included at line 61 — long before any OTA symbol exists). Defined here,
+// after lcd_ota_uart.h, so all three OTA signals are in scope:
+//   - ota_locked            : Sense/manual OTA lock (LCD_Minimal.ino ~1180)
+//   - g_ota_screen_active    : "Updating…" overlay is up (LCD_Minimal.ino ~1181)
+//   - lcd_ota_uart_active()  : LCD OTA binary transfer in progress (lcd_ota_uart.h)
+// Blocks lcd_sd_init() from mounting the SDMMC card mid-OTA, which otherwise
+// contends with esp_ota_write and hard-asserts the SDMMC driver (queue.c:1709).
+bool lcd_ota_in_progress_for_sd_guard() {
+  return ota_locked || g_ota_screen_active || lcd_ota_uart_active();
+}
+
 #include "lcd_uart_rx.h"
 
 
@@ -4090,6 +4142,21 @@ void setup() {
     Serial.println("No saved list found - will fetch from Sense");
   }
 
+  // OTA continuation: if we just rebooted from our own OTA flash, the Sense is
+  // still self-flashing (blocking, UART-silent). Re-show the "Updating…" hold
+  // and keep the panel LIT (via the loop() idle-dark ota_keep_lit guard) until
+  // OTA_UNLOCK arrives or the safety timeout fires. Set BEFORE init_ui_stack so
+  // the ui_task draws the OTA overlay on its first pass instead of Home.
+  // NOTE: lcd_ota_uart_restore_ui() (cited in the spec) does NOT run on a
+  // successful-OTA reboot — esp_restart() is called without it — so the boot
+  // continuation lives here in setup() where boot code actually executes.
+  if (lcd_ota_take_continuation_pending()) {
+    g_ota_screen_active = true;                                  // ui_task draws "Updating…" overlay
+    g_ota_continuation_hold_start_ms = millis();                 // for the loop() safety timeout
+    ota_stay_awake_until_ms = millis() + OTA_CONTINUATION_HOLD_MS; // block sleep AND keep panel lit
+    Serial.println("[LCD_OTA] continuation hold armed — staying lit for Sense self-flash");
+  }
+
   Serial.printf("[BOOT_DIAG] ship_ota=%d maint_wake=%d eff_timer=%d maint_ctx=%d resume_hint=%d timer_ovr=%d reset=%d wake=%d restored_nvs=%d\n",
                 g_ship_ota_wake_window ? 1 : 0,
                 g_lcd_maintenance_wake_window ? 1 : 0,
@@ -4230,6 +4297,19 @@ void loop() {
     hide_provision_intro_screen("return_home_from_loop");
     show_ship_main_menu();
     Serial.println("[PROVISION] return_home (force_from_loop)");
+  }
+
+  // OTA continuation safety timeout: if the post-reboot "Updating…" hold has
+  // been active > OTA_CONTINUATION_HOLD_MS (3 min) and OTA_UNLOCK never arrived
+  // (which would have cleared g_ota_continuation_hold_start_ms), tear the hold
+  // down and return Home so the LCD can't get stuck on "Updating…" forever.
+  if (g_ota_continuation_hold_start_ms > 0 &&
+      (millis() - g_ota_continuation_hold_start_ms) > OTA_CONTINUATION_HOLD_MS) {
+    Serial.println("[LCD_OTA] continuation hold TIMEOUT — no OTA_UNLOCK, returning Home");
+    g_ota_screen_active = false;
+    g_ota_continuation_hold_start_ms = 0;
+    ota_stay_awake_until_ms = 0;
+    show_ship_main_menu();
   }
 
   // Periodic resend of INPUT_OTA_CHECK while a manual OTA request is latched but
@@ -5611,6 +5691,15 @@ void loop() {
     }
     if (lcd_ota_uart_active()) {
       log_sleep_decision(now_ms, screen_name, home_age_ms, false, "lcd_ota_uart");
+      goto loop_continue;
+    }
+    // Keep the panel LIT through the whole OTA — including the post-reboot
+    // "Updating…" hold and the dual-board stay-awake window. This firmware
+    // separates "stay awake" (block sleep) from "stay lit" (panel on); the
+    // guards above only cover the transfer, so without this the freshly-rebooted
+    // LCD darkens after INACTIVITY_TIMEOUT_MS while the Sense is still self-flashing.
+    if (g_ota_screen_active || millis() < ota_stay_awake_until_ms) {
+      log_sleep_decision(now_ms, screen_name, home_age_ms, false, "ota_keep_lit");
       goto loop_continue;
     }
     lcd_set_idle_screen_dark(true, "idle_timeout");

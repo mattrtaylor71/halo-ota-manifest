@@ -3480,6 +3480,83 @@ static void handle_ota_proof() {
 #endif
 }
 
+// FIX B: proxy the LCD OTA INLINE on the main task (NOT the fragile background
+// lcd_ota_proxy_task, which DMA-starves and has many skip paths). Used by the
+// up_to_date path where the Sense is already current and only the LCD is
+// behind — this directly heals a Sense-ahead / LCD-behind split on the next
+// manual OTA. Runs synchronously on the main loop with the LCD held awake via
+// OTA_LOCK, so it is reliable. Sends OTA_LOCK before streaming; the caller is
+// responsible for the final OTA_UNLOCK. Retries the proxy once on transient
+// failure (mirrors FIX A). Returns true if the LCD is up-to-date afterwards
+// (already current OR proxy succeeded); false if it needed an update but the
+// proxy failed (lcd_ota_due left set for the next cycle).
+static bool prod_proxy_lcd_inline() {
+  // Free internal RAM for the LCD download/stream (mirrors the both-behind
+  // inline block and lcd_ota_proxy_task). MQTT/camera DMA are already released
+  // on the OTA path by the caller.
+  g_manifest_client.releaseConnection();
+  delay(100);  // Let memory coalesce before the LCD TLS download
+
+  const OtaUrlConfig* lcd_cfg = ota_get_config();
+  char lcd_fw[32] = {0};
+  OtaManifest lcd_manifest;
+  {
+    char crumb[96];
+    snprintf(crumb, sizeof(crumb), "lcd_inline_query_tx t=%lu link_recent=%d",
+             (unsigned long)millis(), (int)halo_uart_link_recent(3000));
+    diag_record_error_persistent("ota_orch", 0, crumb);
+  }
+  if (!sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr)) {
+    LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=lcd_query_fail");
+    set_lcd_ota_due_nvs(true);
+    return false;
+  }
+  if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest)) {
+    LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=manifest_fetch_fail");
+    set_lcd_ota_due_nvs(true);
+    return false;
+  }
+  if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) <= 0) {
+    LOG_INFO("[OTA_ORCH] up_to_date inline lcd already current (lcd=%s manifest=%s)",
+             lcd_fw, lcd_manifest.version);
+    set_lcd_ota_due_nvs(false);
+    return true;
+  }
+
+  // LCD is behind while the Sense is already current: proxy inline, holding the
+  // LCD awake with OTA_LOCK. Retry once on transient failure.
+  LOG_INFO("[OTA_ORCH] up_to_date inline lcd behind (lcd=%s manifest=%s) — proxying inline",
+           lcd_fw, lcd_manifest.version);
+  send_ota_uart_message("OTA_LOCK");
+  bool ok = false;
+  for (int attempt = 1; attempt <= 2 && !ok; ++attempt) {
+    {
+      char crumb[96];
+      snprintf(crumb, sizeof(crumb), "lcd_inline_proxy_start ver=%s attempt=%d t=%lu",
+               lcd_manifest.version, attempt, (unsigned long)millis());
+      diag_record_error_persistent("ota_orch", 0, crumb);
+    }
+    const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
+    LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=%s (attempt=%d)",
+             lcd_res ? lcd_res : "(null)", attempt);
+    if (lcd_res && strcmp(lcd_res, "success") == 0) {
+      ok = true;
+      strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
+      g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+      set_lcd_ota_result_nvs("updated", lcd_manifest.version);
+      // LCD reboots into the new image; invalidate the cached version so a
+      // future LCD_OTA_QUERY_RESP overwrites it with the real booted version.
+      g_lcd_ota_version[0] = '\0';
+      g_lcd_fw_query_ms = 0;
+    } else if (attempt < 2) {
+      LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy failed (attempt %d) — retrying once", attempt);
+    }
+  }
+  set_lcd_ota_due_nvs(!ok);
+  LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy done ok=%d", ok ? 1 : 0);
+  return ok;
+}
+
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   // Breadcrumb: record OTA-check entry in the persistent black box (area
   // "ota_orch") so the manual-OTA decision/handshake trail survives reboots
@@ -3616,6 +3693,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     dump_system_truth("manifest_err");
     ota_set_last_result("manifest_url_invalid");
     release_waiting_lcd_ota("manifest_url_invalid");
+    // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
+    // (prod:1877) is holding its "Updating…" screen.
+    send_ota_uart_message("OTA_UNLOCK");
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     clear_intent_once();
@@ -3636,6 +3716,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     dump_system_truth("manifest_err");
     ota_set_last_result("manifest_fetch_fail");
     release_waiting_lcd_ota("manifest_fetch_fail");
+    // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
+    // (prod:1877) is holding its "Updating…" screen.
+    send_ota_uart_message("OTA_UNLOCK");
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -3652,6 +3735,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
               manifest.board, HALO_BOARD_NAME);
     ota_set_last_result("board_mismatch");
     release_waiting_lcd_ota("board_mismatch");
+    // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
+    // (prod:1877) is holding its "Updating…" screen.
+    send_ota_uart_message("OTA_UNLOCK");
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -3664,6 +3750,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     LOG_ERROR("[OTA_HOST] Disallowed bin_url: %s", manifest.url);
     ota_set_last_result("bin_url_disallowed");
     release_waiting_lcd_ota("bin_url_disallowed");
+    // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
+    // (prod:1877) is holding its "Updating…" screen.
+    send_ota_uart_message("OTA_UNLOCK");
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -3681,12 +3770,21 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     ota_set_last_result("up_to_date");
     OtaIntent::markNoUpdateNeeded();
     release_waiting_lcd_ota("up_to_date");
-    maybe_trigger_lcd_ota_check();
+    // FIX B: the Sense is already current — proxy the LCD INLINE on the main
+    // task (not the fragile background lcd_ota_proxy_task). This runs with the
+    // LCD held awake by OTA_LOCK, so it reliably heals a Sense-ahead /
+    // LCD-behind split on this manual/nightly OTA instead of depending on the
+    // DMA-starving background task that may never run.
+    bool lcd_inline_ok = prod_proxy_lcd_inline();
+    (void)lcd_inline_ok;  // lcd_ota_due is set inside on failure for next cycle
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     if (!g_lcd_ota_task_running) {
       mqtt_set_allowed(true);
       mqtt_force_connect();
+      // The inline proxy above took/held the LCD lock; release it now so a
+      // manual OTA_LOCK (prod:1877) doesn't strand the LCD on "Updating…".
+      send_ota_uart_message("OTA_UNLOCK");
     }
     clear_intent_once();
     return;
@@ -3706,6 +3804,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     if (!g_lcd_ota_task_running) {
       mqtt_set_allowed(true);
       mqtt_force_connect();
+      // No LCD proxy task will run to release the lock; unlock the LCD now so a
+      // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
+      send_ota_uart_message("OTA_UNLOCK");
     }
     clear_intent_once();
     return;
@@ -3736,6 +3837,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     if (!g_lcd_ota_task_running) {
       mqtt_set_allowed(true);
       mqtt_force_connect();
+      // No LCD proxy task will run to release the lock; unlock the LCD now so a
+      // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
+      send_ota_uart_message("OTA_UNLOCK");
     }
     clear_intent_once();
     return;
@@ -3760,6 +3864,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       if (!g_lcd_ota_task_running) {
         mqtt_set_allowed(true);
         mqtt_force_connect();
+        // No LCD proxy task will run to release the lock; unlock the LCD now so
+        // a manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
+        send_ota_uart_message("OTA_UNLOCK");
       }
       clear_intent_once();
       return;
@@ -3782,6 +3889,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     if (!g_lcd_ota_task_running) {
       mqtt_set_allowed(true);
       mqtt_force_connect();
+      // No LCD proxy task will run to release the lock; unlock the LCD now so a
+      // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
+      send_ota_uart_message("OTA_UNLOCK");
     }
     clear_intent_once();
     return;
@@ -3803,6 +3913,12 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   // sense_lcd_ota_proxy() manages g_lcd_ota_proxy_owns_uart itself (true
   // during COBS streaming, false after); we do not double-manage it.
   bool lcd_proxy_succeeded = false;
+  // FIX A: track whether the LCD actually needed an update this run. When the
+  // LCD is KNOWN behind and its proxy still fails after a retry, the Sense must
+  // NOT self-update ahead of it (that produces a permanent split). Query/
+  // manifest failures leave this false (undetermined) and fall through to the
+  // legacy lcd_ota_due behavior.
+  bool lcd_needed_update = false;
   {
     // Free internal RAM for the LCD download/stream + later Sense apply.
     // MQTT is already stopped (mqtt_stop_for_ota() above) and camera DMA is
@@ -3835,6 +3951,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       snprintf(crumb, sizeof(crumb), "lcd_query_ok lcd_fw=%s t=%lu", lcd_fw, (unsigned long)millis());
       diag_record_error_persistent("ota_orch", 0, crumb);
     } else if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0) {
+      // The LCD is genuinely behind — the Sense MUST NOT advance ahead of it
+      // (FIX A). Mark it owed and proxy with one retry before deciding.
+      lcd_needed_update = true;
       // Breadcrumb: query succeeded; record the LCD fw it reported.
       {
         char crumb[96];
@@ -3842,35 +3961,43 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
         diag_record_error_persistent("ota_orch", 0, crumb);
       }
       send_ota_uart_message("OTA_LOCK");
-      {
-        // Breadcrumb: starting the LCD OTA proxy stream.
-        char crumb[96];
-        snprintf(crumb, sizeof(crumb), "lcd_proxy_start ver=%s t=%lu",
-                 lcd_manifest.version, (unsigned long)millis());
-        diag_record_error_persistent("ota_orch", 0, crumb);
-      }
-      const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
-      LOG_INFO("[OTA_ORCH] lcd proxy result=%s", lcd_res);
-      {
-        // Breadcrumb: LCD OTA proxy returned.
-        char crumb[96];
-        snprintf(crumb, sizeof(crumb), "lcd_proxy_done res=%s t=%lu",
-                 lcd_res ? lcd_res : "(null)", (unsigned long)millis());
-        diag_record_error_persistent("ota_orch", 0, crumb);
-      }
-      if (lcd_res && strcmp(lcd_res, "success") == 0) {
-        lcd_proxy_succeeded = true;
-        // Record the success to the truth globals AND persist to NVS. The Sense
-        // self-OTAs and reboots right after this, wiping RAM; the persisted
-        // result is reloaded next boot so the cloud report shows updated/target.
-        strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
-        g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-        set_lcd_ota_result_nvs("updated", lcd_manifest.version);
-        // LCD reboots into the new image; invalidate the cached version so a
-        // future LCD_OTA_QUERY_RESP overwrites it with the real booted version
-        // (mirrors lcd_ota_proxy_task success handling).
-        g_lcd_ota_version[0] = '\0';
-        g_lcd_fw_query_ms = 0;
+      // Attempt the LCD proxy up to twice: a transient failure (DMA/UART
+      // hiccup) on the first pass must not strand the LCD behind while the
+      // Sense self-updates ahead of it.
+      for (int attempt = 1; attempt <= 2 && !lcd_proxy_succeeded; ++attempt) {
+        {
+          // Breadcrumb: starting the LCD OTA proxy stream.
+          char crumb[96];
+          snprintf(crumb, sizeof(crumb), "lcd_proxy_start ver=%s attempt=%d t=%lu",
+                   lcd_manifest.version, attempt, (unsigned long)millis());
+          diag_record_error_persistent("ota_orch", 0, crumb);
+        }
+        const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
+        LOG_INFO("[OTA_ORCH] lcd proxy result=%s (attempt=%d)",
+                 lcd_res ? lcd_res : "(null)", attempt);
+        {
+          // Breadcrumb: LCD OTA proxy returned.
+          char crumb[96];
+          snprintf(crumb, sizeof(crumb), "lcd_proxy_done res=%s attempt=%d t=%lu",
+                   lcd_res ? lcd_res : "(null)", attempt, (unsigned long)millis());
+          diag_record_error_persistent("ota_orch", 0, crumb);
+        }
+        if (lcd_res && strcmp(lcd_res, "success") == 0) {
+          lcd_proxy_succeeded = true;
+          // Record the success to the truth globals AND persist to NVS. The Sense
+          // self-OTAs and reboots right after this, wiping RAM; the persisted
+          // result is reloaded next boot so the cloud report shows updated/target.
+          strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
+          g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+          set_lcd_ota_result_nvs("updated", lcd_manifest.version);
+          // LCD reboots into the new image; invalidate the cached version so a
+          // future LCD_OTA_QUERY_RESP overwrites it with the real booted version
+          // (mirrors lcd_ota_proxy_task success handling).
+          g_lcd_ota_version[0] = '\0';
+          g_lcd_fw_query_ms = 0;
+        } else if (attempt < 2) {
+          LOG_INFO("[OTA_ORCH] lcd proxy failed (attempt %d) — retrying once before deciding", attempt);
+        }
       }
       // OTA_LOCK above leaves the LCD locked-awake; the Sense reboots right
       // after the apply below. The LCD's own OTA_LOCK timeout / post-OTA
@@ -3893,6 +4020,35 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   set_lcd_ota_due_nvs(!lcd_proxy_succeeded);
   LOG_INFO("[OTA] lcd_ota_due=%d (lcd_proxy_succeeded=%d)",
            lcd_proxy_succeeded ? 0 : 1, lcd_proxy_succeeded ? 1 : 0);
+
+  // ── FIX A: split guard ──
+  // Never self-update the Sense ahead of a KNOWN-behind LCD whose proxy failed.
+  // That produces a permanent split (Sense ahead, LCD behind) whose only
+  // "recovery" (lcd_ota_due -> g_maintenance_in_window / g_maintenance_handled)
+  // has no live consumer, so recovery would never run. If the LCD needed an
+  // update and the proxy still failed after the retry above, DEFER the Sense
+  // self-OTA to the next cycle. lcd_ota_due stays set (above); we deliberately
+  // do NOT send OTA_UNLOCK — the LCD stays locked-awake so the very next
+  // manual/nightly OTA can re-attempt the proxy before the Sense advances.
+  if (lcd_needed_update && !lcd_proxy_succeeded) {
+    LOG_ERROR("[OTA] LCD proxy failed after retry — deferring Sense self-OTA to avoid split; will retry next cycle");
+    {
+      char crumb[96];
+      snprintf(crumb, sizeof(crumb), "sense_apply_deferred lcd_split_guard ver=%s t=%lu",
+               manifest.version, (unsigned long)millis());
+      diag_record_error_persistent("ota_orch", -1, crumb);
+    }
+    OtaIntent::recordOtaResult("lcd_proxy_failed_defer");
+    ota_set_last_result("lcd_proxy_failed_defer");
+    // Return to normal operation but do NOT advance the Sense. No OTA_UNLOCK:
+    // the LCD stays awake for the immediate retry path.
+    mqtt_set_allowed(true);
+    mqtt_force_connect();
+    clear_intent_once();
+    g_ota_check_in_progress = false;
+    g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
+    return;
+  }
 
   // ── THEN the Sense self-OTA (reboots on success, never returns) ──
   {
@@ -4837,6 +4993,12 @@ void halo_prod_setup() {
 
   OtaIntent::init();
   handle_pending_ota_expectation();
+  // Proactively announce the Sense firmware version on boot (fast, non-blocking:
+  // reports sense_fw immediately + cached lcd_fw, no blocking LCD query) so the
+  // LCD gets FW_INFO with the current sense_fw promptly after a manual OTA.
+  // The SYNC handler also pushes FW_INFO, covering the case where the UART/LCD
+  // link is not ready this early.
+  uart_send_fw_info(false);
 
   mqtt_init();
   mqtt_set_allowed(false);

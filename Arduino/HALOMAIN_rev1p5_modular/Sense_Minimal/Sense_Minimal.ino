@@ -2736,6 +2736,11 @@ static bool parse_input_message(const char* json_str) {
     link_synced = true;
     Serial.println("[LNK] synced=1");
     uart_send_sync_ack();
+    // Proactively push the Sense firmware version on every (re)sync. The LCD
+    // re-syncs right after its OTA reboot, so this is what delivers the new
+    // sense_fw to the LCD promptly (it never has to query). Fast, non-blocking
+    // (do_lcd_query=false): reports sense_fw + cached lcd_fw, no LCD round-trip.
+    uart_send_fw_info(false);
   } else if (strcmp(type, "WIFI_STATUS") == 0) {
     lcd_wifi_has_creds = (doc["has_creds"] | 0) != 0;
     lcd_wifi_checksum = (uint32_t)(doc["checksum"] | 0);

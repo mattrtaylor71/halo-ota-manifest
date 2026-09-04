@@ -144,27 +144,25 @@ static bool g_spool_probe_only = false;
 #define SPOOL_DRAIN_WAKE_S 300
 #endif
 
-// ON as of 2026-09-03: the LCD co-wake prerequisite is now satisfied.
+// DISABLED as of 2026-09-04: the SD spool-drain hard-crashes the LCD.
 //
-// Everything on the Sense side already worked: the wake arms, the device holds
-// itself awake for its budget instead of sleeping through the transfer, the
-// outcome is recorded, and the barren-wake backoff bounds it. The one missing
-// piece was the other board -- a Sense timer wake used to wake ONLY the Sense,
-// so the LCD (which owns the SD card) stayed asleep and never answered
-// SPOOL_LIST (drain wakes ran their full budget and recovered nothing).
+// Mounting the LCD's SD card (lcd_sd_init() -> sd_card_Init() ->
+// esp_vfs_fat_sdmmc_mount()) asserts on a NULL SDMMC semaphore
+// (`assert failed: xQueueSemaphoreTake queue.c:1709`) and panics the LCD. That
+// mount is triggered whenever the Sense sends SPOOL_LIST_REQ during a drain /
+// probe, so the whole feature is turned OFF here until the SDMMC init crash is
+// root-caused. This flag now gates EVERY SPOOL_LIST_REQ emission on the Sense
+// (sense_spool_drain_tick / sense_spool_probe_tick / sense_spool_drain_force),
+// not just the early-wake arming, so with it at 0 the Sense never asks the LCD
+// to touch the card. Re-enable only after fixing sd_card_Init/SDMMC init.
 //
-// The nightly-OTA LCD co-schedule fix (g_lcd_maint_coschedule_hook in
-// sense_sleep.h, wired by halo_sense_prod.ino) now sends the LCD a MAINT_WINDOW
-// with the FINAL timer_delta_s at sleep -- and that delta is already shortened to
-// SPOOL_DRAIN_WAKE_S here BEFORE the co-schedule call, so a drain wake co-wakes
-// the LCD too. Verified on hardware that the co-schedule sends wake_in_s and the
-// LCD arms a matching maintenance_rel wake. Battery downside is bounded by the
-// barren-wake backoff (SPOOL_DRAIN_MAX_BARREN_WAKES) and by uploads now being
-// reliable (the spool rarely fills). NB: a full unattended force-spool ->
-// drain-recovery cycle was not re-run when this flipped to 1 -- the co-wake
-// mechanism it depended on was verified, the drain transport was verified 08-21.
+// NB (kept for when this is re-enabled): the co-wake prerequisite was satisfied
+// 2026-09-03 -- the nightly-OTA LCD co-schedule (g_lcd_maint_coschedule_hook in
+// sense_sleep.h) sends the LCD a MAINT_WINDOW with the FINAL timer_delta_s at
+// sleep, and that delta is shortened to SPOOL_DRAIN_WAKE_S here first, so a drain
+// wake co-wakes the LCD. Drain transport verified 08-21.
 #ifndef SPOOL_DRAIN_WAKE_ENABLED
-#define SPOOL_DRAIN_WAKE_ENABLED 1
+#define SPOOL_DRAIN_WAKE_ENABLED 0
 #endif
 // Consecutive drain wakes that recovered nothing. Survives deep sleep (which is
 // all we need; losing it to a reset just means we try again, which is harmless).
@@ -295,6 +293,9 @@ static bool sense_spool_drain_conditions_ok() {
 
 // Called from the main loop.
 static void sense_spool_drain_tick() {
+#if !SPOOL_DRAIN_WAKE_ENABLED
+  return;   // SD spool-drain DISABLED: never emit SPOOL_LIST_REQ (crashes LCD SDMMC). See SPOOL_DRAIN_WAKE_ENABLED.
+#endif
   const uint32_t now = millis();
 
   if (g_spool_state != SPOOL_IDLE && g_spool_deadline_ms &&
@@ -339,6 +340,9 @@ static void sense_spool_drain_tick() {
 //
 // Costs one JSON round trip and tells us whether to bother waking up early.
 static void sense_spool_probe_tick() {
+#if !SPOOL_DRAIN_WAKE_ENABLED
+  return;   // SD spool-drain DISABLED: never emit SPOOL_LIST_REQ (crashes LCD SDMMC). See SPOOL_DRAIN_WAKE_ENABLED.
+#endif
   if (g_spool_probe_done) return;
   if (g_spool_state != SPOOL_IDLE) return;
   // The ONLY hard requirement is that nobody else owns the UART. A COBS transfer
@@ -419,6 +423,13 @@ static void sense_spool_drain_wake_tick() {
 // the transfer can be tested on demand rather than by waiting for the device to
 // go quiet at the right moment.
 static void sense_spool_drain_force(bool verify_only) {
+#if !SPOOL_DRAIN_WAKE_ENABLED
+  // SD spool-drain DISABLED (crashes LCD SDMMC). Even the manual bench command
+  // must not send SPOOL_LIST_REQ. See SPOOL_DRAIN_WAKE_ENABLED.
+  Serial.println("[DRAINTEST] ignored: SD spool-drain DISABLED (SPOOL_DRAIN_WAKE_ENABLED=0)");
+  (void)verify_only;
+  return;
+#endif
   sense_spool_drain_reset("force");
   g_spool_verify_only = verify_only;
   g_spool_next_try_ms = 0;

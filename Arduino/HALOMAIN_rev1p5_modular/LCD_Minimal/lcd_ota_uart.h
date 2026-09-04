@@ -748,6 +748,12 @@ static void lcd_ota_handle_end(JsonObject& doc) {
         }
         // Clear maintenance NVS so stale state doesn't re-enter headless after reboot.
         lcd_clear_persisted_maintenance_state("ota_complete");
+        // Arm the OTA continuation flag so the freshly-rebooted LCD re-shows the
+        // "Updating…" hold and keeps the panel LIT while the Sense self-flashes
+        // (a blocking, UART-silent ~tens-of-seconds loop). LCD_OTA_END_ACK was
+        // already sent above. Written to its own namespace so the maintenance
+        // clear above does not wipe it.
+        lcd_ota_set_continuation_pending(true);
         delay(200);  // Allow NVS writes to flush
         // Clear the bootloader's deep-sleep-validate cache (STORE6/STORE7).
         REG_WRITE(RTC_CNTL_STORE6_REG, 0);
