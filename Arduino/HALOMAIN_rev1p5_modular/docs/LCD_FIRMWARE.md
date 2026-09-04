@@ -291,6 +291,8 @@ Active while the user holds the AI button (recording). `ship_ai_listening_countd
 - "Listening" title + "Release to return" hint, with the staggered entry fade-ins
 All animation runs on the UI task (Core 1). New globals are nulled in `ui_reset_lvgl_objects()` (lcd_activity.h).
 
+**Mic long-press / voice gesture (touch handler, LCD_Minimal.ino loop()):** Mid-hold long-press detection lives in the **drag-tracking (finger-still-down) branch** — the `else if (touch_detected && touch_pressed)` arm that matches every held frame. When `ship_ai_touch_active && !long_press_sent` and the measured hold reaches `LONG_PRESS_THRESHOLD_MS`, it sets `long_press_sent`, starts the listening countdown, and queues `INPUT_LONG_PRESS_START` (tells the Sense to record). The old trailing poll block (`#if SHIP_MENU_UI else if (touch_pressed && ship_ai_touch_active && !long_press_sent)`) is now **unreachable during a continuous hold** because the drag branch shadows it; it is kept intact only to preserve the if/else-if chain. On release, the short-press guard now keys off **measured duration** (`press_duration < LONG_PRESS_THRESHOLD_MS`), so a long hold shows the green "On it!" ack even if the mid-hold detection somehow did not run.
+
 #### Voice Response Screen (JSON Viewer)
 
 Multi-page card UI parsed from `UI_VOICE_RESPONSE` JSON:

@@ -234,6 +234,18 @@ void audio_start_recording_ms(uint32_t duration_ms)
     gpio_set_pull_mode(EXAMPLE_STD_DOUT_PIN, GPIO_FLOATING);
   }
 
+  /* GPIO41 is shared: the STD TX (DAC) drives it as OUTPUT normally, and the PDM
+   * mic drives it as INPUT during recording. Disabling TX above hands the pad to
+   * the mic, but the PDM RX DMA still holds whatever it sampled while the DAC was
+   * driving the pin (its own loopback / a stuck level) — which is exactly the
+   * "few ms then latch to a DC constant" seen fleet-wide. Flush that stale DMA by
+   * restarting the RX channel, so capture begins cleanly from the mic. */
+  if(rx_chan)
+  {
+    i2s_channel_disable(rx_chan);
+    i2s_channel_enable(rx_chan);
+  }
+
   /* 16-bit mono at I2S_SAMPLE_RATE */
   uint64_t total_samples = ((uint64_t)I2S_SAMPLE_RATE * (uint64_t)duration_ms) / 1000ULL;
   if(total_samples > 0xFFFFFFFFULL)

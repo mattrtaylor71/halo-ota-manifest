@@ -4481,6 +4481,22 @@ void loop() {
     int dy = (int)touch_y - (int)touch_press_y;
     uint32_t d2 = (uint32_t)(dx * dx + dy * dy);
     if (d2 > touch_move_max_d2) touch_move_max_d2 = d2;
+#if SHIP_MENU_UI
+    // Long-press detection must run on HELD frames. The drag branch above
+    // (added later) shadows the old poll block below, so fold detection in here.
+    if (ship_ai_touch_active && !long_press_sent && !provisioning_input_locked()) {
+      unsigned long lp_dur = now - touch_press_time;
+      if (lp_dur >= LONG_PRESS_THRESHOLD_MS) {
+        long_press_sent = true;
+        ship_ai_listening_countdown_start_ms = now;
+        ship_update_ai_listening_countdown();
+        Serial.printf("[AI] long_press_start duration_ms=%lu\n", lp_dur);
+        ship_queue_voice_input("INPUT_LONG_PRESS_START", "voice_start");
+        ui_lvgl_tick();
+        resetActivityTimer();
+      }
+    }
+#endif
   } else if (!touch_detected && touch_pressed) {
     // Touch just released
     unsigned long press_duration = now - touch_press_time;
@@ -4499,7 +4515,7 @@ void loop() {
     #if SHIP_MENU_UI
     if (ship_ai_touch_active) {
       ship_ai_touch_active = false;
-      if (!long_press_sent || press_duration < LONG_PRESS_THRESHOLD_MS) {
+      if (press_duration < LONG_PRESS_THRESHOLD_MS) {
         long_press_sent = false;
         ship_ai_listening_countdown_start_ms = 0;
         ship_update_ai_listening_countdown();
@@ -4930,6 +4946,7 @@ void loop() {
     #endif
   }
   #if SHIP_MENU_UI
+  // UNREACHABLE during a continuous hold: the drag branch (touch_detected && touch_pressed, ~4474) matches every held frame and shadows this else-if. Mid-hold long-press detection now lives in that drag branch (see EDIT 1). Kept intact so the if/else-if chain does not fall through to the #if !SHIP_MENU_UI arm below.
   else if (touch_pressed && ship_ai_touch_active && !long_press_sent) {
     if (provisioning_input_locked()) {
       return;

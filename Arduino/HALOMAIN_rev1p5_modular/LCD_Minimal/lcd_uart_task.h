@@ -277,6 +277,24 @@ static void uart_task(void *arg) {
             } else if (strcmp(usb_buf, "ota") == 0) {
               Serial.println("[USB_CMD] shortcut 'ota' -> INPUT_OTA_CHECK");
               uart_send_input_message("INPUT_OTA_CHECK");
+            } else if (strncmp(usb_buf, "sfwd ", 5) == 0) {
+              // Generic Sense forwarder: 'sfwd <raw json>' relays the rest of the
+              // line verbatim to the Sense over the inter-board UART. Lets the
+              // bench drive ANY Sense INPUT_* from the reliable LCD USB, so the
+              // flaky Sense USB is never needed for command injection. The Sense
+              // relays its own diagnostics back as SENSE_DIAG, which print here.
+              const char* payload = usb_buf + 5;
+              Serial.printf("[USB_CMD] sfwd -> sense: %s\n", payload);
+              uart_send_json(payload);
+            } else if (strcmp(usb_buf, "voicestart") == 0) {
+              // Emulate the mic long-press start on the Sense (begins an OP_VOICE
+              // recording). Pair with 'voicestop'. The Sense bridges capture
+              // stats back as SENSE_DIAG [voice] record_done (peak/avg/nz).
+              Serial.println("[USB_CMD] shortcut 'voicestart' -> INPUT_LONG_PRESS_START");
+              uart_send_input_message("INPUT_LONG_PRESS_START");
+            } else if (strcmp(usb_buf, "voicestop") == 0) {
+              Serial.println("[USB_CMD] shortcut 'voicestop' -> INPUT_LONG_PRESS_END");
+              uart_send_input_message("INPUT_LONG_PRESS_END");
             } else if (strcmp(usb_buf, "fwinfo") == 0) {
               // Print the cached Sense fw, then fire a FAST version request.
               // INPUT_SENSE_FW is the same fast type the Settings screen now

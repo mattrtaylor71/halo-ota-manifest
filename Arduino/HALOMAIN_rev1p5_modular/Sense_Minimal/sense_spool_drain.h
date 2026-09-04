@@ -144,27 +144,27 @@ static bool g_spool_probe_only = false;
 #define SPOOL_DRAIN_WAKE_S 300
 #endif
 
-// OFF until the LCD is co-woken. READ THIS BEFORE TURNING IT ON.
+// ON as of 2026-09-03: the LCD co-wake prerequisite is now satisfied.
 //
-// Everything on the Sense side works: the wake arms, the device holds itself
-// awake for its budget instead of sleeping through the transfer, the outcome is
-// recorded, and the backoff bounds it. What does not work is the other board.
+// Everything on the Sense side already worked: the wake arms, the device holds
+// itself awake for its budget instead of sleeping through the transfer, the
+// outcome is recorded, and the barren-wake backoff bounds it. The one missing
+// piece was the other board -- a Sense timer wake used to wake ONLY the Sense,
+// so the LCD (which owns the SD card) stayed asleep and never answered
+// SPOOL_LIST (drain wakes ran their full budget and recovered nothing).
 //
-// A Sense timer wake wakes ONLY the Sense. The LCD owns the SD card and is still
-// in its own deep sleep, so it never answers SPOOL_LIST -- measured as drain
-// wakes running their full 90s budget and recovering nothing, with the probe
-// unanswered every time. This is a known property of the link, documented at
-// sense_link_recent(): "after a TIMER wake the LCD does not know the Sense woke
-// at all".
-//
-// Enabling this as-is is a pure battery cost: ~90s of radio-on after every user
-// interaction, for nothing. The missing piece is co-scheduling -- the OTA path
-// already solves the same problem by having BOTH boards arm their own timers via
-// send_maint_window(..., wake_in_s, ...) and MAINT_WINDOW_ACK. The drain needs
-// the same handshake before this can be 1. That path is entangled with nightly
-// OTA scheduling, so it wants its own pass rather than a bolt-on.
+// The nightly-OTA LCD co-schedule fix (g_lcd_maint_coschedule_hook in
+// sense_sleep.h, wired by halo_sense_prod.ino) now sends the LCD a MAINT_WINDOW
+// with the FINAL timer_delta_s at sleep -- and that delta is already shortened to
+// SPOOL_DRAIN_WAKE_S here BEFORE the co-schedule call, so a drain wake co-wakes
+// the LCD too. Verified on hardware that the co-schedule sends wake_in_s and the
+// LCD arms a matching maintenance_rel wake. Battery downside is bounded by the
+// barren-wake backoff (SPOOL_DRAIN_MAX_BARREN_WAKES) and by uploads now being
+// reliable (the spool rarely fills). NB: a full unattended force-spool ->
+// drain-recovery cycle was not re-run when this flipped to 1 -- the co-wake
+// mechanism it depended on was verified, the drain transport was verified 08-21.
 #ifndef SPOOL_DRAIN_WAKE_ENABLED
-#define SPOOL_DRAIN_WAKE_ENABLED 0
+#define SPOOL_DRAIN_WAKE_ENABLED 1
 #endif
 // Consecutive drain wakes that recovered nothing. Survives deep sleep (which is
 // all we need; losing it to a reset just means we try again, which is harmless).
