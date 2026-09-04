@@ -357,6 +357,15 @@ static void uart_send_wifi_diag_summary() {
 
 // ── Deep sleep entry ────────────────────────────────────────────────
 
+// Optional hook: co-schedule the LCD to wake alongside the Sense's next timer
+// wake. Set by the prod wrapper (halo_sense_prod.ino) at setup; left null in the
+// plain Sense_Minimal build. Called with the FINAL wake delta (after the
+// HALO_MAINT_TEST_S override and any OTA/spool shortening), so the LCD arms the
+// same instant the Sense does. Without this the LCD sleeps on its own unrelated
+// 6h periodic timer and is not awake for the Sense's LCD-OTA proxy on the
+// unattended nightly path -- so a nightly OTA updates only the Sense.
+static void (*g_lcd_maint_coschedule_hook)(uint32_t wake_in_s) = nullptr;
+
 static void sense_enter_deep_sleep(SenseSleepKind kind) {
 #ifdef STRESS_TEST_NO_SLEEP
   // Bench builds must stay on the USB bus. The only previous guard was in the
@@ -808,6 +817,13 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   Serial.printf("[SLEEP] wake timer: nightly=%lus ota=%lus chosen=%lus\n",
                 (unsigned long)nightly_s, (unsigned long)ota_timer_delta_s,
                 (unsigned long)timer_delta_s);
+  // Tell the LCD to wake at the same instant so it is up for the LCD-OTA proxy
+  // on the unattended nightly path. Sent here (before the SLEEP_READY handshake,
+  // while the LCD is still awake) using the FINAL delta so both boards align;
+  // the LCD applies its own ~15s lead. No-op in the plain Sense build (hook null).
+  if (g_lcd_maint_coschedule_hook && timer_delta_s > 0) {
+    g_lcd_maint_coschedule_hook(timer_delta_s);
+  }
   // Close the wake-cycle record before actually sleeping. An entry left open on
   // the next boot means the device never got here — panic, hang or brownout.
   wakelog_end_cycle(timer_delta_s, ext0_allowed, (uint16_t)g_spool_last_known_depth);

@@ -33,7 +33,16 @@
                                                // scheduled cold-wake case (LCD wakes from
                                                // its own timer and needs LVGL init before
                                                // it can answer LCD_OTA_QUERY)
-#define LCD_OTA_PROXY_BEGIN_TIMEOUT_MS  10000
+// The LCD's LCD_OTA_BEGIN handler calls esp_ota_begin(), which SYNCHRONOUSLY
+// erases the full ~2.5MB OTA partition BEFORE it can send LCD_OTA_BEGIN_ACK.
+// That erase takes ~10s on this flash. The old 10000ms value raced the erase:
+// the Sense aborted the LCD half at exactly ~10061ms (confirmed in the on-device
+// ota_orch breadcrumbs: lcd_proxy_start -> lcd_proxy_done res=timeout, 10061ms)
+// while the LCD was still erasing and about to ACK -> Sense self-updated but LCD
+// stayed one version behind. 45s gives >4x margin over the erase. A genuine
+// LCD reject (no partition / image too large) still returns accepted=false
+// immediately, so this longer window only elapses when the LCD is truly silent.
+#define LCD_OTA_PROXY_BEGIN_TIMEOUT_MS  45000
 #define LCD_OTA_PROXY_END_TIMEOUT_MS    60000
 #define LCD_OTA_PROXY_DOWNLOAD_TIMEOUT_MS 2400000  // 40 min
 #define LCD_OTA_PROXY_STALL_WINDOW_MS   30000      // no-data window before stall

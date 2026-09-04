@@ -1972,6 +1972,22 @@ static void send_maint_window(const MaintenanceWindow* mw,
            (unsigned long long)(is_time_valid() ? (uint64_t)time(nullptr) : 0ULL));
 }
 
+// Co-schedule hook (registered into sense_sleep.h at setup). Called from the
+// deep-sleep path with the Sense's FINAL wake delta so the LCD arms a matching
+// maintenance wake and is awake for the LCD-OTA proxy on the unattended nightly
+// path. Reuses the tested send_maint_window() sender; mw=nullptr => a bare
+// relative wake (remaining_s + wake_in_s), which is all the LCD needs to arm
+// g_lcd_maintenance_timer_armed (see lcd_uart_rx.h). now_epoch rides along when
+// our clock is valid so the LCD can align absolutely.
+static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
+  if (wake_in_s == 0) {
+    return;
+  }
+  send_maint_window(nullptr, wake_in_s, wake_in_s, false);
+  LOG_INFO("[MAINT_COSCHED] told LCD to wake in %lus (align nightly maintenance)",
+           (unsigned long)wake_in_s);
+}
+
 // Arm-time delivery race fix: lightweight Sense->LCD keep-awake used ONLY while a
 // maintenance schedule is pending-sync but our clock is not yet valid (so we can't
 // yet send the real MAINT_WINDOW with now_epoch). The LCD handler for this type
@@ -2697,7 +2713,27 @@ static bool maintenance_window_load(MaintenanceWindow* mw) {
   if (!mw->loadFromNvs()) {
     return false;
   }
-  return mw->scheduled && mw->start_epoch > 0;
+  if (!(mw->scheduled && mw->start_epoch > 0)) {
+    return false;
+  }
+  // Reject AND clear an expired window at the single load chokepoint. Previously
+  // only the sleep-scheduling path (maintenance_window_wake_delta_s) checked
+  // expiry, so a stale window lingered in NVS whenever the device wasn't sleeping
+  // -- and keep_lcd_awake_during_maint_arm() would keep reading it and spam
+  // MAINT_KEEPALIVE, pinning the LCD fully lit forever (observed: a Sep-02 test
+  // window "test_..." still held the LCD awake days later). clear() wipes the NVS
+  // namespace, so this self-heals on the next load and never re-clears (a wiped
+  // window fails loadFromNvs() above). Only acts when time is valid, so we never
+  // discard a real window during the pre-NTP boot phase.
+  if (is_time_valid()) {
+    time_t now = time(nullptr);
+    if (now > 0 && mw->hasExpired((uint64_t)now)) {
+      mw->clear();
+      maintenance_window_consumed_clear("expired_on_load");
+      return false;
+    }
+  }
+  return true;
 }
 
 static uint32_t maintenance_window_wake_delta_s(uint32_t* remaining_s_out) {
@@ -4696,6 +4732,10 @@ void halo_prod_setup() {
   g_boot_time_ms = millis();
   ensure_timezone_pt("boot");
   halo_wifi_guard_boot_log();
+
+  // Wire the deep-sleep path to co-schedule the LCD's maintenance wake, so the
+  // LCD is awake for the LCD-OTA proxy on the unattended nightly path.
+  g_lcd_maint_coschedule_hook = prod_co_schedule_lcd_maint_wake;
 
   log_ota_partition_info();
 #if OTA_TEST_BUILD
