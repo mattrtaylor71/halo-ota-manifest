@@ -322,6 +322,7 @@ struct BootOtaBeginRecord {
   int32_t code = 0;
   char detail[96] = {0};  // Same capacity as the original begin diagnostic.
   bool repeat_pending = false;
+  bool noop_reported = false;
 };
 static BootOtaBeginRecord g_boot_ota_begin_record;
 static bool g_boot_ota_diag_context = false;
@@ -3045,6 +3046,7 @@ static void boot_ota_queue(const char* reason) {
 static void boot_ota_finish(const char* result) {
   g_boot_ota_pending = false;
   g_boot_ota_begin_record.repeat_pending = false;
+  g_boot_ota_begin_record.noop_reported = false;
   g_boot_ota_diag_context = false;
   g_maintenance_mode = false;
   g_maintenance_handled = true;
@@ -3061,6 +3063,25 @@ static void boot_ota_repeat_begin_after_lcd_query() {
                               g_boot_ota_begin_record.reason,
                               g_boot_ota_begin_record.code,
                               g_boot_ota_begin_record.detail);
+}
+
+// Only the initial both-current branch calls this, after fresh LCD identity and
+// manifest validation. A begin/replay alone cannot prove a successful no-op.
+static void boot_ota_report_both_current(const char* lcd_fw, const char* manifest_fw) {
+  if (!g_boot_ota_diag_context || !g_boot_ota_begin_reported ||
+      g_boot_ota_begin_record.noop_reported ||
+      !g_boot_ota_begin_record.event || !g_boot_ota_begin_record.reason ||
+      strcmp(g_boot_ota_begin_record.event, "nightly_begin") != 0 ||
+      strcmp(g_boot_ota_begin_record.reason, "nightly") != 0 ||
+      g_boot_ota_begin_record.code != (int32_t)ESP_SLEEP_WAKEUP_TIMER) return;
+  // Both version inputs have 32-byte storage. Preserve the original trigger
+  // detail verbatim; do not sample a later wake/reset/epoch at completion.
+  char detail[192];
+  snprintf(detail, sizeof(detail), "%s lcd=%.31s manifest=%.31s",
+           g_boot_ota_begin_record.detail, lcd_fw, manifest_fw);
+  g_boot_ota_begin_record.noop_reported = true;
+  uart_send_sense_diag_persist("ota", "nightly_noop", "both_current",
+                              g_boot_ota_begin_record.code, detail);
 }
 
 // Call once early in setup. USB reset / touch wake is not a timer wake.
@@ -3588,6 +3609,7 @@ static bool prod_proxy_lcd_inline() {
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd already current (lcd=%s manifest=%s)",
              lcd_fw, lcd_manifest.version);
     set_lcd_ota_due_nvs(false);
+    boot_ota_report_both_current(lcd_fw, lcd_manifest.version);
     return true;
   }
 

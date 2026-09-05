@@ -1045,6 +1045,16 @@ kind. The record can then survive a Sense OTA reboot in the LCD diagnostic
 ring, subject to delivery and bounded-ring retention. No scheduler or transfer
 decisions change.
 
+A successful scheduled no-op additionally sends persistent `ota/nightly_noop`
+with wire label `both_current` only after Sense's manifest validates as its running
+version and the initial fresh LCD query plus fetched LCD manifest confirms
+that LCD is already current. It carries the original TIMER wake/reset/epoch
+detail and the actual LCD/manifest versions. The synchronous automatic scope
+and per-episode bit exclude manual checks, recovery-only episodes, failures,
+and transfer/retry paths. Begin evidence alone does not prove this outcome;
+the completion still depends on UART delivery and bounded-ring retention.
+LCD retains the event, code and detail; its existing storage omits the wire label.
+
 ---
 
 ## 14. Test Infrastructure
