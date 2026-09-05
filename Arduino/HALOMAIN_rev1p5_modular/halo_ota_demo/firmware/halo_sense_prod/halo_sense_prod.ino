@@ -2964,7 +2964,7 @@ static bool get_lcd_ota_due_nvs() {
   return due;
 }
 
-// Persist the outcome+target version of a SUCCESSFUL inline LCD OTA proxy.
+// Persist an inline LCD OTA outcome: updated/target or noop/queried version.
 // The Sense self-OTAs and reboots immediately after the inline proxy returns
 // success, so RAM globals (g_lcd_ota_result / g_lcd_ota_version) are wiped
 // before the post-reboot pre_sleep cloud OTA report is built. We stash the
@@ -3497,6 +3497,18 @@ static void handle_ota_proof() {
 #endif
 }
 
+static bool prepare_lcd_ota_proxy_retry(char* lcd_fw, size_t fw_len) {
+  // An abort clears the old lock. Reacquire it before a fresh query so the
+  // receiver can finish cleanup and prove it is ready for another BEGIN.
+  send_ota_uart_message("OTA_LOCK");
+  if (!sense_lcd_ota_query(lcd_fw, fw_len, nullptr)) {
+    LOG_INFO("[OTA_ORCH] lcd retry query failed - leaving update unresolved");
+    diag_record_error_persistent("ota_orch", -1, "lcd_retry_query_fail");
+    return false;
+  }
+  return true;
+}
+
 // FIX B: proxy the LCD OTA INLINE on the main task (NOT the fragile background
 // lcd_ota_proxy_task, which DMA-starves and has many skip paths). Used by the
 // up_to_date path where the Sense is already current and only the LCD is
@@ -3547,6 +3559,9 @@ static bool prod_proxy_lcd_inline() {
   send_ota_uart_message("OTA_LOCK");
   bool ok = false;
   for (int attempt = 1; attempt <= 2 && !ok; ++attempt) {
+    if (attempt > 1 && !prepare_lcd_ota_proxy_retry(lcd_fw, sizeof(lcd_fw))) {
+      break;
+    }
     {
       char crumb[96];
       snprintf(crumb, sizeof(crumb), "lcd_inline_proxy_start ver=%s attempt=%d t=%lu",
@@ -3556,15 +3571,24 @@ static bool prod_proxy_lcd_inline() {
     const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=%s (attempt=%d)",
              lcd_res ? lcd_res : "(null)", attempt);
-    if (lcd_res && strcmp(lcd_res, "success") == 0) {
+    if (lcd_res && (strcmp(lcd_res, "success") == 0 || strcmp(lcd_res, "up_to_date") == 0)) {
       ok = true;
-      strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
+      const bool updated = strcmp(lcd_res, "success") == 0;
+      const char* result = updated ? "updated" : "noop";
+      strncpy(g_lcd_ota_result, result, sizeof(g_lcd_ota_result) - 1);
       g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-      set_lcd_ota_result_nvs("updated", lcd_manifest.version);
-      // LCD reboots into the new image; invalidate the cached version so a
-      // future LCD_OTA_QUERY_RESP overwrites it with the real booted version.
-      g_lcd_ota_version[0] = '\0';
-      g_lcd_fw_query_ms = 0;
+      set_lcd_ota_result_nvs(result, updated ? lcd_manifest.version : lcd_fw);
+      if (updated) {
+        // A completed transfer needs a fresh query after the LCD reboot.
+        g_lcd_ota_version[0] = '\0';
+        g_lcd_fw_query_ms = 0;
+      } else {
+        // The retry query already proved the real running version, possibly
+        // newer than this manifest; preserve it without claiming a transfer.
+        strncpy(g_lcd_ota_version, lcd_fw, sizeof(g_lcd_ota_version) - 1);
+        g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
+        g_lcd_fw_query_ms = millis();
+      }
     } else if (attempt < 2) {
       LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy failed (attempt %d) — retrying once", attempt);
     }
@@ -3977,6 +4001,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       // hiccup) on the first pass must not strand the LCD behind while the
       // Sense self-updates ahead of it.
       for (int attempt = 1; attempt <= 2 && !lcd_proxy_succeeded; ++attempt) {
+        if (attempt > 1 && !prepare_lcd_ota_proxy_retry(lcd_fw, sizeof(lcd_fw))) {
+          break;
+        }
         {
           // Breadcrumb: starting the LCD OTA proxy stream.
           char crumb[96];
@@ -3994,19 +4021,24 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
                    lcd_res ? lcd_res : "(null)", attempt, (unsigned long)millis());
           diag_record_error_persistent("ota_orch", 0, crumb);
         }
-        if (lcd_res && strcmp(lcd_res, "success") == 0) {
+        if (lcd_res && (strcmp(lcd_res, "success") == 0 || strcmp(lcd_res, "up_to_date") == 0)) {
           lcd_proxy_succeeded = true;
-          // Record the success to the truth globals AND persist to NVS. The Sense
-          // self-OTAs and reboots right after this, wiping RAM; the persisted
-          // result is reloaded next boot so the cloud report shows updated/target.
-          strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
+          // Persist the outcome across the imminent Sense self-OTA reboot.
+          const bool updated = strcmp(lcd_res, "success") == 0;
+          const char* result = updated ? "updated" : "noop";
+          strncpy(g_lcd_ota_result, result, sizeof(g_lcd_ota_result) - 1);
           g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-          set_lcd_ota_result_nvs("updated", lcd_manifest.version);
-          // LCD reboots into the new image; invalidate the cached version so a
-          // future LCD_OTA_QUERY_RESP overwrites it with the real booted version
-          // (mirrors lcd_ota_proxy_task success handling).
-          g_lcd_ota_version[0] = '\0';
-          g_lcd_fw_query_ms = 0;
+          set_lcd_ota_result_nvs(result, updated ? lcd_manifest.version : lcd_fw);
+          if (updated) {
+            // A completed transfer needs a fresh query after the LCD reboot.
+            g_lcd_ota_version[0] = '\0';
+            g_lcd_fw_query_ms = 0;
+          } else {
+            // A fresh query may report the target or a newer running image.
+            strncpy(g_lcd_ota_version, lcd_fw, sizeof(g_lcd_ota_version) - 1);
+            g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
+            g_lcd_fw_query_ms = millis();
+          }
         } else if (attempt < 2) {
           LOG_INFO("[OTA_ORCH] lcd proxy failed (attempt %d) — retrying once before deciding", attempt);
         }
@@ -4929,11 +4961,9 @@ void halo_prod_setup() {
     boot_ota_queue("lcd_due");
   }
 
-  // Repopulate g_lcd_ota_result / g_lcd_ota_version from a SUCCESSFUL inline
-  // LCD OTA proxy that happened just before the Sense self-OTA reboot. One-shot
-  // (the keys are consumed) so the post-reboot pre_sleep cloud report shows
-  // last_lcd_ota_result=updated + last_lcd_fw=<target>. The live pre_sleep LCD
-  // query later confirms/corrects this with the real booted version.
+  // Repopulate the inline LCD OTA outcome saved before a Sense self-OTA
+  // reboot: updated/target or noop/queried version. Keys are consumed once;
+  // the live pre_sleep LCD query confirms the real running version.
   load_lcd_ota_result_nvs();
 
   BootState::init();

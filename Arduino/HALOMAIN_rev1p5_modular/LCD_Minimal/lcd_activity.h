@@ -209,6 +209,16 @@ static void resetActivityTimer() {
   last_sleep_skip_reason[0] = '\0';
 }
 
+static void lcd_ota_arm_recovery_grace() {
+  // Give the existing Home idle interval to a coordinated retry, even when
+  // the guardian is overdue and the cached Sense state says ASLEEP.
+  unsigned long until_ms = millis() + INACTIVITY_TIMEOUT_MS;
+  ota_stay_awake_until_ms = until_ms;
+  g_ota_lock_window_until_ms = until_ms;
+  g_lcd_ota_recovery_grace = true;
+  Serial.printf("[LCD_OTA_UART] recovery grace=%lums\n", INACTIVITY_TIMEOUT_MS);
+}
+
 static const char* ui_screen_state_name(ui_screen_t state) {
   switch (state) {
     case SCREEN_HOME: return "HOME";

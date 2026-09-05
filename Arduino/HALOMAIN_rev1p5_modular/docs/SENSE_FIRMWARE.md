@@ -933,9 +933,10 @@ backfill path.
 | `LCD_OTA_PROXY_MAX_RETRIES` | 5 | Per-chunk retry limit |
 | `LCD_OTA_PROXY_ACK_TIMEOUT_MS` | 3000 | Wait for chunk ACK |
 | `LCD_OTA_PROXY_QUERY_TIMEOUT_MS` | 7000 | Wait for LCD version query (per attempt) |
-| `LCD_OTA_PROXY_BEGIN_TIMEOUT_MS` | 10000 | Wait for OTA begin ACK |
+| `LCD_OTA_PROXY_BEGIN_TIMEOUT_MS` | 45000 | Wait for OTA partition erase and begin ACK |
 | `LCD_OTA_PROXY_END_TIMEOUT_MS` | 60000 | Wait for SHA verify + reboot |
 | `LCD_OTA_PROXY_DOWNLOAD_TIMEOUT_MS` | 2400000 | 40 min overall download limit |
+| `LCD_OTA_PROXY_STALL_WINDOW_MS` | 30000 | No-data interval ends the current session |
 
 **Cold-wake LCD query budget = 35s.** `sense_lcd_ota_query()` retries the version query
 `LCD_OTA_QUERY_ATTEMPTS = 5` times at `LCD_OTA_PROXY_QUERY_TIMEOUT_MS = 7000` ms each
@@ -959,14 +960,14 @@ During binary streaming, `g_lcd_ota_proxy_owns_uart = true` prevents the main lo
 **`sense_lcd_ota_proxy(const OtaManifest& manifest, const char* lcd_fw_version)`**:
 
 1. **Version check**: Compare manifest version against LCD current version. Skip if up-to-date.
-2. **Begin session**: Send `LCD_OTA_BEGIN` with session_id, image_size, sha256, version. Wait for `LCD_OTA_BEGIN_ACK` (supports resume via `resume_offset`).
+2. **Begin session**: Send `LCD_OTA_BEGIN` with a fresh session_id, image_size, sha256, version. Wait for `LCD_OTA_BEGIN_ACK`; require `resume_offset=0` because the LCD cannot restore its SHA context.
 3. **Download + stream**: HTTP GET firmware binary from S3. For each 512-byte chunk:
    - Send COBS frame (`MSG_CHUNK`) with sequence number
    - Wait for `MSG_ACK` with matching sequence
    - Retry up to 5 times on timeout/NACK
    - Progress logged every 10%
    - Stream timeout reduced to 50ms for throughput
-   - **Stall-tolerant (reconnect/resume):** the HTTP GET-and-acquire-stream step is factored into an `open_stream(offset)` lambda used by both the initial fetch and recovery. If the stream goes `>30s` with no data (`LCD_OTA_PROXY_STALL_WINDOW_MS`) or disconnects before completion, the proxy does NOT abort. It closes the socket and re-opens the GET with a `Range: bytes=<bytes_sent>-` header (200/206 expected), re-acquires the stream, and continues from `bytes_sent`. Up to `LCD_OTA_PROXY_MAX_RECONNECTS` (5) **consecutive** stalls are tolerated; the counter resets on any data progress. Only after the budget is exhausted does it abort with `"timeout"`. The overall `LCD_OTA_PROXY_DOWNLOAD_TIMEOUT_MS` (40 min) guard still applies. Logs: `stall -> reconnect attempt N/5 at offset <x>`, `reconnect ok code=<c>`, `reconnect failed code=<c>`. This makes the download survive transient WiFi hiccups / brief net contention instead of failing the whole OTA.
+   - **Bounded fresh-session recovery:** disconnect or 30s without data ends this session with `"timeout"`. The wait uses time since the last data, including the boundary at exactly 30s. There is one HTTP GET per session; no Range reopen or in-session reconnect remains. `http.setReuse(false)` and `close_stream()` (`http.end()` plus `tls_client.stop()`) discard the incomplete body on every exit. The old forced-stall/reconnect test hook was removed. Network calls can block beyond the loop's timer checks; the 40-minute check is not a hard wall-clock limit around DNS/TLS/HTTP calls.
 4. **End session**: Release UART ownership. Send `LCD_OTA_END` with image_size and sha256. Wait for `LCD_OTA_END_ACK`, which carries both `sha_match` (SHA verification result) and `ota_ok` (`esp_ota_set_boot_partition()` result on the LCD).
 5. **Result**: Returns "success", "up_to_date", "sha_mismatch", "lcd_boot_part_fail", "chunk_retry_exhausted", "timeout", etc. **Success requires `sha_match && ota_ok`.** The proxy checks `sha_match` first (→ `"sha_mismatch"` on failure), then `ota_ok`: if the LCD verified the SHA but failed to set its boot partition (`ota_ok=0`), the proxy returns the new verdict `"lcd_boot_part_fail"` (recorded via `diag_record_error_persistent("lcd_ota", -1, "lcd_boot_part_fail")`) rather than falsely reporting success — a transfer that hashes correctly but won't boot the new image no longer masquerades as a success.
 
@@ -975,6 +976,8 @@ During binary streaming, `g_lcd_ota_proxy_owns_uart = true` prevents the main lo
 **Non-OTA network suppression:** while any OTA activity is in flight, `request_list_refresh()` is short-circuited (`[LIST_REFRESH] deferred (lcd_ota_in_progress)`) and the `INPUT_WAKE` handler skips its list-refresh trigger. This prevents an HTTP GET to `/v1/list` from competing with the S3 download on the single net stack (which previously starved the download to a stall/abort). The gate is `lcd_ota_in_progress()`, defined in `halo_sense_prod.ino` and forward-declared in `Sense_Minimal.ino` (weak `return false` fallback for non-wrapper builds). It returns true if any of `g_lcd_ota_proxy_owns_uart`, `g_lcd_ota_request_active`, `g_lcd_ota_task_running`, `g_ota_apply_in_progress`, or `g_ota_check_in_progress` is set. OTA's own HTTP (manifest fetch, S3 download, schedule/report) is NOT gated.
 
 **`sense_lcd_ota_query()`** -- Query LCD firmware version and OTA partition size. The dispatch of `LCD_OTA_QUERY_RESP` also captures extended observability fields (`running_part`, `running_state`, `boot_part`) into static buffers exposed by `sense_lcd_last_running_part/state/boot_part()`.
+
+**`prepare_lcd_ota_proxy_retry()`** (production wrapper) sends a fresh `OTA_LOCK`, then requires a new LCD query response before the second attempt. Both paired-update and LCD-only inline paths use it. A failed query leaves LCD unresolved without sending another BEGIN; a response at or above the target version resolves the update without another transfer, preserving `noop` and the actual queried version. Only a completed transfer records `updated` with the target version and invalidates the cache. The receiver allows its existing 10s Home idle interval after failed cleanup for this exchange, then sleeps if no new lock arrives. At most one fresh-session retry runs, starting at byte zero; final failure keeps `lcd_ota_due=1`, unlocks, and defers Sense self-OTA.
 
 **Stale-RX flush (hardening):** Inside the per-attempt loop, immediately after clearing the mailbox (`g_lcd_ota_query_resp_ready = false`) and before sending the query JSON, the function drains the hardware FIFO (`while (lcdSerial.available() > 0) lcdSerial.read();`) and resets the RX ring / partial-frame state (`uart_reset_rx_state()`). During the Sense's HTTPS-blocking self-OTA window the main-loop UART drain is starved, so a backlog/overflow can accumulate on `lcdSerial` and desync parsing of the fresh `LCD_OTA_QUERY_RESP` (the no-response failure mode). Ordering is mailbox-clear → raw-flush → send fresh query, so an already-parsed response cannot be dropped.
 

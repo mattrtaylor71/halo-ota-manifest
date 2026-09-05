@@ -45,15 +45,7 @@
 #define LCD_OTA_PROXY_BEGIN_TIMEOUT_MS  45000
 #define LCD_OTA_PROXY_END_TIMEOUT_MS    60000
 #define LCD_OTA_PROXY_DOWNLOAD_TIMEOUT_MS 2400000  // 40 min
-#define LCD_OTA_PROXY_STALL_WINDOW_MS   30000      // no-data window before stall
-#define LCD_OTA_PROXY_MAX_RECONNECTS    5          // consecutive stall reconnect budget
-
-// ── TEST-ONLY debug hook ───────────────────────────────────────────
-// When 1, injects a SINGLE forced mid-transfer stall (closes the HTTP
-// connection once, at ~50% of the image) to exercise and verify the
-// reconnect/resume-on-stall path. This MUST be 0 in shipping builds.
-// It has no effect on real OTA behavior when set to 0.
-#define LCD_OTA_PROXY_TEST_FORCE_STALL 0   // TEST-ONLY: set to 1 to inject one mid-transfer stall (verified reconnect/resume 2026-06-01).
+#define LCD_OTA_PROXY_STALL_WINDOW_MS   30000      // no-data window ends this session
 
 // ── Forward declarations of externs from Sense_Minimal.ino ──────────
 
@@ -355,70 +347,52 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
                   (unsigned long)resume_offset);
   }
 
+  // Each attempt is a fresh session. The LCD cannot restore its SHA context,
+  // so a partial offset is not a safe starting point for this image.
+  if (resume_offset != 0) {
+    send_lcd_ota_abort(session_id, "resume_not_supported");
+    return "download_fail";
+  }
+
   // ── d. Download firmware binary from S3 ───────────────────────────
   WiFiClientSecure tls_client;
   tls_client.setInsecure();  // Integrity verified via SHA256 post-transfer
-  tls_client.setTimeout(30);  // 30 s socket timeout
 
   HTTPClient http;
+  http.setReuse(false);  // Never reuse a socket with an unfinished image body.
   const char* download_result = nullptr;
   WiFiClient* stream = nullptr;
 
-  // Open (or re-open) the HTTP GET at byte offset `from`. On resume/reconnect
-  // a Range header is sent. Acquires `stream` on success. Returns the HTTP
-  // status code (>0) on success, or a negative value on begin/stream failure.
-  // Shared by the initial fetch and the stall-reconnect path so they use
-  // identical request setup.
-  auto open_stream = [&](uint32_t from) -> int {
-    http.end();  // harmless if not yet begun; closes a stalled socket
+  auto close_stream = [&]() {
+    http.end();
+    tls_client.stop();  // Explicitly close even if library reuse behavior changes.
     stream = nullptr;
-    if (!http.begin(tls_client, manifest.url)) {
-      Serial.printf("[LCD_OTA_PROXY] HTTP begin failed: %s\n", manifest.url);
-      return -1;
-    }
-    if (from > 0) {
-      char range_hdr[48];
-      snprintf(range_hdr, sizeof(range_hdr), "bytes=%lu-",
-               (unsigned long)from);
-      http.addHeader("Range", range_hdr);
-      Serial.printf("[LCD_OTA_PROXY] requesting Range: %s\n", range_hdr);
-    }
-    int code = http.GET();
-    if (code != HTTP_CODE_OK && code != 206) {
-      return code <= 0 ? code : -code;  // keep negative to signal failure
-    }
-    stream = http.getStreamPtr();
-    if (!stream) {
-      Serial.println("[LCD_OTA_PROXY] null stream pointer");
-      return -2;
-    }
-    // Reduce Stream timeout to avoid blocking on partial TCP segments.
-    // Default is 1000ms — at 2134 chunks, even 50% partial-reads would add
-    // >17 minutes of dead wait time.
-    stream->setTimeout(50);
-    return code;
   };
 
   Serial.printf("[LCD_OTA_PROXY] DL heap: largest=%u free=%u\n",
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                 (unsigned)esp_get_free_heap_size());
   Serial.printf("[LCD_OTA_PROXY] starting HTTP GET: %s\n", manifest.url);
-  int http_code = open_stream(resume_offset);
+  int http_code = http.begin(tls_client, manifest.url) ? http.GET() : -1;
+  if (http_code == HTTP_CODE_OK) stream = http.getStreamPtr();
   Serial.printf("[LCD_OTA_PROXY] HTTP GET result code=%d\n", http_code);
-  if (http_code <= 0 || !stream) {
+  if (http_code != HTTP_CODE_OK || !stream) {
     Serial.printf("[LCD_OTA_PROXY] HTTP GET failed code=%d\n", http_code);
     diag_record_error_persistent("lcd_ota", http_code, "download_fail");
-    http.end();
+    close_stream();
     send_lcd_ota_abort(session_id, "download_fail");
     return "download_fail";
   }
+
+  // Short Stream reads preserve UART pacing; network stalls end this session.
+  stream->setTimeout(50);
 
   // ── e. Create UartOtaProtocol ─────────────────────────────────────
   UartOtaProtocol* protocol = new UartOtaProtocol(&lcdSerial);
   if (protocol) protocol->quiet = true;  // suppress per-frame logs for throughput
   if (!protocol) {
     Serial.println("[LCD_OTA_PROXY] failed to allocate UartOtaProtocol");
-    http.end();
+    close_stream();
     send_lcd_ota_abort(session_id, "out_of_memory");
     return "download_fail";
   }
@@ -428,44 +402,12 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
   // The main loop must skip reading lcdSerial while this flag is set.
   g_lcd_ota_proxy_owns_uart = true;
 
-  // open_stream() already set the per-stream read timeout (50ms).
-
   uint8_t chunk_buf[LCD_OTA_PROXY_CHUNK_SIZE];
-  uint32_t bytes_sent = resume_offset;
+  uint32_t bytes_sent = 0;
   uint16_t seq = 1;
   uint8_t last_pct_10 = 0xFF;  // Force first progress log
   unsigned long stream_start_ms = millis();
   unsigned long last_data_ms = millis();
-  int reconnects = 0;  // consecutive stalls; reset on any data progress
-#if LCD_OTA_PROXY_TEST_FORCE_STALL
-  bool forced_stall_done = false;  // TEST-ONLY: one-shot stall injection guard
-#endif
-
-  // Attempt to recover from a stall by re-opening the HTTP GET at the current
-  // offset with a Range header. Returns true if a fresh connected stream was
-  // acquired and the loop may continue; false if the reconnect budget is
-  // exhausted or the reconnect failed (caller aborts with "timeout").
-  auto try_reconnect = [&]() -> bool {
-    if (reconnects >= LCD_OTA_PROXY_MAX_RECONNECTS) {
-      Serial.printf("[LCD_OTA_PROXY] reconnect budget exhausted (%d/%d) at offset %lu\n",
-                    reconnects, LCD_OTA_PROXY_MAX_RECONNECTS,
-                    (unsigned long)bytes_sent);
-      return false;
-    }
-    reconnects++;
-    Serial.printf("[LCD_OTA_PROXY] stall -> reconnect attempt %d/%d at offset %lu\n",
-                  reconnects, LCD_OTA_PROXY_MAX_RECONNECTS,
-                  (unsigned long)bytes_sent);
-    int code = open_stream(bytes_sent);
-    if (code <= 0 || !stream) {
-      Serial.printf("[LCD_OTA_PROXY] reconnect failed code=%d\n", code);
-      return false;
-    }
-    Serial.printf("[LCD_OTA_PROXY] reconnect ok code=%d\n", code);
-    last_data_ms = millis();  // grant a fresh stall window after reconnect
-    return true;
-  };
-
   while (bytes_sent < manifest.size) {
     // Stall / overall timeout detection
     if ((millis() - stream_start_ms) > LCD_OTA_PROXY_DOWNLOAD_TIMEOUT_MS) {
@@ -479,21 +421,18 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
                          ? remaining
                          : LCD_OTA_PROXY_CHUNK_SIZE;
 
-    // If the stream dropped before completion, treat as a stall and try to
-    // resume from the current offset rather than aborting the whole OTA.
+    // The receiver may independently abort after 30s without a chunk. Never
+    // start a blocking reconnect inside that expiring session; the caller may
+    // negotiate one fresh attempt after cleanup and a new lock/query.
     if (!stream->available() && !stream->connected()) {
       Serial.println("[LCD_OTA_PROXY] stream disconnected before completion");
-      if (!try_reconnect()) {
-        download_result = "timeout";
-        break;
-      }
-      continue;
+      download_result = "timeout";
+      break;
     }
 
     // Wait for data with stall detection
-    unsigned long read_start = millis();
     while (!stream->available() && stream->connected() &&
-           (millis() - read_start) < LCD_OTA_PROXY_STALL_WINDOW_MS) {
+           (millis() - last_data_ms) < LCD_OTA_PROXY_STALL_WINDOW_MS) {
       delay(10);
     }
     // Read only what's available to avoid blocking on partial TCP segments
@@ -510,20 +449,16 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
                     (unsigned)got, (unsigned)to_read, t_read_ms);
     }
     if (got == 0) {
-      // No data for the stall window — attempt a reconnect/resume before
-      // giving up. The reconnect budget bounds total retries.
-      if ((millis() - last_data_ms) > LCD_OTA_PROXY_STALL_WINDOW_MS) {
+      if (!stream->connected() ||
+          (millis() - last_data_ms) >= LCD_OTA_PROXY_STALL_WINDOW_MS) {
         Serial.printf("[LCD_OTA_PROXY] stream stall (%lu s no data)\n",
                       (unsigned long)(LCD_OTA_PROXY_STALL_WINDOW_MS / 1000));
-        if (!try_reconnect()) {
-          download_result = "timeout";
-          break;
-        }
+        download_result = "timeout";
+        break;
       }
       continue;
     }
     last_data_ms = millis();
-    reconnects = 0;  // any data progress resets the consecutive-stall counter
 
     // Send chunk with retry
     unsigned long t_send_start = millis();
@@ -579,19 +514,6 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
                     elapsed_s, rate_bps, t_read_ms, t_rtt_ms);
       last_pct_10 = pct_bucket;
     }
-
-#if LCD_OTA_PROXY_TEST_FORCE_STALL
-    if (!forced_stall_done && bytes_sent >= (manifest.size / 2)) {
-      forced_stall_done = true;
-      Serial.printf("[LCD_OTA_PROXY][TEST] stopping stream at offset %lu (%.0f%%) to exercise reconnect\n",
-                    (unsigned long)bytes_sent, 100.0 * bytes_sent / manifest.size);
-      stream->stop();   // close the actual TCP socket the loop reads from.
-                        // http.end() alone does NOT stop a user-supplied
-                        // tls_client, so the stream kept flowing. Stopping the
-                        // stream makes next iteration's pre-read
-                        // !available() && !connected() check fire -> try_reconnect().
-    }
-#endif
   }
 
   // ── Cleanup on stream error ───────────────────────────────────────
@@ -599,7 +521,7 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     diag_record_error_persistent("lcd_ota", -1, download_result);
     g_lcd_ota_proxy_owns_uart = false;
     delete protocol;
-    http.end();
+    close_stream();
     send_lcd_ota_abort(session_id, download_result);
     return download_result;
   }
@@ -611,7 +533,7 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
   protocol = nullptr;
 
   // Close HTTP before sending END (free TLS RAM for UART traffic)
-  http.end();
+  close_stream();
 
   // Clear mailbox before sending END
   g_lcd_ota_end_ack_ready = false;

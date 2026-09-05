@@ -243,6 +243,7 @@ static void menu_btn_event_handler(lv_event_t * e);
 static void set_menu_mode(menu_mode_t mode);
 static void update_menu_display();
 static void resetActivityTimer();
+static void lcd_ota_arm_recovery_grace();
 static void user_activity_bump(const char* reason);
 static void save_list_to_storage(const app_state_t *s);
 static int load_list_from_storage(app_state_t *s);
@@ -1240,6 +1241,9 @@ static const unsigned long OTA_STAY_AWAKE_MS = 20000;
 // (LCD_OTA_BEGIN) and on the post-OTA restore/reboot path. A stale stay-awake
 // (no recent OTA_LOCK) leaves this at 0 and is still canceled as before.
 static unsigned long g_ota_lock_window_until_ms = 0;
+// Written/read by the UART task: distinguishes the short failed-OTA recovery
+// window from a live dual-board update when OTA_UNLOCK arrives.
+static bool g_lcd_ota_recovery_grace = false;
 static bool lcd_ota_request_active = false;
 static uint32_t lcd_ota_request_id = 0;
 static bool lcd_ota_request_allow_reboot = true;

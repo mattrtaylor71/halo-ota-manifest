@@ -881,6 +881,7 @@ static void uart_process_received_message(const char* json_str) {
   }
   
   if (strcmp(type, "OTA_LOCK") == 0) {
+    g_lcd_ota_recovery_grace = false;
     lcd_allow_visible_ui("ota_lock");
     ota_locked = true;
     ota_lock_at_ms = millis();
@@ -944,7 +945,12 @@ static void uart_process_received_message(const char* json_str) {
     // reboot + the post-reboot LCD_OTA_QUERY/proxy. The OTA_LOCK handler set a
     // long stay-awake window for exactly this; preserve it so the normal
     // sleep-decision keeps the LCD awake until the window naturally expires.
-    if (g_ota_continuation_hold_start_ms > 0) {
+    if (g_lcd_ota_recovery_grace) {
+      g_lcd_ota_recovery_grace = false;
+      ota_stay_awake_until_ms = 0;
+      g_ota_lock_window_until_ms = 0;
+      Serial.println("[OTA] unlock - failed-update recovery grace cleared");
+    } else if (g_ota_continuation_hold_start_ms > 0) {
       // Post-OTA-reboot continuation hold: OTA_UNLOCK means the LCD already
       // rebooted and the Sense is done. Clear the stay-awake so the panel
       // resumes normal idle behavior once Home is shown — otherwise the 180s

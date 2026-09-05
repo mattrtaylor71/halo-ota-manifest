@@ -240,6 +240,7 @@ static void lcd_ota_uart_restore_ui() {
     // For failed OTA, just clear flags and let the device sleep/wake naturally.
     provision_return_home_pending = true;
     resetActivityTimer();
+    lcd_ota_arm_recovery_grace();
     Serial.println("[LCD_OTA_UART] OTA flags cleared");
 }
 
@@ -247,6 +248,11 @@ static void lcd_ota_uart_restore_ui() {
 static void lcd_ota_handle_abort(JsonObject& doc);
 
 static void lcd_ota_abort_internal(const char* reason) {
+    s_lcd_ota_state = LCD_OTA_ABORTING;
+    g_lcd_ota_uart_receiving = true;
+    // The abort is JSON. Leave COBS mode without releasing sleep ownership.
+    g_lcd_ota_binary_mode = false;
+    g_suppress_uart_json_tx = false;
     Serial.printf("[LCD_OTA_UART] ABORT reason=%s state=%d written=%u\n",
                   reason ? reason : "unknown", static_cast<int>(s_lcd_ota_state.load()),
                   s_lcd_ota_bytes_written);
@@ -288,10 +294,6 @@ static void lcd_ota_abort_internal(const char* reason) {
         Serial.println("[LCD_OTA_UART] NVS preserved for resume (timeout abort)");
     }
 
-    g_lcd_ota_binary_mode        = false;
-    g_lcd_ota_uart_receiving     = false;
-    g_suppress_uart_json_tx      = false;
-    s_lcd_ota_state              = LCD_OTA_IDLE;
     s_lcd_ota_partition          = NULL;
     s_lcd_ota_bytes_written      = 0;
     s_lcd_ota_image_size         = 0;
@@ -302,6 +304,8 @@ static void lcd_ota_abort_internal(const char* reason) {
     s_lcd_ota_target_version[0]  = '\0';
 
     lcd_ota_uart_restore_ui();
+    s_lcd_ota_state = LCD_OTA_IDLE;
+    g_lcd_ota_uart_receiving = false;
 }
 
 
@@ -774,6 +778,17 @@ static void lcd_ota_handle_end(JsonObject& doc) {
 // ── LCD_OTA_ABORT ────────────────────────────────────────────────────
 static void lcd_ota_handle_abort(JsonObject& doc) {
     const char* reason = doc["reason"] | "sense_abort";
+    uint16_t session_id = doc["session_id"] | (uint16_t)0;
+    if (s_lcd_ota_state == LCD_OTA_IDLE || session_id != s_lcd_ota_session_id) {
+        Serial.printf("[LCD_OTA_UART] ABORT ignored session=%u active=%u state=%d\n",
+                      session_id, s_lcd_ota_session_id,
+                      static_cast<int>(s_lcd_ota_state.load()));
+        return;
+    }
+    s_lcd_ota_state = LCD_OTA_ABORTING;
+    g_lcd_ota_uart_receiving = true;
+    g_lcd_ota_binary_mode = false;
+    g_suppress_uart_json_tx = false;
 
     Serial.printf("[LCD_OTA_UART] ABORT from Sense: reason=%s session=%u written=%u\n",
                   reason, s_lcd_ota_session_id, s_lcd_ota_bytes_written);
@@ -799,10 +814,6 @@ static void lcd_ota_handle_abort(JsonObject& doc) {
         Serial.println("[LCD_OTA_UART] NVS preserved for resume (timeout)");
     }
 
-    g_lcd_ota_binary_mode        = false;
-    g_lcd_ota_uart_receiving     = false;
-    g_suppress_uart_json_tx      = false;
-    s_lcd_ota_state              = LCD_OTA_IDLE;
     s_lcd_ota_partition          = NULL;
     s_lcd_ota_bytes_written      = 0;
     s_lcd_ota_image_size         = 0;
@@ -813,6 +824,8 @@ static void lcd_ota_handle_abort(JsonObject& doc) {
     s_lcd_ota_target_version[0]  = '\0';
 
     lcd_ota_uart_restore_ui();
+    s_lcd_ota_state = LCD_OTA_IDLE;
+    g_lcd_ota_uart_receiving = false;
 }
 
 

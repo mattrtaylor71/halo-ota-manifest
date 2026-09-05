@@ -570,14 +570,16 @@ The Sense board acts as a TLS proxy for LCD OTA:
 1. **Query**: Sense sends `LCD_OTA_QUERY` over JSON UART
 2. **Manifest**: Sense fetches LCD manifest from S3 (`lcd/manifest.json`)
 3. **Version compare**: Skip if LCD already running latest
-4. **Download**: Sense downloads LCD binary over HTTPS. **Stall-tolerant**: if the S3 stream stalls (>30s no data) or drops before completion, Sense re-opens the GET with a `Range: bytes=<offset>-` header and resumes from the current offset rather than aborting — up to 5 consecutive reconnects (counter resets on data progress). The overall 40-min download timeout still bounds the transfer.
+4. **Download**: Sense makes one HTTPS GET per session. A disconnect or 30s without data ends the attempt; HTTP and TLS are explicitly closed. There is no in-session Range reconnect that can outlive the LCD's matching 30s idle timeout. The overall 40-minute loop check does not interrupt blocking DNS/TLS/HTTP calls.
 5. **UART switch**: `g_lcd_ota_proxy_owns_uart = true` (blocks JSON RX)
 6. **Stream**: COBS-framed binary chunks (512B each) with CRC16 and ACK/NACK
-7. **Resume**: NVS progress saved every 64KB; can resume after power loss
+7. **Progress**: NVS progress is saved every 64KB, but SHA context cannot be restored; a new session starts from byte zero.
 8. **Verify**: LCD computes SHA256 over entire received binary
 9. **Apply**: LCD calls `esp_ota_set_boot_partition()` and reboots
 
 **Single net stack contention:** Sense has one network stack shared by OTA HTTPS and normal app traffic. While any OTA is in flight (`lcd_ota_in_progress()`), non-OTA HTTP — specifically `request_list_refresh()` / the `INPUT_WAKE`-triggered `/v1/list` GET — is suppressed so it cannot starve the S3 download. OTA's own HTTP (manifest, download, schedule/report) is never gated.
+
+**Retry ownership:** after an abort or failed END, the LCD keeps its atomic sleep guards through cleanup and grants the existing 10s Home idle interval before sleeping. The Sense's second attempt reacquires `OTA_LOCK` and queries the LCD afresh before BEGIN in both paired-update and LCD-only inline paths. If the LCD is unavailable, Sense retains `lcd_ota_due`, unlocks, and defers its own update. Duplicate/late LCD abort commands cannot clear an idle receiver's new lock or a different active session. The guardian limit and GPIO wake contract are unchanged.
 
 **Cloud `lcd_fw` is the REAL running version:** the cloud-reported LCD firmware version (`truth_get_lcd_fw_version()`) is sourced exclusively from an actual `LCD_OTA_QUERY_RESP`, never from the OTA manifest. On proxy success the cached value is cleared and re-queried (pre-sleep / periodic, refreshed when empty or >5min stale), so a transfer that completes but never boots the new image no longer masquerades as success in the dashboard.
 
@@ -590,16 +592,9 @@ When a manual/button-triggered OTA check (`maybeRunOtaCheck()` in `halo_sense_pr
 
 **Why:** Previously the Sense applied its own image and **rebooted FIRST**, deferring the LCD proxy to the next boot via the `lcd_ota_due` NVS flag. By the time the rebooted Sense queried the LCD, the LCD had often gone back to sleep → intermittent `lcd_query_fail`. Doing the LCD proxy first, while the LCD is still awake, eliminates that race.
 
-**`lcd_ota_due` is now a fallback only:** `set_lcd_ota_due_nvs()` is set based on the inline proxy outcome — **cleared on success / already-up-to-date**, **set when the proxy is skipped or fails** (query fail, manifest fetch fail, or a non-`"success"` proxy result). The boot-time `lcd_ota_due` handler in `run_maintenance_if_needed()` retries the LCD OTA on the next boot in the failure case. The post-apply code no longer unconditionally clears `lcd_ota_due`, so a transient LCD failure followed by a successful Sense apply still leaves the next-boot retry armed.
+**Persistent LCD recovery:** `lcd_ota_due` is cleared after a successful LCD transfer or a query proving it is already current, and retained on an unknown/failed LCD result. The strict guard then defers Sense self-OTA. On a later boot, the debt queues a bounded recovery check through `nightly_maintenance_tick()`; normal health, provisioning and user service continue while readiness is checked. If a retry query finds the target or a newer LCD image, no new BEGIN is sent: reporting preserves `noop` and the actual queried version rather than claiming a transfer to the manifest version.
 
-**Scheduled maintenance OTA uses the same LCD-proxy-first order (`run_maintenance_if_needed()`):** The in-window dual-board sequence is **LCD proxy first, Sense self-OTA second**, for an even stronger reason than the manual path. A scheduled window wakes both boards from their own deep-sleep timers; the Sense self-OTA (download + apply + reboot, ~1–3 min) outlasts the LCD's OTA_LOCK stay-awake budget, and after a Sense reboot the Sense **cannot wake the LCD** (GPIO39 is LCD→Sense only). If the Sense rebooted first, the LCD would have idle-slept and be stranded on old firmware (`lcd_fw=unknown` / `lcd_ota_result=unknown` after the window). New order:
-1. `OTA_LOCK` (keep LCD awake/listening).
-2. LCD proxy retry loop (`run_lcd_maintenance_ota_attempt` × `LCD_MAINT_OTA_MAX_ATTEMPTS`, window-budget guarded); success tracked via `lcd_maintenance_result_successful()`.
-3. `OTA_LOCK` re-asserted; Sense self-OTA (`maybeRunOtaCheck`, which now no-ops its own inline LCD proxy because the LCD is already current). May `esp_restart()` on success — fine, the LCD is already updated.
-4. `OTA_UNLOCK` (only if the Sense did not reboot).
-5. **Conditional** `set_lcd_ota_due_nvs(!lcd_proxy_succeeded)` — clear on LCD success, set on LCD failure so the boot-time `lcd_ota_due` fallback retries next boot/window. (Was an unconditional clear before.)
-
-This eliminated the prior scheduled-window failure mode where the LCD was deferred to the post-reboot `lcd_ota_due` branch but had already idle-slept and could not be woken.
+**Scheduled maintenance uses the same production path:** a real TIMER boot queues a check with a 120s readiness deadline. Once connectivity, time, cooldown and foreground-work guards permit, `nightly_maintenance_tick()` invokes `maybeRunOtaCheck(reason, true)`. The shared path resolves the LCD first, then permits Sense self-OTA. Failed LCD coordination retains the debt and returns to normal service; it does not strand a new Sense image ahead of an unresolved LCD. Sense cannot wake LCD through GPIO39, which is LCD→Sense only, so timer co-wake and a fresh LCD query remain required.
 
 ### S3 Bucket Layout
 
