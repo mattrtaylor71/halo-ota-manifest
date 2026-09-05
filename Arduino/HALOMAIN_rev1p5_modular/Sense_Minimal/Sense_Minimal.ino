@@ -2899,8 +2899,8 @@ static bool parse_input_message(const char* json_str) {
     strncpy(g_lcd_ota_query_resp_fw, fw, sizeof(g_lcd_ota_query_resp_fw) - 1);
     g_lcd_ota_query_resp_fw[sizeof(g_lcd_ota_query_resp_fw) - 1] = '\0';
     g_lcd_ota_query_resp_part_size = part_size;
-    // Extended observability fields (real LCD partition/state). Optional —
-    // older LCD firmware may omit them; default to "" / "UNKNOWN".
+    // Fresh boot-proof fields. Older LCD firmware may omit them; defaults
+    // must never borrow a previous response's VALID/ready state.
     const char* running_part  = doc["running_part"]  | "";
     const char* running_state = doc["running_state"] | "UNKNOWN";
     const char* boot_part     = doc["boot_part"]     | "";
@@ -2910,10 +2910,11 @@ static bool parse_input_message(const char* json_str) {
     g_lcd_query_running_state[sizeof(g_lcd_query_running_state) - 1] = '\0';
     strncpy(g_lcd_query_boot_part, boot_part, sizeof(g_lcd_query_boot_part) - 1);
     g_lcd_query_boot_part[sizeof(g_lcd_query_boot_part) - 1] = '\0';
+    g_lcd_query_boot_ready = doc["boot_ready"] | false;
     g_lcd_ota_query_resp_ready = true;
-    Serial.printf("[UART] LCD_OTA_QUERY_RESP fw=%s part_size=%lu running_part=%s running_state=%s boot_part=%s\n",
+    Serial.printf("[UART] LCD_OTA_QUERY_RESP fw=%s part_size=%lu running_part=%s running_state=%s boot_part=%s boot_ready=%d\n",
                   fw, (unsigned long)part_size,
-                  running_part, running_state, boot_part);
+                  running_part, running_state, boot_part, g_lcd_query_boot_ready ? 1 : 0);
   } else if (strcmp(type, "LCD_OTA_BEGIN_ACK") == 0) {
     bool accepted = doc["accepted"] | false;
     const char* reason = doc["reason"] | "unknown";

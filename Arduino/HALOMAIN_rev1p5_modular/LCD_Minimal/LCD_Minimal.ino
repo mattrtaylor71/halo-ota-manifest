@@ -410,6 +410,8 @@ static const unsigned long WAKE_DEBOUNCE_MS = 200;
 static volatile bool g_in_light_sleep = false;
 extern "C" volatile bool g_sleep_transition = false;
 static bool g_ui_initialized = false;
+// Published across cores only after continuation/UI setup and OTA self-test.
+static std::atomic<bool> g_lcd_boot_ready{false};
 static bool g_lcd_initialized = false;
 static bool g_backlight_initialized = false;
 static bool g_touch_initialized = false;
@@ -4256,6 +4258,7 @@ void setup() {
 #ifdef HALO_LCD_PROD_WRAPPER
   halo_lcd_prod_setup();
 #endif
+  g_lcd_boot_ready.store(true);
 }
 
 void loop() {

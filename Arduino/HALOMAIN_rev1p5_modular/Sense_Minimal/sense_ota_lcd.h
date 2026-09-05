@@ -62,12 +62,13 @@ static uint32_t      g_lcd_ota_query_resp_part_size = 0;
 
 // Extended LCD partition/state fields captured from LCD_OTA_QUERY_RESP.
 // Filled by parse_input_message dispatch (Sense_Minimal.ino) alongside
-// g_lcd_ota_query_resp_fw. Observability only — does not affect OTA control.
+// g_lcd_ota_query_resp_fw. Also used to confirm LCD-only completion after reboot.
 static char          g_lcd_query_running_part[16]  = {0};  // LCD running partition label
 static char          g_lcd_query_running_state[20] = {0};  // NEW|PENDING_VERIFY|VALID|INVALID|ABORTED|UNDEFINED|UNKNOWN
 static char          g_lcd_query_boot_part[16]     = {0};  // LCD boot partition label
+static bool          g_lcd_query_boot_ready        = false;
 
-// Getters exposing the last captured LCD running-state observability fields.
+// Getters exposing the last captured LCD running-state and boot-proof fields.
 // Persist across queries; reflect the most recent successful QUERY_RESP.
 static inline const char* sense_lcd_last_running_part() {
   return g_lcd_query_running_part;
@@ -77,6 +78,9 @@ static inline const char* sense_lcd_last_running_state() {
 }
 static inline const char* sense_lcd_last_boot_part() {
   return g_lcd_query_boot_part;
+}
+static inline bool sense_lcd_last_boot_ready() {
+  return g_lcd_query_boot_ready;
 }
 
 static volatile bool g_lcd_ota_begin_ack_ready = false;
@@ -125,10 +129,13 @@ static void send_lcd_ota_abort(uint16_t session_id, const char* reason) {
  * size.  Sends LCD_OTA_QUERY over UART JSON and waits for
  * LCD_OTA_QUERY_RESP.
  *
- * Returns true on success, populating lcd_fw_out and part_size_out.
+ * Returns true on success, populating lcd_fw_out and part_size_out. Optional
+ * expected_boot_fw requires a post-reboot VALID/ready response within the same
+ * 35s budget; its first 7s slot lets END finalization/reboot settle without TX.
  */
 static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
-                                uint32_t* part_size_out) {
+                                uint32_t* part_size_out,
+                                const char* expected_boot_fw = nullptr) {
   if (!lcd_fw_out || fw_len == 0) return false;
   lcd_fw_out[0] = '\0';
   if (part_size_out) *part_size_out = 0;
@@ -140,7 +147,19 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
   // case wakes the LCD from its own deep-sleep timer, so it may still be
   // running LVGL init when the first query arrives; give it more retries.
   const int LCD_OTA_QUERY_ATTEMPTS = 5;
-  for (int attempt = 1; attempt <= LCD_OTA_QUERY_ATTEMPTS; attempt++) {
+  const unsigned long query_started_ms = millis();
+  const unsigned long query_budget_ms = LCD_OTA_QUERY_ATTEMPTS * LCD_OTA_PROXY_QUERY_TIMEOUT_MS;
+  bool boot_confirmed = !expected_boot_fw;
+  if (expected_boot_fw) {
+    // END_ACK precedes the LCD's reboot. Do not queue a command behind its
+    // still-active FINALIZING handler; consume one existing query slot first.
+    while ((millis() - query_started_ms) < LCD_OTA_PROXY_QUERY_TIMEOUT_MS) {
+      pump_uart_rx_once();
+      delay(10);
+    }
+  }
+  for (int attempt = expected_boot_fw ? 2 : 1; attempt <= LCD_OTA_QUERY_ATTEMPTS; attempt++) {
+    if (expected_boot_fw && (millis() - query_started_ms) >= query_budget_ms) break;
     // Clear mailbox before sending
     g_lcd_ota_query_resp_ready = false;
 
@@ -170,17 +189,42 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
     // Wait for mailbox to be filled by parse_input_message dispatch
     unsigned long start = millis();
     while (!g_lcd_ota_query_resp_ready &&
-           (millis() - start) < LCD_OTA_PROXY_QUERY_TIMEOUT_MS) {
+           (millis() - start) < LCD_OTA_PROXY_QUERY_TIMEOUT_MS &&
+           (!expected_boot_fw || (millis() - query_started_ms) < query_budget_ms)) {
       pump_uart_rx_once();   // process incoming frames so INPUT_OTA_CHECK isn't dropped
       delay(10);
     }
 
+    // A blocking RX/TX call may return after the deadline with a response.
+    // Never turn that late response into successful postboot proof.
+    if (expected_boot_fw && (millis() - query_started_ms) >= query_budget_ms) break;
     if (g_lcd_ota_query_resp_ready) {
-      break;   // success
+      if (!expected_boot_fw) break;
+      boot_confirmed = strcmp(g_lcd_ota_query_resp_fw, expected_boot_fw) == 0 &&
+                       strcmp(g_lcd_query_running_state, "VALID") == 0 &&
+                       g_lcd_query_boot_ready && g_lcd_query_running_part[0] &&
+                       strcmp(g_lcd_query_running_part, "?") != 0 &&
+                       strcmp(g_lcd_query_running_part, g_lcd_query_boot_part) == 0;
+      if (boot_confirmed) break;
+      Serial.printf("[LCD_OTA_PROXY] postboot waiting expected=%s actual=%s state=%s ready=%d running=%s boot=%s\n",
+                    expected_boot_fw, g_lcd_ota_query_resp_fw, g_lcd_query_running_state,
+                    g_lcd_query_boot_ready ? 1 : 0, g_lcd_query_running_part, g_lcd_query_boot_part);
+      // A quick pre-ready reply must not exhaust all retries during setup.
+      while ((millis() - start) < LCD_OTA_PROXY_QUERY_TIMEOUT_MS &&
+             (millis() - query_started_ms) < query_budget_ms) {
+        pump_uart_rx_once();
+        delay(10);
+      }
+      continue;
     }
 
     Serial.printf("[LCD_OTA_PROXY] LCD_OTA_QUERY_RESP timeout (attempt %d/%d)\n",
                   attempt, LCD_OTA_QUERY_ATTEMPTS);
+  }
+
+  if (expected_boot_fw && !boot_confirmed) {
+    Serial.println("[LCD_OTA_PROXY] lcd_postboot_unconfirmed");
+    return false;
   }
 
   if (!g_lcd_ota_query_resp_ready) {

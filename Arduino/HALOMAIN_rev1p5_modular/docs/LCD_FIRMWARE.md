@@ -185,10 +185,10 @@ The LCD uses GPIO39 (INT_PIN) to wake the Sense board. Pin mode tracking (`lcd_w
 6. Create `app_state_mutex`
 7. Load NVS test mode flag
 8. Handle boot wake sequence (maintenance resume, schedule wake, ship OTA)
-9. Initialize UI stack (`init_ui_stack`)
-10. Start UART task on Core 0
-11. Run OTA self-test
-12. Log boot count, GPIO states
+9. Start UART task on Core 0 (queries may arrive before UI/continuation setup finishes)
+10. Restore OTA continuation, then initialize UI stack (`init_ui_stack`)
+11. Run OTA self-test and production setup hook
+12. Publish atomic `g_lcd_boot_ready=true` only after those setup writes complete
 
 #### loop() Flow (runs every iteration on Core 1)
 
@@ -823,6 +823,7 @@ LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> restart (success)
 | Field | Source | Notes |
 |-------|--------|-------|
 | `lcd_fw` | `kFirmwareVersion` | Running image version |
+| `boot_ready` | Atomic `g_lcd_boot_ready` | False until setup, continuation/UI initialization and OTA self-test finish; older receivers omit it |
 | `ota_part_label` / `ota_part_size` | `esp_ota_get_next_update_partition(NULL)` | Legacy, retained for back-compat |
 | `running_part` | `esp_ota_get_running_partition()->label` | `?` if NULL |
 | `running_state` | `esp_ota_get_state_partition(running)` | One of `NEW`, `PENDING_VERIFY`, `VALID`, `INVALID`, `ABORTED`, `UNDEFINED`, `UNKNOWN` |
@@ -850,6 +851,8 @@ Clears all OTA/maintenance flags, sets `provision_return_home_pending = true` so
 **Failed attempts get one Home idle interval for recovery.** Both abort handlers keep atomic ownership through NVS/UI cleanup. Internal abort first leaves binary/JSON-suppression mode so its `LCD_OTA_ABORT` notification is actually transmitted. Common restoration resets activity and calls `lcd_ota_arm_recovery_grace()`: the existing `INACTIVITY_TIMEOUT_MS` (10s) is placed in `ota_stay_awake_until_ms` and `g_ota_lock_window_until_ms` before ownership is released. This also covers failed END. The sleep funnel honors that brief window even if the guardian is overdue and Sense is cached ASLEEP. A new `OTA_LOCK` replaces recovery with the normal update window; final `OTA_UNLOCK` clears recovery immediately; otherwise it expires. The guardian limit is unchanged. Incoming peer aborts are ignored while IDLE or when their session ID differs, so a duplicate/late abort cannot free state twice or clear a fresh lock/new session.
 
 **Terminal unlock returns to normal idle.** The optional `terminal:true` field on `OTA_UNLOCK` means Sense has finished the production check/update. The receiver clears both generic and recovery stay-awake timers, then follows the existing Home/UI cleanup and normal idle policy. This prevents a both-current no-op from leaving Home lit for the 180s update lease. An unmarked unlock retains legacy continuation behavior: some Sense paths send it before a subsequent LCD query or transfer, so clearing every unlock would reintroduce a sleep race. Older senders remain compatible.
+
+**LCD-only completion waits for the new boot.** END_ACK precedes the receiver's continuation-NVS write and reboot. Sense now waits for a fresh response with the expected version, VALID state, matching running/boot partitions and `boot_ready=true` before recording a resolved LCD-only transfer and sending the final unlock. The ready flag is separate from partition validity because the UART task starts before setup can arm the continuation hold. A failed proof leaves Sense's LCD debt set and ends that check; its final unlock releases the current check only and does not erase the LCD's persisted continuation flag for a later boot. Active FINALIZING remains guarded. There is no new sleep timeout or GPIO contract.
 
 #### OTA "Updating…" Continuous Hold (smooth manual OTA)
 
@@ -1042,7 +1045,7 @@ for (;;) {
 
 | Command | Action |
 |---------|--------|
-| `fw` / `ver` | Print `[FW] {json}` line (lcd_fw, running_part, running_state, boot_part, next_part) via `lcd_build_fw_status_json()`, then legacy human-readable `[FW]` lines. Case-insensitive. |
+| `fw` / `ver` | Print `[FW] {json}` line (lcd_fw, boot_ready, running_part, running_state, boot_part, next_part) via `lcd_build_fw_status_json()`, then legacy human-readable `[FW]` lines. Case-insensitive. |
 | `ota` | Send INPUT_OTA_CHECK |
 | `fwinfo` | Print `[USB_CMD] fwinfo cached_sense_fw=<g_sense_fw_version>`, then send `INPUT_SENSE_FW` (the FAST version request — Sense answers immediately with cached sense_fw + lcd_fw, replying via the existing `FW_INFO` message type). Sent via `uart_send_input_message("INPUT_SENSE_FW")` (mirrors the `ota` command) rather than `ship_menu_request_fw_info()` so it doesn't touch the Settings-screen retry/UI state from the UART task. Round-trip is observable via the `[UART] FW_INFO received sense_fw=... age_ms=...` log in lcd_uart_rx.h. |
 | `list` | Emulate tapping List on the second menu. Sends INPUT_WAKE, posts `EVT_USB_ENTER_LIST` so the UI task runs `show_shopping_list_screen()` (entry renders the cached list + auto-triggers the `entry_revalidate` refresh). Prints `[USB] list`. |

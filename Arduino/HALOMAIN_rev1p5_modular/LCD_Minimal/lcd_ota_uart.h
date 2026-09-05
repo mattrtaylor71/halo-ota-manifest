@@ -358,6 +358,7 @@ static const char* lcd_ota_last_result_str() {
 // Guards against NULL partition pointers by emitting "?".
 static void lcd_build_fw_status_json(JsonDocument& doc) {
     doc["lcd_fw"] = kFirmwareVersion ? kFirmwareVersion : "unknown";
+    doc["boot_ready"] = g_lcd_boot_ready.load();
 
     const esp_partition_t* running = esp_ota_get_running_partition();
     const esp_partition_t* boot    = esp_ota_get_boot_partition();
@@ -410,14 +411,15 @@ static void lcd_ota_handle_query() {
     serializeJson(doc, output);
     uart_send_json(output.c_str());
 
-    Serial.printf("[LCD_OTA_UART] QUERY_RESP fw=%s part=%s size=%u running=%s state=%s boot=%s next=%s\n",
+    Serial.printf("[LCD_OTA_UART] QUERY_RESP fw=%s part=%s size=%u running=%s state=%s boot=%s next=%s boot_ready=%d\n",
                   kFirmwareVersion ? kFirmwareVersion : "?",
                   ota_part ? ota_part->label : "none",
                   ota_part ? (unsigned)ota_part->size : 0,
                   doc["running_part"].as<const char*>(),
                   doc["running_state"].as<const char*>(),
                   doc["boot_part"].as<const char*>(),
-                  doc["next_part"].as<const char*>());
+                  doc["next_part"].as<const char*>(),
+                  doc["boot_ready"].as<bool>() ? 1 : 0);
 }
 
 // ── LCD_OTA_BEGIN ────────────────────────────────────────────────────

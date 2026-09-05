@@ -146,7 +146,7 @@ Maximum line length: 4096 bytes (allows rich voice response payloads).
 | `LINK_HB` | Heartbeat (sent every 4s, confirms LCD is alive) |
 | `SYNC` | Request link synchronization |
 | `PONG` | Response to PING |
-| `LCD_OTA_QUERY_RESP` | LCD running fw + partition size + real partition/state: `running_part`, `running_state` (`NEW`/`PENDING_VERIFY`/`VALID`/`INVALID`/`ABORTED`/`UNDEFINED`/`UNKNOWN`), `boot_part`, optional `last_ota_result` |
+| `LCD_OTA_QUERY_RESP` | LCD running fw + partition size + real partition/state: `running_part`, `running_state` (`NEW`/`PENDING_VERIFY`/`VALID`/`INVALID`/`ABORTED`/`UNDEFINED`/`UNKNOWN`), `boot_part`, `boot_ready` (setup/continuation/self-test complete), optional `last_ota_result` |
 | `LCD_OTA_BEGIN_ACK` | Acknowledge OTA begin (accepted/rejected, resume offset) |
 | `LCD_OTA_END_ACK` | Acknowledge OTA end: `sha_match` (SHA256 verify) + `ota_ok` (`esp_ota_set_boot_partition()` result). Sense proxy requires **both** true for success |
 | `RELEASE_WAKE_ACK` | Acknowledged wake pin release |
@@ -583,7 +583,9 @@ The Sense board acts as a TLS proxy for LCD OTA:
 
 **Final check completion:** proven terminal production exits send `OTA_UNLOCK` with optional `terminal:true`, releasing the LCD's generic and recovery stay-awake timers. A both-current check therefore returns to normal Home idle sleep instead of keeping the panel lit for the 180s update lease. Unmarked unlocks preserve the continuation hold, including the intermediate unlock before the LCD-only query/transfer. Old receivers safely ignore the optional field.
 
-**Cloud `lcd_fw` is the REAL running version:** the cloud-reported LCD firmware version (`truth_get_lcd_fw_version()`) is sourced exclusively from an actual `LCD_OTA_QUERY_RESP`, never from the OTA manifest. On proxy success the cached value is cleared and re-queried (pre-sleep / periodic, refreshed when empty or >5min stale), so a transfer that completes but never boots the new image no longer masquerades as success in the dashboard.
+**LCD-only postboot completion:** END_ACK confirms bytes and boot selection before the LCD actually reboots. The Sense-current inline path waits within the existing 35s query budget (one 7s settle slot, four fresh query slots) for the expected version, VALID state, equal real running/boot partitions, and additive `boot_ready=true`. The LCD publishes readiness atomically only after setup finishes arming any continuation hold, initializing UI and running OTA self-test. This prevents a terminal unlock sent to the old image or early setup from being lost/overwritten. Failed proof records `lcd_postboot_unconfirmed`, keeps LCD debt, and ends that attempt without another transfer or false updated result; final check cleanup does not erase receiver continuation NVS. Legacy receivers missing readiness defer safely. Initial both-current and paired-update behavior are unchanged.
+
+**Cloud `lcd_fw` is the REAL running version:** the cloud-reported LCD firmware version (`truth_get_lcd_fw_version()`) is sourced exclusively from an actual `LCD_OTA_QUERY_RESP`, never from the OTA manifest. On paired proxy success the cached value is cleared and re-queried (pre-sleep / periodic, refreshed when empty or >5min stale); LCD-only success retains its confirmed postboot query, so a transfer that completes but never boots the new image no longer masquerades as success in the dashboard.
 
 ### OTA Orchestration Order (LCD proxy FIRST, then Sense self-OTA)
 

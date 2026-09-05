@@ -3611,23 +3611,28 @@ static bool prod_proxy_lcd_inline() {
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=%s (attempt=%d)",
              lcd_res ? lcd_res : "(null)", attempt);
     if (lcd_res && (strcmp(lcd_res, "success") == 0 || strcmp(lcd_res, "up_to_date") == 0)) {
-      ok = true;
       const bool updated = strcmp(lcd_res, "success") == 0;
+      char confirmed_lcd_fw[32] = {0};
+      if (!sense_lcd_ota_query(confirmed_lcd_fw, sizeof(confirmed_lcd_fw), nullptr,
+                               updated ? lcd_manifest.version : lcd_fw)) {
+        // END_ACK proves bytes/boot selection, not completed boot/setup. Do not
+        // retry into a version-only no-op and accidentally clear this debt.
+        strncpy(g_lcd_ota_result, "lcd_postboot_unconfirmed", sizeof(g_lcd_ota_result) - 1);
+        g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+        set_lcd_ota_result_nvs("lcd_postboot_unconfirmed", "");
+        g_lcd_ota_version[0] = '\0';
+        g_lcd_fw_query_ms = 0;
+        diag_record_error_persistent("ota_orch", -1, "lcd_postboot_unconfirmed");
+        break;
+      }
+      ok = true;
       const char* result = updated ? "updated" : "noop";
       strncpy(g_lcd_ota_result, result, sizeof(g_lcd_ota_result) - 1);
       g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-      set_lcd_ota_result_nvs(result, updated ? lcd_manifest.version : lcd_fw);
-      if (updated) {
-        // A completed transfer needs a fresh query after the LCD reboot.
-        g_lcd_ota_version[0] = '\0';
-        g_lcd_fw_query_ms = 0;
-      } else {
-        // The retry query already proved the real running version, possibly
-        // newer than this manifest; preserve it without claiming a transfer.
-        strncpy(g_lcd_ota_version, lcd_fw, sizeof(g_lcd_ota_version) - 1);
-        g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
-        g_lcd_fw_query_ms = millis();
-      }
+      set_lcd_ota_result_nvs(result, confirmed_lcd_fw);
+      strncpy(g_lcd_ota_version, confirmed_lcd_fw, sizeof(g_lcd_ota_version) - 1);
+      g_lcd_ota_version[sizeof(g_lcd_ota_version) - 1] = '\0';
+      g_lcd_fw_query_ms = millis();
     } else if (attempt < 2) {
       LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy failed (attempt %d) — retrying once", attempt);
     }
