@@ -794,7 +794,8 @@ any intermediate wake). Fix:
 #### State Machine
 
 ```
-LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> LCD_OTA_IDLE
+LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> restart (success)
+                                                   -> LCD_OTA_IDLE (failure)
                        |
                        v
                LCD_OTA_ABORTING -> LCD_OTA_IDLE
@@ -812,7 +813,7 @@ LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> LCD_OTA_IDLE
 8. Sense sends `LCD_OTA_END` JSON (detected by peeking for `{` in binary stream)
 9. LCD finalizes: SHA256 verify, `esp_ota_end`, `esp_ota_set_boot_partition`
 10. LCD sends `LCD_OTA_END_ACK` with sha_match and ota_ok
-11. On success: restore UI, sleep naturally, boot new firmware on next wake
+11. On success: retain sleep guards, persist continuation, restart into the new firmware
 12. On failure: restore UI, log error
 
 #### Enriched `LCD_OTA_QUERY_RESP` Fields
@@ -831,7 +832,6 @@ LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> LCD_OTA_IDLE
 
 #### Key Design Decisions
 
-- **No ESP.restart():** On ESP32-S3 with USB-Serial/JTAG, software reset enters download mode. Instead, the device sleeps naturally and boots the new partition on wake.
 - **esp_restart() on OTA completion:** On OTA completion, `esp_restart()` is called instead of `esp_deep_sleep()`. Deep sleep preserves RTC memory, causing the bootloader to cache the old boot partition. `esp_restart()` clears RTC state and forces a fresh otadata read, ensuring the new partition boots.
 - **SHA context not resumable:** Saving/restoring mbedtls SHA256 context caused heap corruption. On resume, OTA restarts from offset 0.
 - **UI task stays alive:** Set `g_ota_screen_active` flag so UI task just ticks LVGL without processing events, avoiding need to restart UI task post-OTA (which caused crashes).
@@ -839,17 +839,13 @@ LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> LCD_OTA_IDLE
 
 #### Post-OTA Self Test
 
-Called from `setup()` on boot. If running partition is `ESP_OTA_IMG_PENDING_VERIFY`:
-1. Check LVGL initialized
-2. Check senseSerial ready
-3. Check internal heap >= 32KB
-4. Check firmware version string exists
-5. Pass -> `esp_ota_mark_app_valid_cancel_rollback()`
-6. Fail -> `esp_ota_mark_app_invalid_rollback_and_reboot()`
+Called from `setup()` on boot. If the running partition is `ESP_OTA_IMG_PENDING_VERIFY`, the current implementation immediately calls `esp_ota_mark_app_valid_cancel_rollback()`, relying on the verified image and successful boot. It logs API failures; it does not currently test LVGL, UART, or heap health before marking valid.
 
 #### UI Restore (`lcd_ota_uart_restore_ui`)
 
 Clears all OTA/maintenance flags, sets `provision_return_home_pending = true` so the UI task navigates to HOME on Core 1 (safe LVGL access). NOTE: this runs on a *failed/aborted* OTA. On a **successful** OTA, `esp_restart()` is called directly in `lcd_ota_handle_end()` **without** calling `lcd_ota_uart_restore_ui()` — the continuation-hold path (below) covers the reboot instead.
+
+**Finalization owns the sleep guards until completion.** `s_lcd_ota_state` and `g_lcd_ota_uart_receiving` are atomics shared by the UART and sleep tasks. After a successful `LCD_OTA_END_ACK`, the receiver remains `LCD_OTA_FINALIZING` with its receiving guard set through maintenance-NVS cleanup, continuation persistence, and `esp_restart()`. The target partition remains available for the reboot diagnostic. On failed finalization, the receiver releases these guards only after UI/NVS restoration finishes. A manual OTA exposed the old ordering: an image transfer exceeded the five-minute guardian limit, and clearing the guards immediately after END_ACK let deep sleep win the race against the intended reboot. No timeout was increased.
 
 #### OTA "Updating…" Continuous Hold (smooth manual OTA)
 
@@ -1126,7 +1122,7 @@ Their real purpose is to drop a **stale** stay-awake set by an `INPUT_OTA_CHECK`
 
 #### Guardian Force-Sleep
 
-`GUARDIAN_FORCE_SLEEP_MS` (5 minutes) is a hard upper bound. After 5 minutes awake, the device enters sleep regardless of activity. Tracked by `guardian_awake_start_ms`.
+`GUARDIAN_FORCE_SLEEP_MS` (5 minutes) forces a sleep attempt after prolonged awake time, tracked by `guardian_awake_start_ms`. Active LCD OTA receive/finalization defers it; the sleep entry path also checks OTA guards. A successful LCD OTA keeps these guards through reboot, even when the transfer outlasts the guardian limit.
 
 #### Key Functions
 

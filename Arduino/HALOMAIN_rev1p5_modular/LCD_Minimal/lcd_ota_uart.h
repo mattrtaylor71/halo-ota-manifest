@@ -55,7 +55,7 @@ static void uart_send_json(const char* json_str);
 static uint32_t get_next_msg_id();
 
 // ── Global state ─────────────────────────────────────────────────────
-static LcdOtaState            s_lcd_ota_state             = LCD_OTA_IDLE;
+static std::atomic<LcdOtaState> s_lcd_ota_state{LCD_OTA_IDLE};
 static esp_ota_handle_t       s_lcd_ota_handle            = 0;
 static const esp_partition_t* s_lcd_ota_partition          = NULL;
 static uint16_t               s_lcd_ota_session_id         = 0;
@@ -75,8 +75,7 @@ static bool g_lcd_ota_binary_mode = false;
 static volatile int g_lcd_ota_progress_pct = -1;  // -1 = no OTA, 0-100 = progress
 static volatile bool g_lcd_ota_show_progress = false;
 
-// Returns true when an LCD OTA binary transfer is in progress.
-// Used by sleep logic to prevent deep sleep during active OTA.
+// Receive and finalization both block sleep, including successful reboot prep.
 static bool lcd_ota_uart_active() {
   return s_lcd_ota_state != LCD_OTA_IDLE;
 }
@@ -249,7 +248,7 @@ static void lcd_ota_handle_abort(JsonObject& doc);
 
 static void lcd_ota_abort_internal(const char* reason) {
     Serial.printf("[LCD_OTA_UART] ABORT reason=%s state=%d written=%u\n",
-                  reason ? reason : "unknown", s_lcd_ota_state,
+                  reason ? reason : "unknown", static_cast<int>(s_lcd_ota_state.load()),
                   s_lcd_ota_bytes_written);
 
     lcd_errlog_store_with_context("lcd", "ota", "OTA_ABORT", (int)s_lcd_ota_bytes_written, reason ? reason : "unknown");
@@ -421,7 +420,7 @@ static void lcd_ota_handle_query() {
 static void lcd_ota_handle_begin(JsonObject& doc) {
     if (s_lcd_ota_state != LCD_OTA_IDLE) {
         Serial.printf("[LCD_OTA_UART] BEGIN rejected: already in state %d\n",
-                      s_lcd_ota_state);
+                      static_cast<int>(s_lcd_ota_state.load()));
         // Send rejection
         StaticJsonDocument<256> resp;
         resp["ver"]        = PROTOCOL_VERSION;
@@ -724,23 +723,11 @@ static void lcd_ota_handle_end(JsonObject& doc) {
     serializeJson(resp, out);
     uart_send_json(out.c_str());
 
-    // Reset state
-    g_lcd_ota_uart_receiving     = false;
-    s_lcd_ota_state              = LCD_OTA_IDLE;
-    s_lcd_ota_partition          = NULL;
-    s_lcd_ota_bytes_written      = 0;
-    s_lcd_ota_image_size         = 0;
-    s_lcd_ota_last_nvs_offset    = 0;
-    s_lcd_ota_last_chunk_ms      = 0;
-    s_lcd_ota_last_progress_pct  = 0;
-    s_lcd_ota_expected_sha256[0] = '\0';
-    s_lcd_ota_target_version[0]  = '\0';
-
     if (sha_match && ota_ok) {
-        // Reboot IMMEDIATELY. Do not call lcd_ota_uart_restore_ui() first —
-        // clearing flags lets the sleep coordinator (Core 1) put the device
-        // to deep sleep before esp_restart() can execute on Core 0.
-        // The new firmware will initialize clean on boot.
+        // Keep FINALIZING and the receiving guard set through esp_restart().
+        // Core 1's guardian can already be overdue after a long transfer;
+        // releasing either guard before NVS/delays lets sleep race this reboot.
+        // Do not restore the UI: the new firmware initializes it on boot.
         //
         // Clear testmode NVS so it doesn't persist after reboot.
         if (g_test_mode_active) {
@@ -769,6 +756,18 @@ static void lcd_ota_handle_end(JsonObject& doc) {
         Serial.printf("[LCD_OTA_UART] OTA failed: sha_match=%d ota_ok=%d\n",
                       sha_match ? 1 : 0, ota_ok ? 1 : 0);
         lcd_ota_uart_restore_ui();
+
+        // Release sleep only after failed-finalization cleanup is complete.
+        s_lcd_ota_partition          = NULL;
+        s_lcd_ota_bytes_written      = 0;
+        s_lcd_ota_image_size         = 0;
+        s_lcd_ota_last_nvs_offset    = 0;
+        s_lcd_ota_last_chunk_ms      = 0;
+        s_lcd_ota_last_progress_pct  = 0;
+        s_lcd_ota_expected_sha256[0] = '\0';
+        s_lcd_ota_target_version[0]  = '\0';
+        s_lcd_ota_state              = LCD_OTA_IDLE;
+        g_lcd_ota_uart_receiving     = false;
     }
 }
 
@@ -839,7 +838,7 @@ static bool lcd_ota_receive_loop() {
     if (s_lcd_ota_state != LCD_OTA_RECEIVING || !s_lcd_ota_protocol) {
         if (millis() - s_last_diag_ms > 5000) {
             Serial.printf("[LCD_OTA_UART] recv_loop skip: state=%d proto=%p\n",
-                          (int)s_lcd_ota_state, (void*)s_lcd_ota_protocol);
+                          static_cast<int>(s_lcd_ota_state.load()), (void*)s_lcd_ota_protocol);
             s_last_diag_ms = millis();
         }
         return false;

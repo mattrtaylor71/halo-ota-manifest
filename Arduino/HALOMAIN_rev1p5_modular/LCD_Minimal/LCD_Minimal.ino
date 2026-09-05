@@ -77,6 +77,7 @@ typedef struct app_event_t app_event_t;
 #include "esp_mac.h"
 #include "Preferences.h"
 #include <string.h>
+#include <atomic>
 #include <ctype.h>   // toupper() for shopping-list store-group headers
 #include <time.h>
 #include <sys/time.h>  // settimeofday() for syncing clock from Sense MAINT_WINDOW now_epoch
@@ -939,9 +940,9 @@ static void sleep_fallback_reset(const char* reason) {
   sleep_fallback_magic = SLEEP_FALLBACK_MAGIC;
 }
 static bool sense_ota_active = false;
-// Forward-declared; true when LCD OTA binary transfer is active (set by lcd_ota_uart.h).
+// True through LCD OTA receive and finalization, until restart or failed cleanup.
 // Used by sleep_blocked_for_ota() which is defined before the lcd_ota_uart.h include.
-static bool g_lcd_ota_uart_receiving = false;
+static std::atomic<bool> g_lcd_ota_uart_receiving{false};
 static volatile bool sense_sleep_intent_pending = false;
 static unsigned long sense_sleep_intent_received_ms = 0;
 static const unsigned long SENSE_SLEEP_RETRY_INTERVAL_MS = 1000;
@@ -2959,7 +2960,7 @@ static void log_sleep_decision(unsigned long now_ms,
 }
 
 static bool sleep_blocked_for_ota() {
-  // LCD OTA over UART is actively receiving binary data
+  // LCD OTA receive/finalization owns the device until restart or cleanup.
   if (g_lcd_ota_uart_receiving) {
     return true;
   }
