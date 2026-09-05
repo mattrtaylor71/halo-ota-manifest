@@ -586,6 +586,12 @@ Cloud (S3)                    Sense                         LCD
 5. Set boot partition and reboot
 6. Health gate validates new firmware on next boot
 
+`SenseOtaApplier` allows at most three full restarts after the initial attempt.
+The same-offset stall recovery uses that same budget: after exhaustion it closes
+HTTP/TLS, aborts the current OTA write, and returns `FAILED_NO_PROGRESS` before
+another erase or deadline reset. The existing per-download timer still resets on
+an allowed restart; this is a retry cap, not an overall paired-update deadline.
+
 ### LCD OTA Proxy (via Sense UART)
 
 The Sense board acts as a TLS proxy for LCD OTA:

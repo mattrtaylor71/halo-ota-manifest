@@ -1210,6 +1210,22 @@ The free/restore hooks are idempotent (free checks non-null, restore checks null
 
 ---
 
+### Shared SenseOtaApplier -- Full-Restart Budget
+
+`applyToOtaPartition()` permits `RESTART_MAX_ATTEMPTS = 3` full restarts after
+the initial attempt. Three stalls at the same downloaded offset can force a
+full restart, but this path shares the existing restart budget with ordinary
+resume/disconnection recovery. Once the count reaches the cap, it closes the
+HTTP client, stops TLS, deletes the connection context and aborts the OTA handle,
+then returns `RESULT_FAILED_NO_PROGRESS` without another erase, SHA reset,
+counter increment or deadline reset. Allowed restarts and successful progress
+retain their existing behavior.
+
+The Sense caller's 20-minute download timer still resets on a permitted full
+restart and is checked within the streaming loop. It is not an end-to-end paired
+OTA deadline. This cap does not change the separate LCD proxy's two attempts or
+30-second no-chunk timeout.
+
 ## Cross-Module Dependencies
 
 ```

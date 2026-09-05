@@ -1229,6 +1229,16 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             ota_handle = 0;
           }
           
+          // Same-offset recovery shares the normal full-restart budget.
+          // Clean up the failed attempt before returning, but do not erase or
+          // reset its deadline once every permitted restart has been used.
+          if (restart_attempt >= RESTART_MAX_ATTEMPTS) {
+            LOG_ERROR_TAG(LOG_TAG_OTA_WRITE,
+                          "Same-offset stall: all restart attempts exhausted (restart_attempt=%d/%d)",
+                          restart_attempt, RESTART_MAX_ATTEMPTS);
+            LCD_OTA_RETURN_FAIL(RESULT_FAILED_NO_PROGRESS);
+          }
+
           // Reset SHA256
           mbedtls_sha256_starts(&sha256_ctx, 0);
           
