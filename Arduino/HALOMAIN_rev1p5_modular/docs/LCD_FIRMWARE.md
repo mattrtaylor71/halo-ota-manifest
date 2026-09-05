@@ -50,6 +50,29 @@ startup flash, touch/encoder while housekeeping is awake and dark, real OTA plus
 post-reboot continuation, and at least four consecutive failed-handshake sleeps.
 Compilation/static review alone cannot prove panel darkness or physical wake.
 
+### Bounded receiver rendezvous on a maintenance timer (2026-09-04)
+
+The production wrapper now consumes a validated maintenance TIMER schedule before
+starting UART and arms a separate **120-second receiver wait**. It initializes the
+normal UI under the existing dark policy. A next-wake value such as `23030` seconds
+is never interpreted as an awake duration, and a valid timer boot no longer falls
+through the legacy "stale maintenance" UI override that erased its wait.
+
+`lcd_timer_receiver_wait_active()` participates in `sleep_blocked_for_ota()` before
+stale Sense-state cleanup. Ordinary Home idle, the direct sleep funnel and guardian
+therefore cannot end the rendezvous merely because synchronous Sense HTTPS work
+delays PONGs. Accepted `OTA_LOCK` releases the wait only after its existing OTA hold
+is installed. `terminal:true` `OTA_UNLOCK` and real touch/encoder input also release
+it; intermediate unlocks and future `MAINT_WINDOW` messages do not. Active receive,
+finalization and failed-transfer retry holds retain their existing ownership.
+
+If Sense never arrives, the wait expires once. The consumed schedule cannot cause
+an immediate five-second re-wake or replay its old relative interval: a new future
+schedule is used if received, otherwise the existing six-hour periodic timer applies.
+Future schedules arriving during UI initialization are preserved. Serial logs record
+`receiver_wait_start` and the release/timeout reason. This changes no wake pins,
+protocol fields, transfer timeout, or user-input visibility rule.
+
 ## Sense OTA identity through LCD diagnostics (2026-09-04)
 
 `FW_INFO` now prints the optional live Sense fields `sense_build`,

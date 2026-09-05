@@ -665,11 +665,17 @@ When Sense receives a maintenance schedule from the cloud:
 1. Sense sends `MAINT_WINDOW` to LCD with timing details
 2. LCD persists window to NVS and arms RTC timer wake
 3. Both boards sleep
-4. Timer wake: LCD enters maintenance mode (headless, no UI init)
-5. LCD wakes Sense via INT_PIN
+4. A validated production maintenance TIMER wake consumes the old schedule and
+   initializes the normal dark UI/UART with a separate 120-second receiver wait.
+5. Sense wakes on its own co-scheduled timer; LCD waits through delayed WiFi/HTTPS
+   without treating missed PONGs as permission to end that rendezvous.
 6. Sense performs OTA checks for both boards
 7. LCD receives OTA via UART COBS if update available
-8. Both boards sleep after maintenance completes
+8. A terminal unlock releases the receiver wait for normal idle sleep; accepted OTA
+   transfers take over through their existing guards. Actual user input also releases
+   the wait. With no Sense response it expires after 120 seconds; a newly received
+   future schedule is preserved, otherwise LCD uses its existing six-hour periodic
+   wake. The old consumed window cannot create an immediate repeated wake.
 
 #### MAINT_WINDOW carries the Sense wall clock (`now_epoch`) — LCD self-wake from the absolute window
 

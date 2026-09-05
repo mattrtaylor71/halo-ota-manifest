@@ -281,6 +281,7 @@ static void lcd_set_idle_screen_dark(bool dark, const char* reason) {
 }
 
 static void ensure_awake_for_ui(const char* reason) {
+  lcd_timer_receiver_wait_release("user_input");
   // Only call this on real user input (touch/scroll/pull-to-refresh).
   lcd_allow_visible_ui(reason);
   sleep_fallback_reset("user_input");
@@ -337,6 +338,7 @@ static void abort_sleep_transition(const char* reason, bool user_input = true) {
   // Pin/teardown callers have real input. The handshake wait can also abort on
   // generic activity (e.g. a firmware-info retry); that must remain dark.
   if (user_input) {
+    lcd_timer_receiver_wait_release("sleep_aborted_by_touch");
     lcd_allow_visible_ui(reason);
     sleep_fallback_reset("sleep_aborted_by_touch");
   }

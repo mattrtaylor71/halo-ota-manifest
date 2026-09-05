@@ -920,6 +920,8 @@ static void uart_process_received_message(const char* json_str) {
       Serial.printf("[OTA] ota_stay_awake extended %lums (ota_lock)\n",
                     (unsigned long)LCD_OTA_LOCK_STAY_AWAKE_MS);
     }
+    // Publish existing OTA ownership before releasing the timer rendezvous.
+    lcd_timer_receiver_wait_release("ota_lock");
     // Wake display from idle-dark if needed
     if (g_idle_screen_dark) {
       lcd_set_idle_screen_dark(false, "ota_lock");
@@ -943,6 +945,7 @@ static void uart_process_received_message(const char* json_str) {
     // sleep. Unmarked unlocks keep the legacy/intermediate continuation lease:
     // Sense may still be about to query or stream the LCD on those paths.
     if (doc["terminal"] | false) {
+      lcd_timer_receiver_wait_release("terminal_unlock");
       // A completed check/update has no remaining continuation. Release both
       // the generic dual-OTA hold and any short failed-attempt retry lease.
       g_lcd_ota_recovery_grace = false;

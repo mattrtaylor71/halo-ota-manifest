@@ -449,6 +449,25 @@ static bool g_lcd_schedule_wake_window = false;
 static unsigned long g_lcd_schedule_window_deadline_ms = 0;
 static unsigned long g_lcd_maintenance_boot_grace_until_ms = 0;
 static const unsigned long LCD_MAINT_BOOT_GRACE_MS = 120000;
+// Production timer boots wait for Sense's WiFi/manifest work with the normal
+// dark UI and UART alive. This is not the interval until the next wake.
+static std::atomic<uint32_t> g_lcd_timer_receiver_wait_until_ms{0};
+
+static void lcd_timer_receiver_wait_release(const char* reason) {
+  if (g_lcd_timer_receiver_wait_until_ms.exchange(0) != 0) {
+    Serial.printf("[LCD_MAINT] receiver_wait_end reason=%s\n", reason ? reason : "unknown");
+  }
+}
+
+static bool lcd_timer_receiver_wait_active() {
+  uint32_t deadline = g_lcd_timer_receiver_wait_until_ms.load();
+  if (deadline == 0) return false;
+  if ((int32_t)((uint32_t)millis() - deadline) < 0) return true;
+  if (g_lcd_timer_receiver_wait_until_ms.compare_exchange_strong(deadline, 0)) {
+    Serial.println("[LCD_MAINT] receiver_wait_end reason=timeout");
+  }
+  return false;
+}
 static char s_wake_cause_label[32] = "cold_boot";
 static const char* LCD_MAINT_PREF_NAMESPACE = "lcd_maint";
 static const char* LCD_MAINT_PREF_KEY_VALID = "valid";
@@ -2970,6 +2989,9 @@ static bool sleep_blocked_for_ota() {
   if (g_lcd_ota_uart_receiving) {
     return true;
   }
+  // A missed PONG during Sense's synchronous HTTPS work does not cancel the
+  // receiver's bounded timer rendezvous.
+  if (lcd_timer_receiver_wait_active()) return true;
   unsigned long now_ms = millis();
   if (lcd_maintenance_active() || g_ota_mode_active || sense_ota_apply_required || sense_ota_active) {
     // Safety: if Sense is asleep and OTA is not locked, these are stale flags — clear and allow sleep
@@ -3987,6 +4009,22 @@ void setup() {
   g_lcd_maintenance_wake_window =
       (effective_timer_wake && maintenance_context && maintenance_resume_hint);
   if (g_lcd_maintenance_wake_window) {
+#ifdef HALO_LCD_PROD_WRAPPER
+    // Consume the schedule that woke us BEFORE UART starts. A new MAINT_WINDOW
+    // received later belongs to the next sleep and must survive UI setup.
+    g_lcd_maintenance_timer_armed = 0;
+    g_lcd_maintenance_wake_in_s = 0;
+    g_lcd_maintenance_remaining_s = 0;
+    g_lcd_maintenance_request_id[0] = '\0';
+    g_lcd_maintenance_start_epoch = 0;
+    g_lcd_maintenance_duration_sec = 0;
+    g_lcd_maintenance_grace_before_sec = 0;
+    g_lcd_maintenance_grace_after_sec = 0;
+    lcd_clear_persisted_maintenance_state("timer_schedule_consumed");
+    g_lcd_maintenance_wake_window = false;
+    g_lcd_timer_receiver_wait_until_ms.store((uint32_t)millis() + LCD_MAINT_BOOT_GRACE_MS);
+    Serial.printf("[LCD_MAINT] receiver_wait_start budget_ms=%lu\n", LCD_MAINT_BOOT_GRACE_MS);
+#else
     Serial.println("[LCD_MAINT] wake_window_start");
     g_lcd_maintenance_timer_armed = 0;
     g_lcd_maintenance_active = true;
@@ -4013,6 +4051,7 @@ void setup() {
     }
     lcd_persist_maintenance_state("maint_wake_window");
     lcd_log_rtc_timer_state("maint_wake_window");
+#endif
   }
   g_lcd_schedule_wake_window =
       (effective_timer_wake && g_lcd_schedule_timer_armed);
@@ -4040,7 +4079,7 @@ void setup() {
     Serial.printf("[DEV_OTA] %s -> auto OTA check\n", wake_cause_label);
   }
 #endif
-#if HALO_OTA_POLICY_MAINTENANCE_ONLY
+#if HALO_OTA_POLICY_MAINTENANCE_ONLY && !defined(HALO_LCD_PROD_WRAPPER)
   if (!g_lcd_maintenance_active) {
     g_lcd_maintenance_boot_grace_until_ms = millis() + LCD_MAINT_BOOT_GRACE_MS;
     Serial.printf("[LCD_MAINT] boot_grace_until=%lu reason=maint_only_wait\n",
@@ -4200,6 +4239,11 @@ void setup() {
                 (int)reset_reason,
                 (int)wake_cause,
                 restored_maint_state ? 1 : 0);
+#ifdef HALO_LCD_PROD_WRAPPER
+  // The production receiver needs touch/UART/UI initialized even while dark.
+  // Never clear a valid timer rendezvous or a newly received future schedule.
+  init_ui_stack(g_saved_list_count);
+#else
   if (!g_ship_ota_wake_window && !g_lcd_maintenance_wake_window) {
     init_ui_stack(g_saved_list_count);
   } else {
@@ -4221,6 +4265,7 @@ void setup() {
     g_panel_enabled = true;
     init_ui_stack(g_saved_list_count);
   }
+#endif
   // Force LVGL to flush the display buffer immediately after init
   if (g_ui_initialized) {
     lv_timer_handler();
