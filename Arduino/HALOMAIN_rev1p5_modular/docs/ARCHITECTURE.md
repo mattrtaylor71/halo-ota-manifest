@@ -1006,9 +1006,17 @@ before switching its own latest manifest, then downloads and verifies them.
 There is no atomic two-board manifest switch. This order avoids advertising a
 new Sense release before its LCD target exists. Use `--channel prod --bucket
 halo-ota-prod --region us-east-1 --profile trepo-dev` for the current production
-target. Any `HALO_MAINT_TEST_S` accelerated timer build stays local and must not
-be supplied to either publisher. The wrapper below remains the legacy combined
-compile/publish sequence; it publishes Sense before building LCD.
+target. Both publishers reject explicit binaries beneath `DO_NOT_PUBLISH*` or
+`bench-only` path components, checking both the supplied path and resolved
+symlink destination before AWS work. They also reject the actual compiled
+`HALO_MAINT_TEST_S override` marker, including renamed or copied accelerated images;
+Sense applies the same check to its newly compiled selection. This uses the
+existing timer-branch marker, not inferred build metadata. The entire local
+`bench-only/recovery-images` archive is nonpublishable in place; normal recovery
+bytes copied to an ordinary release location remain eligible for the usual
+board/version/size checks. Any accelerated timer build stays local. The wrapper
+below remains the legacy combined compile/publish sequence; it publishes Sense
+before building LCD.
 
 ```bash
 ./publish_both.sh --version 6.1.315 --channel dev --profile trepo-dev --bucket halo-ota-dev

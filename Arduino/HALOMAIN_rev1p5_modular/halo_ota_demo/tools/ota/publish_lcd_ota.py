@@ -45,6 +45,8 @@ import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
+from artifact_safety import validate_publishable_artifact
+
 # Reuse helpers from publish_ota (same repo)
 try:
     from publish_ota import (
@@ -300,6 +302,12 @@ def main():
     parser.add_argument("--rollout-seed", default=None, type=int, help="Optional rollout seed (int)")
     parser.add_argument("--min-version-allowed", default=None, help="Optional rollout min version gate")
     args = parser.parse_args()
+
+    try:
+        args.bin = str(validate_publishable_artifact(args.bin))
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     repo_root = Path(__file__).resolve().parent.parent.parent
     lcd_partitions = repo_root / "firmware" / "halo_lcd_prod" / "partitions.csv"
