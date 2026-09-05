@@ -1030,8 +1030,14 @@ the optional `FW_INFO` fields `sense_build`, `sense_running_part`,
 `sense_running_state`, `sense_boot_part`, `sense_wake_cause`, and
 `sense_reset_reason`. The first four identify the running/selected image and
 validation state; the last two report raw ESP-IDF values from that boot. Sense
-also persists one `nightly_begin` wake/reset/epoch breadcrumb through the LCD
-diagnostic ring when timer maintenance starts.
+captures the original automatic begin event and wake/reset/epoch detail, sends
+it at episode start, and repeats that same record once after the LCD answers a
+fresh OTA query, before binary streaming. Both paired and LCD-only paths use
+this corroboration. A diagnostic-only scope prevents later manual work from
+replaying stale automatic evidence; `lcd_due` keeps its `lcd_recovery_begin`
+kind. The record can then survive a Sense OTA reboot in the LCD diagnostic
+ring, subject to delivery and bounded-ring retention. No scheduler or transfer
+decisions change.
 
 ---
 

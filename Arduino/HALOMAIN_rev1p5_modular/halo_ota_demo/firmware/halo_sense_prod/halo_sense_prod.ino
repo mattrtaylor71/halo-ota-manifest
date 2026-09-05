@@ -314,6 +314,17 @@ static uint32_t g_boot_ota_next_try_ms = 0;
 static bool g_boot_ota_time_sync_started = false;
 static bool g_boot_ota_begin_reported = false;
 static const char* g_boot_ota_reason = "nightly";
+// Corroborate the original automatic trigger once after LCD answers a query.
+// The initial diagnostic can precede the LCD's co-wake timer by several seconds.
+struct BootOtaBeginRecord {
+  const char* event = nullptr;
+  const char* reason = nullptr;
+  int32_t code = 0;
+  char detail[96] = {0};  // Same capacity as the original begin diagnostic.
+  bool repeat_pending = false;
+};
+static BootOtaBeginRecord g_boot_ota_begin_record;
+static bool g_boot_ota_diag_context = false;
 static volatile bool g_manual_ota_override = false;
 static unsigned long g_manual_ota_override_until_ms = 0;
 static const unsigned long MANUAL_OTA_OVERRIDE_TTL_MS = 5UL * 60UL * 1000UL;
@@ -3025,15 +3036,31 @@ static void boot_ota_queue(const char* reason) {
   g_boot_ota_next_try_ms = 0;
   g_boot_ota_time_sync_started = false;
   g_boot_ota_begin_reported = false;
+  g_boot_ota_begin_record = {};
+  g_boot_ota_diag_context = false;
   g_boot_ota_reason = reason;
   Serial.printf("[BOOT_OTA] check pending reason=%s budget_ms=120000\n", reason);
 }
 
 static void boot_ota_finish(const char* result) {
   g_boot_ota_pending = false;
+  g_boot_ota_begin_record.repeat_pending = false;
+  g_boot_ota_diag_context = false;
   g_maintenance_mode = false;
   g_maintenance_handled = true;
   Serial.printf("[BOOT_OTA] finished reason=%s result=%s\n", g_boot_ota_reason, result);
+}
+
+// Called only after a fresh LCD query succeeds, before binary OTA takes UART.
+// A manual check can run while an earlier automatic episode remains pending;
+// only the synchronous automatic invocation may repeat its cached trigger.
+static void boot_ota_repeat_begin_after_lcd_query() {
+  if (!g_boot_ota_diag_context || !g_boot_ota_begin_record.repeat_pending) return;
+  g_boot_ota_begin_record.repeat_pending = false;
+  uart_send_sense_diag_persist("ota", g_boot_ota_begin_record.event,
+                              g_boot_ota_begin_record.reason,
+                              g_boot_ota_begin_record.code,
+                              g_boot_ota_begin_record.detail);
 }
 
 // Call once early in setup. USB reset / touch wake is not a timer wake.
@@ -3087,17 +3114,24 @@ static void nightly_maintenance_tick() {
 
   if (!g_boot_ota_begin_reported) {
     g_boot_ota_begin_reported = true;
-    // An OTA reboot precedes wake-log closure: preserve its actual trigger in
-    // the LCD error ring. Once per episode, including guard retries.
-    char detail[96];
-    snprintf(detail, sizeof(detail), "wake=%d reset=%d epoch=%lu reason=%s",
-             (int)esp_sleep_get_wakeup_cause(), (int)esp_reset_reason(),
-             (unsigned long)sense_now_epoch(), g_boot_ota_reason);
-    uart_send_sense_diag_persist("ota", nightly ? "nightly_begin" : "lcd_recovery_begin",
-                                g_boot_ota_reason,
-                                (int32_t)esp_sleep_get_wakeup_cause(), detail);
+    // Capture once: a later corroborating send must keep the real original
+    // wake/reset/epoch and event kind, not the time/cause of its delivery.
+    g_boot_ota_begin_record.event = nightly ? "nightly_begin" : "lcd_recovery_begin";
+    g_boot_ota_begin_record.reason = g_boot_ota_reason;
+    g_boot_ota_begin_record.code = (int32_t)esp_sleep_get_wakeup_cause();
+    snprintf(g_boot_ota_begin_record.detail, sizeof(g_boot_ota_begin_record.detail),
+             "wake=%d reset=%d epoch=%lu reason=%s",
+             (int)g_boot_ota_begin_record.code, (int)esp_reset_reason(),
+             (unsigned long)sense_now_epoch(), g_boot_ota_begin_record.reason);
+    g_boot_ota_begin_record.repeat_pending = true;
+    uart_send_sense_diag_persist("ota", g_boot_ota_begin_record.event,
+                                g_boot_ota_begin_record.reason,
+                                g_boot_ota_begin_record.code,
+                                g_boot_ota_begin_record.detail);
   }
+  g_boot_ota_diag_context = true;
   maybeRunOtaCheck(g_boot_ota_reason, true);
+  g_boot_ota_diag_context = false;
   if (g_ota_check_done) {
     uart_send_sense_diag("ota", nightly ? "nightly_done" : "lcd_recovery_done",
                          g_boot_ota_reason, 1, "check_started");
@@ -3509,6 +3543,7 @@ static bool prepare_lcd_ota_proxy_retry(char* lcd_fw, size_t fw_len) {
     diag_record_error_persistent("ota_orch", -1, "lcd_retry_query_fail");
     return false;
   }
+  boot_ota_repeat_begin_after_lcd_query();
   return true;
 }
 
@@ -3543,6 +3578,7 @@ static bool prod_proxy_lcd_inline() {
     set_lcd_ota_due_nvs(true);
     return false;
   }
+  boot_ota_repeat_begin_after_lcd_query();
   if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest)) {
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=manifest_fetch_fail");
     set_lcd_ota_due_nvs(true);
@@ -3979,7 +4015,9 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
                (unsigned long)millis(), (int)halo_uart_link_recent(3000));
       diag_record_error_persistent("ota_orch", 0, crumb);
     }
-    if (!sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr)) {
+    const bool lcd_query_ok = sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr);
+    if (lcd_query_ok) boot_ota_repeat_begin_after_lcd_query();
+    if (!lcd_query_ok) {
       LOG_INFO("[OTA_ORCH] lcd proxy result=lcd_query_fail (will defer to lcd_ota_due)");
       // Breadcrumb: LCD never answered the query (the failure we're chasing).
       char crumb[96];
