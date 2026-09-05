@@ -603,9 +603,6 @@ static bool is_time_valid();
 void halo_prod_kick_time_sync(const char* reason);  // Start SNTP immediately on STA-connect (idempotent, non-blocking)
 static void ota_sched_save();
 
-// Tracks whether configTime()/SNTP has been started this boot. File-scope so the
-// provisioning STATE_CONNECTED path can kick SNTP early (halo_prod_kick_time_sync)
-// and the main-loop SNTP block stays idempotent with it.
 // Legacy OTA orchestration (schedule fetch / arm / revalidate / windows /
 // cooldowns / the 7-reason dispatcher). Set to 0 to run the nightly 02:00 path
 // ALONE — which is the state the teardown produces, so building with it off is
@@ -621,7 +618,6 @@ static void ota_sched_save();
 #define HALO_LEGACY_OTA_ORCHESTRATOR 0
 #endif
 
-static bool g_prod_sntp_started = false;
 static bool maintenance_window_load(MaintenanceWindow* mw);
 
 static const char* reset_reason_to_str(esp_reset_reason_t reason) {
@@ -1298,6 +1294,7 @@ static bool ota_report_build_payload(String& out,
 static bool ota_report_post(const char* report_type,
                             const OtaReportExtras* extras,
                             uint32_t timeout_ms) {
+  HaloNtpDnsGuard ntp_dns_guard;
   const char* rt = (report_type && report_type[0]) ? report_type : "pre_sleep";
   if (!OTA_REPORT_HTTP_URL[0]) {
     return false;
@@ -2238,6 +2235,7 @@ static void maintenance_resync_on_time_jump(const char* reason) {
 }
 
 static void lcd_ota_proxy_task(void* param) {
+  HaloNtpDnsGuard ntp_dns_guard;
   LOG_INFO("[LCD_OTA_PROXY_TASK] started stack=%u",
            (unsigned)uxTaskGetStackHighWaterMark(NULL));
 
@@ -2260,6 +2258,7 @@ static void lcd_ota_proxy_task(void* param) {
     send_ota_uart_message("OTA_UNLOCK");
     LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (lcd_query_fail)");
     g_lcd_ota_task_running = false;
+    ntp_dns_guard.release();
     vTaskDelete(NULL);
     return;
   }
@@ -2277,6 +2276,7 @@ static void lcd_ota_proxy_task(void* param) {
     LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (manifest_fetch_fail)");
     mqtt_force_connect();
     g_lcd_ota_task_running = false;
+    ntp_dns_guard.release();
     vTaskDelete(NULL);
     return;
   }
@@ -2314,6 +2314,7 @@ static void lcd_ota_proxy_task(void* param) {
   LOG_INFO("[LCD_OTA_PROXY_TASK] done stack_remaining=%u",
            (unsigned)uxTaskGetStackHighWaterMark(NULL));
   g_lcd_ota_task_running = false;
+  ntp_dns_guard.release();
   vTaskDelete(NULL);
 }
 
@@ -2620,17 +2621,12 @@ static void ensure_timezone_pt(const char* reason) {
 // Start SNTP/NTP the instant WiFi (STA) connects, so the owner-claim TLS and OTA
 // schedule calls have valid time on the first attempt rather than failing http=-1
 // while time is still invalid right after connect. Idempotent (only starts once per
-// boot) and non-blocking (does NOT wait for sync). Called from the provisioning
-// STATE_CONNECTED transition (ProvisioningManager) and shared with the main-loop
-// SNTP block via g_prod_sntp_started so they never double-init.
+// boot) and non-blocking. Suspended network work can resume the same attempt
+// inside its original deadline; a completed/expired attempt never re-arms.
 void halo_prod_kick_time_sync(const char* reason) {
-  if (g_prod_sntp_started) {
-    return;
-  }
-  sense_ntp_begin();   // configTime(0,0,..) would reset TZ to UTC; see sense_time.h
   ensure_timezone_pt(reason ? reason : "kick_time_sync");
-  g_prod_sntp_started = true;
-  LOG_INFO("[TLS_GUARD] SNTP init (early on connect) reason=%s", reason ? reason : "unknown");
+  sense_ntp_service();
+  sense_ntp_begin();
 }
 
 static int clamp_int(int value, int min_value, int max_value) {
@@ -2714,8 +2710,13 @@ static uint32_t ota_sched_compute_next_epoch(time_t now) {
 }
 
 static void ota_sched_update_next_epoch(time_t now) {
-  if (!g_ota_sched.enabled || now <= 0) {
+  if (!g_ota_sched.enabled || now <= 0 || !sense_time_has_fresh_sync()) {
     return;
+  }
+  static bool applied_fresh_clock = false;
+  if (!applied_fresh_clock) {
+    g_next_ota_epoch = 0;  // discard a cached target after authoritative correction
+    applied_fresh_clock = true;
   }
   ensure_timezone_pt("sched_update");
   if (OTA_SCHED_TEST_OFFSET_SEC > 0) {
@@ -2820,6 +2821,11 @@ void ota_schedule_update_from_mqtt(bool enable,
 
 static void ota_sched_configure_timer_wakeup() {
   g_sleep_timer_delta_s = 0;
+  if (!sense_time_has_fresh_sync()) {
+    g_timer_wake_armed = 0;
+    LOG_INFO("[OTA_SCHED] unconfirmed_clock skip_absolute_timer");
+    return;  // normal sleep still arms the shared relative six-hour fallback
+  }
   MaintenanceWindow mw;
   bool maint_scheduled = maintenance_window_load(&mw);
   bool retry_pending = maintenance_followup_retry_pending();
@@ -3131,6 +3137,10 @@ static void nightly_maintenance_tick() {
     g_boot_ota_time_sync_started = true;
     halo_prod_kick_time_sync(g_boot_ota_reason);
   }
+  // Give the nonblocking fresh-time attempt its bounded chance before long
+  // HTTPS work. An unavailable NTP server must not suppress already-due OTA:
+  // after the deadline, a plausible retained clock remains sufficient for TLS.
+  if (sense_ntp_attempt_pending()) return;
   if (!is_time_valid() || !OtaIntent::cooldownAllows()) return;
 
   if (!g_boot_ota_begin_reported) {
@@ -3745,6 +3755,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   // Record actual check entry after readiness guards, so skipped retries do
   // not write NVS. The manual-OTA decision/handshake trail survives reboots
   // and is readable later via the LCD error log.
+  HaloNtpDnsGuard ntp_dns_guard;
   {
     char crumb[96];
     snprintf(crumb, sizeof(crumb), "reason=%s manual=%d t=%lu",

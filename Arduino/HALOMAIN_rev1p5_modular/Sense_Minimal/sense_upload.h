@@ -183,6 +183,7 @@ static bool http_post_json_with_retries(const char* url,
       delay(backoff);
       continue;
     }
+    HaloNtpDnsGuard ntp_dns_guard;
     WiFiClientSecure client;
     tls_configure(client, label);
     HTTPClient http;
@@ -305,6 +306,7 @@ static bool http_get_with_retries(const char* url,
       delay(backoff);
       continue;
     }
+    HaloNtpDnsGuard ntp_dns_guard;
     WiFiClientSecure client;
     tls_configure(client, label);
     HTTPClient http;

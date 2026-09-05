@@ -71,6 +71,7 @@ static bool parse_url_parts(const String& url, bool& https, String& host, uint16
 // ── DNS helpers ──────────────────────────────────────────────────────
 
 static void net_diag_dns_for_host(const char* host, const char* reason) {
+  HaloNtpDnsGuard ntp_dns_guard;
   IPAddress dns0 = WiFi.dnsIP(0);
   IPAddress dns1 = WiFi.dnsIP(1);
   IPAddress resolved_ip;
@@ -93,6 +94,7 @@ static bool dns_ip_is_empty(const IPAddress& ip) {
 }
 
 static bool dns_resolve_test(const char* host) {
+  HaloNtpDnsGuard ntp_dns_guard;
   if (!host || !host[0]) {
     return true;
   }

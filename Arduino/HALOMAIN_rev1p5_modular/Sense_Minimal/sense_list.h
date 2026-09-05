@@ -269,6 +269,7 @@ static void delete_item_from_api(const char* item_id) {
   } list_tls_dma_guard;
 
   // Create HTTPS client
+  HaloNtpDnsGuard ntp_dns_guard;
   WiFiClientSecure client;
   HTTPClient http;
   client.setInsecure();
@@ -413,6 +414,7 @@ static void fetch_shopping_list_from_api() {
     list_refresh_fail("net_not_ready");
     return;
   }
+  HaloNtpDnsGuard ntp_dns_guard;
   bool dns_ok = ensure_dns_ready(list_host.c_str());
   if (!dns_ok) {
     Serial.println("[NET] dns_error; proceeding with fetch");

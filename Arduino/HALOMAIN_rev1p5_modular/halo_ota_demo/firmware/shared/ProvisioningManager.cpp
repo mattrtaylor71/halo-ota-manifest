@@ -13,6 +13,7 @@
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include "NtpDnsGuard.h"
 #include <WiFiClientSecure.h>
 #include <esp_wifi.h>
 #include <esp_heap_caps.h>
@@ -887,6 +888,10 @@ bool ProvisioningManager::tryClaimOwnerId() {
     claim_completed = true;
     return false;
   }
+  // Connected-state service started a bounded, nonblocking SNTP attempt. Let
+  // it receive a reply or expire before the first claim DNS/TLS operation.
+  if (halo_sntp_sync_pending && halo_sntp_sync_pending()) return false;
+  HaloNtpDnsGuard ntp_dns_guard;
   if (owner_id_set) {
     LOG_WARN("[PROVISION] Owner code present; clearing existing owner_id to re-claim");
     ProvisioningState::clearOwnerId();

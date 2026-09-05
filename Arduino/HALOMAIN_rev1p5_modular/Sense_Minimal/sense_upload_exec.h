@@ -187,6 +187,7 @@ static bool put_to_presigned_url(const String& url,
   if (effective_job == 0 && current_job.active) {
     effective_job = current_job.job_id;
   }
+  HaloNtpDnsGuard ntp_dns_guard;
   http_queue_lock("UPLOAD_PUT", effective_job);
 
   bool https = false;

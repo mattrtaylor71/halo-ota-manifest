@@ -699,7 +699,6 @@ static bool wifi_recover_requested = false;
 static TaskHandle_t op_worker_task_handle = NULL;  // Handle to suspend/resume task
 static bool scan_terminal_sent = false;
 static char presign_last_error_text[64] = "";
-static bool sntp_started = false;
 static CameraProfile g_camera_profile = CAM_PROFILE_LABEL;
 static bool g_camera_preflight_force = false;
 static int g_last_scene_luma = -1;
@@ -1685,10 +1684,9 @@ static bool sense_idle_mode_active() {
 
 static void service_boot_wifi_connect(unsigned long now_ms) {
   service_wifi_maintenance(now_ms);
-  // Retire SNTP as soon as the clock is good. Must run on THIS task: stopping
-  // SNTP is itself a raw-lwIP call, and the whole point is to keep those off
-  // upload_worker_task. See sense_ntp_stop_if_time_valid() for the panic.
-  sense_ntp_stop_if_time_valid("wifi_service");
+  // Consume actual SNTP replies or expire the bounded attempt on the owner
+  // task. Plausible retained time alone must not stop a fresh synchronization.
+  sense_ntp_service();
 }
 
 // (voice functions removed — see sense_voice.h)

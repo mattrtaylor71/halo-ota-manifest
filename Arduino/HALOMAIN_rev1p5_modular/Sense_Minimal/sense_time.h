@@ -14,6 +14,18 @@
 #define SENSE_TIME_H
 
 #include "esp_sntp.h"
+#include <atomic>
+#include <mutex>
+#include "lwip/priv/tcpip_priv.h"
+#include "lwip/dns.h"
+#include "../halo_ota_demo/firmware/shared/NtpDnsGuard.h"
+
+// esp_sntp_stop() only queues a callback in IDF 5.5.4. DNS quiescence needs the
+// raw stop to have completed before a worker can call hostByName().
+extern "C" void sntp_stop(void);
+#if !CONFIG_LWIP_TCPIP_CORE_LOCKING
+#error "HALO SNTP/DNS serialization requires the production TCPIP core lock"
+#endif
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -29,10 +41,34 @@ static const char* TIME_CACHE_EPOCH_KEY = "epoch";
 
 RTC_DATA_ATTR static uint32_t g_time_cache_epoch = 0;
 static bool g_time_cache_loaded = false;
+static std::recursive_mutex g_time_mutex;
+static const uint32_t SENSE_NTP_ATTEMPT_MS = 15000;
+static bool g_ntp_attempt_started = false;
+static bool g_ntp_attempt_finished = false;
+static bool g_ntp_running = false;
+static bool g_ntp_sleep_quiesced = false;
+static uint32_t g_ntp_attempt_start_ms = 0;
+static unsigned g_ntp_dns_users = 0;
+static std::atomic<uint32_t> g_ntp_accept_until_ms{0};
+static std::atomic<uint32_t> g_ntp_received_epoch{0};
+static std::atomic<bool> g_ntp_fresh_this_boot{false};
+static std::atomic<uint32_t> g_ntp_resolve_until_ms{0};
+struct SenseNtpServer {
+  const char* hostname;
+  bool requested = false;  // owner context, protected by g_time_mutex
+  std::atomic<uint32_t> ipv4{0};
+  std::atomic<bool> done{false};
+};
+static SenseNtpServer g_ntp_servers[3] = {
+    {"pool.ntp.org"}, {"time.nist.gov"}, {"time.google.com"}};
+// SNTP retains these pointers. Never pass a temporary String/caller buffer.
+static char g_ntp_numeric_servers[3][16] = {};
+static_assert(CONFIG_LWIP_SNTP_MAX_SERVERS == 3, "Update all SNTP numeric server slots when SDK server count changes");
 
 // ── Time cache functions ─────────────────────────────────────────────
 
 static uint32_t time_cache_load() {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
   if (g_time_cache_epoch >= (uint32_t)TIME_VALID_MIN_EPOCH) {
     return g_time_cache_epoch;
   }
@@ -83,6 +119,7 @@ static char g_tz_current[64] = HALO_DEFAULT_TZ;
 // Apply a POSIX TZ string. Call at boot, and again whenever the backend hands
 // us the owner's zone. Idempotent.
 static void sense_set_timezone(const char* posix_tz) {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
   const char* tz = (posix_tz && posix_tz[0]) ? posix_tz : HALO_DEFAULT_TZ;
   snprintf(g_tz_current, sizeof(g_tz_current), "%s", tz);
   setenv("TZ", tz, 1);
@@ -100,13 +137,107 @@ static void sense_set_timezone(const char* posix_tz) {
 // The wrapper even set PST8PDT explicitly 16 lines before calling configTime,
 // which then undid it. Re-applying afterwards is the fix; SNTP itself only
 // needs UTC internally.
-static void sense_ntp_begin() {
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-  setenv("TZ", g_tz_current, 1);
-  tzset();
+// SNTP's callback runs after its immediate system-clock update. Only publish a
+// reply received inside this boot's original attempt budget; no logging, NVS,
+// mutex acquisition or network work runs in the TCPIP callback.
+static void sense_ntp_on_sync(struct timeval* tv) {
+  const uint32_t deadline = g_ntp_accept_until_ms.load();
+  if (!tv || tv->tv_sec < TIME_VALID_MIN_EPOCH || deadline == 0 ||
+      (int32_t)((uint32_t)millis() - deadline) >= 0) return;
+  uint32_t empty = 0;
+  g_ntp_received_epoch.compare_exchange_strong(empty, (uint32_t)tv->tv_sec);
 }
 
-// Stop SNTP once the clock is good. THIS IS A CRASH FIX, not tidiness.
+// IDF's raw sntp_stop does NOT cancel an outstanding sntp_dns_found callback.
+// Own the hostname lookups instead: this callback is safe even if Arduino's
+// foreground dns_clear_cache invokes it outside the TCPIP task. Static slot
+// lifetime, record-only writes and a single per-boot deadline make late results
+// harmless. The SNTP client itself is only ever given numeric IPv4 strings.
+static void sense_ntp_on_dns(const char*, const ip_addr_t* address, void* arg) {
+  SenseNtpServer* server = static_cast<SenseNtpServer*>(arg);
+  const uint32_t deadline = g_ntp_resolve_until_ms.load();
+  if (!server) return;
+  if (deadline != 0 && (int32_t)((uint32_t)millis() - deadline) < 0 &&
+      address && IP_IS_V4(address)) {
+    server->ipv4.store(ip4_addr_get_u32(ip_2_ip4(address)));
+  }
+  server->done.store(true);
+}
+
+// Caller holds g_time_mutex. Lock order is always application mutex -> TCPIP
+// core. The callback above never takes the application mutex, avoiding inversion.
+static void sense_ntp_stop_locked() {
+  LOCK_TCPIP_CORE();
+  g_ntp_accept_until_ms.store(0);
+  sntp_stop();
+  UNLOCK_TCPIP_CORE();
+  g_ntp_running = false;
+}
+
+static bool sense_ntp_attempt_pending() {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  return g_ntp_attempt_started && !g_ntp_attempt_finished &&
+         !g_ntp_sleep_quiesced && g_ntp_received_epoch.load() == 0 &&
+         ((uint32_t)millis() - g_ntp_attempt_start_ms) < SENSE_NTP_ATTEMPT_MS;
+}
+
+static bool sense_time_has_fresh_sync() {
+  return g_ntp_fresh_this_boot.load();
+}
+
+static void sense_ntp_begin() {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  if (g_ntp_attempt_finished || g_ntp_sleep_quiesced || g_ntp_received_epoch.load() != 0) return;
+  const uint32_t now_ms = millis();
+  if (!g_ntp_attempt_started) {
+    g_ntp_attempt_started = true;
+    g_ntp_attempt_start_ms = now_ms;
+    g_ntp_resolve_until_ms.store(now_ms + SENSE_NTP_ATTEMPT_MS);
+  }
+  if ((now_ms - g_ntp_attempt_start_ms) >= SENSE_NTP_ATTEMPT_MS ||
+      g_ntp_dns_users != 0 || g_ntp_running) return;
+  for (SenseNtpServer& server : g_ntp_servers) {
+    if (server.requested) continue;
+    server.requested = true;
+    ip_addr_t address = {};
+    LOCK_TCPIP_CORE();
+    const err_t result = dns_gethostbyname_addrtype(server.hostname, &address,
+                                                  sense_ntp_on_dns, &server,
+                                                  LWIP_DNS_ADDRTYPE_IPV4);
+    if (result == ERR_OK) sense_ntp_on_dns(server.hostname, &address, &server);
+    else if (result != ERR_INPROGRESS) sense_ntp_on_dns(server.hostname, nullptr, &server);
+    UNLOCK_TCPIP_CORE();
+  }
+  const char* numeric[3] = {};
+  bool have_address = false;
+  for (unsigned i = 0; i < 3; ++i) {
+    const uint32_t ip = g_ntp_servers[i].ipv4.load();
+    if (ip == 0) continue;
+    IPAddress(ip).toString().toCharArray(g_ntp_numeric_servers[i], sizeof(g_ntp_numeric_servers[i]));
+    numeric[i] = g_ntp_numeric_servers[i];
+    have_address = true;
+  }
+  if (!have_address || ((uint32_t)millis() - g_ntp_attempt_start_ms) >= SENSE_NTP_ATTEMPT_MS) return;
+  const char* first_address = nullptr;
+  for (const char* address : numeric) if (address) { first_address = address; break; }
+  for (const char*& address : numeric) if (!address) address = first_address;
+  // A suspended attempt resumes with the SAME absolute deadline. A stop is
+  // synchronous, so no earlier callback can race registration/restart.
+  sense_ntp_stop_locked();
+  esp_sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+  esp_sntp_set_time_sync_notification_cb(sense_ntp_on_sync);
+  g_ntp_accept_until_ms.store(g_ntp_attempt_start_ms + SENSE_NTP_ATTEMPT_MS);
+  // configTime replaces all three server-name slots. A numeric lookup returns
+  // ERR_OK directly in lwIP, without registering its unsafe sntp_dns_found.
+  configTime(0, 0, numeric[0], numeric[1], numeric[2]);
+  setenv("TZ", g_tz_current, 1);
+  tzset();
+  g_ntp_running = true;
+  Serial.printf("[TIME] SNTP attempt active remaining_ms=%lu\n",
+                (unsigned long)(SENSE_NTP_ATTEMPT_MS - (now_ms - g_ntp_attempt_start_ms)));
+}
+
+// Quiescing before non-SNTP DNS is a crash fix, not tidiness.
 //
 // configTime() leaves SNTP running for the whole boot. If it cannot reach a
 // server -- which is routine right after a WiFi hard reset -- it sits with a
@@ -121,26 +252,37 @@ static void sense_ntp_begin() {
 //
 // i.e. SNTP called raw lwIP from a task that does not hold the TCPIP core lock,
 // and the board PANICKED mid-upload -- losing the capture held in PSRAM. Seen
-// once in a 30-cycle soak (2026-08-22), always with time ALREADY valid, so the
-// retries were pure liability. Stopping SNTP removes the pending callback.
-static void sense_ntp_stop_if_time_valid(const char* reason) {
-  if (time(nullptr) < TIME_VALID_MIN_EPOCH) {
-    return;   // still need it
-  }
-  if (esp_sntp_enabled()) {
-    esp_sntp_stop();
-    Serial.printf("[TIME] SNTP stopped (%s) - clock valid, no pending DNS callback\n",
-                  reason ? reason : "");
-  }
+// once in a 30-cycle soak (2026-08-22). A plausible retained clock does not prove
+// a fresh reply. Nested network scopes stop SNTP synchronously and prevent any
+// other task from restarting it while an application DNS operation may run.
+extern "C" void halo_sntp_dns_acquire() {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  ++g_ntp_dns_users;
+  if (g_ntp_running) sense_ntp_stop_locked();
 }
 
-static void time_cache_store(time_t now) {
+extern "C" void halo_sntp_dns_release() {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  if (g_ntp_dns_users != 0) --g_ntp_dns_users;
+  // Only normal loop service may restart, and only inside the original budget.
+}
+
+extern "C" bool halo_sntp_sync_pending() {
+  return sense_ntp_attempt_pending();
+}
+
+static void time_cache_store(time_t now, bool authoritative = false) {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  // A worker may have sampled its argument before a backward correction, then
+  // waited for this mutex. Do not let that stale sample undo the fresh cache.
+  if (!authoritative && g_ntp_fresh_this_boot.load()) now = time(nullptr);
   if (now < TIME_VALID_MIN_EPOCH) {
     return;
   }
   uint32_t epoch = (uint32_t)now;
   if (g_time_cache_epoch >= (uint32_t)TIME_VALID_MIN_EPOCH &&
-      epoch < g_time_cache_epoch + 3600) {
+      !(authoritative && epoch < g_time_cache_epoch) &&
+      (uint64_t)epoch < (uint64_t)g_time_cache_epoch + 3600ULL) {
     return;
   }
   g_time_cache_epoch = epoch;
@@ -152,7 +294,42 @@ static void time_cache_store(time_t now) {
   }
 }
 
+// Called by the Arduino loop/boot owner, never by the SNTP callback or upload
+// worker. A timely reply remains valid if service is delayed by other work;
+// an out-of-budget callback never enters the mailbox in the first place.
+static void sense_ntp_service() {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  const bool expired = g_ntp_attempt_started && !g_ntp_attempt_finished &&
+      ((uint32_t)millis() - g_ntp_attempt_start_ms) >= SENSE_NTP_ATTEMPT_MS;
+  if (g_ntp_received_epoch.load() == 0 && !expired) return;
+  g_ntp_resolve_until_ms.store(0);
+  // Stop under the core lock before draining the mailbox. A timely callback
+  // may finish between the first read above and acquiring that lock.
+  sense_ntp_stop_locked();
+  const uint32_t received = g_ntp_received_epoch.exchange(0);
+  if (received >= (uint32_t)TIME_VALID_MIN_EPOCH) {
+    g_ntp_attempt_finished = true;
+    time_cache_store((time_t)received, true);
+    g_ntp_fresh_this_boot.store(true);
+    Serial.printf("[TIME] SNTP fresh epoch=%lu elapsed_ms=%lu\n",
+                  (unsigned long)received,
+                  (unsigned long)((uint32_t)millis() - g_ntp_attempt_start_ms));
+  } else if (expired) {
+    g_ntp_attempt_finished = true;
+    Serial.println("[TIME] SNTP attempt timed out; retained time is unconfirmed");
+  }
+}
+
+static void sense_ntp_quiesce_for_sleep() {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  g_ntp_sleep_quiesced = true;
+  g_ntp_resolve_until_ms.store(0);
+  sense_ntp_stop_locked();
+  sense_ntp_service();  // preserve any timely reply that completed before stop
+}
+
 static bool time_cache_bootstrap(const char* reason) {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
   time_t now = time(nullptr);
   if (now >= TIME_VALID_MIN_EPOCH) {
     return true;
@@ -161,13 +338,23 @@ static bool time_cache_bootstrap(const char* reason) {
   if (cached < (uint32_t)TIME_VALID_MIN_EPOCH) {
     return false;
   }
-  timeval tv = {};
-  tv.tv_sec = (time_t)cached;
-  tv.tv_usec = 0;
-  settimeofday(&tv, nullptr);
-  Serial.printf("[TLS_GUARD] time_bootstrap epoch=%lu reason=%s\n",
-                (unsigned long)cached,
-                reason ? reason : "unknown");
+  // The SDK updates system time before invoking our sync callback. Serialize
+  // the final recheck/write with that update, so a reply arriving during the
+  // cache read cannot be overwritten by the retained checkpoint.
+  LOCK_TCPIP_CORE();
+  const bool needs_bootstrap = time(nullptr) < TIME_VALID_MIN_EPOCH;
+  if (needs_bootstrap) {
+    timeval tv = {};
+    tv.tv_sec = (time_t)cached;
+    tv.tv_usec = 0;
+    settimeofday(&tv, nullptr);
+  }
+  UNLOCK_TCPIP_CORE();
+  if (needs_bootstrap) {
+    Serial.printf("[TLS_GUARD] time_bootstrap epoch=%lu reason=%s\n",
+                  (unsigned long)cached,
+                  reason ? reason : "unknown");
+  }
   return true;
 }
 

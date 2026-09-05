@@ -515,11 +515,12 @@ The guard prevents concurrent connection attempts using a claim/release pattern 
 - Calls `hardResetSta()` (disconnect + mode OFF + mode STA)
 - Reconnects with fresh credentials
 
-**`ensure_time_valid(const char* reason, uint32_t timeout_ms)`** -- NTP time sync:
+**`ensure_time_valid(const char* reason, uint32_t timeout_ms)`** -- Plausible TLS time:
 - Checks system time >= `TIME_VALID_MIN_EPOCH` (1700000000, ~Nov 2023)
 - Tries RTC/NVS time cache bootstrap first
-- Falls back to SNTP (pool.ntp.org, time.nist.gov, time.google.com)
-- Polls for up to 15s
+- Falls back to the shared bounded SNTP attempt when no plausible time exists
+- Its wait cannot extend the original per-boot 15-second attempt; a retained or
+  bootstrapped epoch is sufficient for TLS but is never fresh-sync evidence
 
 #### WiFi Diagnostic Accumulator (`WifiDiagAccum`)
 
@@ -888,6 +889,48 @@ directly.
 
 **Purpose:** Persist last-known epoch to RTC memory and NVS so TLS can bootstrap time after deep sleep without waiting for NTP.
 
+**Freshness and DNS safety (2026-09-04).** A plausible retained `time(nullptr)`
+is not an NTP response. The old loop stopped SNTP almost immediately after starting
+it whenever the retained epoch passed the TLS threshold; the RC RTC could therefore
+accumulate sleep drift without correction. `sense_ntp_begin()` now owns one absolute
+15-second attempt budget per boot, including resolver time and network suspensions.
+`sense_ntp_service()` on the Arduino owner task consumes a timely reply, updates the
+cache and logs `[TIME] SNTP fresh`; without one it expires the attempt explicitly.
+
+The three existing NTP hostnames are resolved once using application callbacks that
+only publish an address/done flag into static storage. SNTP receives only persistent
+numeric IPv4 strings in **all three SDK server slots** (an available address fills
+an unresolved slot). The exact IDF 5.5.4 resolver recognizes literals without queuing
+`sntp_dns_found`. This matters because raw `sntp_stop()` removes the UDP PCB/timers
+but does not cancel a pending SNTP DNS callback; `esp_sntp_stop()` is additionally
+asynchronous. Late application DNS callbacks after suspend, deadline or teardown do
+no SDK/network work and cannot mark clock freshness. Neither callback logs, writes
+NVS, or takes the application mutex.
+
+`HaloNtpDnsGuard` uses nested Sense hooks around application network scopes: DNS
+diagnostics, HTTP GET/POST, list/delete, voice, upload PUT, owner claim, OTA report,
+the synchronous paired/LCD-only check and background LCD proxy. Acquiring the guard
+stops SNTP synchronously under the configured TCPIP core lock; the application mutex
+serializes start/stop/suspension, with lock order application mutex then core lock.
+The mutex is not held during HTTP. Main-loop service may resume only after the final
+guard exits and only within the original deadline. Shared builds without Sense hooks
+get a no-op guard. Background task exits explicitly release ownership before
+`vTaskDelete`, which does not unwind C++ destructors. TLS readiness runs before its HTTP guard so an uncached clock can
+still synchronize. Pre-sleep explicitly quiesces the attempt before upload flushing.
+
+Automatic due TIMER/debt work and initial owner claim wait nonblockingly for a fresh
+reply or the attempt deadline. Due OTA then proceeds with plausible TLS time even if
+NTP failed. Only `sense_time_has_fresh_sync()` permits calculating an accurate future
+02:00 arm; otherwise sleep uses the existing six-hour **relative** fallback, still
+co-scheduled to LCD. The private `HALO_MAINT_TEST_S` override remains separate and
+unchanged. POSIX TZ is restored after `configTime`; a first fresh sync invalidates
+the cached next schedule, and authoritative backward corrections replace a future
+cache checkpoint rather than being hidden by the ordinary one-hour write limit.
+An older worker sample cannot overwrite that correction after waiting for the cache
+mutex. Cache bootstrap rechecks/writes the live clock under the TCPIP core lock so
+it cannot overwrite a concurrent SNTP clock update. Raw trigger epochs remain observations of the device clock, not implicit proof
+of external wall-clock accuracy.
+
 **Owner timezone (2026-08-20).** The nightly maintenance wake is scheduled at **02:00 local**, so
 the zone is not cosmetic. `sense_set_timezone()` applies a POSIX TZ string; `HALO_DEFAULT_TZ` is
 `PST8PDT,M3.2.0,M11.1.0`.
@@ -917,7 +960,9 @@ backfill path.
 
 #### Key Functions
 
-**`time_cache_store(time_t now)`** -- Saves epoch to RTC + NVS. Rate-limited: skips if < 1 hour since last store.
+**`time_cache_store(time_t now, bool authoritative=false)`** -- Saves epoch to RTC + NVS.
+Ordinary writes retain the one-hour rate limit. A confirmed backward correction can
+replace a future checkpoint once; callbacks themselves never write the cache.
 
 **`time_cache_bootstrap(const char* reason)`** -- Restores time from cache:
 1. Check RTC memory first (fastest)
@@ -1042,7 +1087,7 @@ The LCD's existing `persist=true` handler stores received copies in its error ri
 
 **Automatic nightly and LCD recovery checks (`nightly_maintenance_tick()`).** The production path no longer calls `run_maintenance_if_needed()`. A raw `ESP_SLEEP_WAKEUP_TIMER` queues one automatic episode with reason `nightly`; `lcd_ota_due` at any boot queues reason `lcd_due` unless the timer episode is already queued. The existing 120-second bound covers readiness, not a transfer already in progress. No wake cause is inferred from USB reset or manual command.
 
-Normal provisioning, time and health service run before the tick; the obsolete `g_maintenance_mode && !g_maintenance_handled` early return is removed. An old schedule-enable flag cannot suppress servicing a real timer request. Readiness is polled at most once per second. Automatic work waits for user operations, foreground/voice/list activity, queued operations, provisioning SoftAP, or another OTA to finish, then requires provisioning state CONNECTED, WiFi/IP/DNS, valid time, and cooldown permission. It kicks SNTP once without a blocking wait. `maybeRunOtaCheck(reason, true)` skips only the initial boot delay; it does not create a forced/manual intent or bypass OTA guards.
+Normal provisioning, time and health service run before the tick; the obsolete `g_maintenance_mode && !g_maintenance_handled` early return is removed. An old schedule-enable flag cannot suppress servicing a real timer request. Readiness is polled at most once per second. Automatic work waits for user operations, foreground/voice/list activity, queued operations, provisioning SoftAP, or another OTA to finish, then requires provisioning state CONNECTED and WiFi/IP/DNS. It gives the per-boot SNTP attempt its bounded nonblocking chance; once a reply arrives or the original 15-second budget expires, plausible TLS time and cooldown permission allow due OTA to proceed. Freshness is required for accurate future wall-clock scheduling, not for recovery eligibility. `maybeRunOtaCheck(reason, true)` skips only the initial boot delay; it does not create a forced/manual intent or bypass OTA guards.
 
 A readiness skip leaves the episode pending. Only a check that actually started (`g_ota_check_done`, set after the OTA guards) or the readiness deadline consumes it; a manifest failure counts as an attempted check. The final sleep guard and OTA sleep-ack guard both honor `halo_prod_boot_ota_pending()` while the deadline is live. Completion clears the pending flag and legacy mode and marks the old mode handled, so later manual work and health validation remain serviceable. `lcd_ota_due` persists until the LCD is positively current; the next boot earns a new bounded recovery opportunity. The same inline LCD-first / Sense-second path above handles manual, nightly, and recovery checks.
 

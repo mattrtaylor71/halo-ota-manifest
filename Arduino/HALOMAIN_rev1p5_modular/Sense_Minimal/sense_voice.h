@@ -331,6 +331,7 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
                 device_id[0] ? device_id : TREPO_DEVICE_ID);
   Serial.println("[VOICE] client_surface=halo");
 
+  HaloNtpDnsGuard ntp_dns_guard;
   const uint8_t max_attempts = 2;
   uint32_t voice_http_job = voice_job_id;
   bool accepted = false;

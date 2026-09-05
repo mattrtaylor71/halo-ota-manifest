@@ -19,6 +19,25 @@ The boards communicate over a dedicated **UART link at 115200 baud**. The LCD bo
 
 Both production boards set `Serial.setTxTimeoutMs(1)` at their sole USB-console initialization point. Arduino core 3.3.8 can underflow its unsigned no-progress counter with timeout 0 when a physically connected host stops draining a full TX byte ring: a zero-byte FreeRTOS ring send returns success, so the subsequent decrement wraps. A positive 1 ms SDK timeout bounds that write/flush no-progress path without patching the installed core. Console loss is preferable to blocking application work; this is not a 1 ms wall-clock limit on an entire partially progressing write. UART1 OTA framing and timeouts are unchanged. In addition to the independent source reproduction, a September 4 JTAG snapshot of the unresponsive Sense found `loopTask` in `HWCDC::write()`'s no-progress delay branch with timeout 0, `connected=true` and a full 256-byte TX ring. Those runtime conditions corroborate the source mechanism; the optimized local retry counter was not inspected. Both cores were resumed after the bounded snapshot, with no reset or flash command.
 
+### Wall-clock freshness and network ownership
+
+Sense distinguishes a plausible retained TLS clock from a confirmed SNTP reply in
+the current boot. One nonblocking 15-second attempt includes hostname resolution
+and suspension for foreground network work. Due TIMER/debt OTA waits for that bounded
+attempt, then remains eligible with plausible TLS time if NTP failed. An accurate
+future local 02:00 timer is calculated only after a fresh reply; otherwise both boards
+receive the existing six-hour relative fallback. RTC drift during sleep therefore
+cannot silently masquerade as a fresh NTP clock.
+
+Application callbacks resolve the existing NTP hostnames into static numeric server
+strings; SNTP never owns a pending hostname callback. Nested network guards stop it
+synchronously under the TCPIP core lock before application DNS and prevent restart
+until those scopes unwind. This avoids the installed SDK's asynchronous-stop and
+uncancelled-DNS-callback traps without changing the SDK. Callback code only records
+data; the Arduino owner task handles freshness, logging and authoritative backward
+cache correction. POSIX timezone survives every SNTP start. See `sense_time.h` and
+`shared/NtpDnsGuard.h` for the lifecycle and shared no-op hooks used by LCD builds.
+
 ### Physical Architecture
 
 ```

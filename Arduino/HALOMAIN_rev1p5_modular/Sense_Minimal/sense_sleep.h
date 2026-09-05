@@ -552,11 +552,9 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     }
   }
 
-  // Retire SNTP before the flush hands DNS to upload_worker_task. Same task
-  // that started it, so no cross-thread lwIP call. Without this a pending SNTP
-  // DNS callback fires INLINE on the worker's resolve and panics the board
-  // mid-upload, destroying the capture (see sense_time.h).
-  sense_ntp_stop_if_time_valid("pre_sleep_flush");
+  // Stop synchronously before the flush releases worker DNS. A plausible
+  // retained clock is not fresh proof; no new attempt starts during teardown.
+  sense_ntp_quiesce_for_sleep();
 
   // --- Upload flush window: drain pending uploads before sleep ---
   // User may have done captures during this wake cycle. The upload_worker_task
@@ -773,12 +771,13 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   // handles DST properly — "tomorrow" is not now+86400, and 02:00 does not
   // exist on spring-forward day). Anything sooner takes precedence.
   uint32_t ota_timer_delta_s = ota_get_timer_delta_s();
-  uint32_t nightly_s = halo_seconds_until_maintenance((time_t)sense_now_epoch());
+  uint32_t nightly_s = sense_time_has_fresh_sync()
+                           ? halo_seconds_until_maintenance((time_t)sense_now_epoch()) : 0;
   if (nightly_s == 0) {
     // No usable wall clock. Wake on a plain interval anyway so the device gets
     // a chance to re-sync time and try again, rather than sleeping forever.
     nightly_s = HALO_MAINTENANCE_FALLBACK_S;
-    Serial.println("[SLEEP] no usable wall clock - arming fallback interval");
+    Serial.println("[SLEEP] no fresh confirmed clock - arming fallback interval");
   }
 #ifdef HALO_MAINT_TEST_S
   // Bench override: collapse the nightly wake to a few seconds so the ARM ->

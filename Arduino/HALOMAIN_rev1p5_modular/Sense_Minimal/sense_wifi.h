@@ -11,7 +11,7 @@
  *   - wifi_connect_mutex (SemaphoreHandle_t)
  *   - WIFI_SSID, WIFI_PASS (const char*)
  *   - ACTION_MIN_REMAINING_MS (uint32_t)
- *   - sntp_started (bool), TIME_VALID_MIN_EPOCH (time_t)
+ *   - sense_ntp_begin(), sense_ntp_attempt_pending(), TIME_VALID_MIN_EPOCH
  *   - time_cache_bootstrap(), time_cache_store() from .ino
  *   - http_inflight, wifi_recover_requested globals
  *   - uart_send_sense_diag() from sense_uart.h
@@ -758,11 +758,7 @@ static bool ensure_time_valid(const char* reason, uint32_t timeout_ms) {
       return true;
     }
   }
-  if (!sntp_started) {
-    sense_ntp_begin();   // configTime(0,0,..) would reset TZ to UTC; see sense_time.h
-    sntp_started = true;
-    Serial.printf("[TLS_GUARD] SNTP init reason=%s\n", reason ? reason : "unknown");
-  }
+  sense_ntp_begin();
   unsigned long start = millis();
   unsigned long wait_ms = timeout_ms ? timeout_ms : 15000;
   if (wait_ms < ACTION_MIN_REMAINING_MS) {
@@ -776,6 +772,8 @@ static bool ensure_time_valid(const char* reason, uint32_t timeout_ms) {
       time_cache_store(now);
       return true;
     }
+    if (!sense_ntp_attempt_pending()) break;
+    sense_ntp_begin();  // resume only within the original budget after DNS work
     delay(250);
   }
   Serial.printf("[TLS_GUARD] time_invalid epoch=%ld\n", (long)now);
