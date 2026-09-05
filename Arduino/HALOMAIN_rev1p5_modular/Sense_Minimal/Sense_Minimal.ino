@@ -858,6 +858,7 @@ static void diag_record_error_persistent(const char* stage, int32_t code, const 
 #include "sense_uart_msg.h"
 #ifdef HALO_SENSE_PROD_WRAPPER
 #include "sense_ota_lcd.h"
+#include "sense_lcd_query_proof.h"
 #endif
 #include "sense_http.h"
 #include "sense_wifi.h"
@@ -2975,9 +2976,8 @@ static bool parse_input_message(const char* json_str) {
     strlcpy(g_lcd_query_coord_owner, owner, sizeof(g_lcd_query_coord_owner));
     g_lcd_query_coord_lease_ms = doc["coord_lease_ms"] | (uint32_t)0;
     g_lcd_ota_query_resp_ready = true;
-    Serial.printf("[UART] LCD_OTA_QUERY_RESP fw=%s part_size=%lu running_part=%s running_state=%s boot_part=%s boot_ready=%d\n",
-                  fw, (unsigned long)part_size,
-                  running_part, running_state, boot_part, g_lcd_query_boot_ready ? 1 : 0);
+    (void)sense_lcd_query_proof_emit(Serial, coord_id, g_lcd_query_peer_boot_id,
+        fw, running_part, boot_part, running_state, g_lcd_query_boot_ready, part_size);
   } else if (strcmp(type, "LCD_OTA_BEGIN_ACK") == 0) {
     if (!doc["accepted"].is<bool>() ||
         (!doc["json_ready"].isUnbound() && !doc["json_ready"].is<bool>()) ||

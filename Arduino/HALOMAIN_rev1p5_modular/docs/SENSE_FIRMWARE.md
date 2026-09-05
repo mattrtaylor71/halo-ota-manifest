@@ -155,6 +155,18 @@ schedule/boot proof is admitted by the existing coordinator without inventing a
 Sense TIMER; `lcd_timer_begin` and `lcd_timer_origin` retain the two real causes.
 Sense-first arrivals still retain their original `nightly_begin` TIMER proof.
 
+
+Timer-only construction explicitly sets duration, early grace and late grace to
+zero in both pre-apply and final/accelerated co-scheduling. `MaintenanceWindow{}`
+invokes the shared constructor, whose genuine maintenance defaults remain
+600/60/600 seconds. The September 5 manual 17→18 failure exposed this distinction:
+the LCD truthfully stored those defaults, Sense rejected its three ACKs and
+deferred after 120 seconds, and LCD selected an unintended 75-second lead. Tests
+for this contract execute the production type, constructor and outbound serializer
+before forwarding actual fields through the ACK path and LCD timer selector.
+Earlier composition tests substituted a zero-default object and zero-valued ACKs;
+they do not establish this production composition.
+
 ## Module Reference
 
 ### 1. Sense_Minimal.ino -- Main File
@@ -1409,3 +1421,18 @@ MQTT (PubSubClient) is compiled out in production builds (`HALO_SENSE_PROD_WRAPP
 
 ### Upload Persistence
 Failed uploads are saved to SPIFFS (one job at a time) and retried on next boot. Voice replays have 60s backoff. Stale uploads (> 24h) are dropped. Max 5 retries.
+
+At checked post-boot schedule completion, a single optional existing persistent
+SENSE_DIAG records `verified_postboot_complete`, the original request ID and
+current version after the successful `done_ids` commit clears pending in RAM. It
+does not add a schedule write or wait for an acknowledgment. Ordinary UART
+ownership/quarantine guards remain in effect. LCD may already be asleep, storage
+can fail and the 20-entry ring can evict older evidence; a missing or incomplete
+record leaves host completion proof unproven and does not undo firmware completion.
+
+The existing LCD receiver stores diagnostic uptime as zero above INT32_MAX because
+its default is a signed integer. This unchanged observation limit does not alter
+completion. Quiet-run host proof must independently bind the original episode, ID
+and record freshness; uptime zero is never proof of freshness.
+
+After strict LCD_OTA_QUERY_RESP acceptance, Sense replaces its old summary with one compact [LCD_Q1] USB record carrying exact challenge, peer boot, firmware, running/boot slots, state, readiness and slot capacity. A body byte count and CRC16-CCITT detect incomplete output. One bounded write has no application retry or delay; missing/corrupt output remains unproven. The host accepts one intact Q1 or complete LCD JSON only with the same fresh challenge and later verified-arm boot binding; fragments/history are never combined. This prospective logging change does not repair historical captures.

@@ -2078,6 +2078,10 @@ static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
     return;
   }
   MaintenanceWindow identity = {};
+  // Timer-only arm: the maintenance constructor defaults are not zero.
+  identity.duration_sec = 0;
+  identity.grace_before_sec = 0;
+  identity.grace_after_sec = 0;
   const time_t now = time(nullptr);
   const time_t target = now + wake_in_s;
   struct tm local_target = {};
@@ -4255,6 +4259,10 @@ static bool prepare_lcd_absolute_sleep_before_apply() {
   const uint32_t delta = halo_seconds_until_maintenance(now);
   if (now < 1700000000 || !delta || uint64_t(now) + delta > UINT32_MAX) return false;
   MaintenanceWindow mw = {};
+  // Timer-only arm: the maintenance constructor defaults are not zero.
+  mw.duration_sec = 0;
+  mw.grace_before_sec = 0;
+  mw.grace_after_sec = 0;
   mw.start_epoch = uint64_t(now) + delta;
   struct tm local_target; time_t target = (time_t)mw.start_epoch;
   if (!localtime_r(&target, &local_target)) return false;
@@ -5143,8 +5151,17 @@ void halo_prod_loop() {
     const esp_partition_t* running = esp_ota_get_running_partition();
     esp_ota_img_states_t state;
     if (running && esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_VALID) {
+      char completed_request[sizeof(g_coord_pending)] = {0};
+      strlcpy(completed_request, g_coord_pending, sizeof(completed_request));
       ota_peer_schedule_complete();
-      if (!g_coord_pending[0]) g_coord_completion_target[0] = 0;
+      if (!g_coord_pending[0]) {
+        // Optional retained evidence after the done_ids commit. The existing
+        // JSON ownership guard may suppress delivery; completion never waits.
+        char detail[112];
+        snprintf(detail, sizeof(detail), "rid=%.63s fw=%.31s", completed_request, kFirmwareVersion);
+        uart_send_sense_diag_persist("ota", "verified_postboot_complete", "done_ids", 0, detail);
+        g_coord_completion_target[0] = 0;
+      }
       if (!g_coord_pending[0] && g_boot_ota_pending) {
         g_ota_check_done = true; g_peer_episode_finished = true;
         ota_peer_cancel("verified_postboot_complete");
