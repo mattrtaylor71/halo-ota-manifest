@@ -1426,3 +1426,12 @@ completion. Quiet-run host proof must independently bind the original episode, I
 and record freshness; uptime zero is never proof of freshness.
 
 After strict LCD_OTA_QUERY_RESP acceptance, Sense replaces its old summary with one compact [LCD_Q1] USB record carrying exact challenge, peer boot, firmware, running/boot slots, state, readiness and slot capacity. A body byte count and CRC16-CCITT detect incomplete output. One bounded write has no application retry or delay; missing/corrupt output remains unproven. The host accepts one intact Q1 or complete LCD JSON only with the same fresh challenge and later verified-arm boot binding; fragments/history are never combined. This prospective logging change does not repair historical captures.
+
+
+### Fresh clock before paired OTA entry
+
+The common Sense OTA entrypoint now gives the existing boot SNTP attempt its original 15-second opportunity before taking the long DNS guard or fetching a manifest. Pending clock service returns to the normal owner loop without entering the transaction, consuming the manual request, finishing the automatic episode, or renewing either the clock attempt or the peer readiness deadline. The actual callback mailbox is serviced again before declaring failure, including a timely reply that arrived between the first service and the pending check. Peer readiness is rechecked after time-cache persistence, so late storage cannot permit an expired episode to start.
+
+A finished attempt without a fresh reply logs `[OTA_CLOCK] deferred reason=fresh_sync_unavailable before_manifest=1`, releases the peer hold, and finishes only the current check. Original persisted pending and future schedule IDs remain separate and intact. Automatic diagnostics report `clock_unconfirmed`, not `check_started`. A later boot may recover; the same boot does not restart the expired attempt. Plausible retained time remains useful for TLS elsewhere, but cannot authorize this paired update. Existing SNTP/DNS serialization, verified absolute-arm admission, original transaction budget, and final sleep behavior remain in force.
+
+This closes the observed manual19 lifecycle gap: the one manual request began long HTTPS work about three seconds into an active SNTP attempt, whose guard then stopped further synchronization. LCD20 completed but Sense19 correctly refused the later fresh-clock arm gate. That saved negative remains a negative; the logs do not establish whether an external time server would have answered after the guard stopped it.

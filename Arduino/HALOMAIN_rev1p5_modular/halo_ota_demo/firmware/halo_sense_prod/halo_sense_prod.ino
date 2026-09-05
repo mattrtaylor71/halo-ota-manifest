@@ -3630,8 +3630,8 @@ static void nightly_maintenance_tick() {
     halo_prod_kick_time_sync(g_boot_ota_reason);
   }
   // Give the nonblocking fresh-time attempt its bounded chance before long
-  // HTTPS work. An unavailable NTP server must not suppress already-due OTA:
-  // after the deadline, a plausible retained clock remains sufficient for TLS.
+  // HTTPS work. The common entrypoint requires an actual fresh reply; a
+  // retained TLS clock alone cannot authorize the paired absolute sleep arm.
   if (sense_ntp_attempt_pending()) return;
   if (!is_time_valid() || (!OtaIntent::cooldownAllows() && !ota_peer_continuation())) return;
 
@@ -3639,7 +3639,7 @@ static void nightly_maintenance_tick() {
   g_boot_ota_diag_context = true;
   maybeRunOtaCheck(g_boot_ota_reason, true);
   g_boot_ota_diag_context = false;
-  if (g_ota_check_done) {
+  if (g_ota_check_done && g_boot_ota_pending) {
     uart_send_sense_diag("ota", nightly ? "nightly_done" : "lcd_recovery_done",
                          g_boot_ota_reason, 1, "check_started");
     boot_ota_finish("check_started");
@@ -4316,6 +4316,32 @@ static bool prepare_lcd_absolute_sleep_before_apply() {
   return false;
 }
 
+// Complete the existing per-boot SNTP opportunity before a long DNS guard
+// can suspend it. Pending is a normal-loop retry, not a consumed OTA attempt.
+static bool ota_clock_ready_before_work() {
+  if (sense_time_has_fresh_sync()) return true;
+  halo_prod_kick_time_sync("ota_preflight");
+  if (sense_time_has_fresh_sync()) return true;
+  if (sense_ntp_attempt_pending()) return false;
+  // A reply can arrive after kick's service but before the pending check.
+  // Drain that mailbox (or the expired attempt) before deciding to defer.
+  sense_ntp_service();
+  if (sense_time_has_fresh_sync()) return true;
+
+  LOG_ERROR("[OTA_CLOCK] deferred reason=fresh_sync_unavailable before_manifest=1");
+  diag_record_error_persistent("ota_orch", -1, "clock_unconfirmed_defer before_manifest");
+  ota_peer_cancel("clock_unconfirmed");
+  g_peer_episode_finished = true;
+  g_ota_check_done = true;
+  g_ota_check_requested = false;
+  OtaIntent::clearForceAndCheck();
+  manual_ota_override_clear("clock_unconfirmed");
+  ota_set_last_result("clock_unconfirmed_defer");
+  if (g_boot_ota_pending) boot_ota_finish("clock_unconfirmed");
+  // The original persisted schedule/debt remains pending for a later boot.
+  return false;
+}
+
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   if (g_peer_episode_finished) { g_ota_check_done = true; return; }
   if (g_ota_check_done || g_ota_apply_in_progress) {
@@ -4386,6 +4412,10 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
              d0.toString().c_str());
     return;
   }
+  if (!ota_clock_ready_before_work()) return;
+  // Time-cache persistence may block; refresh the existing proof/deadline
+  // before transaction entry without granting a new readiness lease.
+  if (!ota_peer_ready()) return;
   if (!is_time_valid()) {
     static unsigned long last_tls_guard_log_ms = 0;
     unsigned long now_ms = millis();
