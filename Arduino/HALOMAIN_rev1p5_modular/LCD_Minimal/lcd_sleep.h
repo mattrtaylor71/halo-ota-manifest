@@ -277,10 +277,30 @@ static void enterLightSleep() {
     Serial.println("[SLEEP] skip_ui_reset (lvgl_inactive)");
   }
 
-  g_sleep_transition = true;
+  // Serialize timer selection through final sleep against arm commits and
+  // BEGIN startup. Every return destroys this guard; deep sleep resets it.
+  // No NVS operation occurs under the short coordinator critical section.
+  LcdMaintenanceStorageGuard sleep_arm_guard;
+  if (sleep_blocked_for_ota()) { resetActivityTimer(); return; }
+  struct SleepCommitGate {
+    SleepCommitGate() {
+      LcdCoordCriticalGuard guard;
+      g_lcd_sleep_commit_gate.store(true);
+      g_sleep_transition = true;
+    }
+    ~SleepCommitGate() {
+      LcdCoordCriticalGuard guard;
+      g_lcd_sleep_commit_gate.store(false);
+    }
+  } sleep_commit_guard;
   Serial.println("[SLEEP] transition_begin");
   // Everything below here is the window in which a tap used to be dropped.
   lcd_sleep_touch_watch_begin();
+  if (sleep_blocked_for_ota()) {
+    lcd_sleep_touch_watch_end();
+    abort_sleep_transition("ota_before_teardown");
+    return;
+  }
   g_lvgl_running = false;
   
   // Save shopping list to persistent storage before sleep (with reset index)
@@ -384,6 +404,9 @@ static void enterLightSleep() {
   if (sleep_fallback_timer_sec > 0) {
     sleep_timer_sec = sleep_fallback_timer_sec;
     timer_reason = "fallback";
+  } else if (g_lcd_arm_storage_fault) {
+    sleep_timer_sec = LCD_OTA_WAKE_INTERVAL_SEC;
+    timer_reason = "maintenance_store_failed";
   } else if (maint_abs) {
     maint_now_epoch = (uint64_t)time(nullptr);
     uint64_t lead = (uint64_t)g_lcd_maintenance_grace_before_sec + (uint64_t)LCD_MAINT_WAKE_LEAD_S;
@@ -395,6 +418,13 @@ static void enterLightSleep() {
       if (delta > 0xFFFFFFFFULL) delta = 0xFFFFFFFFULL;
       sleep_timer_sec = (uint32_t)delta;
       timer_reason = "maintenance_abs";
+    } else if (maint_now_epoch > g_lcd_maintenance_start_epoch +
+                   (uint64_t)g_lcd_maintenance_duration_sec + g_lcd_maintenance_grace_after_sec) {
+      // An expired absolute arm must not produce a five-second reset loop,
+      // including when the attempted durable disarm fails.
+      lcd_clear_persisted_maintenance_state("absolute_expired");
+      sleep_timer_sec = LCD_OTA_WAKE_INTERVAL_SEC;
+      timer_reason = "maintenance_expired";
     } else {
       // At/inside the wake band or window already: do not deep-sleep for the
       // stale relative value. Part D keeps the LCD awake through the window, but
@@ -473,6 +503,11 @@ static void enterLightSleep() {
 
   // LAST CHANCE TO ABANDON. Must stay ABOVE Touch_Standby()/backlight-off/
   // vTaskDelete: once the UI task is gone there is no clean way back.
+  if (!g_sleep_transition || sleep_blocked_for_ota()) {
+    lcd_sleep_touch_watch_end();
+    abort_sleep_transition("ota_or_cancel_during_teardown");
+    return;
+  }
   if (lcd_sleep_touch_fired()) {
     lcd_sleep_touch_watch_end();
     Serial.println("[SLEEP_ABORT] touch arrived during teardown - abandoning sleep");

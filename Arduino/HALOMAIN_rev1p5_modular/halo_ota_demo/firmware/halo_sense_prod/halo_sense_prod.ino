@@ -49,6 +49,13 @@ static const unsigned long LCD_FW_QUERY_STALE_MS = 300000;  // 5 min
 RTC_DATA_ATTR static uint32_t g_lcd_ota_recent_request_id = 0;
 static bool g_lcd_ota_attempted_this_window = false;
 static uint32_t g_lcd_ota_window_remaining_s = 0;
+struct LcdVerifiedArmAck {
+  bool waiting = false, matched = false;
+  uint32_t started_ms = 0, budget_ms = 0, peer_boot_id = 0;
+  uint32_t start_epoch = 0, remaining_s = 0;
+  char challenge[40] = {0}, request_id[64] = {0};
+};
+static LcdVerifiedArmAck g_lcd_verified_arm;
 static bool g_lcd_maint_ack_received = false;
 static unsigned long g_lcd_maint_ack_ms = 0;
 static uint32_t g_lcd_maint_ack_remaining_s = 0;
@@ -1637,7 +1644,24 @@ void halo_prod_on_lcd_maint_ack(uint32_t remaining_s,
                                 uint64_t start_epoch,
                                 uint32_t duration_sec,
                                 uint32_t grace_before_sec,
-                                uint32_t grace_after_sec) {
+                                uint32_t grace_after_sec,
+                                const char* coord_id, uint32_t peer_boot_id) {
+  if (coord_id && coord_id[0]) {
+    // A future sleep arm never completes or replaces the current OTA origin.
+    if (g_lcd_verified_arm.waiting &&
+        (uint32_t)(millis() - g_lcd_verified_arm.started_ms) < g_lcd_verified_arm.budget_ms &&
+        g_lcd_work_budget_live && g_lcd_work_budget.remaining_ms() &&
+        strcmp(coord_id, g_lcd_verified_arm.challenge) == 0 &&
+        peer_boot_id == g_lcd_verified_arm.peer_boot_id &&
+        strcmp(request_id, g_lcd_verified_arm.request_id) == 0 &&
+        !clear && persisted && strcmp(status, "stored_verified") == 0 &&
+        start_epoch == g_lcd_verified_arm.start_epoch &&
+        remaining_s == g_lcd_verified_arm.remaining_s && wake_in_s == remaining_s &&
+        !duration_sec && !grace_before_sec && !grace_after_sec) {
+      g_lcd_verified_arm.matched = true;
+    }
+    return;
+  }
   g_lcd_maint_ack_received = true;
   g_lcd_maint_ack_ms = millis();
   g_lcd_maint_ack_epoch = maint_sync_epoch_now();
@@ -1997,10 +2021,12 @@ void halo_prod_request_maint_test(uint32_t duration_sec) {
 static void send_maint_window(const MaintenanceWindow* mw,
                               uint32_t remaining_s,
                               uint32_t wake_in_s,
-                              bool clear_schedule) {
-  StaticJsonDocument<384> doc;
+                              bool clear_schedule,
+                              const char* coord_id = nullptr, uint32_t peer_boot_id = 0) {
+  StaticJsonDocument<512> doc;
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = "MAINT_WINDOW";
+  if (coord_id && coord_id[0]) { doc["coord_id"] = coord_id; doc["peer_boot_id"] = peer_boot_id; }
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   doc["remaining_s"] = remaining_s;
@@ -2040,23 +2066,37 @@ static void send_maint_window(const MaintenanceWindow* mw,
            (unsigned long long)(is_time_valid() ? (uint64_t)time(nullptr) : 0ULL));
 }
 
-// Co-schedule hook (registered into sense_sleep.h at setup). Called from the
-// deep-sleep path with the Sense's FINAL wake delta so the LCD arms a matching
-// maintenance wake and is awake for the LCD-OTA proxy on the unattended nightly
-// path. Reuses the tested send_maint_window() sender; mw=nullptr => a bare
-// relative wake (remaining_s + wake_in_s), which is all the LCD needs to arm
-// g_lcd_maintenance_timer_armed (see lcd_uart_rx.h). now_epoch rides along when
-// our clock is valid so the LCD can align absolutely.
+// The ordinary calendar sleep uses the same absolute representation as the
+// pre-apply fallback. Private shortened test sleeps retain their relative ID.
 static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
-  if (wake_in_s == 0) {
+  if (!wake_in_s) return;
+  // Do not replace a previously verified absolute arm with an untrusted
+  // relative fallback after reboot. Without an arm LCD already has periodic
+  // six-hour fallback; no exact fallback co-scheduling claim is made.
+  if (!sense_time_has_fresh_sync()) {
+    LOG_WARN("[MAINT_COSCHED] no fresh clock; existing LCD arm and schedule retained");
     return;
   }
-  MaintenanceWindow identity;
-  memset(&identity, 0, sizeof(identity));
-  const time_t target = time(nullptr) + wake_in_s;
-  struct tm local_target;
-  localtime_r(&target, &local_target);
-  if (sense_time_has_fresh_sync() && local_target.tm_hour == 2 && local_target.tm_min == 0) {
+  MaintenanceWindow identity = {};
+  const time_t now = time(nullptr);
+  const time_t target = now + wake_in_s;
+  struct tm local_target = {};
+  const bool local_ok = localtime_r(&target, &local_target) != nullptr;
+  bool calendar = sense_time_has_fresh_sync() && local_ok &&
+      local_target.tm_hour == 2 && local_target.tm_min == 0;
+#if defined(HALO_MAINT_TEST_S) && HALO_MAINT_TEST_S > 0
+  calendar = false;
+  // Explicit compiled test arm still has a fresh absolute target. Its LCD
+  // timer includes the ordinary 15-second lead; the request ID retains delta.
+  if (now < 1700000000 || uint64_t(now) + wake_in_s > UINT32_MAX) return;
+  identity.start_epoch = (uint64_t)target;
+#endif
+  if (calendar) {
+    const uint32_t delta = halo_seconds_until_maintenance(now);
+    if (!delta || uint64_t(now) + delta > UINT32_MAX) return;
+    identity.start_epoch = uint64_t(now) + delta;
+    time_t absolute = (time_t)identity.start_epoch;
+    if (!localtime_r(&absolute, &local_target)) return;
     snprintf(identity.request_id, sizeof(identity.request_id), "nightly_%04d%02d%02d",
              local_target.tm_year + 1900, local_target.tm_mon + 1, local_target.tm_mday);
   } else {
@@ -2064,14 +2104,19 @@ static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
              (unsigned long)target, (unsigned long)wake_in_s);
   }
   Preferences p;
-  if (p.begin("ota_coord", false)) {
-    p.putString("schedule", identity.request_id);
-    p.end();
+  if (!p.begin("ota_coord", false)) return;
+  const size_t written = p.putString("schedule", identity.request_id);
+  const bool committed = written == strlen(identity.request_id) &&
+      p.getString("schedule", "") == identity.request_id;
+  p.end();
+  if (!committed) {
+    LOG_WARN("[MAINT_COSCHED] schedule identity storage failed; prior arm retained");
+    return;
   }
   strlcpy(g_coord_schedule, identity.request_id, sizeof(g_coord_schedule));
   send_maint_window(&identity, wake_in_s, wake_in_s, false);
-  LOG_INFO("[MAINT_COSCHED] told LCD to wake in %lus (align nightly maintenance)",
-           (unsigned long)wake_in_s);
+  LOG_INFO("[MAINT_COSCHED] sent wake=%lus target=%llu id=%s (delivery not verified)",
+           (unsigned long)wake_in_s, (unsigned long long)identity.start_epoch, identity.request_id);
 }
 
 // Arm-time delivery race fix: lightweight Sense->LCD keep-awake used ONLY while a
@@ -4163,6 +4208,106 @@ static bool complete_downgrade_policy_check(const char* manifest_fw, const char*
   return true;
 }
 
+// Use the existing two-minute proof budget as reserve before the LCD's 15s
+// maintenance lead. Neither admission nor retransmissions reset the pair clock.
+static const uint32_t LCD_ARM_PROOF_BUDGET_MS = 120000UL;
+static uint32_t lcd_verified_arm_apply_budget() {
+  if (!g_lcd_verified_arm.matched || !sense_time_has_fresh_sync() ||
+      (uint32_t)(millis() - g_lcd_verified_arm.started_ms) >= g_lcd_verified_arm.budget_ms ||
+      !g_lcd_work_budget_live || !sense_lcd_ota_retry_safe()) return 0;
+  const time_t now = time(nullptr);
+  const uint32_t target = g_lcd_verified_arm.start_epoch;
+  if (now < 1700000000 || uint64_t(now) + 15 >= target ||
+      uint64_t(now) + halo_seconds_until_maintenance(now) != target) return 0;
+  uint64_t until_lcd_ms = (uint64_t(target) - uint64_t(now) - 15) * 1000ULL;
+  uint32_t left = g_lcd_work_budget.remaining_ms();
+  if (until_lcd_ms < left) left = (uint32_t)until_lcd_ms;
+  if (left <= LCD_ARM_PROOF_BUDGET_MS) return 0;
+  left -= LCD_ARM_PROOF_BUDGET_MS;
+  return left < 1200000UL ? left : 1200000UL;
+}
+static bool prepare_lcd_absolute_sleep_before_apply() {
+  g_lcd_verified_arm = LcdVerifiedArmAck{};
+  if (!g_lcd_work_budget_live || !g_lcd_work_budget.remaining_ms() ||
+      !sense_lcd_ota_retry_safe() || !sense_time_has_fresh_sync()) return false;
+  const uint32_t started = millis();
+  uint32_t proof_budget = g_lcd_work_budget.remaining_ms();
+  if (proof_budget > LCD_ARM_PROOF_BUDGET_MS) proof_budget = LCD_ARM_PROOF_BUDGET_MS;
+  char expected_fw[32]; strlcpy(expected_fw, g_lcd_ota_query_resp_fw, sizeof(expected_fw));
+  if (!expected_fw[0]) return false;
+  char query_challenge[40];
+  snprintf(query_challenge, sizeof(query_challenge), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+  if (!sense_lcd_ota_query_start(query_challenge, proof_budget)) return false;
+  LcdOtaQuerySnapshot peer = {};
+  bool ready = false;
+  while ((uint32_t)(millis() - started) < proof_budget && g_lcd_work_budget.remaining_ms()) {
+    pump_uart_rx_once();
+    LcdOtaQueryPoll result = sense_lcd_ota_query_poll(peer);
+    if (result == LCD_QUERY_READY) {
+      ready = peer.correlated && peer.peer_boot_id && strcmp(peer.fw, expected_fw) == 0;
+      break;
+    }
+    if (result == LCD_QUERY_TIMEOUT) break;
+    delay(10);
+  }
+  if (!ready || !sense_time_has_fresh_sync()) return false;
+  time_t now = time(nullptr);
+  const uint32_t delta = halo_seconds_until_maintenance(now);
+  if (now < 1700000000 || !delta || uint64_t(now) + delta > UINT32_MAX) return false;
+  MaintenanceWindow mw = {};
+  mw.start_epoch = uint64_t(now) + delta;
+  struct tm local_target; time_t target = (time_t)mw.start_epoch;
+  if (!localtime_r(&target, &local_target)) return false;
+  snprintf(mw.request_id, sizeof(mw.request_id), "nightly_%04d%02d%02d",
+           local_target.tm_year + 1900, local_target.tm_mon + 1, local_target.tm_mday);
+  g_lcd_verified_arm.started_ms = started;
+  g_lcd_verified_arm.budget_ms = proof_budget;
+  g_lcd_verified_arm.peer_boot_id = peer.peer_boot_id;
+  g_lcd_verified_arm.start_epoch = (uint32_t)mw.start_epoch;
+  strlcpy(g_lcd_verified_arm.request_id, mw.request_id, sizeof(g_lcd_verified_arm.request_id));
+  g_lcd_verified_arm.waiting = true;
+  struct WaitingGuard { ~WaitingGuard() { g_lcd_verified_arm.waiting = false; } } waiting_guard;
+  unsigned sends = 0;
+  uint32_t last_send = 0;
+  while ((uint32_t)(millis() - started) < proof_budget && g_lcd_work_budget.remaining_ms()) {
+    if (!sense_time_has_fresh_sync() || !sense_lcd_ota_retry_safe()) return false;
+    const uint32_t ms = millis();
+    if (sends < MAINT_SYNC_MAX_SENDS && (!sends || (uint32_t)(ms - last_send) >= MAINT_SYNC_RESEND_MS)) {
+      now = time(nullptr);
+      if (now < 1700000000 || uint64_t(now) >= mw.start_epoch) return false;
+      const uint64_t remaining = mw.start_epoch - uint64_t(now);
+      if (remaining > HALO_MAINTENANCE_MAX_SLEEP_S) return false;
+      g_lcd_verified_arm.remaining_s = (uint32_t)remaining;
+      snprintf(g_lcd_verified_arm.challenge, sizeof(g_lcd_verified_arm.challenge), "%08lx%08lx",
+               (unsigned long)esp_random(), (unsigned long)esp_random());
+      g_lcd_verified_arm.matched = false;
+      last_send = ms; ++sends;
+      send_maint_window(&mw, (uint32_t)remaining, (uint32_t)remaining, false,
+                       g_lcd_verified_arm.challenge, peer.peer_boot_id);
+    }
+    pump_uart_rx_once();
+    if (g_lcd_verified_arm.matched) {
+      if (!lcd_verified_arm_apply_budget()) return false;
+      Preferences p;
+      if (!p.begin("ota_coord", false)) return false;
+      if (!lcd_verified_arm_apply_budget()) { p.end(); return false; }
+      // Store only the NEXT sleep identity; pending remains the original cause.
+      const size_t written = p.putString("schedule", mw.request_id);
+      const bool committed = written == strlen(mw.request_id) &&
+          p.getString("schedule", "") == mw.request_id;
+      p.end();
+      if (!committed) return false;
+      strlcpy(g_coord_schedule, mw.request_id, sizeof(g_coord_schedule));
+      LOG_INFO("[OTA_ARM] stored_verified id=%s target=%lu lcd_boot=%lu pending=%s",
+          mw.request_id, (unsigned long)mw.start_epoch, (unsigned long)peer.peer_boot_id,
+          g_coord_pending[0] ? g_coord_pending : "-");
+      return lcd_verified_arm_apply_budget() > 0;
+    }
+    delay(10);
+  }
+  return false;
+}
+
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   if (g_peer_episode_finished) { g_ota_check_done = true; return; }
   if (g_ota_check_done || g_ota_apply_in_progress) {
@@ -4691,6 +4836,17 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     return;
   }
 
+  if (!prepare_lcd_absolute_sleep_before_apply()) {
+    LOG_ERROR("[OTA_ARM] unverified_or_no_time_budget; Sense apply deferred");
+    diag_record_error_persistent("ota_orch", -1, "sense_apply_deferred arm_unverified");
+    OtaIntent::recordOtaResult("lcd_arm_unverified_defer");
+    ota_set_last_result("lcd_arm_unverified_defer");
+    send_ota_uart_message("OTA_UNLOCK", true);
+    clear_intent_once();
+    g_ota_check_in_progress = false; g_dma_reserve_suppressed = false;
+    return;
+  }
+
   // ── THEN the Sense self-OTA (reboots on success, never returns) ──
   {
     // Breadcrumb: about to apply the Sense self-OTA (this reboots on success,
@@ -4714,7 +4870,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   send_ota_uart_message("OTA_LOCK");
   // NVS and UART calls consume the same pair budget. Sample at the actual
   // applier boundary rather than giving it time spent in those operations.
-  const uint32_t pair_remaining_ms = g_lcd_work_budget.remaining_ms();
+  const uint32_t pair_remaining_ms = lcd_verified_arm_apply_budget();
   if (!sense_lcd_ota_retry_safe() || !pair_remaining_ms) {
     OtaIntent::recordOtaResult("paired_deadline");
     ota_set_last_result("paired_deadline");
@@ -4726,7 +4882,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
 
   SenseOtaApplier::Result res = g_ota_applier.applyToOtaPartition(
       manifest.url, manifest.sha256, manifest.size,
-      pair_remaining_ms < 1200000UL ? pair_remaining_ms : 1200000UL, true, manifest.version);
+      pair_remaining_ms, true, manifest.version);
   g_ota_apply_in_progress = false;
   // NOTE: lcd_ota_due was already set above based on whether the inline LCD
   // proxy succeeded (clear) or was skipped/failed (set as next-boot fallback).

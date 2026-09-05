@@ -92,7 +92,8 @@ void halo_prod_on_lcd_maint_ack(uint32_t remaining_s,
                                 uint64_t start_epoch,
                                 uint32_t duration_sec,
                                 uint32_t grace_before_sec,
-                                uint32_t grace_after_sec);
+                                uint32_t grace_after_sec,
+                                const char* coord_id, uint32_t peer_boot_id);
 bool halo_prod_should_defer_sleep_ack(bool* ota_busy, bool* mqtt_busy, bool* time_invalid, bool* ota_check_busy);
 void halo_prod_request_manual_ota(const char* reason);
 void halo_prod_note_lcd_timer(const char* schedule_id, uint32_t boot_id, int wake, int reset, uint32_t epoch, bool resumed);
@@ -2325,6 +2326,28 @@ static bool parse_input_message(const char* json_str) {
     }
     last_wake_ms = now_ms;
   } else if (strcmp(type, "MAINT_WINDOW_ACK") == 0) {
+    if ((!doc["remaining_s"].isUnbound() && !doc["remaining_s"].is<uint32_t>()) ||
+        (!doc["wake_in_s"].isUnbound() && !doc["wake_in_s"].is<uint32_t>()) ||
+        (!doc["clear"].isUnbound() && !doc["clear"].is<bool>()) ||
+        (!doc["persisted"].isUnbound() && !doc["persisted"].is<bool>()) ||
+        (!doc["request_id"].isUnbound() && !doc["request_id"].is<const char*>()) ||
+        (!doc["status"].isUnbound() && !doc["status"].is<const char*>()) ||
+        (!doc["start_epoch"].isUnbound() && !doc["start_epoch"].is<uint32_t>()) ||
+        (!doc["duration_sec"].isUnbound() && !doc["duration_sec"].is<uint32_t>()) ||
+        (!doc["grace_before_sec"].isUnbound() && !doc["grace_before_sec"].is<uint32_t>()) ||
+        (!doc["grace_after_sec"].isUnbound() && !doc["grace_after_sec"].is<uint32_t>()) ||
+        (!doc["coord_id"].isUnbound() && !doc["coord_id"].is<const char*>()) ||
+        (!doc["peer_boot_id"].isUnbound() && !doc["peer_boot_id"].is<uint32_t>())) return false;
+    const char* arm_coord = doc["coord_id"] | "";
+    const char* arm_id = doc["request_id"] | "";
+    const char* arm_status = doc["status"] | "";
+    if (strlen(arm_id) >= 64 || strlen(arm_status) >= 24 || strlen(arm_coord) >= 40 ||
+        (!doc["coord_id"].isUnbound() && !arm_coord[0])) return false;
+    if (strcmp(arm_status, "stored_verified") == 0 && arm_coord[0] &&
+        (!doc["remaining_s"].is<uint32_t>() || !doc["wake_in_s"].is<uint32_t>() ||
+         !doc["persisted"].is<bool>() || !doc["start_epoch"].is<uint32_t>() ||
+         !doc["duration_sec"].is<uint32_t>() || !doc["grace_before_sec"].is<uint32_t>() ||
+         !doc["grace_after_sec"].is<uint32_t>() || !doc["peer_boot_id"].is<uint32_t>())) return false;
     uint32_t remaining_s = doc["remaining_s"] | 0;
     uint32_t wake_in_s = doc["wake_in_s"] | 0;
     bool clear = doc["clear"] | false;
@@ -2345,7 +2368,7 @@ static bool parse_input_message(const char* json_str) {
                                start_epoch,
                                duration_sec,
                                grace_before_sec,
-                               grace_after_sec);
+                               grace_after_sec, arm_coord, doc["peer_boot_id"] | (uint32_t)0);
 #endif
     Serial.printf("[UART] MAINT_WINDOW_ACK received remaining_s=%lu wake_in_s=%lu clear=%d request_id=%s status=%s persisted=%d\n",
                   (unsigned long)remaining_s,

@@ -267,13 +267,13 @@ static void uart_task(void *arg) {
               Serial.printf("[FW] device_id=%s\n",
                             g_lcd_device_id[0] ? g_lcd_device_id : "?");
             } else if (strcmp(usb_buf, "clearwindow") == 0) {
-              lcd_clear_persisted_maintenance_state("usb_clear");
-              g_lcd_maintenance_active = false;
-              g_lcd_maintenance_timer_armed = 0;
-              g_lcd_maintenance_wake_in_s = 0;
-              g_lcd_maintenance_remaining_s = 0;
-              g_lcd_maintenance_deadline_ms = 0;
-              Serial.println("[USB_CMD] maintenance window cleared");
+              if (lcd_clear_persisted_maintenance_state("usb_clear")) {
+                g_lcd_maintenance_active = false;
+                g_lcd_maintenance_deadline_ms = 0;
+                Serial.println("[USB_CMD] maintenance window cleared");
+              } else {
+                Serial.println("[USB_CMD] maintenance window clear failed");
+              }
             } else if (strcmp(usb_buf, "ota") == 0) {
               Serial.println("[USB_CMD] shortcut 'ota' -> INPUT_OTA_CHECK");
               uart_send_input_message("INPUT_OTA_CHECK");

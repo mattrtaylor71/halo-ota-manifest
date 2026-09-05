@@ -25,8 +25,10 @@ Sense distinguishes a plausible retained TLS clock from a confirmed SNTP reply i
 the current boot. One nonblocking 15-second attempt includes hostname resolution
 and suspension for foreground network work. Due TIMER/debt OTA waits for that bounded
 attempt, then remains eligible with plausible TLS time if NTP failed. An accurate
-future local 02:00 timer is calculated only after a fresh reply; otherwise both boards
-receive the existing six-hour relative fallback. RTC drift during sleep therefore
+future local 02:00 timer is calculated only after a fresh reply. Without one, Sense
+uses its existing six-hour relative fallback and sends no replacement LCD arm. The
+LCD retains a previously verified absolute arm; without an arm it uses its own
+existing six-hour periodic fallback. RTC drift during sleep therefore
 cannot silently masquerade as a fresh NTP clock.
 
 Application callbacks resolve the existing NTP hostnames into static numeric server
@@ -37,6 +39,28 @@ uncancelled-DNS-callback traps without changing the SDK. Callback code only reco
 data; the Arduino owner task handles freshness, logging and authoritative backward
 cache correction. POSIX timezone survives every SNTP start. See `sense_time.h` and
 `shared/NtpDnsGuard.h` for the lifecycle and shared no-op hooks used by LCD builds.
+
+### Durable next-wake handoff across paired OTA
+
+Before Sense self-apply, a freshly proved LCD must read back an atomic absolute arm
+for the real next local 02:00. Existing `MAINT_WINDOW`/ACK messages carry an optional
+fresh challenge and LCD boot echo; only exact `stored_verified` proof authorizes
+application. The original unfinished OTA ID remains separate from this future sleep
+ID. If fresh time, storage, matching ACK, or the remaining pre-wake budget is missing,
+Sense defers without declaring completion. LCD may then sleep during Sense's bounded
+self-update while its verified calendar wake persists across reset. A later Sense
+boot without fresh NTP cannot replace that arm with a relative fallback.
+
+LCD stores a versioned CRC arm/disarm in one NVS value. Exact successful write
+return plus matching readback is required; failed commits never become proof
+merely because the same handle can read the attempted value. Newer disarms and corrupt
+new records cannot fall back to obsolete legacy/RTC arms. Every sleep entry shares
+a finite OTA predicate, and arm/BEGIN acceptance is serialized against selecting
+and committing the sleep timer. Fresh LOCK publication cannot race expiry cleanup.
+The normal 15-second LCD lead supports both arrival orders: LCD TIMER→Sense EXT0
+with retained LCD origin, or actual Sense TIMER first. Firmware and test reports
+preserve those real causes. See the two board documents for compatibility, storage
+failure, near-02 admission and cooperative SDK timing limits.
 
 ### Paired OTA rendezvous and transfer ownership (September 5 hardening)
 
@@ -124,8 +148,14 @@ writing, hashing or advancing progress, including the final chunk while awaiting
 END. Changed duplicates, gaps and invalid sizes abort. Accepted-new-chunk inactivity
 remains bounded at 30 seconds. Legacy JSON/control remains explicit; a failed
 attempt restarts the production image from zero rather than claiming cross-session
-resume. Sense retains four terminal records in `lcd_xfer` independently of the small
-general diagnostic ring; reporting waits for safe JSON-mode proof.
+resume. Sense retains four journal entries in `lcd_xfer` independently of the small
+general diagnostic ring; reporting waits for safe JSON-mode proof. A decided HTTP
+or chunk-phase failure adds one `N1` transport snapshot after its unchanged terminal
+record. The snapshot is taken before connection teardown, then persisted afterward.
+It samples socket queue/peek/error state and Wi-Fi/memory facts without an SSL read;
+TLS state remains explicitly unknown. Four slots retain two fully diagnosed failed
+attempts, or one diagnosed failure followed by success in three slots. Older entries
+are overwritten normally; the count is entries, not four diagnosed attempts.
 
 These changes are source hardening under review/build validation. They do not
 change the recorded earlier campaign or imply deployment, publication or successful

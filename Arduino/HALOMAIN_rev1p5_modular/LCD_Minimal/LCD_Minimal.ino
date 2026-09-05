@@ -409,6 +409,9 @@ static char last_sleep_skip_reason[32] = "";
 static const unsigned long WAKE_DEBOUNCE_MS = 200;
 static volatile bool g_in_light_sleep = false;
 extern "C" volatile bool g_sleep_transition = false;
+// Owned only by the sleep RAII scope; ordinary UI/message cancellation cannot
+// reopen LOCK/BEGIN admission after the final sleep decision.
+static std::atomic<bool> g_lcd_sleep_commit_gate{false};
 static bool g_ui_initialized = false;
 // Published across cores only after continuation/UI setup and OTA self-test.
 static std::atomic<bool> g_lcd_boot_ready{false};
@@ -700,44 +703,7 @@ static bool lcd_should_resume_maintenance_on_boot(bool restored_from_nvs,
          g_lcd_maintenance_request_id[0] != '\0';
 }
 
-static void lcd_clear_persisted_maintenance_state(const char* reason) {
-  Preferences prefs;
-  if (prefs.begin(LCD_MAINT_PREF_NAMESPACE, false)) {
-    prefs.clear();
-    prefs.end();
-  }
-  Serial.printf("[LCD_MAINT_NVS] clear reason=%s\n", reason ? reason : "unknown");
-}
-
-static void lcd_persist_maintenance_state(const char* reason) {
-  bool valid = lcd_maintenance_context_present();
-  if (!valid) {
-    lcd_clear_persisted_maintenance_state(reason ? reason : "empty_state");
-    return;
-  }
-  Preferences prefs;
-  if (!prefs.begin(LCD_MAINT_PREF_NAMESPACE, false)) {
-    Serial.printf("[LCD_MAINT_NVS] save_failed reason=%s\n", reason ? reason : "unknown");
-    return;
-  }
-  prefs.putBool(LCD_MAINT_PREF_KEY_VALID, true);
-  prefs.putBool(LCD_MAINT_PREF_KEY_ARMED, g_lcd_maintenance_timer_armed != 0);
-  prefs.putUInt(LCD_MAINT_PREF_KEY_WAKE_S, g_lcd_maintenance_wake_in_s);
-  prefs.putUInt(LCD_MAINT_PREF_KEY_REMAIN_S, g_lcd_maintenance_remaining_s);
-  prefs.putString(LCD_MAINT_PREF_KEY_REQ_ID, g_lcd_maintenance_request_id);
-  prefs.putUInt(LCD_MAINT_PREF_KEY_START, (uint32_t)g_lcd_maintenance_start_epoch);
-  prefs.putUInt(LCD_MAINT_PREF_KEY_DUR, g_lcd_maintenance_duration_sec);
-  prefs.putUInt(LCD_MAINT_PREF_KEY_GB, g_lcd_maintenance_grace_before_sec);
-  prefs.putUInt(LCD_MAINT_PREF_KEY_GA, g_lcd_maintenance_grace_after_sec);
-  prefs.end();
-  Serial.printf("[LCD_MAINT_NVS] save reason=%s armed=%d wake_in_s=%lu remaining_s=%lu start_epoch=%lu request_id=%s\n",
-                reason ? reason : "unknown",
-                g_lcd_maintenance_timer_armed ? 1 : 0,
-                (unsigned long)g_lcd_maintenance_wake_in_s,
-                (unsigned long)g_lcd_maintenance_remaining_s,
-                (unsigned long)g_lcd_maintenance_start_epoch,
-                g_lcd_maintenance_request_id[0] ? g_lcd_maintenance_request_id : "-");
-}
+#include "lcd_maintenance_arm.h"
 
 // ── OTA continuation flag (survives the LCD's own OTA reboot) ─────────────
 // One-shot: set true just before esp_restart() in lcd_ota_handle_end(), read +
@@ -766,74 +732,7 @@ static bool lcd_ota_take_continuation_pending() {
   return pending;
 }
 
-static bool lcd_restore_persisted_maintenance_state(const char* reason) {
-  if (lcd_maintenance_context_present()) {
-    return false;
-  }
-  Preferences prefs;
-  if (!prefs.begin(LCD_MAINT_PREF_NAMESPACE, true)) {
-    return false;
-  }
-  bool valid = prefs.getBool(LCD_MAINT_PREF_KEY_VALID, false);
-  if (!valid) {
-    prefs.end();
-    return false;
-  }
 
-  uint8_t armed = prefs.getBool(LCD_MAINT_PREF_KEY_ARMED, false) ? 1 : 0;
-  uint32_t wake_in_s = prefs.getUInt(LCD_MAINT_PREF_KEY_WAKE_S, 0);
-  uint32_t remaining_s = prefs.getUInt(LCD_MAINT_PREF_KEY_REMAIN_S, 0);
-  String request_id = prefs.getString(LCD_MAINT_PREF_KEY_REQ_ID, "");
-  uint32_t start_epoch = prefs.getUInt(LCD_MAINT_PREF_KEY_START, 0);
-  uint32_t duration_sec = prefs.getUInt(LCD_MAINT_PREF_KEY_DUR, 0);
-  uint32_t grace_before_sec = prefs.getUInt(LCD_MAINT_PREF_KEY_GB, 0);
-  uint32_t grace_after_sec = prefs.getUInt(LCD_MAINT_PREF_KEY_GA, 0);
-  prefs.end();
-
-  if (lcd_time_valid() && start_epoch > 0) {
-    uint64_t now_epoch = (uint64_t)time(nullptr);
-    uint64_t window_end = (uint64_t)start_epoch +
-                          (uint64_t)duration_sec +
-                          (uint64_t)grace_after_sec;
-    if (now_epoch > window_end && armed == 0 && remaining_s == 0) {
-      lcd_clear_persisted_maintenance_state("expired_on_boot");
-      return false;
-    }
-  }
-
-  g_lcd_maintenance_timer_armed = armed;
-  g_lcd_maintenance_wake_in_s = wake_in_s;
-  g_lcd_maintenance_remaining_s = remaining_s;
-  g_lcd_maintenance_start_epoch = start_epoch;
-  g_lcd_maintenance_duration_sec = duration_sec;
-  g_lcd_maintenance_grace_before_sec = grace_before_sec;
-  g_lcd_maintenance_grace_after_sec = grace_after_sec;
-  if (request_id.length() > 0) {
-    strncpy(g_lcd_maintenance_request_id, request_id.c_str(), sizeof(g_lcd_maintenance_request_id) - 1);
-    g_lcd_maintenance_request_id[sizeof(g_lcd_maintenance_request_id) - 1] = '\0';
-  } else {
-    g_lcd_maintenance_request_id[0] = '\0';
-  }
-  Serial.printf("[LCD_MAINT_NVS] restore reason=%s armed=%d wake_in_s=%lu remaining_s=%lu start_epoch=%lu request_id=%s\n",
-                reason ? reason : "unknown",
-                g_lcd_maintenance_timer_armed ? 1 : 0,
-                (unsigned long)g_lcd_maintenance_wake_in_s,
-                (unsigned long)g_lcd_maintenance_remaining_s,
-                (unsigned long)g_lcd_maintenance_start_epoch,
-                g_lcd_maintenance_request_id[0] ? g_lcd_maintenance_request_id : "-");
-  // Arm-time delivery race fix (breadcrumb): capture the post-deep-sleep restore
-  // of the maintenance timer + whether the clock was valid then. value=armed,
-  // detail encodes clock_valid + request_id (clk=<0/1> rid=<...>).
-  {
-    char restore_detail[80];
-    snprintf(restore_detail, sizeof(restore_detail), "clk=%d rid=%s",
-             lcd_time_valid() ? 1 : 0,
-             g_lcd_maintenance_request_id[0] ? g_lcd_maintenance_request_id : "-");
-    lcd_errlog_store_with_context("lcd", "maint", "RESTORE",
-                                  (int)g_lcd_maintenance_timer_armed, restore_detail);
-  }
-  return true;
-}
 
 static uint32_t lcd_sched_compute_next_epoch(time_t now) {
   if (now <= 0) {
@@ -2469,9 +2368,6 @@ static void lcd_clear_maintenance_state(const char* reason, bool mark_completed)
   g_lcd_maintenance_aborted = false;
   g_lcd_maintenance_headless = false;
   g_lcd_maintenance_deadline_ms = 0;
-  g_lcd_maintenance_timer_armed = 0;
-  g_lcd_maintenance_wake_in_s = 0;
-  g_lcd_maintenance_remaining_s = 0;
   if (mark_completed) {
     g_lcd_maintenance_completed_ms = millis();
   }
@@ -3095,62 +2991,62 @@ static bool sleep_blocked_for_ota() {
   // A missed PONG during Sense's synchronous HTTPS work does not cancel the
   // receiver's bounded timer rendezvous.
   if (lcd_timer_receiver_wait_active()) return true;
-  unsigned long now_ms = millis();
-  if (lcd_maintenance_active() || g_ota_mode_active || sense_ota_apply_required || sense_ota_active) {
-    // Safety: if Sense is asleep and OTA is not locked, these are stale flags — clear and allow sleep
-    if (sense_state == SENSE_ASLEEP && !ota_locked && !g_lcd_ota_uart_receiving) {
-      g_lcd_maintenance_active = false;
-      g_lcd_maintenance_deadline_ms = 0;
+  const uint32_t now_ms = (uint32_t)millis();
+  bool hold_expired = false;
+  {
+    // Serialize the snapshot and expiry against new coordinator/legacy LOCK
+    // publication. A lease accepted on Core0 must not be erased by Core1.
+    LcdCoordCriticalGuard guard;
+    const bool hold_live = (ota_stay_awake_until_ms &&
+        (int32_t)((uint32_t)ota_stay_awake_until_ms - now_ms) > 0) ||
+        (g_ota_lock_window_until_ms && (int32_t)((uint32_t)g_ota_lock_window_until_ms - now_ms) > 0) ||
+        (g_ota_continuation_hold_start_ms &&
+         (uint32_t)(now_ms - g_ota_continuation_hold_start_ms) < OTA_CONTINUATION_HOLD_MS);
+    if (hold_live) return true;
+    // Clear expired generic deadlines too; raw unsigned comparisons elsewhere
+    // must never resurrect them after millis wraps.
+    ota_stay_awake_until_ms = 0; g_ota_lock_window_until_ms = 0;
+    if (ota_locked || g_ota_continuation_hold_start_ms) {
+      hold_expired = true;
+      ota_locked = false;
+      ota_check_requested = false; ota_check_pending = false;
+      sense_ota_active = false; sense_ota_apply_required = false;
+      g_lcd_maintenance_active = false; g_lcd_maintenance_deadline_ms = 0;
       g_ota_mode_active = false;
-      sense_ota_apply_required = false;
-      sense_ota_active = false;
-      Serial.println("[SLEEP] stale ota/maint flags cleared (sense_asleep)");
-      return false;
+      g_ota_continuation_hold_start_ms = 0; g_ota_screen_active = false;
+      provision_return_home_pending = true;
     }
-    return true;
   }
-  if (ota_check_requested || ota_check_pending) {
-    // This branch used to be an unconditional `return true` -- the only one here
-    // without a stale-flag escape, while the branches either side of it both had
-    // one. If the Sense set the flag and then slept (or the exchange simply never
-    // completed) the LCD was pinned awake FOREVER with a lit AMOLED. Observed
-    // 2026-08-21: 10+ minutes of "[SLEEP] blocked (ota_pending)" with the Sense
-    // asleep the whole time, and it only recovered when the USB port was opened
-    // and reset the board. On a "mostly off" device that is a flat battery.
-    if (sense_state == SENSE_ASLEEP && !ota_locked && !g_lcd_ota_uart_receiving) {
-      ota_check_requested = false;
-      ota_check_pending = false;
-      g_ota_check_block_since_ms = 0;
-      Serial.println("[SLEEP] stale ota_check flags cleared (sense_asleep)");
-      return false;
+  if (hold_expired) Serial.println("[OTA] finite peer hold expired; normal schedule retained");
+  // A declared absolute window is finite by its stored end, independent of
+  // missed Sense PONGs. Future arms alone never hold the LCD awake.
+  if (lcd_time_valid() && g_lcd_maintenance_start_epoch &&
+      lcd_maintenance_window_is_current((uint64_t)time(nullptr))) return true;
+  bool pending_expired = false;
+  {
+    LcdCoordCriticalGuard guard;
+    const uint32_t pending_now = (uint32_t)millis();
+    // A LOCK/BEGIN may have arrived after the first snapshot. Never let the
+    // pending-grace cleanup erase flags belonging to that newly accepted work.
+    if (g_lcd_ota_uart_receiving ||
+        (ota_stay_awake_until_ms && (int32_t)((uint32_t)ota_stay_awake_until_ms - pending_now) > 0) ||
+        (g_ota_lock_window_until_ms && (int32_t)((uint32_t)g_ota_lock_window_until_ms - pending_now) > 0)) return true;
+    const bool pending = lcd_maintenance_active() || g_ota_mode_active ||
+        sense_ota_apply_required || sense_ota_active || ota_check_requested || ota_check_pending;
+    if (pending) {
+      if (sense_state != SENSE_ASLEEP) {
+        if (!g_ota_check_block_since_ms) g_ota_check_block_since_ms = pending_now ? pending_now : 1;
+        if ((uint32_t)(pending_now - g_ota_check_block_since_ms) < OTA_CHECK_BLOCK_MAX_MS) return true;
+      }
+      // All non-receiving OTA flags share the existing bounded pending grace.
+      g_lcd_maintenance_active = false; g_lcd_maintenance_deadline_ms = 0;
+      g_ota_mode_active = false; sense_ota_apply_required = false; sense_ota_active = false;
+      ota_check_requested = false; ota_check_pending = false;
+      pending_expired = true;
     }
-    // Belt and braces: even with the Sense awake, a check that never finishes
-    // must not hold the screen indefinitely.
-    if (g_ota_check_block_since_ms == 0) {
-      g_ota_check_block_since_ms = now_ms;
-    } else if ((now_ms - g_ota_check_block_since_ms) > OTA_CHECK_BLOCK_MAX_MS) {
-      Serial.printf("[SLEEP] ota_check block expired after %lums - allowing sleep\n",
-                    (unsigned long)(now_ms - g_ota_check_block_since_ms));
-      ota_check_requested = false;
-      ota_check_pending = false;
-      g_ota_check_block_since_ms = 0;
-      return false;
-    }
-    return true;
+    g_ota_check_block_since_ms = 0;
   }
-  g_ota_check_block_since_ms = 0;
-  if (now_ms < ota_stay_awake_until_ms) {
-    // If Sense went to sleep without OTA_LOCK, the OTA request was missed — don't block.
-    // EXCEPTION: a fresh OTA_LOCK window means the Sense is mid self-OTA reboot and
-    // will proxy the LCD afterward — keep the LCD awake + UART-reachable.
-    if (sense_state == SENSE_ASLEEP && !ota_locked &&
-        now_ms >= g_ota_lock_window_until_ms) {
-      ota_stay_awake_until_ms = 0;
-      ota_check_requested = false;
-      return false;
-    }
-    return true;
-  }
+  if (pending_expired) Serial.println("[SLEEP] stale or expired OTA flags cleared; arm retained");
   return false;
 }
 
@@ -4116,16 +4012,8 @@ void setup() {
   if (g_lcd_maintenance_wake_window) {
 #ifdef HALO_LCD_PROD_WRAPPER
     lcd_coord_capture_timer((int)wake_cause, (int)reset_reason);
-    // Consume the schedule that woke us BEFORE UART starts. A new MAINT_WINDOW
-    // received later belongs to the next sleep and must survive UI setup.
-    g_lcd_maintenance_timer_armed = 0;
-    g_lcd_maintenance_wake_in_s = 0;
-    g_lcd_maintenance_remaining_s = 0;
-    g_lcd_maintenance_request_id[0] = '\0';
-    g_lcd_maintenance_start_epoch = 0;
-    g_lcd_maintenance_duration_sec = 0;
-    g_lcd_maintenance_grace_before_sec = 0;
-    g_lcd_maintenance_grace_after_sec = 0;
+    // Consume the old schedule atomically before UART can deliver the next one.
+    // Failure retains its durable truth and uses the bounded periodic fallback.
     lcd_clear_persisted_maintenance_state("timer_schedule_consumed");
     g_lcd_maintenance_wake_window = false;
     g_lcd_timer_receiver_wait_until_ms.store((uint32_t)millis() + LCD_MAINT_BOOT_GRACE_MS);
@@ -4485,17 +4373,11 @@ void loop() {
     Serial.println("[PROVISION] return_home (force_from_loop)");
   }
 
-  // OTA continuation safety timeout: if the post-reboot "Updating…" hold has
-  // been active > OTA_CONTINUATION_HOLD_MS (3 min) and OTA_UNLOCK never arrived
-  // (which would have cleared g_ota_continuation_hold_start_ms), tear the hold
-  // down and return Home so the LCD can't get stuck on "Updating…" forever.
-  if (g_ota_continuation_hold_start_ms > 0 &&
-      (millis() - g_ota_continuation_hold_start_ms) > OTA_CONTINUATION_HOLD_MS) {
-    Serial.println("[LCD_OTA] continuation hold TIMEOUT — no OTA_UNLOCK, returning Home");
-    g_ota_screen_active = false;
-    g_ota_continuation_hold_start_ms = 0;
-    ota_stay_awake_until_ms = 0;
-    show_ship_main_menu();
+  // Expiry uses the same predicate as every sleep entry; a newer live LOCK
+  // must not be shortened by an independent continuation timeout cleanup.
+  if (g_ota_continuation_hold_start_ms &&
+      (uint32_t)(millis() - g_ota_continuation_hold_start_ms) >= OTA_CONTINUATION_HOLD_MS) {
+    (void)sleep_blocked_for_ota();
   }
 
   // Periodic resend of INPUT_OTA_CHECK while a manual OTA request is latched but
@@ -5737,11 +5619,11 @@ void loop() {
   if (!g_in_light_sleep && GUARDIAN_FORCE_SLEEP_MS > 0) {
     unsigned long awake_ms = now_ms - guardian_awake_start_ms;
     if (awake_ms >= GUARDIAN_FORCE_SLEEP_MS) {
-      if (lcd_ota_uart_active()) {
-        // Do not force-sleep during active LCD OTA
+      if (lcd_ota_uart_active() || sleep_blocked_for_ota()) {
+        // All sleep paths honor the same finite OTA ownership
         static bool guardian_ota_defer_logged = false;
         if (!guardian_ota_defer_logged) {
-          Serial.println("[GUARDIAN] force_sleep deferred (lcd_ota_uart_active)");
+          Serial.println("[GUARDIAN] force_sleep deferred (shared_ota_hold)");
           guardian_ota_defer_logged = true;
         }
       } else {
@@ -5942,43 +5824,8 @@ void loop() {
       inhibit_reason = "maint_boot_grace";
     }
 #endif
-    if (!inhibit_reason && g_lcd_maintenance_active) {
-      // Safety: if Sense is asleep and OTA not active, maintenance is stale — clear it
-      if (sense_state == SENSE_ASLEEP && !ota_locked && !g_lcd_ota_uart_receiving) {
-        g_lcd_maintenance_active = false;
-        g_lcd_maintenance_deadline_ms = 0;
-        g_ota_mode_active = false;
-        Serial.println("[SLEEP] stale maintenance cleared (sense_asleep, no ota)");
-      } else if (g_lcd_maintenance_deadline_ms == 0 || millis() < g_lcd_maintenance_deadline_ms) {
-        inhibit_reason = "maintenance_active";
-      }
-    }
-    if (!inhibit_reason && ota_locked) {
-      inhibit_reason = "ota_locked";
-    }
-    if (!inhibit_reason && lcd_ota_uart_active()) {
-      inhibit_reason = "lcd_ota_uart";
-    }
-    // Stay awake through the absolute maintenance window so the Sense's
-    // LCD-first OTA proxy (which queries the LCD with retries over ~35s at
-    // window entry) can reach us. The LCD has a real clock now (set from the
-    // Sense's now_epoch in MAINT_WINDOW), so once we are inside the window we
-    // must not idle-sleep until the OTA completes or the window+grace ends.
-    // lcd_maintenance_window_is_current() is bounded by start_epoch +
-    // duration + grace_after, so this self-terminates. Clock-gated so it never
-    // affects normal (non-maintenance) idle-sleep or an old-Sense/no-clock LCD.
-    if (!inhibit_reason && lcd_time_valid() &&
-        g_lcd_maintenance_start_epoch > 0 &&
-        lcd_maintenance_window_is_current((uint64_t)time(nullptr))) {
-      static unsigned long last_maint_window_log_ms = 0;
-      unsigned long mw_now = millis();
-      if (mw_now - last_maint_window_log_ms > 5000) {
-        Serial.printf("[LCD_MAINT] stay_awake in_window now_epoch=%llu remaining_s=%lu\n",
-                      (unsigned long long)time(nullptr),
-                      (unsigned long)lcd_maintenance_window_remaining_s((uint64_t)time(nullptr)));
-        last_maint_window_log_ms = mw_now;
-      }
-      inhibit_reason = "maintenance_window";
+    if (!inhibit_reason && sleep_blocked_for_ota()) {
+      inhibit_reason = "ota_hold";
     }
     if (inhibit_reason) {
       unsigned long now_ms = millis();
@@ -6024,33 +5871,7 @@ void loop() {
       log_sleep_decision(now_ms, screen_name, home_age_ms, false, decision_reason);
       goto loop_continue;
     }
-    if (millis() < ota_stay_awake_until_ms) {
-      // If Sense went to sleep without OTA_LOCK, the OTA request was missed.
-      // EXCEPTION: a fresh OTA_LOCK window means a real dual-OTA is pending and
-      // the Sense is just mid self-OTA reboot — keep the LCD awake + reachable.
-      if (sense_state == SENSE_ASLEEP && !ota_locked &&
-          millis() >= g_ota_lock_window_until_ms) {
-        Serial.println("[OTA] stay_awake cancelled (sense asleep, no ota_lock)");
-        ota_stay_awake_until_ms = 0;
-        ota_check_requested = false;
-      } else if (sense_state == SENSE_ASLEEP && !ota_locked) {
-        static unsigned long last_ota_lock_keep_log_ms = 0;
-        if (millis() - last_ota_lock_keep_log_ms > 5000) {
-          Serial.println("[OTA] keep stay_awake (ota_lock window active, sense rebooting)");
-          last_ota_lock_keep_log_ms = millis();
-        }
-        log_sleep_decision(now_ms, screen_name, home_age_ms, false, "ota_stay_awake");
-        goto loop_continue;
-      } else {
-        static unsigned long last_ota_log_ms = 0;
-        if (millis() - last_ota_log_ms > 5000) {
-          Serial.println("[OTA] stay_awake window active - deferring sleep");
-          last_ota_log_ms = millis();
-        }
-        log_sleep_decision(now_ms, screen_name, home_age_ms, false, "ota_stay_awake");
-        goto loop_continue;
-      }
-    }
+    // OTA stay-awake/LOCK expiry was evaluated by the shared predicate above.
     if (millis() < stay_awake_until_ms) {
       static unsigned long last_stay_awake_log_ms = 0;
       unsigned long now_ms = millis();

@@ -259,19 +259,9 @@ static void lcd_ota_uart_restore_ui() {
     g_ota_screen_active = false;
     g_lcd_maintenance_headless = false;
 
-    // Clear persisted maintenance NVS so stale timer doesn't re-enter headless after OTA reboot.
-    // Double-clear with delay to ensure NVS flash write completes before esp_restart().
-    // Without this, the NVS write may not flush and the boot sequence re-enters headless.
+    // One readback-verified disarm. Its helper publishes the actual stored
+    // value; a failed commit must not be hidden by unconditional RTC clearing.
     lcd_clear_persisted_maintenance_state("ota_complete");
-    delay(200);  // Allow NVS flash write to commit
-    lcd_clear_persisted_maintenance_state("ota_complete_verify");  // Belt-and-suspenders
-
-    // Clear RTC maintenance timer variables so they don't survive into the next sleep
-    g_lcd_maintenance_timer_armed = 0;
-    g_lcd_maintenance_wake_in_s = 0;
-    g_lcd_maintenance_remaining_s = 0;
-    g_lcd_maintenance_start_epoch = 0;
-    g_lcd_maintenance_request_id[0] = '\0';
 
     // Don't try to restore LVGL here — this runs on Core 0 (UART task) and
     // lcd_exit_ota_mode() calls LVGL init which crashes on Core 0.
@@ -479,6 +469,10 @@ static void lcd_ota_handle_query(const char* coord_id = nullptr) {
 
 // ── LCD_OTA_BEGIN ────────────────────────────────────────────────────
 static void lcd_ota_handle_begin(JsonObject& doc) {
+    // Share the arm/sleep gate through startup and erase. Once sleep owns it,
+    // this request gets no acceptance proof and cannot start an inactive write.
+    LcdMaintenanceStorageGuard startup_guard;
+    if (g_lcd_sleep_commit_gate.load()) return;
     if (s_lcd_ota_state != LCD_OTA_IDLE) {
         Serial.printf("[LCD_OTA_UART] BEGIN rejected: already in state %d\n",
                       static_cast<int>(s_lcd_ota_state.load()));

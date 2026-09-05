@@ -296,13 +296,18 @@ static void uart_send_maint_window_ack(uint32_t remaining_s,
                                        uint64_t start_epoch,
                                        uint32_t duration_sec,
                                        uint32_t grace_before_sec,
-                                       uint32_t grace_after_sec) {
-  StaticJsonDocument<320> doc;
+                                       uint32_t grace_after_sec,
+                                       const char* coord_id = nullptr) {
+  StaticJsonDocument<512> doc;
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = "MAINT_WINDOW_ACK";
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   doc["remaining_s"] = remaining_s;
+  if (coord_id && coord_id[0]) {
+    doc["coord_id"] = coord_id;
+    doc["peer_boot_id"] = g_lcd_coord_boot_id;
+  }
   if (request_id && request_id[0]) {
     doc["request_id"] = request_id;
   }

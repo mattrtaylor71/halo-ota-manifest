@@ -86,8 +86,8 @@ until an independent debt/timer boot or explicit manual request.
 
 The wrapper starts one 40-minute cooperative budget before manifest work and passes
 its remainder to both LCD attempts, postboot queries and Sense application. Sense
-apply is capped to `min(20 minutes, remaining)`; zero refuses instead of choosing a
-default. Receiver cleanup and framed/legacy control-mode handoff remain transfer
+apply is capped to `min(20 minutes, remaining)` and the verified next-wake
+admission bound below; zero refuses instead of choosing a default. Receiver cleanup and framed/legacy control-mode handoff remain transfer
 requirements. Returning foreground paths release local ownership and preserve
 unresolved LCD debt; unknown UART mode suppresses peer controls until fresh proof.
 SDK calls are checked before/after bounded work; a stalled SDK call is not
@@ -115,6 +115,45 @@ records rather than relying on the eight-entry general ring during binary mode.
 Fresh JSON-ready acknowledgment/query gates diagnostic forwarding after cleanup.
 Source tests/builds and hardware outcomes are recorded separately in the hardening
 validation journal; the older public 6.4.14 campaign remains historical evidence.
+
+## Durable sleep handoff before Sense self-update (September 5)
+
+After LCD target/current VALID and setup-ready proof, Sense obtains a new correlated
+LCD boot proof and uses the existing `MAINT_WINDOW` message to arm the real next
+local 02:00 before self-apply. `coord_id` is a fresh bounded challenge and
+`peer_boot_id` must match that newly queried LCD boot. The matching
+`MAINT_WINDOW_ACK` must report `status=stored_verified`, `persisted=true`, and the
+exact request ID, absolute start, remaining/wake seconds, and zero duration/graces.
+Old stored-only ACKs, stale challenges, wrong boot IDs and malformed fields cannot
+qualify. The gate runs after any needed LCD update, so upgrading an older LCD can
+provide this capability. Older Sense parsers ignore the added fields/status safely;
+a new Sense paired with an LCD lacking verified storage defers self-apply.
+
+The proof uses one bounded 120-second opportunity inside the original 40-minute
+transaction; retransmissions do not renew it. Self-apply receives the smaller of
+20 minutes, transaction time remaining, and time before the LCD's absolute target
+minus its existing 15-second lead and the existing 120-second proof/reboot reserve.
+Expired, changed-calendar or unfresh clock conditions defer before application.
+Synchronous SDK calls remain cooperative: late successful durable commits are
+truthful commits, but a late proof cannot authorize a new apply.
+
+`ota_coord/pending` remains the original automatic request (including a private
+`relative_*_180` request); `schedule` is the next sleep identity. A future arm does
+not complete the old request. New schedule writes require the exact successful
+Preferences return and matching readback, not merely visible same-handle data. After reset, ordinary co-scheduling without a fresh
+SNTP reply leaves the existing LCD arm and Sense schedule untouched. With no prior
+arm, each board still has its periodic fallback; exact fallback alignment is not
+claimed. Normal calendar co-scheduling uses the same absolute representation.
+Compiled `HALO_MAINT_TEST_S` setup also requires fresh time and carries an explicit
+absolute target while retaining its original relative request ID. Consequently a
+180-second Sense arm gives LCD the ordinary approximately 165-second arm, with
+actual setup/teardown timing checked independently.
+
+A normal absolute arm wakes LCD 15 seconds before 02:00. Its real TIMER and existing
+GPIO pulse can wake Sense via EXT0 before Sense's own timer. Matching uncompleted
+schedule/boot proof is admitted by the existing coordinator without inventing a
+Sense TIMER; `lcd_timer_begin` and `lcd_timer_origin` retain the two real causes.
+Sense-first arrivals still retain their original `nightly_begin` TIMER proof.
 
 ## Module Reference
 
@@ -1092,6 +1131,40 @@ The sender retains binary UART ownership while its persistent mixed COBS/JSON pa
 ABORT cleanup must provide a matched JSON-ready acknowledgment. Up to 36 seconds of receiver idle/parser grace consumes the original budget; absence of acknowledgment leaves control mode unconfirmed. No second transaction, ordinary diagnostic, final unlock or Sense apply is then sent. Local gate/ownership is released so normal sleep remains possible. `lcd_xfer/unsafe` is written before BEGIN; a reset cannot silently forget possible binary reception. Successful END_ACK restores runtime permission only, leaving this durable marker until postboot proof. A later independent query is the sole permitted probe while normal JSON is suppressed. With no OTA request, a boot-local query-only recovery has a 120-second bound and cannot fetch a manifest or acquire a lock.
 
 The dedicated four-record `lcd_xfer` journal stores exact terminal stage, counters and timing locally even while UART is unavailable. The read-only `lcdxfer` USB command dumps those records within a cooperative two-second send budget. Each record includes its prefix byte count and CRC16-CCITT-FALSE; the host must verify both, since console output may lose bytes. A later safe JSON bridge is best effort and does not consume the local record. The original 40-minute pair budget covers both attempts and cleanup. SDK calls can return late; precommit boundary checks reject late results, while successful boot selection remains committed success.
+
+**Terminal transport snapshot (`sense_lcd_transport_snapshot.h`):** only after an
+HTTP/chunk failure is decided, the proxy samples the client descriptor before
+closing the connection. It performs `FIONREAD`, one one-byte
+`MSG_PEEK | MSG_DONTWAIT` receive and then `SO_ERROR`. This does not consume
+ciphertext; `SO_ERROR` does clear the pending socket error, so it is restricted to
+this already-failed connection. An invalid descriptor skips all socket calls.
+There are no extra SSL reads or `available()`/`connected()`/`lastError()` calls.
+Caller `errno` is restored. Local SDK calls remain synchronous; measured `d`
+records their duration, not a claim that they are preemptible.
+
+The existing main terminal is unchanged. After HTTP cleanup one additional `N1`
+entry is stored in the same journal; it contains no ciphertext, address, SSID or
+credential. Fields are: `s` session; `t` capture uptime; `fd`; `io` ioctl return and
+`ie` errno (`q` queued socket bytes is valid only when `io=0`); `pk` peek return and
+`pe` errno; `so` getsockopt return and `se` socket error on success or syscall errno
+on failure; `w` Wi-Fi status; `r` RSSI; `m` four hexadecimal byte counts in order
+internal free/largest, PSRAM free/largest; `d` elapsed capture milliseconds; and
+literal `tls=?`. Socket return `-2` means not sampled, or an invalid SO_ERROR
+result length. Peek zero means socket EOF, positive means queued ciphertext and
+negative EAGAIN/EWOULDBLOCK means no currently queued socket bytes. None reveals
+partial ciphertext already held by TLS or distinguishes TLS WANT_READ/WANT_WRITE.
+The snapshot preserves the already-decided failure classification and configured
+retry/deadline policy. Sampling and NVS persistence consume the existing cooperative
+budget, so their elapsed time can reduce what remains for cleanup or another attempt.
+
+Every signed/unsigned 32-bit extremum fits in 219 detail bytes, below the existing
+224-byte reader limit. The unchanged normal16 `lcdxfer` reader can retrieve it
+after an upgrade and verifies the same record byte count/CRC. The shorter general
+error-ring/UART bridge copies are best effort and are not authoritative. Two
+diagnosed failures use all four local slots; a diagnosed failure plus successful
+retry uses three. Repeated later attempts can evict them, so retrieve errors-first
+before another campaign episode. NVS failures remain explicitly counted and do
+not affect OTA integrity or boot behavior.
 
 **Non-OTA network suppression:** while any OTA activity is in flight, `request_list_refresh()` is short-circuited (`[LIST_REFRESH] deferred (lcd_ota_in_progress)`) and the `INPUT_WAKE` handler skips its list-refresh trigger. This prevents an HTTP GET to `/v1/list` from competing with the S3 download on the single net stack (which previously starved the download to a stall/abort). The gate is `lcd_ota_in_progress()`, defined in `halo_sense_prod.ino` and forward-declared in `Sense_Minimal.ino` (weak `return false` fallback for non-wrapper builds). It returns true if any of `g_lcd_ota_proxy_owns_uart`, `g_lcd_ota_request_active`, `g_lcd_ota_task_running`, `g_ota_apply_in_progress`, or `g_ota_check_in_progress` is set. OTA's own HTTP (manifest fetch, S3 download, schedule/report) is NOT gated.
 

@@ -73,6 +73,48 @@ Future schedules arriving during UI initialization are preserved. Serial logs re
 `receiver_wait_start` and the release/timeout reason. This changes no wake pins,
 protocol fields, transfer timeout, or user-input visibility rule.
 
+## Authoritative maintenance arm and finite sleep ownership (September 5)
+
+`lcd_maintenance_arm.h` stores one versioned CRC-protected `lcd_maint/arm_v1` blob
+for either an arm or an explicit disarm. A successful write is not assumed:
+the Preferences write must return the exact successful byte count and readback
+must match before RAM and `stored_verified` acceptance reflect the new state. A
+reported commit failure cannot be rescued by visible same-handle data. RAM retains
+the prior verified arm, or explicit uncertainty when none was known.
+An existing corrupt record suppresses RTC and old-key fallback; a missing record
+may migrate only a complete, typed, bounded legacy representation. Failed storage
+is logged and uses a periodic fallback instead of repeatedly rearming stale data.
+All disarm paths use this same record, including OTA cleanup, timer consumption and
+USB clear. An explicit failed clear is not reported as successful.
+
+A challenged absolute `MAINT_WINDOW` echoes the exact bounded `coord_id` and current
+`peer_boot_id`; arm fields are validated before accepting the Sense clock, and the
+clock is sampled before synchronous storage so storage latency advances normally.
+Only exact durable readback yields `stored_verified`. Time may still be corrected
+by a valid message whose storage later fails; the old durable arm remains explicit.
+The absolute target survives software reset and is recomputed at each later sleep
+when the RTC clock is valid, including the existing 15-second lead. Invalid-clock
+fallback is a relative opportunity, not proof of accurate calendar time. An expired
+absolute arm is disarmed if possible and chooses periodic sleep, not a repeated
+five-second reset loop.
+
+The same finite OTA predicate serves guardian, activity/idle and direct sleep.
+Active receive/finalization remains protected; actual timer readiness, coordinator
+lease, legacy transfer hold and continuation retain their existing finite limits.
+Expired flags are cleared without erasing a future arm. Expiry and fresh LOCK
+publication use the same short critical section, with no NVS or logging inside it.
+A separate recursive storage gate serializes arm/BEGIN acceptance against sleep's
+timer selection and final commit. Sleep abort paths release it; a request arriving
+once sleep owns the gate cannot receive an acceptance proof for a stale configured
+timer. Shared OTA checks run again before destructive teardown. Terminal unlock
+releases continuation as well as lock holds, and losing Sense eventually permits
+sleep using the previously verified absolute arm.
+
+This permits LCD to sleep during a slow Sense update without waiting for a later
+unacknowledged schedule message. Physical return to the intended schedule still
+requires exact arm/sleep evidence; source tests and builds alone do not establish
+clock accuracy, radio reliability or successful unattended installation.
+
 ## Sense OTA identity through LCD diagnostics (2026-09-04)
 
 `FW_INFO` now prints the optional live Sense fields `sense_build`,

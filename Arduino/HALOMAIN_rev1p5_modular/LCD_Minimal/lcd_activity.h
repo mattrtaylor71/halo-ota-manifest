@@ -75,35 +75,7 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
     if (reason_out) *reason_out = "maint_boot_grace";
     return false;
   }
-  if (ota_locked) {
-    if (reason_out) *reason_out = "ota_locked";
-    return false;
-  }
-  if (ota_check_requested || ota_check_pending) {
-    if (reason_out) *reason_out = "ota_check";
-    return false;
-  }
-  if (now_ms < ota_stay_awake_until_ms) {
-    // If Sense went to sleep without sending OTA_LOCK, the OTA request was missed
-    // (race: LCD sent INPUT_OTA_CHECK after Sense already started sleep sequence).
-    // Clear the stay_awake timer so LCD can sleep too.
-    if (sense_state == SENSE_ASLEEP && !ota_locked &&
-        now_ms >= g_ota_lock_window_until_ms) {
-      Serial.println("[OTA] stay_awake cancelled (sense asleep, no ota_lock)");
-      ota_stay_awake_until_ms = 0;
-      ota_check_requested = false;
-      // fall through — allow sleep
-    } else if (sense_state == SENSE_ASLEEP && !ota_locked) {
-      // Fresh OTA_LOCK window still live: the Sense is mid self-OTA reboot and
-      // will proxy the LCD afterward. Keep the LCD awake + UART-reachable.
-      Serial.println("[OTA] keep stay_awake (ota_lock window active, sense rebooting)");
-      if (reason_out) *reason_out = "ota_stay_awake";
-      return false;
-    } else {
-      if (reason_out) *reason_out = "ota_stay_awake";
-      return false;
-    }
-  }
+  // OTA ownership and expiry are handled by sleep_blocked_for_ota above.
   // An image spool from the Sense is in flight — do not sleep through it.
   //
   // This is the whole reason the SD spool never worked for a real capture. A

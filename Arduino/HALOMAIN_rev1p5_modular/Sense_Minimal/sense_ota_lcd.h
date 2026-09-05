@@ -23,6 +23,7 @@
 #include <ArduinoJson.h>
 #include "../halo_ota_demo/firmware/shared/UartOtaProtocol.h"
 #include "../halo_ota_demo/firmware/shared/ManifestClient.h"
+#include "sense_lcd_transport_snapshot.h"
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -662,8 +663,21 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     return "control_ack_timeout";
   };
   auto fail = [&](const char* origin, int code) -> const char* {
+    // Failure is already decided. Observe the live transport before teardown;
+    // diagnostics cannot turn this failure into a retry or change its result.
+    const bool capture_transport = strcmp(phase, "http") == 0 || strcmp(phase, "chunk") == 0;
+    LcdOtaTransportSnapshot transport;
+    if (capture_transport) transport = sense_lcd_transport_snapshot(tls_client);
     close_stream();
     record(origin, code);
+    if (capture_transport) {
+      char network_detail[224];
+      if (sense_lcd_transport_format(session_id, transport, network_detail, sizeof(network_detail))) {
+        sense_lcd_terminal_store(network_detail, code);
+      } else {
+        ++s_lcd_terminal_store_failures;
+      }
+    }
     if (receiver_open && !json_ready && remaining_ms()) {
       g_lcd_ota_proxy_owns_uart = true;
       send_control("LCD_OTA_ABORT", origin);
