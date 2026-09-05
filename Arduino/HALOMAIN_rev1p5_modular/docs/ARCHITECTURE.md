@@ -581,6 +581,8 @@ The Sense board acts as a TLS proxy for LCD OTA:
 
 **Retry ownership:** after an abort or failed END, the LCD keeps its atomic sleep guards through cleanup and grants the existing 10s Home idle interval before sleeping. The Sense's second attempt reacquires `OTA_LOCK` and queries the LCD afresh before BEGIN in both paired-update and LCD-only inline paths. If the LCD is unavailable, Sense retains `lcd_ota_due`, unlocks, and defers its own update. Duplicate/late LCD abort commands cannot clear an idle receiver's new lock or a different active session. The guardian limit and GPIO wake contract are unchanged.
 
+**Final check completion:** proven terminal production exits send `OTA_UNLOCK` with optional `terminal:true`, releasing the LCD's generic and recovery stay-awake timers. A both-current check therefore returns to normal Home idle sleep instead of keeping the panel lit for the 180s update lease. Unmarked unlocks preserve the continuation hold, including the intermediate unlock before the LCD-only query/transfer. Old receivers safely ignore the optional field.
+
 **Cloud `lcd_fw` is the REAL running version:** the cloud-reported LCD firmware version (`truth_get_lcd_fw_version()`) is sourced exclusively from an actual `LCD_OTA_QUERY_RESP`, never from the OTA manifest. On proxy success the cached value is cleared and re-queried (pre-sleep / periodic, refreshed when empty or >5min stale), so a transfer that completes but never boots the new image no longer masquerades as success in the dashboard.
 
 ### OTA Orchestration Order (LCD proxy FIRST, then Sense self-OTA)

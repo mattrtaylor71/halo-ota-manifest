@@ -939,13 +939,17 @@ static void uart_process_received_message(const char* json_str) {
     ota_check_requested = false;
     sense_ota_active = false;
     sense_ota_apply_required = false;
-    // Do NOT blindly clear ota_stay_awake_until_ms here. The Sense sends
-    // OTA_UNLOCK *before* its self-OTA reboot so the LCD is allowed to sleep,
-    // but the LCD must stay awake (and UART-responsive) through the Sense
-    // reboot + the post-reboot LCD_OTA_QUERY/proxy. The OTA_LOCK handler set a
-    // long stay-awake window for exactly this; preserve it so the normal
-    // sleep-decision keeps the LCD awake until the window naturally expires.
-    if (g_lcd_ota_recovery_grace) {
+    // A terminal unlock completes this check/update and permits normal idle
+    // sleep. Unmarked unlocks keep the legacy/intermediate continuation lease:
+    // Sense may still be about to query or stream the LCD on those paths.
+    if (doc["terminal"] | false) {
+      // A completed check/update has no remaining continuation. Release both
+      // the generic dual-OTA hold and any short failed-attempt retry lease.
+      g_lcd_ota_recovery_grace = false;
+      ota_stay_awake_until_ms = 0;
+      g_ota_lock_window_until_ms = 0;
+      Serial.println("[OTA] terminal unlock - all stay-awake holds cleared");
+    } else if (g_lcd_ota_recovery_grace) {
       g_lcd_ota_recovery_grace = false;
       ota_stay_awake_until_ms = 0;
       g_ota_lock_window_until_ms = 0;

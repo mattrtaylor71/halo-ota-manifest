@@ -1807,11 +1807,14 @@ bool halo_prod_should_delay_sleep() {
   return (ota_pending || mqtt_pending || maint_sync_block);
 }
 
-static void send_ota_uart_message(const char* type) {
+static void send_ota_uart_message(const char* type, bool terminal = false) {
   if (!type || !type[0]) return;
   StaticJsonDocument<128> doc;
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = type;
+  // Legacy/intermediate unlocks retain their continuation hold. Only a proven
+  // final outcome releases it; older LCD firmware safely ignores this field.
+  if (terminal && strcmp(type, "OTA_UNLOCK") == 0) doc["terminal"] = true;
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   String output;
@@ -3448,7 +3451,7 @@ static void handle_pending_ota_expectation() {
     Serial.println("[OTA_EXPECT] version match — keep OTA_LOCK (lcd_ota_due pending)");
   } else {
     Serial.println("[OTA_EXPECT] version match -> send OTA_UNLOCK to LCD");
-    send_ota_uart_message("OTA_UNLOCK");
+    send_ota_uart_message("OTA_UNLOCK", true);
   }
   // Clear expectation after a successful version match to avoid repeated OTA_UNLOCK.
   OtaExpect::setLastSuccessTs((uint32_t)(millis() / 1000));
@@ -3736,7 +3739,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("manifest_url_invalid");
     // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
     // (prod:1877) is holding its "Updating…" screen.
-    send_ota_uart_message("OTA_UNLOCK");
+    send_ota_uart_message("OTA_UNLOCK", true);
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     clear_intent_once();
@@ -3759,7 +3762,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("manifest_fetch_fail");
     // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
     // (prod:1877) is holding its "Updating…" screen.
-    send_ota_uart_message("OTA_UNLOCK");
+    send_ota_uart_message("OTA_UNLOCK", true);
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -3778,7 +3781,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("board_mismatch");
     // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
     // (prod:1877) is holding its "Updating…" screen.
-    send_ota_uart_message("OTA_UNLOCK");
+    send_ota_uart_message("OTA_UNLOCK", true);
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -3793,7 +3796,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("bin_url_disallowed");
     // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
     // (prod:1877) is holding its "Updating…" screen.
-    send_ota_uart_message("OTA_UNLOCK");
+    send_ota_uart_message("OTA_UNLOCK", true);
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -3825,7 +3828,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       mqtt_force_connect();
       // The inline proxy above took/held the LCD lock; release it now so a
       // manual OTA_LOCK (prod:1877) doesn't strand the LCD on "Updating…".
-      send_ota_uart_message("OTA_UNLOCK");
+      send_ota_uart_message("OTA_UNLOCK", true);
     }
     clear_intent_once();
     return;
@@ -3847,7 +3850,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       mqtt_force_connect();
       // No LCD proxy task will run to release the lock; unlock the LCD now so a
       // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
-      send_ota_uart_message("OTA_UNLOCK");
+      send_ota_uart_message("OTA_UNLOCK", true);
     }
     clear_intent_once();
     return;
@@ -3880,7 +3883,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       mqtt_force_connect();
       // No LCD proxy task will run to release the lock; unlock the LCD now so a
       // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
-      send_ota_uart_message("OTA_UNLOCK");
+      send_ota_uart_message("OTA_UNLOCK", true);
     }
     clear_intent_once();
     return;
@@ -3907,7 +3910,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
         mqtt_force_connect();
         // No LCD proxy task will run to release the lock; unlock the LCD now so
         // a manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
-        send_ota_uart_message("OTA_UNLOCK");
+        send_ota_uart_message("OTA_UNLOCK", true);
       }
       clear_intent_once();
       return;
@@ -3932,7 +3935,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       mqtt_force_connect();
       // No LCD proxy task will run to release the lock; unlock the LCD now so a
       // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
-      send_ota_uart_message("OTA_UNLOCK");
+      send_ota_uart_message("OTA_UNLOCK", true);
     }
     clear_intent_once();
     return;
@@ -4079,7 +4082,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     OtaIntent::recordOtaResult("lcd_proxy_failed_defer");
     ota_set_last_result("lcd_proxy_failed_defer");
     // Return to normal operation without advancing Sense.
-    send_ota_uart_message("OTA_UNLOCK");
+    send_ota_uart_message("OTA_UNLOCK", true);
     mqtt_set_allowed(true);
     mqtt_force_connect();
     clear_intent_once();
