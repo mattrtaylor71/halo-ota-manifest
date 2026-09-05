@@ -13,8 +13,8 @@
 // All runtime code should use kFirmwareVersion and kBuildId from BuildInfo.h
 // (which reference these macros). This ensures consistency across compilation units.
 //
-// Generated: Sep 04 2026 16:52:43
-// Git Hash: b4765ff
+// Generated: Sep 04 2026 17:13:47
+// Git Hash: 13318e3
 
 #ifndef VERSION_H
 #define VERSION_H
@@ -32,17 +32,17 @@
 #endif
 
 // Firmware version string (semantic versioning: MAJOR.MINOR.PATCH)
-#define FIRMWARE_VERSION "6.4.9"
+#define FIRMWARE_VERSION "6.4.10"
 
 // Build metadata (AUTO-GENERATED - do not override)
 #define BUILD_DATE "Sep 04 2026"
-#define BUILD_TIME "16:52:43"
-#define BUILD_DATE_TIME_STR "Sep 04 2026 16:52:43"
-#define BUILD_GIT_HASH "b4765ff"
+#define BUILD_TIME "17:13:47"
+#define BUILD_DATE_TIME_STR "Sep 04 2026 17:13:47"
+#define BUILD_GIT_HASH "13318e3"
 
 // Build ID: unique identifier for this build (version + date + time + git hash)
-// Format: "VERSION-DATE-TIME-GIT" (e.g., "6.4.9-Sep 04 2026-16:52:43-b4765ff")
-#define BUILD_ID "6.4.9-Sep 04 2026-16:52:43-b4765ff"
+// Format: "VERSION-DATE-TIME-GIT" (e.g., "6.4.10-Sep 04 2026-17:13:47-13318e3")
+#define BUILD_ID "6.4.10-Sep 04 2026-17:13:47-13318e3"
 
 // Version comparison helper
 struct Version {
@@ -105,7 +105,7 @@ struct BuildInfo {
 // Note: This macro is still used for compile-time stringification.
 // Runtime code should use kFwEmbedMarker from BuildInfo.h instead.
 #ifndef FW_EMBED_MARKER
-#define FW_EMBED_MARKER "HALO_FW_MARKER:6.4.9|BUILD_ID:6.4.9-Sep 04 2026-16:52:43-b4765ff|BOARD:sense"
+#define FW_EMBED_MARKER "HALO_FW_MARKER:6.4.10|BUILD_ID:6.4.10-Sep 04 2026-17:13:47-13318e3|BOARD:sense"
 #endif
 
 // Force retention in binary (prevent LTO/GC from stripping it)
