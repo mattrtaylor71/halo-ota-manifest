@@ -93,6 +93,20 @@ unresolved LCD debt; unknown UART mode suppresses peer controls until fresh proo
 SDK calls are checked before/after bounded work; a stalled SDK call is not
 preemptible by these clock checks.
 
+A newer Sense image seeing an older manifest retains `downgrade_blocked`, but
+still runs the bounded inline LCD resolution. The already-current LCD branch
+requires fresh expected-version/VALID/setup-ready proof after its manifest and
+does not emit `both_current`/`nightly_noop` for this policy path. An LCD needing
+an update follows the existing transfer and postboot checks; Sense never
+downgrades. Once the LCD is resolved, Sense is VALID with boot equal to running,
+and the original budget remains, the pending schedule is durably completed.
+`policy_result` retains actual versions and LCD outcome; `policy_complete`
+retains the original automatic wake/reset/epoch or a separately labeled manual
+result. Failed checks or a failed completion write leave recovery pending.
+Both this policy path and the ordinary Sense-current path keep their proved peer
+lease through LCD resolution. They clear request intent and send unlock only
+after the LCD work has completed or explicitly deferred.
+
 Protocol-2 BEGIN/ACK negotiates framed END/ABORT with unchanged CHUNK encoding.
 A lost ACK can be recovered by re-ACKing the exact prior chunk without a second
 flash write or SHA update, including the final chunk while waiting for END. Receiver

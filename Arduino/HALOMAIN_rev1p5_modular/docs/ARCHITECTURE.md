@@ -103,6 +103,19 @@ than the remaining paired budget; zero remaining refuses apply. This is separate
 from the 120-second readiness window. Clock checks and SDK timeout limits cannot
 preempt a blocked driver/SDK call, so this is not a hard real-time deadline.
 
+When policy blocks a Sense downgrade, the same bounded inline path still resolves
+the LCD. A current LCD must provide another expected-version/VALID/setup-ready
+proof after its manifest; an updated LCD uses the existing postboot proof. Only
+after the Sense is also VALID with matching running/boot partitions and the
+original budget remains may the schedule's atomic completion record be written.
+The result retains `downgrade_blocked` and the actual LCD outcome in `policy_result`
+and `policy_complete`, with the original automatic cause/epoch where applicable.
+It is not `nightly_noop`. Unknown LCD state, invalid Sense state or failed durable
+completion leaves the schedule pending; a later manual request remains separate.
+Both the Sense-current and downgrade-blocked branches retain peer ownership while
+the LCD resolves. Request cleanup and unlock happen only after completion or
+explicit deferral; an early unmarked unlock would also discard the proved lease.
+
 Transfer protocol 2 is negotiated in BEGIN/ACK. CHUNK encoding remains compatible;
 framed `MSG_OTA_CONTROL=7` carries END/ABORT. Abort and failed-END acknowledgments
 follow cleanup; successful END acknowledges boot selection and still requires a

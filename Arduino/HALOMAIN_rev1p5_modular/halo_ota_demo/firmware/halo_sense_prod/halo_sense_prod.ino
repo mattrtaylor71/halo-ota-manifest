@@ -3251,6 +3251,12 @@ static void ota_peer_schedule_complete() {
   }
   Preferences p;
   if (p.begin("ota_coord", false)) {
+    // Opening NVS can block too. Do not begin a new completion commit after
+    // the current work budget expires; a successful write below is final.
+    if (g_lcd_work_budget_live && !g_lcd_work_budget.remaining_ms()) {
+      p.end();
+      return;
+    }
     // The entire eight-ID history is one atomic NVS value. Publish RAM only
     // after it succeeds; a reset before pending removal still finds the ID.
     if (p.putString("done_ids", encoded) == strlen(encoded)) {
@@ -4010,7 +4016,7 @@ static bool prepare_lcd_ota_proxy_retry(char* lcd_fw, size_t fw_len) {
 // failure (mirrors FIX A). Returns true if the LCD is up-to-date afterwards
 // (already current OR proxy succeeded); false if it needed an update but the
 // proxy failed (lcd_ota_due left set for the next cycle).
-static bool prod_proxy_lcd_inline() {
+static bool prod_proxy_lcd_inline(bool report_both_current = true) {
   if (!sense_lcd_ota_retry_safe() || !g_lcd_work_budget.remaining_ms()) {
     set_lcd_ota_due_nvs(true);
     return false;
@@ -4043,10 +4049,27 @@ static bool prod_proxy_lcd_inline() {
   }
   if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) <= 0) {
     if (!g_lcd_work_budget.remaining_ms()) { set_lcd_ota_due_nvs(true); return false; }
+    if (!report_both_current) {
+      // A definitive policy completion needs current VALID/setup proof after
+      // the manifest result, not just the earlier preflight ownership proof.
+      char confirmed_lcd_fw[32] = {0};
+      if (!sense_lcd_ota_retry_safe() ||
+          !sense_lcd_ota_query(confirmed_lcd_fw, sizeof(confirmed_lcd_fw), nullptr,
+                              lcd_fw, g_lcd_work_budget.remaining_ms()) ||
+          !g_lcd_work_budget.remaining_ms()) {
+        set_lcd_ota_due_nvs(true);
+        return false;
+      }
+      strlcpy(g_lcd_ota_result, "noop", sizeof(g_lcd_ota_result));
+      set_lcd_ota_result_nvs("noop", confirmed_lcd_fw);
+      strlcpy(g_lcd_ota_version, confirmed_lcd_fw, sizeof(g_lcd_ota_version));
+      g_lcd_fw_query_ms = millis();
+      if (!g_lcd_work_budget.remaining_ms()) { set_lcd_ota_due_nvs(true); return false; }
+    }
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd already current (lcd=%s manifest=%s)",
              lcd_fw, lcd_manifest.version);
     set_lcd_ota_due_nvs(false);
-    boot_ota_report_both_current(lcd_fw, lcd_manifest.version);
+    if (report_both_current) boot_ota_report_both_current(lcd_fw, lcd_manifest.version);
     return true;
   }
 
@@ -4101,6 +4124,43 @@ static bool prod_proxy_lcd_inline() {
   set_lcd_ota_due_nvs(!ok);
   LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy done ok=%d", ok ? 1 : 0);
   return ok;
+}
+
+// Sense policy may forbid its downgrade while the LCD still needs work. Resolve
+// that work inline, then complete this schedule only after both boot proofs.
+static bool complete_downgrade_policy_check(const char* manifest_fw, const char* reason) {
+  const auto sense_boot_valid = []() {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const esp_partition_t* boot = esp_ota_get_boot_partition();
+    esp_ota_img_states_t state;
+    return running && boot && running->address == boot->address &&
+        esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_VALID;
+  };
+  if (!sense_lcd_ota_retry_safe() || !g_lcd_work_budget.remaining_ms() || !sense_boot_valid()) return false;
+  strlcpy(g_lcd_ota_result, "pending", sizeof(g_lcd_ota_result));
+  g_lcd_ota_version[0] = 0;
+  if (!prod_proxy_lcd_inline(false) || !sense_lcd_ota_retry_safe() ||
+      !g_lcd_work_budget.remaining_ms() || !sense_boot_valid() || get_lcd_ota_due_nvs()) return false;
+
+  const bool had_pending = g_coord_pending[0] != 0;
+  if (!g_lcd_work_budget.remaining_ms()) return false;
+  ota_peer_schedule_complete();  // The atomic completion write precedes RAM/pending removal.
+  if (had_pending && g_coord_pending[0]) return false;
+  if (had_pending) g_coord_completion_target[0] = 0;
+
+  char detail[192];
+  snprintf(detail, sizeof(detail), "sense=%.31s manifest=%.31s policy=downgrade_blocked lcd=%.31s lcd_result=%.31s",
+           kFirmwareVersion, manifest_fw, g_lcd_ota_version, g_lcd_ota_result);
+  uart_send_sense_diag_persist("ota", "policy_result", "downgrade_blocked", 0, detail);
+  if (g_boot_ota_diag_context && g_boot_ota_begin_reported) {
+    snprintf(detail, sizeof(detail), "%s policy=downgrade_blocked lcd=%.31s result=%.15s",
+             g_boot_ota_begin_record.detail, g_lcd_ota_version, g_lcd_ota_result);
+    uart_send_sense_diag_persist("ota", "policy_complete", g_boot_ota_begin_record.reason,
+                                g_boot_ota_begin_record.code, detail);
+  } else {
+    uart_send_sense_diag_persist("ota", "policy_complete", reason ? reason : "manual", 0, detail);
+  }
+  return true;
 }
 
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
@@ -4336,8 +4396,6 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     LOG_INFO("[MANIFEST] up_to_date version=%s", manifest.version);
     OtaIntent::recordOtaResult("up_to_date");
     ota_set_last_result("up_to_date");
-    OtaIntent::markNoUpdateNeeded();
-    release_waiting_lcd_ota("up_to_date");
     // FIX B: the Sense is already current — proxy the LCD INLINE on the main
     // task (not the fragile background lcd_ota_proxy_task). This runs with the
     // LCD held awake by OTA_LOCK, so it reliably heals a Sense-ahead /
@@ -4345,6 +4403,8 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     // DMA-starving background task that may never run.
     bool lcd_inline_ok = prod_proxy_lcd_inline();
     if (lcd_inline_ok && g_lcd_work_budget.remaining_ms()) ota_peer_schedule_complete();
+    OtaIntent::markNoUpdateNeeded();
+    release_waiting_lcd_ota("up_to_date");
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     if (!g_lcd_ota_task_running) {
@@ -4364,9 +4424,13 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
              desired_force ? 1 : 0);
     OtaIntent::recordOtaResult("downgrade_blocked");
     ota_set_last_result("downgrade_blocked");
+    if (!complete_downgrade_policy_check(manifest.version, reason)) {
+      diag_record_error_persistent("ota_orch", -1, "downgrade_policy_deferred");
+    }
+    // Keep the proved peer lease while resolving LCD work. Even an unmarked
+    // unlock clears that lease and can release a recovery/continuation hold.
     OtaIntent::markNoUpdateNeeded();
     release_waiting_lcd_ota("downgrade_blocked");
-    maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     if (!g_lcd_ota_task_running) {
