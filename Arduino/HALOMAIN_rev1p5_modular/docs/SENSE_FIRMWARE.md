@@ -38,6 +38,8 @@ The Sense board is an **XIAO ESP32-S3** with PSRAM, OV2640 camera, I2S microphon
 
 `initUarts()` sets `Serial.setTxTimeoutMs(1)` once; no production code overrides it. The installed Arduino core 3.3.8 `HWCDC::write()` uses an unsigned no-progress retry counter. With timeout 0 and a connected host that stops draining a full byte ring, the zero-byte ring send succeeds and the counter underflows before its zero test. The positive 1 ms SDK timeout avoids that path. It also bounds no-progress `Serial.flush()` retry; mutex/ring waits use the SDK tick conversion. This is a no-progress timeout, not a 1 ms wall-clock guarantee for a whole write with partial progress. Console logs may be dropped. The inter-board UART1 and OTA transfer timeouts are unchanged; the installed SDK is not modified.
 
+A September 4 JTAG snapshot directly corroborated this mechanism on the unresponsive private Sense build: `loopTask` was in `HWCDC::write()`'s no-progress delay branch while printing UART diagnostics, with `tx_timeout_ms=0`, `connected=true` and all 256 TX-ring bytes occupied. The optimized local retry counter was not inspected. The single snapshot issued no reset or flash command; both cores resumed after a 1.146-second halt. This is runtime stall evidence, not evidence of a scheduled TIMER wake or of the corrected firmware's later hardware result.
+
 This conditional driver defect is reproduced with actual-source host tests. Passive USB enumeration after closing a reader did not establish that it caused the observed bench stall; physical validation remains separate.
 
 ## Module Reference

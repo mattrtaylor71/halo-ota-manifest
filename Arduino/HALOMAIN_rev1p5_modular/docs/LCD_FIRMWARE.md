@@ -177,7 +177,7 @@ The LCD uses GPIO39 (INT_PIN) to wake the Sense board. Pin mode tracking (`lcd_w
 
 #### USB console backpressure
 
-`setup()` sets `Serial.setTxTimeoutMs(1)` immediately after `Serial.begin()`, matching Sense. The earlier claim that timeout 0 was safe on core 3.3.8 was incorrect: a connected/full BYTEBUF accepts a zero-byte send, and `HWCDC::write()` decrements its unsigned retry counter from 0 before checking for timeout. The positive 1 ms SDK timeout bounds no-progress write/flush retries and avoids the underflow; logs may be dropped. This is not a hard 1 ms total-write deadline when progress occurs. UART1, LVGL ownership, sleep timing and the installed SDK remain unchanged. The condition is host-source reproduced; the particular USB-close bench stall still needs physical evidence.
+`setup()` sets `Serial.setTxTimeoutMs(1)` immediately after `Serial.begin()`, matching Sense. The earlier claim that timeout 0 was safe on core 3.3.8 was incorrect: a connected/full BYTEBUF accepts a zero-byte send, and `HWCDC::write()` decrements its unsigned retry counter from 0 before checking for timeout. The positive 1 ms SDK timeout bounds no-progress write/flush retries and avoids the underflow; logs may be dropped. This is not a hard 1 ms total-write deadline when progress occurs. UART1, LVGL ownership, sleep timing and the installed SDK remain unchanged. The source fixture reproduces the condition on both boards. A September 4 Sense JTAG snapshot also found the application in the exact no-progress delay branch, with timeout 0, a connected host and a full 256-byte ring; the optimized local retry counter was not inspected. The equivalent LCD runtime stall was not directly observed.
 
 #### setup() Flow
 
