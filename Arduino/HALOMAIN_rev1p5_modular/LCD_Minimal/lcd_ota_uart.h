@@ -36,7 +36,8 @@
 #define LCD_OTA_CHUNK_TIMEOUT_MS  5000
 #define LCD_OTA_NVS_SAVE_INTERVAL 65536   // 64KB
 #define LCD_OTA_NVS_NAMESPACE     "lcd_ota_prog"
-#define LCD_OTA_IDLE_TIMEOUT_MS   30000   // 30s no chunk -> abort
+#define LCD_OTA_IDLE_TIMEOUT_MS   30000   // 30s no new accepted chunk -> abort
+#define LCD_OTA_ATTEMPT_BUDGET_MS 2400000 // absolute whole-attempt ceiling, including retries
 
 // ── State enum ───────────────────────────────────────────────────────
 enum LcdOtaState {
@@ -68,6 +69,44 @@ static UartOtaProtocol*       s_lcd_ota_protocol           = NULL;
 static uint32_t               s_lcd_ota_last_nvs_offset    = 0;
 static unsigned long          s_lcd_ota_last_chunk_ms      = 0;
 static uint8_t                s_lcd_ota_last_progress_pct  = 0;
+static uint32_t               s_lcd_ota_started_ms = 0;
+static uint32_t               s_lcd_ota_budget_ms = LCD_OTA_ATTEMPT_BUDGET_MS;
+static uint16_t               s_lcd_ota_expected_seq = 1;
+static uint16_t               s_lcd_ota_last_seq = 0;
+static size_t                 s_lcd_ota_last_len = 0;
+static uint8_t                s_lcd_ota_last_data[MAX_CHUNK_SIZE];
+static bool                   s_lcd_ota_have_last = false;
+static bool                   s_lcd_ota_control_v2 = false;
+static uint16_t               s_lcd_ota_last_aborted_session = 0;
+
+// Terminal evidence is already bounded; do not append/truncate it through the
+// generic192-byte context buffer. Preserve the complete record in the same ring.
+static void lcd_ota_store_terminal(const char* board, const char* event, int32_t code,
+                                   const char* detail) {
+    StaticJsonDocument<512> entry;
+    entry["board"] = board;
+    entry["area"] = "ota";
+    entry["event"] = event;
+    entry["code"] = code;
+    entry["detail"] = detail ? detail : "";
+    entry["uptime_ms"] = millis();
+    String output;
+    serializeJson(entry, output);
+    errlog_store(output.c_str());
+}
+
+static void lcd_ota_send_abort_ack(uint16_t session_id) {
+    StaticJsonDocument<192> doc;
+    doc["ver"] = PROTOCOL_VERSION;
+    doc["type"] = "LCD_OTA_ABORT_ACK";
+    doc["msg_id"] = get_next_msg_id();
+    doc["ts"] = (uint32_t)millis();
+    doc["session_id"] = session_id;
+    doc["json_ready"] = true;
+    String output;
+    serializeJson(doc, output);
+    uart_send_json(output.c_str());
+}
 
 // Global flag: when true, the UART task switches to binary RX mode.
 static bool g_lcd_ota_binary_mode = false;
@@ -257,7 +296,14 @@ static void lcd_ota_abort_internal(const char* reason) {
                   reason ? reason : "unknown", static_cast<int>(s_lcd_ota_state.load()),
                   s_lcd_ota_bytes_written);
 
-    lcd_errlog_store_with_context("lcd", "ota", "OTA_ABORT", (int)s_lcd_ota_bytes_written, reason ? reason : "unknown");
+    char terminal[160];
+    snprintf(terminal, sizeof(terminal), "s=%u why=%s seq=%u bytes=%lu idle=%lu crc=%lu frame=%lu",
+             s_lcd_ota_session_id, reason ? reason : "unknown", s_lcd_ota_last_seq,
+             (unsigned long)s_lcd_ota_bytes_written,
+             (unsigned long)(millis() - s_lcd_ota_last_chunk_ms),
+             (unsigned long)(s_lcd_ota_protocol ? s_lcd_ota_protocol->crc_error_count() : 0),
+             (unsigned long)(s_lcd_ota_protocol ? s_lcd_ota_protocol->frame_error_count() : 0));
+    lcd_ota_store_terminal("lcd", "OTA_ABORT", (int)s_lcd_ota_bytes_written, terminal);
 
     // Send abort notification to Sense
     StaticJsonDocument<256> doc;
@@ -306,6 +352,8 @@ static void lcd_ota_abort_internal(const char* reason) {
     lcd_ota_uart_restore_ui();
     s_lcd_ota_state = LCD_OTA_IDLE;
     g_lcd_ota_uart_receiving = false;
+    s_lcd_ota_last_aborted_session = s_lcd_ota_session_id;
+    lcd_ota_send_abort_ack(s_lcd_ota_session_id);
 }
 
 
@@ -359,6 +407,12 @@ static const char* lcd_ota_last_result_str() {
 static void lcd_build_fw_status_json(JsonDocument& doc) {
     doc["lcd_fw"] = kFirmwareVersion ? kFirmwareVersion : "unknown";
     doc["boot_ready"] = g_lcd_boot_ready.load();
+#ifdef HALO_LCD_PROD_WRAPPER
+    doc["peer_boot_id"] = halo_lcd_coord_boot_id();
+    doc["coord_waiting"] = halo_lcd_coord_waiting();
+    doc["coord_owner"] = halo_lcd_coord_owner();
+    doc["coord_lease_ms"] = halo_lcd_coord_lease_ms();
+#endif
 
     const esp_partition_t* running = esp_ota_get_running_partition();
     const esp_partition_t* boot    = esp_ota_get_boot_partition();
@@ -380,7 +434,7 @@ static void lcd_build_fw_status_json(JsonDocument& doc) {
 }
 
 // ── LCD_OTA_QUERY ────────────────────────────────────────────────────
-static void lcd_ota_handle_query() {
+static void lcd_ota_handle_query(const char* coord_id = nullptr) {
     const esp_partition_t* ota_part = esp_ota_get_next_update_partition(NULL);
 
     StaticJsonDocument<512> doc;
@@ -401,6 +455,7 @@ static void lcd_ota_handle_query() {
     // Enriched partition/state fields (shared contract). This also sets
     // lcd_fw, so it is intentionally called after the back-compat block.
     lcd_build_fw_status_json(doc);
+    if (coord_id && coord_id[0] && strlen(coord_id) < 40) doc["coord_id"] = coord_id;
 
     const char* last_result = lcd_ota_last_result_str();
     if (last_result && last_result[0]) {
@@ -435,6 +490,8 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
         resp["ts"]         = millis();
         resp["accepted"]   = false;
         resp["reason"]     = "already_active";
+        if (doc["session_id"].is<uint16_t>()) resp["session_id"] = doc["session_id"].as<uint16_t>();
+        resp["json_ready"] = false;
         String out;
         serializeJson(resp, out);
         uart_send_json(out.c_str());
@@ -470,6 +527,8 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
         resp["ts"]       = millis();
         resp["accepted"] = false;
         resp["reason"]   = "no_ota_partition";
+        resp["session_id"] = session_id;
+        resp["json_ready"] = true;
         String out;
         serializeJson(resp, out);
         uart_send_json(out.c_str());
@@ -487,11 +546,44 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
         resp["ts"]       = millis();
         resp["accepted"] = false;
         resp["reason"]   = "image_too_large";
+        resp["session_id"] = session_id;
+        resp["json_ready"] = true;
         String out;
         serializeJson(resp, out);
         uart_send_json(out.c_str());
         return;
     }
+
+    // Reject incomplete metadata before opening/writing an inactive partition.
+    bool valid_sha = sha256 && strlen(sha256) == 64;
+    for (size_t i = 0; valid_sha && i < 64; ++i) {
+        const char c = sha256[i];
+        valid_sha = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    }
+    if (!doc["session_id"].is<uint16_t>() || !doc["image_size"].is<uint32_t>() ||
+        (!doc["budget_ms"].isUnbound() && (!doc["budget_ms"].is<uint32_t>() || (doc["budget_ms"] | (uint32_t)0) == 0)) ||
+        (!doc["ota_proto"].isUnbound() && (!doc["ota_proto"].is<uint8_t>() ||
+          ((doc["ota_proto"] | 0) != 1 && (doc["ota_proto"] | 0) != OTA_UART_PROTOCOL_VERSION))) ||
+        !session_id || !image_size || !valid_sha || !version || !version[0] || strlen(version) >= sizeof(s_lcd_ota_target_version)) {
+        StaticJsonDocument<256> resp;
+        resp["ver"] = PROTOCOL_VERSION;
+        resp["type"] = "LCD_OTA_BEGIN_ACK";
+        resp["msg_id"] = get_next_msg_id();
+        resp["ts"] = (uint32_t)millis();
+        resp["session_id"] = session_id;
+        resp["accepted"] = false;
+        resp["reason"] = "invalid_metadata";
+        resp["json_ready"] = true;
+        String output;
+        serializeJson(resp, output);
+        uart_send_json(output.c_str());
+        return;
+    }
+    s_lcd_ota_started_ms = millis();
+    uint32_t requested_budget = doc["budget_ms"] | (uint32_t)LCD_OTA_ATTEMPT_BUDGET_MS;
+    s_lcd_ota_budget_ms = requested_budget && requested_budget < LCD_OTA_ATTEMPT_BUDGET_MS
+                             ? requested_budget : LCD_OTA_ATTEMPT_BUDGET_MS;
+    s_lcd_ota_control_v2 = (doc["ota_proto"] | 1) == OTA_UART_PROTOCOL_VERSION;
 
     // Store session info
     s_lcd_ota_session_id = session_id;
@@ -504,6 +596,12 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
         strncpy(s_lcd_ota_target_version, version, 31);
         s_lcd_ota_target_version[31] = '\0';
     }
+
+    // BEGIN's erase/NVS work also owns sleep. The UART task is still inside
+    // this handler; binary polling starts only after the acceptance response.
+    s_lcd_ota_state = LCD_OTA_RECEIVING;
+    g_lcd_ota_uart_receiving = true;
+    s_lcd_ota_last_aborted_session = 0;
 
     // Check NVS for resume
     uint32_t resume_offset = 0;
@@ -562,10 +660,14 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
         resp["ts"]       = millis();
         resp["accepted"] = false;
         resp["reason"]   = "ota_begin_failed";
+        resp["session_id"] = session_id;
+        lcd_ota_uart_restore_ui();
+        s_lcd_ota_state = LCD_OTA_IDLE;
+        g_lcd_ota_uart_receiving = false;
+        resp["json_ready"] = true;
         String out;
         serializeJson(resp, out);
         uart_send_json(out.c_str());
-        lcd_ota_uart_restore_ui();
         return;
     }
 
@@ -585,16 +687,40 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
     s_lcd_ota_bytes_written     = resuming ? resume_offset : 0;
     s_lcd_ota_last_nvs_offset   = s_lcd_ota_bytes_written;
     s_lcd_ota_last_progress_pct = 0;
+    s_lcd_ota_expected_seq = 1;
+    s_lcd_ota_last_seq = 0;
+    s_lcd_ota_last_len = 0;
+    s_lcd_ota_have_last = false;
 
     // Create protocol instance (quiet mode suppresses per-frame Serial.printf)
     s_lcd_ota_protocol = new UartOtaProtocol(&senseSerial);
     if (s_lcd_ota_protocol) s_lcd_ota_protocol->quiet = true;
-    if (!s_lcd_ota_protocol) {
+    if (!s_lcd_ota_protocol || !s_lcd_ota_protocol->valid()) {
+        delete s_lcd_ota_protocol;
+        s_lcd_ota_protocol = nullptr;
         Serial.println("[LCD_OTA_UART] FATAL: failed to allocate UartOtaProtocol");
         esp_ota_abort(s_lcd_ota_handle);
         s_lcd_ota_handle = 0;
         mbedtls_sha256_free(&s_lcd_ota_sha_ctx);
         lcd_ota_uart_restore_ui();
+        s_lcd_ota_state = LCD_OTA_IDLE;
+        g_lcd_ota_uart_receiving = false;
+        StaticJsonDocument<256> resp;
+        resp["ver"] = PROTOCOL_VERSION;
+        resp["type"] = "LCD_OTA_BEGIN_ACK";
+        resp["msg_id"] = get_next_msg_id();
+        resp["ts"] = (uint32_t)millis();
+        resp["session_id"] = session_id;
+        resp["accepted"] = false;
+        resp["reason"] = "out_of_memory";
+        resp["json_ready"] = true;
+        String output;
+        serializeJson(resp, output);
+        uart_send_json(output.c_str());
+        return;
+    }
+    if ((uint32_t)(millis() - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms) {
+        lcd_ota_abort_internal("begin_deadline");
         return;
     }
 
@@ -615,17 +741,15 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
         resp["session_id"]     = session_id;
         resp["accepted"]       = true;
         resp["resume_offset"]  = resume_offset;
+        resp["ota_proto"]      = s_lcd_ota_control_v2 ? OTA_UART_PROTOCOL_VERSION : 1;
 
         String out;
         serializeJson(resp, out);
         uart_send_json(out.c_str());
     }
 
-    // Drain any stray bytes in the RX buffer before switching to binary
-    delay(50);  // Allow any in-flight JSON to arrive
-    while (senseSerial.available() > 0) {
-        senseSerial.read();
-    }
+    // The JSON parser already consumed BEGIN's delimiter. Do not drain after
+    // ACK: a fast sender may already be delivering the first valid CHUNK.
 
     // Switch to binary RX mode
     s_lcd_ota_state       = LCD_OTA_RECEIVING;
@@ -637,6 +761,22 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
 
 // ── LCD_OTA_END ──────────────────────────────────────────────────────
 static void lcd_ota_handle_end(JsonObject& doc) {
+    const uint16_t session = doc["session_id"] | (uint16_t)0;
+    if (!doc["session_id"].is<uint16_t>() || s_lcd_ota_state != LCD_OTA_RECEIVING ||
+        !session || session != s_lcd_ota_session_id) return;
+    if ((!doc["image_size"].isUnbound() && !doc["image_size"].is<uint32_t>()) ||
+        s_lcd_ota_bytes_written != s_lcd_ota_image_size ||
+        (doc["image_size"] | s_lcd_ota_image_size) != s_lcd_ota_image_size) {
+        lcd_ota_abort_internal("end_size_mismatch");
+        return;
+    }
+    if ((uint32_t)(millis() - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms) {
+        lcd_ota_abort_internal("end_deadline");
+        return;
+    }
+    const char* sender_detail = doc["detail"] | (const char*)nullptr;
+    if (sender_detail && strlen(sender_detail) < 224)
+        lcd_ota_store_terminal("sense", "LCD_PROXY_STREAM", 0, sender_detail);
     unsigned long t0 = millis();
     Serial.printf("[LCD_OTA_UART] END received: session=%u written=%u expected=%u t=%lu\n",
                   s_lcd_ota_session_id, s_lcd_ota_bytes_written, s_lcd_ota_image_size, t0);
@@ -675,41 +815,52 @@ static void lcd_ota_handle_end(JsonObject& doc) {
                   computed_hex, s_lcd_ota_expected_sha256, sha_match ? 1 : 0);
 
     bool ota_ok = false;
+    bool deadline_expired = (uint32_t)(millis() - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms;
 
-    if (sha_match) {
+    if (sha_match && !deadline_expired) {
         // Finalize OTA
         unsigned long t3 = millis();
         esp_err_t err = esp_ota_end(s_lcd_ota_handle);
         unsigned long t4 = millis();
         Serial.printf("[LCD_OTA_UART] esp_ota_end took %lums err=0x%x\n", t4 - t3, err);
         s_lcd_ota_handle = 0;
+        deadline_expired = (uint32_t)(millis() - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms;
 
         if (err != ESP_OK) {
             Serial.printf("[LCD_OTA_UART] esp_ota_end failed: 0x%x\n", err);
             lcd_errlog_store_with_context("lcd", "ota", "OTA_END_FAIL", (int)err, "esp_ota_end");
-        } else {
+        } else if (!deadline_expired) {
             unsigned long t5 = millis();
-            err = esp_ota_set_boot_partition(s_lcd_ota_partition);
-            unsigned long t6 = millis();
-            Serial.printf("[LCD_OTA_UART] esp_ota_set_boot_partition took %lums err=0x%x\n", t6 - t5, err);
-            if (err != ESP_OK) {
-                Serial.printf("[LCD_OTA_UART] esp_ota_set_boot_partition failed: 0x%x\n", err);
-                lcd_errlog_store_with_context("lcd", "ota", "BOOT_PART_FAIL", (int)err, "set_boot_partition");
-            } else {
-                ota_ok = true;
-                Serial.printf("[LCD_OTA_UART] Boot partition set to %s total_end_ms=%lu\n",
-                              s_lcd_ota_partition->label, millis() - t0);
+            // Last cancellable boundary. A successful boot selection remains
+            // committed even if the synchronous SDK call returns after budget.
+            deadline_expired = (uint32_t)(t5 - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms;
+            if (!deadline_expired) {
+                err = esp_ota_set_boot_partition(s_lcd_ota_partition);
+                unsigned long t6 = millis();
+                Serial.printf("[LCD_OTA_UART] esp_ota_set_boot_partition took %lums err=0x%x\n", t6 - t5, err);
+                if (err != ESP_OK) {
+                    Serial.printf("[LCD_OTA_UART] esp_ota_set_boot_partition failed: 0x%x\n", err);
+                    lcd_errlog_store_with_context("lcd", "ota", "BOOT_PART_FAIL", (int)err, "set_boot_partition");
+                } else {
+                    ota_ok = true;
+                    Serial.printf("[LCD_OTA_UART] Boot partition set to %s total_end_ms=%lu\n",
+                                  s_lcd_ota_partition->label, millis() - t0);
+                }
             }
         }
     } else {
         // SHA mismatch — abort OTA
-        Serial.println("[LCD_OTA_UART] SHA256 mismatch — aborting OTA");
-        lcd_errlog_store_with_context("lcd", "ota", "SHA_MISMATCH", 0, "checksum_mismatch");
+        if (!deadline_expired) {
+            Serial.println("[LCD_OTA_UART] SHA256 mismatch — aborting OTA");
+            lcd_errlog_store_with_context("lcd", "ota", "SHA_MISMATCH", 0, "checksum_mismatch");
+        }
         if (s_lcd_ota_handle != 0) {
             esp_ota_abort(s_lcd_ota_handle);
             s_lcd_ota_handle = 0;
         }
     }
+    if (deadline_expired && !ota_ok)
+        lcd_ota_store_terminal("lcd", "OTA_END_DEADLINE", 0, "end_deadline_before_commit");
 
     // Clear NVS progress regardless of outcome
     lcd_ota_nvs_clear();
@@ -724,12 +875,13 @@ static void lcd_ota_handle_end(JsonObject& doc) {
     resp["sha_match"]    = sha_match;
     resp["sha_computed"] = computed_hex;
     resp["ota_ok"]       = ota_ok;
+    if (deadline_expired && !ota_ok) resp["reason"] = "attempt_deadline";
 
     String out;
     serializeJson(resp, out);
-    uart_send_json(out.c_str());
 
     if (sha_match && ota_ok) {
+        uart_send_json(out.c_str());
         // Keep FINALIZING and the receiving guard set through esp_restart().
         // Core 1's guardian can already be overdue after a long transfer;
         // releasing either guard before NVS/delays lets sleep race this reboot.
@@ -774,6 +926,8 @@ static void lcd_ota_handle_end(JsonObject& doc) {
         s_lcd_ota_target_version[0]  = '\0';
         s_lcd_ota_state              = LCD_OTA_IDLE;
         g_lcd_ota_uart_receiving     = false;
+        // Failed END_ACK is a post-cleanup JSON-mode proof, like ABORT_ACK.
+        uart_send_json(out.c_str());
     }
 }
 
@@ -781,12 +935,20 @@ static void lcd_ota_handle_end(JsonObject& doc) {
 static void lcd_ota_handle_abort(JsonObject& doc) {
     const char* reason = doc["reason"] | "sense_abort";
     uint16_t session_id = doc["session_id"] | (uint16_t)0;
-    if (s_lcd_ota_state == LCD_OTA_IDLE || session_id != s_lcd_ota_session_id) {
+    if (!doc["session_id"].is<uint16_t>() || !session_id) return;
+    if (s_lcd_ota_state == LCD_OTA_IDLE && session_id && session_id == s_lcd_ota_last_aborted_session) {
+        lcd_ota_send_abort_ack(session_id);  // idempotent; never clear a newer lock
+        return;
+    }
+    if (s_lcd_ota_state != LCD_OTA_RECEIVING || session_id != s_lcd_ota_session_id) {
         Serial.printf("[LCD_OTA_UART] ABORT ignored session=%u active=%u state=%d\n",
                       session_id, s_lcd_ota_session_id,
                       static_cast<int>(s_lcd_ota_state.load()));
         return;
     }
+    const char* sender_detail = doc["detail"] | (const char*)nullptr;
+    if (sender_detail && strlen(sender_detail) < 224)
+        lcd_ota_store_terminal("sense", "LCD_PROXY_END", 0, sender_detail);
     s_lcd_ota_state = LCD_OTA_ABORTING;
     g_lcd_ota_uart_receiving = true;
     g_lcd_ota_binary_mode = false;
@@ -828,6 +990,8 @@ static void lcd_ota_handle_abort(JsonObject& doc) {
     lcd_ota_uart_restore_ui();
     s_lcd_ota_state = LCD_OTA_IDLE;
     g_lcd_ota_uart_receiving = false;
+    s_lcd_ota_last_aborted_session = session_id;
+    lcd_ota_send_abort_ack(session_id);
 }
 
 
@@ -865,110 +1029,86 @@ static bool lcd_ota_receive_loop() {
         s_last_diag_ms = millis();
     }
 
-    // Check for idle timeout
-    unsigned long now = millis();
-    if (s_lcd_ota_last_chunk_ms > 0 &&
-        (now - s_lcd_ota_last_chunk_ms) >= LCD_OTA_IDLE_TIMEOUT_MS) {
-        Serial.printf("[LCD_OTA_UART] Idle timeout (%lu ms since last chunk)\n",
-                      now - s_lcd_ota_last_chunk_ms);
+    const uint32_t now = millis();
+    if ((uint32_t)(now - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms) {
+        lcd_ota_abort_internal("attempt_deadline");
+        return false;
+    }
+    if ((uint32_t)(now - s_lcd_ota_last_chunk_ms) >= LCD_OTA_IDLE_TIMEOUT_MS) {
         lcd_ota_abort_internal("timeout");
         return false;
     }
 
-    // Peek at the first available byte.  If it's '{', a JSON control
-    // message has arrived (LCD_OTA_END or LCD_OTA_ABORT).  Read the full
-    // line and dispatch it.
-    if (senseSerial.available() > 0) {
-        int peek = senseSerial.peek();
-        // If all data received, consume any non-'{' stray bytes (e.g. COBS
-        // 0x00 delimiters) so they don't block the LCD_OTA_END JSON read.
-        if (peek != '{' && s_lcd_ota_bytes_written >= s_lcd_ota_image_size) {
-            uint8_t discarded = senseSerial.read();
-            Serial.printf("[LCD_OTA_UART] discarded stray byte 0x%02X while awaiting JSON\n",
-                          discarded);
-            return true;  // loop back to check next byte
-        }
-        if (peek == '{') {
-            // Read the full JSON line
-            char json_buf[512];
-            int pos = 0;
-            unsigned long read_start = millis();
-            while ((millis() - read_start) < 1000 && pos < (int)(sizeof(json_buf) - 1)) {
-                if (senseSerial.available() > 0) {
-                    char c = senseSerial.read();
-                    if (c == '\n' || c == '\r') {
-                        if (pos > 0) break;
-                        continue;
-                    }
-                    json_buf[pos++] = c;
-                } else {
-                    delay(1);
-                }
-            }
-            json_buf[pos] = '\0';
-
-            if (pos > 0) {
-                Serial.printf("[LCD_OTA_UART] JSON in binary mode: %s\n", json_buf);
-                StaticJsonDocument<512> jdoc;
-                DeserializationError jerr = deserializeJson(jdoc, json_buf);
-                if (jerr == DeserializationError::Ok) {
-                    const char* type = jdoc["type"] | (const char*)nullptr;
-                    if (type) {
-                        JsonObject obj = jdoc.as<JsonObject>();
-                        if (strcmp(type, "LCD_OTA_END") == 0) {
-                            lcd_ota_handle_end(obj);
-                            return false;
-                        } else if (strcmp(type, "LCD_OTA_ABORT") == 0) {
-                            lcd_ota_handle_abort(obj);
-                            return false;
-                        } else {
-                            Serial.printf("[LCD_OTA_UART] WARN: unexpected JSON type in binary mode: %s\n", type);
-                        }
-                    }
-                } else {
-                    Serial.printf("[LCD_OTA_UART] WARN: JSON parse error in binary mode: %s\n", jerr.c_str());
-                }
-            }
-            return true;  // Continue receiving
-        }
-    }
-
-    // All expected bytes received — stop calling recv_frame so it won't
-    // consume the incoming LCD_OTA_END JSON bytes.  Just wait for the
-    // peek-for-'{' check above to catch the JSON message.
-    if (s_lcd_ota_bytes_written >= s_lcd_ota_image_size) {
-        if (millis() - s_last_diag_ms > 2000) {
-            Serial.printf("[LCD_OTA_UART] All %u bytes received, awaiting LCD_OTA_END JSON\n",
-                          s_lcd_ota_bytes_written);
-            s_last_diag_ms = millis();
-        }
-        delay(10);
-        return true;
-    }
-
-    // Try to receive a binary COBS frame
     uint8_t msg_type = 0;
     uint16_t seq = 0;
     uint8_t chunk_data[MAX_CHUNK_SIZE];
     size_t chunk_len = sizeof(chunk_data);
-
-    bool got_frame = s_lcd_ota_protocol->recv_frame(&msg_type, &seq,
-                                                     chunk_data, &chunk_len,
-                                                     LCD_OTA_CHUNK_TIMEOUT_MS);
-    if (!got_frame) {
-        // No frame within timeout — not necessarily fatal; the idle
-        // timeout above handles true stalls.
-        return true;
+    char json_buf[512];
+    auto event = s_lcd_ota_protocol->recv_event(&msg_type, &seq, chunk_data, &chunk_len,
+                                                json_buf, sizeof(json_buf), 100);
+    if (event == UartOtaProtocol::TIMEOUT) return true;
+    // Recheck after blocking receive: a late frame cannot refresh an expired lease.
+    if ((uint32_t)(millis() - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms ||
+        (uint32_t)(millis() - s_lcd_ota_last_chunk_ms) >= LCD_OTA_IDLE_TIMEOUT_MS) {
+        lcd_ota_abort_internal("deadline_after_rx");
+        return false;
     }
-
+    if (event == UartOtaProtocol::JSON || msg_type == MSG_OTA_CONTROL) {
+        if (event == UartOtaProtocol::FRAME && !s_lcd_ota_control_v2) {
+            lcd_ota_abort_internal("unnegotiated_control");
+            return false;
+        }
+        const char* control_text = event == UartOtaProtocol::JSON ? json_buf : reinterpret_cast<const char*>(chunk_data);
+        const size_t control_length = event == UartOtaProtocol::JSON ? strlen(json_buf) : chunk_len;
+        if (!UartOtaProtocol::json_record_complete(control_text, control_length)) return true;
+        StaticJsonDocument<512> doc;
+        DeserializationError err = event == UartOtaProtocol::JSON
+            ? deserializeJson(doc, json_buf)
+            : deserializeJson(doc, chunk_data, chunk_len);
+        if (err != DeserializationError::Ok) return true;
+        const char* type = doc["type"] | "";
+        JsonObject obj = doc.as<JsonObject>();
+        if (strcmp(type, "LCD_OTA_END") == 0) lcd_ota_handle_end(obj);
+        else if (strcmp(type, "LCD_OTA_ABORT") == 0) lcd_ota_handle_abort(obj);
+        return s_lcd_ota_state == LCD_OTA_RECEIVING;
+    }
     if (msg_type != MSG_CHUNK) {
-        Serial.printf("[LCD_OTA_UART] WARN: unexpected msg_type=%u seq=%u\n",
-                      msg_type, seq);
-        return true;
+        s_lcd_ota_protocol->send_nack(seq, ERR_INVALID_FRAME);
+        lcd_ota_abort_internal("unexpected_frame_type");
+        return false;
+    }
+    if (s_lcd_ota_have_last && seq == s_lcd_ota_last_seq) {
+        if (chunk_len == s_lcd_ota_last_len &&
+            memcmp(chunk_data, s_lcd_ota_last_data, chunk_len) == 0) {
+            // Idempotence includes the final CHUNK while waiting for END.
+            // A duplicate is not new progress and cannot extend either deadline.
+            s_lcd_ota_protocol->send_ack(seq);
+            return true;
+        }
+        s_lcd_ota_protocol->send_nack(seq, ERR_SEQUENCE);
+        lcd_ota_abort_internal("duplicate_payload_mismatch");
+        return false;
+    }
+    if (seq != s_lcd_ota_expected_seq) {
+        s_lcd_ota_protocol->send_nack(seq, ERR_SEQUENCE);
+        lcd_ota_abort_internal("sequence_mismatch");
+        return false;
+    }
+    if (!chunk_len || chunk_len > MAX_CHUNK_SIZE ||
+        s_lcd_ota_bytes_written > s_lcd_ota_image_size ||
+        chunk_len > s_lcd_ota_image_size - s_lcd_ota_bytes_written) {
+        s_lcd_ota_protocol->send_nack(seq, ERR_IMAGE_SIZE);
+        lcd_ota_abort_internal("chunk_size_mismatch");
+        return false;
     }
 
     // Write chunk to OTA partition
     esp_err_t werr = esp_ota_write(s_lcd_ota_handle, chunk_data, chunk_len);
+    if ((uint32_t)(millis() - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms ||
+        (uint32_t)(millis() - s_lcd_ota_last_chunk_ms) >= LCD_OTA_IDLE_TIMEOUT_MS) {
+        lcd_ota_abort_internal("deadline_after_write");
+        return false;
+    }
     if (werr != ESP_OK) {
         Serial.printf("[LCD_OTA_UART] esp_ota_write failed: 0x%x (len=%u)\n",
                       werr, (unsigned)chunk_len);
@@ -979,9 +1119,19 @@ static bool lcd_ota_receive_loop() {
 
     // Update SHA256
     mbedtls_sha256_update(&s_lcd_ota_sha_ctx, chunk_data, chunk_len);
+    if ((uint32_t)(millis() - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms ||
+        (uint32_t)(millis() - s_lcd_ota_last_chunk_ms) >= LCD_OTA_IDLE_TIMEOUT_MS) {
+        lcd_ota_abort_internal("deadline_after_hash");
+        return false;
+    }
 
     s_lcd_ota_bytes_written += chunk_len;
     s_lcd_ota_last_chunk_ms = millis();
+    s_lcd_ota_last_seq = seq;
+    s_lcd_ota_last_len = chunk_len;
+    memcpy(s_lcd_ota_last_data, chunk_data, chunk_len);
+    s_lcd_ota_have_last = true;
+    s_lcd_ota_expected_seq = (uint16_t)(seq + 1);  // defined modulo-65536 sequence wrap
 
     // Send ACK
     s_lcd_ota_protocol->send_ack(seq);

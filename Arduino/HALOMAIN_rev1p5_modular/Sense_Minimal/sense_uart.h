@@ -22,12 +22,56 @@
 #ifndef SENSE_UART_H
 #define SENSE_UART_H
 
+#include <atomic>
+
 // Forward declaration - parse_input_message stays in .ino (dispatch layer)
 static bool parse_input_message(const char* json_str);
 
 // LCD OTA proxy UART ownership flag — when true, suppress JSON TX
 // (binary COBS framing is in progress on lcdSerial)
 static volatile bool g_lcd_ota_proxy_owns_uart = false;
+// An interrupted sender must not forget that its peer may still be receiving.
+// This blocks ordinary JSON, independently of local binary-task ownership.
+static std::atomic<bool> g_lcd_ota_mode_unconfirmed{true};
+static bool s_lcd_mode_marker_pending = true;
+static bool sense_uart_ordinary_tx_allowed() {
+  return !g_lcd_ota_proxy_owns_uart && !g_spool_owns_uart && !g_img_spool_tx_active &&
+         !g_lcd_ota_mode_unconfirmed.load();
+}
+
+static void sense_lcd_mode_restore() {
+  Preferences prefs;
+  bool unsafe = true;  // Missing/unreadable state requires a fresh mode probe.
+  if (prefs.begin("lcd_xfer", true)) {
+    unsafe = prefs.getBool("unsafe", true);
+    prefs.end();
+  }
+  s_lcd_mode_marker_pending = unsafe;
+  g_lcd_ota_mode_unconfirmed.store(unsafe);
+}
+
+static bool sense_lcd_mode_before_begin() {
+  Preferences prefs;
+  if (!prefs.begin("lcd_xfer", false)) return false;
+  const bool stored = prefs.putBool("unsafe", true) == 1;
+  prefs.end();
+  if (stored) s_lcd_mode_marker_pending = true;
+  else Serial.println("[LCD_XFER] mode_marker_write_failed");
+  return stored;
+}
+
+static void sense_lcd_mode_confirm(bool persist = true) {
+  g_lcd_ota_mode_unconfirmed.store(false);
+  if (!persist || !s_lcd_mode_marker_pending) return;
+  Preferences prefs;
+  bool stored = false;
+  if (prefs.begin("lcd_xfer", false)) {
+    stored = prefs.putBool("unsafe", false) == 1;
+    prefs.end();
+  }
+  if (stored) s_lcd_mode_marker_pending = false;
+  else Serial.println("[LCD_XFER] mode_marker_clear_failed; next boot will recheck");
+}
 
 // ── UART ring buffer & protocol state ────────────────────────────────
 static uint32_t sense_msg_id_counter = 1;
@@ -83,6 +127,7 @@ static void initUarts() {
     Serial.println("[UART_INIT] skipped already_initialized=1");
     return;
   }
+  sense_lcd_mode_restore();
   Serial.begin(115200);
   // Keep USB console backpressure bounded when a cable remains attached but
   // no host drains logs. Core3.3.8 HWCDC::write decrements its unsigned retry
@@ -350,10 +395,18 @@ static bool validate_protocol_message(JsonDocument& doc) {
 
 // ── Core TX ──────────────────────────────────────────────────────────
 
-static void uart_send_json(const char* json_str) {
+static void uart_send_json(const char* json_str, bool explicit_mode_probe = false) {
   // Block JSON TX while LCD OTA proxy owns the UART for binary COBS framing
   if (g_lcd_ota_proxy_owns_uart) {
     return;
+  }
+  if (g_lcd_ota_mode_unconfirmed.load()) {
+    // Only the bounded query APIs can opt in. No general producer can bypass
+    // quarantine by choosing a type string or racing a global probe flag.
+    if (!explicit_mode_probe || !json_str || strlen(json_str) >= 256) return;
+    StaticJsonDocument<256> probe;
+    if (deserializeJson(probe, json_str) != DeserializationError::Ok ||
+        strcmp(probe["type"] | "", "LCD_OTA_QUERY") != 0) return;
   }
   // Same rule for the SD-spool drain. The Sense emits SENSE_DIAG rssi reports
   // roughly every 2s; during a drain those land inside the LCD's ACK reads and

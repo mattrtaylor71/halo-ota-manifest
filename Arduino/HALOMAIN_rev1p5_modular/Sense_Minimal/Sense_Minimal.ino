@@ -95,6 +95,7 @@ void halo_prod_on_lcd_maint_ack(uint32_t remaining_s,
                                 uint32_t grace_after_sec);
 bool halo_prod_should_defer_sleep_ack(bool* ota_busy, bool* mqtt_busy, bool* time_invalid, bool* ota_check_busy);
 void halo_prod_request_manual_ota(const char* reason);
+void halo_prod_note_lcd_timer(const char* schedule_id, uint32_t boot_id, int wake, int reset, uint32_t epoch, bool resumed);
 void halo_prod_request_maint_test(uint32_t duration_sec);
 // True if any LCD/Sense OTA activity is in progress. Used to suppress
 // non-OTA HTTP traffic (e.g. list refresh) that would starve the single
@@ -787,6 +788,7 @@ static SemaphoreHandle_t g_list_mutex = NULL;
 // board's own JSON TX so a periodic SENSE_DIAG cannot land inside the COBS
 // frames it is transmitting.
 static bool g_img_spool_tx_active = false;
+static bool sense_uart_ordinary_tx_allowed();  // Defined with the transport guard below.
 #include "sense_img_spool.h"  // spool captures to the LCD SD card (Step 4)
 #include "sense_diag.h"
 #include "sense_errlog.h"
@@ -2891,7 +2893,30 @@ static bool parse_input_message(const char* json_str) {
   // These messages are responses from the LCD board during OTA proxy
   // sessions. The proxy task polls the mailbox flags instead of reading
   // lcdSerial directly, avoiding UART contention with this main loop.
+  } else if (strcmp(type, "OTA_PEER_READY") == 0) {
+#ifdef HALO_SENSE_PROD_WRAPPER
+    if (!doc["schedule_id"].is<const char*>() || !doc["peer_boot_id"].is<uint32_t>() ||
+        !doc["origin_wake"].is<int>() || !doc["origin_reset"].is<int>() ||
+        !doc["origin_epoch"].is<uint32_t>() || !doc["resumed"].is<bool>()) return false;
+    halo_prod_note_lcd_timer(doc["schedule_id"] | "", doc["peer_boot_id"] | (uint32_t)0,
+                             doc["origin_wake"] | -1, doc["origin_reset"] | -1,
+                             doc["origin_epoch"] | (uint32_t)0, doc["resumed"] | false);
+#endif
   } else if (strcmp(type, "LCD_OTA_QUERY_RESP") == 0) {
+    // Clear acceptance first: malformed present fields cannot inherit a
+    // previous reply or silently fall back to the uncorrelated legacy path.
+    g_lcd_ota_query_resp_ready = false;
+    g_lcd_query_boot_ready = false;
+    if (!doc["lcd_fw"].is<const char*>() || !doc["ota_part_size"].is<uint32_t>() ||
+        (!doc["running_part"].isUnbound() && !doc["running_part"].is<const char*>()) ||
+        (!doc["running_state"].isUnbound() && !doc["running_state"].is<const char*>()) ||
+        (!doc["boot_part"].isUnbound() && !doc["boot_part"].is<const char*>()) ||
+        (!doc["boot_ready"].isUnbound() && !doc["boot_ready"].is<bool>()) ||
+        (!doc["coord_id"].isUnbound() && !doc["coord_id"].is<const char*>()) ||
+        (!doc["peer_boot_id"].isUnbound() && !doc["peer_boot_id"].is<uint32_t>()) ||
+        (!doc["coord_waiting"].isUnbound() && !doc["coord_waiting"].is<bool>()) ||
+        (!doc["coord_owner"].isUnbound() && !doc["coord_owner"].is<const char*>()) ||
+        (!doc["coord_lease_ms"].isUnbound() && !doc["coord_lease_ms"].is<uint32_t>())) return false;
     const char* fw = doc["lcd_fw"] | "";
     uint32_t part_size = doc["ota_part_size"] | (uint32_t)0;
     strncpy(g_lcd_ota_query_resp_fw, fw, sizeof(g_lcd_ota_query_resp_fw) - 1);
@@ -2902,6 +2927,10 @@ static bool parse_input_message(const char* json_str) {
     const char* running_part  = doc["running_part"]  | "";
     const char* running_state = doc["running_state"] | "UNKNOWN";
     const char* boot_part     = doc["boot_part"]     | "";
+    if (strlen(fw) >= sizeof(g_lcd_ota_query_resp_fw) ||
+        strlen(running_part) >= sizeof(g_lcd_query_running_part) ||
+        strlen(running_state) >= sizeof(g_lcd_query_running_state) ||
+        strlen(boot_part) >= sizeof(g_lcd_query_boot_part)) return false;
     strncpy(g_lcd_query_running_part, running_part, sizeof(g_lcd_query_running_part) - 1);
     g_lcd_query_running_part[sizeof(g_lcd_query_running_part) - 1] = '\0';
     strncpy(g_lcd_query_running_state, running_state, sizeof(g_lcd_query_running_state) - 1);
@@ -2909,18 +2938,40 @@ static bool parse_input_message(const char* json_str) {
     strncpy(g_lcd_query_boot_part, boot_part, sizeof(g_lcd_query_boot_part) - 1);
     g_lcd_query_boot_part[sizeof(g_lcd_query_boot_part) - 1] = '\0';
     g_lcd_query_boot_ready = doc["boot_ready"] | false;
+    // Per-response freshness: an omitted field must not inherit an earlier
+    // correlated reply or another LCD boot's readiness window.
+    const char* coord_id = doc["coord_id"] | "";
+    if (!doc["coord_id"].isUnbound() && !coord_id[0]) return false;
+    if (strlen(coord_id) >= sizeof(g_lcd_query_coord_id)) coord_id = "!overlength";
+    strncpy(g_lcd_query_coord_id, coord_id, sizeof(g_lcd_query_coord_id) - 1);
+    g_lcd_query_coord_id[sizeof(g_lcd_query_coord_id) - 1] = '\0';
+    g_lcd_query_peer_boot_id = doc["peer_boot_id"] | (uint32_t)0;
+    g_lcd_query_coord_waiting = doc["coord_waiting"] | false;
+    const char* owner = doc["coord_owner"] | "";
+    if (strlen(owner) >= sizeof(g_lcd_query_coord_owner)) owner = "!overlength";
+    strlcpy(g_lcd_query_coord_owner, owner, sizeof(g_lcd_query_coord_owner));
+    g_lcd_query_coord_lease_ms = doc["coord_lease_ms"] | (uint32_t)0;
     g_lcd_ota_query_resp_ready = true;
     Serial.printf("[UART] LCD_OTA_QUERY_RESP fw=%s part_size=%lu running_part=%s running_state=%s boot_part=%s boot_ready=%d\n",
                   fw, (unsigned long)part_size,
                   running_part, running_state, boot_part, g_lcd_query_boot_ready ? 1 : 0);
   } else if (strcmp(type, "LCD_OTA_BEGIN_ACK") == 0) {
+    if (!doc["accepted"].is<bool>() ||
+        (!doc["json_ready"].isUnbound() && !doc["json_ready"].is<bool>()) ||
+        (!doc["session_id"].isUnbound() && !doc["session_id"].is<uint16_t>()) ||
+        (!doc["resume_offset"].isUnbound() && !doc["resume_offset"].is<uint32_t>()) ||
+        (!doc["ota_proto"].isUnbound() && (!doc["ota_proto"].is<uint8_t>() ||
+          ((doc["ota_proto"] | 0) != 1 && (doc["ota_proto"] | 0) != OTA_UART_PROTOCOL_VERSION)))) return false;
     bool accepted = doc["accepted"] | false;
     const char* reason = doc["reason"] | "unknown";
     uint32_t resume_offset = doc["resume_offset"] | (uint32_t)0;
     g_lcd_ota_begin_ack_accepted = accepted;
+    g_lcd_ota_begin_ack_json_ready = doc["json_ready"] | false;
     strncpy(g_lcd_ota_begin_ack_reason, reason, sizeof(g_lcd_ota_begin_ack_reason) - 1);
     g_lcd_ota_begin_ack_reason[sizeof(g_lcd_ota_begin_ack_reason) - 1] = '\0';
     g_lcd_ota_begin_ack_resume_offset = resume_offset;
+    g_lcd_ota_begin_ack_proto = doc["ota_proto"] | 1;
+    g_lcd_ota_begin_ack_session = doc["session_id"] | (uint16_t)0;
     g_lcd_ota_begin_ack_ready = true;
     Serial.printf("[UART] LCD_OTA_BEGIN_ACK accepted=%d reason=%s resume=%lu\n",
                   accepted ? 1 : 0, reason, (unsigned long)resume_offset);
@@ -3802,7 +3853,7 @@ void setup() {
   }
   
   // On initial boot, send AWAKE immediately
-  if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED) {
+  if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED && sense_uart_ordinary_tx_allowed()) {
     Serial.println("[SENSE] Initial boot - sending AWAKE to LCD");
     Serial.printf("[BOOT_FLOW] stage=awake_tx_begin t=%lu\n", millis());
     lcdSerial.println("AWAKE");
@@ -3946,6 +3997,8 @@ void loop() {
             parse_input_message(usb_rx_line);
           } else if (strcmp(usb_rx_line, "errors") == 0) {
             sense_errlog_dump(Serial);
+          } else if (strcmp(usb_rx_line, "lcdxfer") == 0) {
+            sense_lcd_terminal_dump(Serial);
           } else if (strcmp(usb_rx_line, "wakelog") == 0) {
             wakelog_dump();
           } else if (strcmp(usb_rx_line, "clearerrors") == 0) {
@@ -4681,5 +4734,3 @@ loop_end:
 
   delay(idle_mode ? 50 : 10);
 }
-
-

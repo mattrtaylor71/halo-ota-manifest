@@ -831,13 +831,13 @@ LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> restart (success)
 #### Protocol Flow
 
 1. Sense sends `LCD_OTA_QUERY` -> LCD responds with `LCD_OTA_QUERY_RESP` (current fw version, OTA partition info, enriched partition/state fields -- see below)
-2. Sense sends `LCD_OTA_BEGIN` with session_id, image_size, sha256, version
-3. LCD validates (partition exists, image fits), sends `LCD_OTA_BEGIN_ACK`
+2. Sense sends `LCD_OTA_BEGIN` with session_id, image_size, sha256, version and optional `ota_proto=2` / remaining `budget_ms`
+3. LCD validates nonempty metadata, lowercase SHA256, nonzero session/size and partition capacity, owns sleep through erase, then sends `LCD_OTA_BEGIN_ACK` with the negotiated protocol
 4. LCD switches to binary RX mode (`g_lcd_ota_binary_mode = true`)
 5. Sense sends COBS-framed chunks (512 bytes each, `UartOtaProtocol`)
-6. LCD writes each chunk to OTA partition via `esp_ota_write`, sends ACK/NACK
-7. LCD updates SHA256 hash, saves NVS progress every 64KB
-8. Sense sends `LCD_OTA_END` JSON (detected by peeking for `{` in binary stream)
+6. LCD writes each new expected sequence once via `esp_ota_write`, sends ACK/NACK; an exact immediately previous sequence/payload is re-ACKed without another write
+7. LCD updates SHA256 and progress only for newly accepted data, saves NVS progress every 64KB
+8. New peers send END/ABORT JSON inside CRC-protected `MSG_OTA_CONTROL` (7); legacy JSON controls remain supported by the incremental record parser
 9. LCD finalizes: SHA256 verify, `esp_ota_end`, `esp_ota_set_boot_partition`
 10. LCD sends `LCD_OTA_END_ACK` with sha_match and ota_ok
 11. On success: retain sleep guards, persist continuation, restart into the new firmware
@@ -845,12 +845,16 @@ LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> restart (success)
 
 #### Enriched `LCD_OTA_QUERY_RESP` Fields
 
-`lcd_ota_handle_query()` reports both legacy and enriched fields. The enriched partition/state fields are built by the shared helper `lcd_build_fw_status_json(JsonDocument&)` (defined in `lcd_ota_uart.h`), which is reused by the USB `fw`/`ver` command so the two reporting paths never diverge. The state-string mapping is `lcd_ota_img_state_str()`.
+`lcd_ota_handle_query(const char* coord_id = nullptr)` reports both legacy and enriched fields and echoes a bounded query challenge. The enriched partition/state fields are built by the shared helper `lcd_build_fw_status_json(JsonDocument&)` (defined in `lcd_ota_uart.h`), which is reused by the USB `fw`/`ver` command so the two reporting paths never diverge. The state-string mapping is `lcd_ota_img_state_str()`.
 
 | Field | Source | Notes |
 |-------|--------|-------|
 | `lcd_fw` | `kFirmwareVersion` | Running image version |
 | `boot_ready` | Atomic `g_lcd_boot_ready` | False until setup, continuation/UI initialization and OTA self-test finish; older receivers omit it |
+| `coord_id` | Query request | Echo of the current challenge, at most39 characters; omitted for legacy requests |
+| `peer_boot_id` | `halo_lcd_coord_boot_id()` | Current production boot token |
+| `coord_waiting` | `halo_lcd_coord_waiting()` | Whether this boot has a live receiver opportunity |
+| `coord_owner` / `coord_lease_ms` | Production coordinator accessors | Accepted ownership token and remaining bounded lease; empty/zero when unowned |
 | `ota_part_label` / `ota_part_size` | `esp_ota_get_next_update_partition(NULL)` | Legacy, retained for back-compat |
 | `running_part` | `esp_ota_get_running_partition()->label` | `?` if NULL |
 | `running_state` | `esp_ota_get_state_partition(running)` | One of `NEW`, `PENDING_VERIFY`, `VALID`, `INVALID`, `ABORTED`, `UNDEFINED`, `UNKNOWN` |
@@ -864,6 +868,10 @@ LCD_OTA_IDLE -> LCD_OTA_RECEIVING -> LCD_OTA_FINALIZING -> restart (success)
 - **SHA context not resumable:** Saving/restoring mbedtls SHA256 context caused heap corruption. On resume, OTA restarts from offset 0.
 - **UI task stays alive:** Set `g_ota_screen_active` flag so UI task just ticks LVGL without processing events, avoiding need to restart UI task post-OTA (which caused crashes).
 - **JSON TX suppressed:** `g_suppress_uart_json_tx = true` prevents JSON messages from corrupting COBS binary frames.
+- **Idempotent CHUNK acceptance:** expected sequence starts at1 and wraps modulo65536. The receiver retains the last accepted sequence, exact length and up to512 payload bytes. An identical previous chunk is only re-ACKed, including after the declared image size has been received while awaiting END. A changed same-sequence payload, out-of-order sequence, empty chunk or size overrun aborts without flash/SHA advancement. Duplicate traffic never refreshes the30s new-progress deadline.
+- **Bounded parser and control handoff:** `UartOtaProtocol::recv_event()` retains fragmented RX across polls with separate transmit scratch. A record has a5s lifetime and bounded storage; malformed/oversized data is discarded through its delimiter. JSON selection waits for the second byte so legitimate COBS code bytes such as `{`, CR and LF remain valid binary. New senders use negotiated framed controls. END requires the active session and exact accepted size; ABORT ACK is emitted only after cleanup has finished and JSON mode is ready. Unknown/stale controls cannot release a newer session.
+- **Attempt budget:** the receiver observes an absolute40min ceiling, optionally shortened by the sender's remaining shared budget. The receiver checks this deadline and the existing30s new-progress deadline before accepting a frame and again after synchronous flash/SHA work. END checks the original budget before boot selection; an actual successful late boot selection retains its committed outcome. These checks do not preempt a synchronous flash/driver/NVS call; late completion cannot be described as a hard real-time guarantee. No per-read or guardian timeout was increased.
+- **Terminal evidence:** local abort records include session, reason, last sequence, written count, idle age and parser counters. Framed peer controls can carry a bounded sender terminal detail, persisted before the cleanup acknowledgment. Sense also retains four terminal records with source BUILD_ID and checked NVS writes; its read-only USB `lcdxfer` command prints them with checked64-byte writes under one2s cooperative output budget without consuming evidence; each slot appends its exact prefix byte length and CRC16-CCITT (initial0xffff, polynomial0x1021, excluding the suffix/newline). Retrieval must verify all four lengths/CRCs and END; missing or corrupt output is incomplete. A failed END_ACK now follows cleanup. A BEGIN rejection proves control readiness only with matching session and typed `json_ready:true`; legacy uncorrelated rejection takes bounded cleanup/defer, while uncorrelated acceptance is ignored. Missing cleanup acknowledgment defers further control traffic until a later fresh readiness proof; expiry alone is not JSON-mode proof. Sense persists an unsafe-mode marker before BEGIN and restores it before UART startup; ordinary JSON and image-spool admission are quarantined until an explicit query proves readiness, including after reset. Successful END_ACK leaves that durable marker pending until the postboot query. Counters represent accepted writes, not a cryptographically verified prefix until final SHA validation succeeds.
 
 #### Post-OTA Self Test
 
@@ -875,7 +883,7 @@ Clears all OTA/maintenance flags, sets `provision_return_home_pending = true` so
 
 **Finalization owns the sleep guards until completion.** `s_lcd_ota_state` and `g_lcd_ota_uart_receiving` are atomics shared by the UART and sleep tasks. After a successful `LCD_OTA_END_ACK`, the receiver remains `LCD_OTA_FINALIZING` with its receiving guard set through maintenance-NVS cleanup, continuation persistence, and `esp_restart()`. The target partition remains available for the reboot diagnostic. On failed finalization, the receiver releases these guards only after UI/NVS restoration finishes. A manual OTA exposed the old ordering: an image transfer exceeded the five-minute guardian limit, and clearing the guards immediately after END_ACK let deep sleep win the race against the intended reboot. No timeout was increased.
 
-**Failed attempts get one Home idle interval for recovery.** Both abort handlers keep atomic ownership through NVS/UI cleanup. Internal abort first leaves binary/JSON-suppression mode so its `LCD_OTA_ABORT` notification is actually transmitted. Common restoration resets activity and calls `lcd_ota_arm_recovery_grace()`: the existing `INACTIVITY_TIMEOUT_MS` (10s) is placed in `ota_stay_awake_until_ms` and `g_ota_lock_window_until_ms` before ownership is released. This also covers failed END. The sleep funnel honors that brief window even if the guardian is overdue and Sense is cached ASLEEP. A new `OTA_LOCK` replaces recovery with the normal update window; final `OTA_UNLOCK` clears recovery immediately; otherwise it expires. The guardian limit is unchanged. Incoming peer aborts are ignored while IDLE or when their session ID differs, so a duplicate/late abort cannot free state twice or clear a fresh lock/new session.
+**Failed attempts get one Home idle interval for recovery.** Both abort handlers keep atomic ownership through NVS/UI cleanup. Internal abort first leaves binary/JSON-suppression mode so its `LCD_OTA_ABORT` notification is actually transmitted. Common restoration resets activity and calls `lcd_ota_arm_recovery_grace()`: the existing `INACTIVITY_TIMEOUT_MS` (10s) is placed in `ota_stay_awake_until_ms` and `g_ota_lock_window_until_ms` before ownership is released. This also covers failed END. The sleep funnel honors that brief window even if the guardian is overdue and Sense is cached ASLEEP. A new `OTA_LOCK` replaces recovery with the normal update window; final `OTA_UNLOCK` clears recovery immediately; otherwise it expires. The guardian limit is unchanged. After cleanup, `LCD_OTA_ABORT_ACK` declares `json_ready=true`. A repeated JSON abort for the just-completed session can be acknowledged while IDLE without repeating cleanup; other stale aborts are ignored. Neither case can free state twice or clear a fresh lock/new session.
 
 **Terminal unlock returns to normal idle.** The optional `terminal:true` field on `OTA_UNLOCK` means Sense has finished the production check/update. The receiver clears both generic and recovery stay-awake timers, then follows the existing Home/UI cleanup and normal idle policy. This prevents a both-current no-op from leaving Home lit for the 180s update lease. An unmarked unlock retains legacy continuation behavior: some Sense paths send it before a subsequent LCD query or transfer, so clearing every unlock would reintroduce a sleep race. Older senders remain compatible.
 
@@ -1288,7 +1296,7 @@ The INT_PIN (GPIO39) drives Sense EXT0. Toggling between OUTPUT and INPUT modes 
 
 ### 6. OTA Binary Mode UART Exclusivity
 
-During LCD OTA (`g_lcd_ota_binary_mode = true`), all JSON TX is suppressed (`g_suppress_uart_json_tx = true`) and the UART task delegates all RX to `lcd_ota_receive_loop()`. The JSON/binary boundary is detected by peeking for `{` in the byte stream.
+During LCD OTA (`g_lcd_ota_binary_mode = true`), ordinary JSON TX is suppressed (`g_suppress_uart_json_tx = true`) and the UART task delegates all RX to `lcd_ota_receive_loop()`. The incremental `recv_event()` parser handles fragmented binary and legacy JSON records; new peers carry END/ABORT inside negotiated CRC-protected control frames. Completion JSON is emitted after binary input ownership ends.
 
 ### 7. Double-Buffered List State
 

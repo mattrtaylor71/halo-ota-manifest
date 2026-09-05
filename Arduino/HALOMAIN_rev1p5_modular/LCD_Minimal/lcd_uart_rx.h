@@ -881,8 +881,56 @@ static void uart_process_received_message(const char* json_str) {
   }
   
   if (strcmp(type, "OTA_LOCK") == 0) {
+    if ((!doc["coord_id"].isUnbound() && !doc["coord_id"].is<const char*>()) ||
+        (!doc["lease_ms"].isUnbound() && !doc["lease_ms"].is<uint32_t>()) ||
+        (!doc["sense_boot_id"].isUnbound() && !doc["sense_boot_id"].is<uint32_t>()) ||
+        (!doc["coord_seq"].isUnbound() && !doc["coord_seq"].is<uint32_t>()) ||
+        (!doc["peer_boot_id"].isUnbound() && !doc["peer_boot_id"].is<uint32_t>())) return;
+    const char* coord = doc["coord_id"] | "";
+    const uint32_t lease_ms = doc["lease_ms"] | (uint32_t)0;
+    const uint32_t sense_boot_id = doc["sense_boot_id"] | (uint32_t)0;
+    const uint32_t coord_seq = doc["coord_seq"] | (uint32_t)0;
+    if (!doc["coord_id"].isUnbound() && !coord[0]) return;
+    if (coord[0]) {
+      if (strlen(coord) >= sizeof(g_lcd_coord_owner) || !sense_boot_id || !coord_seq || lease_ms == 0 || lease_ms > 120000 ||
+          (doc["peer_boot_id"] | (uint32_t)0) != g_lcd_coord_boot_id) return;
+      {
+      LcdCoordCriticalGuard guard;
+      const bool new_boot = g_lcd_coord_sense_boot_id == 0 ||
+          (int32_t)(sense_boot_id - g_lcd_coord_sense_boot_id) > 0;
+      if (!new_boot && sense_boot_id != g_lcd_coord_sense_boot_id) return;
+      if (!new_boot && (int32_t)(coord_seq - g_lcd_coord_sequence) <= 0) return;
+      if (halo_lcd_coord_lease_ms() > 0) {
+        // A genuinely newer Sense boot can take over the owner, preserving
+        // the old absolute deadline. Same-boot requests cannot steal a lease.
+        if (new_boot) {
+          strlcpy(g_lcd_coord_owner, coord, sizeof(g_lcd_coord_owner));
+          g_lcd_coord_sense_boot_id = sense_boot_id;
+          g_lcd_coord_sequence = coord_seq;
+        }
+        return;
+      }
+      strlcpy(g_lcd_coord_owner, coord, sizeof(g_lcd_coord_owner));
+      g_lcd_coord_sense_boot_id = sense_boot_id;
+      g_lcd_coord_sequence = coord_seq;
+      g_lcd_coord_lease_until_ms.store((uint32_t)millis() + lease_ms);
+      g_lcd_ota_recovery_grace = false;
+      ota_locked = true; ota_lock_at_ms = millis();
+      if (ota_check_requested) { ota_check_pending = true; ota_check_requested = false; }
+      g_lcd_maintenance_boot_grace_until_ms = 0;
+      ota_stay_awake_until_ms = g_lcd_coord_lease_until_ms.load();
+      g_ota_lock_window_until_ms = ota_stay_awake_until_ms;
+      g_ota_screen_active = true;
+      }
+      lcd_timer_receiver_wait_release("ota_lock");
+      return;
+    } else {
+      LcdCoordCriticalGuard guard;
+      g_lcd_coord_lease_until_ms.store(0);
+    }
+
     g_lcd_ota_recovery_grace = false;
-    lcd_allow_visible_ui("ota_lock");
+    if (!coord[0]) lcd_allow_visible_ui("ota_lock");
     ota_locked = true;
     ota_lock_at_ms = millis();
     if (ota_check_requested) {
@@ -907,7 +955,7 @@ static void uart_process_received_message(const char* json_str) {
     // LCD deep-sleeps and the post-reboot LCD_OTA_QUERY gets no UART reply
     // (lcd_query_fail). Only extend (never shorten), like ship_menu_send_manual_ota.
     {
-      unsigned long ota_lock_awake_until = millis() + LCD_OTA_LOCK_STAY_AWAKE_MS;
+      unsigned long ota_lock_awake_until = millis() + (coord[0] ? lease_ms : LCD_OTA_LOCK_STAY_AWAKE_MS);
       if (ota_lock_awake_until > ota_stay_awake_until_ms) {
         ota_stay_awake_until_ms = ota_lock_awake_until;
       }
@@ -923,7 +971,7 @@ static void uart_process_received_message(const char* json_str) {
     // Publish existing OTA ownership before releasing the timer rendezvous.
     lcd_timer_receiver_wait_release("ota_lock");
     // Wake display from idle-dark if needed
-    if (g_idle_screen_dark) {
+    if (!coord[0] && g_idle_screen_dark) {
       lcd_set_idle_screen_dark(false, "ota_lock");
     }
     Serial.println("[OTA] lock received - blocking LCD OTA");
@@ -936,6 +984,12 @@ static void uart_process_received_message(const char* json_str) {
     g_ota_screen_active = true;
     return;
   } else if (strcmp(type, "OTA_UNLOCK") == 0) {
+    if ((!doc["coord_id"].isUnbound() && !doc["coord_id"].is<const char*>()) ||
+        (!doc["terminal"].isUnbound() && !doc["terminal"].is<bool>())) return;
+    const char* coord = doc["coord_id"] | "";
+    if (!doc["coord_id"].isUnbound() && (!coord[0] || strlen(coord) >= sizeof(g_lcd_coord_owner))) return;
+    if (coord[0] && g_lcd_coord_owner[0] && strcmp(coord, g_lcd_coord_owner) != 0) return;
+    g_lcd_coord_lease_until_ms.store(0);
     ota_locked = false;
     ota_check_pending = false;
     ota_check_requested = false;
@@ -1609,7 +1663,7 @@ static void uart_process_received_message(const char* json_str) {
       }
     }
     } else if (strcmp(type, "LCD_OTA_QUERY") == 0) {
-    lcd_ota_handle_query();
+    lcd_ota_handle_query(doc["coord_id"] | (const char*)nullptr);
     return;
   } else if (strcmp(type, "LCD_OTA_BEGIN") == 0) {
     JsonObject obj = doc.as<JsonObject>();

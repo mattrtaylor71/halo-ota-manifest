@@ -42,6 +42,66 @@ A September 4 JTAG snapshot directly corroborated this mechanism on the unrespon
 
 This conditional driver defect is reproduced with actual-source host tests. Passive USB enumeration after closing a reader did not establish that it caused the observed bench stall; physical validation remains separate.
 
+## Manual and scheduled OTA coordinator (September 5 hardening)
+
+The production wrapper shares a nonblocking peer-readiness gate between manual,
+nightly and persisted-debt checks. A failed three-second query slot does not consume
+the original 120-second opportunity. Normal UART/Wi-Fi/SNTP/UI service continues;
+manifest work starts only after a fresh LCD VALID/setup-ready proof and bounded
+ownership. The gate uses an exact challenge echo, current LCD boot ID, random owner
+token, persisted Sense boot generation and monotonic transaction sequence. Legacy
+6.4.14 can qualify only through a fresh reply after an empty input/parser boundary;
+it does not supply correlated ownership proof.
+
+`OTA_PEER_READY` is an LCD scheduled-origin notice, not a manual override. Sense
+accepts it only for a pending/expected schedule that has not completed and only
+once per LCD boot (at most three notice boots in one Sense boot). A pending Sense
+TIMER keeps its original cause and deadline. A later LCD GPIO wake uses a separate
+`lcd_timer_begin` with the actual Sense wake cause and a separate LCD-origin record.
+The last true Sense timer detail is retained in `ota_coord/sense_origin` and may be
+reported after reset as `previous_timer_origin`, never as a new TIMER.
+
+`ota_coord` separates unfinished `pending` from the next `schedule`, migrates the
+older `complete` key into its bounded `done_ids` history, and records the expected
+Sense `target` before self-apply. A new normal
+nightly schedule uses its local target date; relative/test schedules use their
+actual target and interval. After an unfinished reset, `coord_recovery` preserves
+the original identity. Both-current/LCD-only completion requires fresh manifest and
+LCD proof; paired completion additionally requires the expected Sense image VALID.
+The eight most recent exact completed IDs are retained in one atomic NVS string;
+RAM changes only after a successful write. An older completed day can be evicted
+after eight distinct completions. A future erroneous date never suppresses a
+different legitimate date after clock correction. Within that bounded history,
+a completed ID cannot restart from repeated LCD notices, while a later
+explicit manual request is accepted. A manual request during pending/in-flight
+work joins it without resetting the transaction, retry count or deadline.
+
+A new LCD boot notice after a deferred transfer can continue the same pending
+schedule inside the original still-live work budget. Only that new-boot
+continuation bypasses discovery cooldown; it does not receive another 40 minutes.
+Fresh readiness and current-version comparison can then finish Sense without
+retransferring an LCD that already committed. An unchanged boot or expired budget
+cannot trigger this continuation. A failed ABORT with no new boot stays deferred
+until an independent debt/timer boot or explicit manual request.
+
+The wrapper starts one 40-minute cooperative budget before manifest work and passes
+its remainder to both LCD attempts, postboot queries and Sense application. Sense
+apply is capped to `min(20 minutes, remaining)`; zero refuses instead of choosing a
+default. Receiver cleanup and framed/legacy control-mode handoff remain transfer
+requirements. Returning foreground paths release local ownership and preserve
+unresolved LCD debt; unknown UART mode suppresses peer controls until fresh proof.
+SDK calls are checked before/after bounded work; a stalled SDK call is not
+preemptible by these clock checks.
+
+Protocol-2 BEGIN/ACK negotiates framed END/ABORT with unchanged CHUNK encoding.
+A lost ACK can be recovered by re-ACKing the exact prior chunk without a second
+flash write or SHA update, including the final chunk while waiting for END. Receiver
+errors retain precise terminal origin, and Sense keeps four terminal `lcd_xfer`
+records rather than relying on the eight-entry general ring during binary mode.
+Fresh JSON-ready acknowledgment/query gates diagnostic forwarding after cleanup.
+Source tests/builds and hardware outcomes are recorded separately in the hardening
+validation journal; the older public 6.4.14 campaign remains historical evidence.
+
 ## Module Reference
 
 ### 1. Sense_Minimal.ino -- Main File
@@ -175,7 +235,8 @@ Central UART message dispatcher. Parses JSON, validates protocol fields, routes 
 | `MAINT_WINDOW_ACK` | Maintenance window scheduling |
 | `SLEEP_DENY` | LCD denied Sense sleep intent |
 | `OTA_CHECK_ACK` / `OTA_CHECK_RESULT` | OTA status from LCD |
-| `LCD_OTA_QUERY_RESP` | LCD running fw version + partition/state (OTA proxy mailbox). Extended fields: `running_part`, `running_state`, `boot_part`, `boot_ready` |
+| `LCD_OTA_QUERY_RESP` | Running fw/partition/state/ready plus exact `coord_id`, `peer_boot_id`, `coord_waiting`, `coord_owner`, `coord_lease_ms`; omitted fields never inherit a previous reply |
+| `OTA_PEER_READY` | Bounded LCD scheduled-origin notice; original wake/reset/epoch, schedule identity and current LCD boot |
 | `LCD_OTA_BEGIN_ACK` | LCD accepted OTA session (mailbox) |
 | `LCD_OTA_END_ACK` | LCD SHA verification result (mailbox) |
 | `LCD_OTA_STATUS` | LCD OTA progress (informational) |
@@ -1010,33 +1071,25 @@ During binary streaming, `g_lcd_ota_proxy_owns_uart = true` prevents the main lo
 
 #### OTA Proxy Flow
 
-**`sense_lcd_ota_proxy(const OtaManifest& manifest, const char* lcd_fw_version)`**:
+**`sense_lcd_ota_proxy(manifest, lcd_fw, shared_budget)`** runs inline. BEGIN carries a fresh session ID, complete image metadata, protocol capability and remaining budget. The sender requires a zero resume offset. Protocol 2 permits bounded retransmission of the same CHUNK; an older receiver gets one send attempt because its duplicate handling is unsafe. NACK, malformed/out-of-order data and exhausted retries fail the session. There is one HTTP GET per session, and each fresh attempt starts from byte zero.
 
-1. **Version check**: Compare manifest version against LCD current version. Skip if up-to-date.
-2. **Begin session**: Send `LCD_OTA_BEGIN` with a fresh session_id, image_size, sha256, version. Wait for `LCD_OTA_BEGIN_ACK`; require `resume_offset=0` because the LCD cannot restore its SHA context.
-3. **Download + stream**: HTTP GET firmware binary from S3. For each 512-byte chunk:
-   - Send COBS frame (`MSG_CHUNK`) with sequence number
-   - Wait for `MSG_ACK` with matching sequence
-   - Retry up to 5 times on timeout/NACK
-   - Progress logged every 10%
-   - Stream timeout reduced to 50ms for throughput
-   - **Bounded fresh-session recovery:** disconnect or 30s without data ends this session with `"timeout"`. The wait uses time since the last data, including the boundary at exactly 30s. There is one HTTP GET per session; no Range reopen or in-session reconnect remains. `http.setReuse(false)` and `close_stream()` (`http.end()` plus `tls_client.stop()`) discard the incomplete body on every exit. The old forced-stall/reconnect test hook was removed. Network calls can block beyond the loop's timer checks; the 40-minute check is not a hard wall-clock limit around DNS/TLS/HTTP calls.
-4. **End session**: Release UART ownership. Send `LCD_OTA_END` with image_size and sha256. Wait for `LCD_OTA_END_ACK`, which carries both `sha_match` (SHA verification result) and `ota_ok` (`esp_ota_set_boot_partition()` result on the LCD).
-5. **Result**: Returns "success", "up_to_date", "sha_mismatch", "lcd_boot_part_fail", "chunk_retry_exhausted", "timeout", etc. **Success requires `sha_match && ota_ok`.** The proxy checks `sha_match` first (→ `"sha_mismatch"` on failure), then `ota_ok`: if the LCD verified the SHA but failed to set its boot partition (`ota_ok=0`), the proxy returns the new verdict `"lcd_boot_part_fail"` (recorded via `diag_record_error_persistent("lcd_ota", -1, "lcd_boot_part_fail")`) rather than falsely reporting success — a transfer that hashes correctly but won't boot the new image no longer masquerades as a success.
+The sender retains binary UART ownership while its persistent mixed COBS/JSON parser handles ACKs and framed END/ABORT. It does not hand END to the ordinary main-loop parser. BEGIN and ordinary query waits still pump the normal JSON mailbox. A matched END_ACK requires both `sha_match` and `ota_ok` for success. This proves boot selection, not completed reboot: the wrapper subsequently requires a fresh expected-version/VALID/setup-ready query before advancing Sense or clearing LCD debt.
 
-**Inline proxy pumps its own UART for JSON-mode handshake waits:** the proxy now runs **inline on the main task** (called from `maybeRunOtaCheck()`), so `loop()` is blocked and its concurrent UART RX drain does NOT run while the proxy waits. The three JSON-mode mailbox waits therefore each call `pump_uart_rx_once(); delay(10);` inside their wait loops so the proxy drains+parses incoming UART itself and the LCD's ACK actually reaches the mailbox: the `LCD_OTA_QUERY_RESP` wait (in `sense_lcd_ota_query()`), the `LCD_OTA_BEGIN_ACK` wait (step 2), and the `LCD_OTA_END_ACK` wait (step 4). At both the BEGIN_ACK wait (before `g_lcd_ota_proxy_owns_uart` is ever set true) and the END_ACK wait (after it has been set back to false), `g_lcd_ota_proxy_owns_uart == false`, so `pump_uart_rx_once()` (which early-returns when that flag is true) actually runs. The binary chunk-streaming loop (step 3) deliberately does NOT pump — it owns the UART (`g_lcd_ota_proxy_owns_uart = true`) and uses the COBS protocol's own RX path.
+ABORT cleanup must provide a matched JSON-ready acknowledgment. Up to 36 seconds of receiver idle/parser grace consumes the original budget; absence of acknowledgment leaves control mode unconfirmed. No second transaction, ordinary diagnostic, final unlock or Sense apply is then sent. Local gate/ownership is released so normal sleep remains possible. `lcd_xfer/unsafe` is written before BEGIN; a reset cannot silently forget possible binary reception. Successful END_ACK restores runtime permission only, leaving this durable marker until postboot proof. A later independent query is the sole permitted probe while normal JSON is suppressed. With no OTA request, a boot-local query-only recovery has a 120-second bound and cannot fetch a manifest or acquire a lock.
+
+The dedicated four-record `lcd_xfer` journal stores exact terminal stage, counters and timing locally even while UART is unavailable. The read-only `lcdxfer` USB command dumps those records within a cooperative two-second send budget. Each record includes its prefix byte count and CRC16-CCITT-FALSE; the host must verify both, since console output may lose bytes. A later safe JSON bridge is best effort and does not consume the local record. The original 40-minute pair budget covers both attempts and cleanup. SDK calls can return late; precommit boundary checks reject late results, while successful boot selection remains committed success.
 
 **Non-OTA network suppression:** while any OTA activity is in flight, `request_list_refresh()` is short-circuited (`[LIST_REFRESH] deferred (lcd_ota_in_progress)`) and the `INPUT_WAKE` handler skips its list-refresh trigger. This prevents an HTTP GET to `/v1/list` from competing with the S3 download on the single net stack (which previously starved the download to a stall/abort). The gate is `lcd_ota_in_progress()`, defined in `halo_sense_prod.ino` and forward-declared in `Sense_Minimal.ino` (weak `return false` fallback for non-wrapper builds). It returns true if any of `g_lcd_ota_proxy_owns_uart`, `g_lcd_ota_request_active`, `g_lcd_ota_task_running`, `g_ota_apply_in_progress`, or `g_ota_check_in_progress` is set. OTA's own HTTP (manifest fetch, S3 download, schedule/report) is NOT gated.
 
 **`sense_lcd_ota_query()`** -- Query LCD firmware version and OTA partition size. The dispatch also captures fresh `running_part`, `running_state`, `boot_part`, and `boot_ready`. The optional fourth argument `expected_boot_fw` enables strict postboot confirmation in the existing 35s budget: the first 7s slot pumps RX without transmitting, allowing END finalization/reboot to settle; up to four fresh query slots remain. A response must match the expected version, report VALID, identify equal nonempty/non-`?` running/boot partitions, and set `boot_ready=true`. A fast not-ready response waits out its slot before the next query; all waits share the absolute budget. This mode sends only queries, with no LOCK, UNLOCK or BEGIN during proof. Default three-argument queries retain their existing behavior.
 
-**LCD-only resolved transfers require postboot proof.** `prod_proxy_lcd_inline()` uses that mode after a successful byte transfer or an at/above-target retry response. Only a confirmed boot persists `updated`/`noop`, the actual queried version and a fresh cache, then clears LCD debt. Failure records `lcd_postboot_unconfirmed`, clears the version cache, leaves `lcd_ota_due=1`, and stops the transfer loop so a second version-only attempt cannot bypass proof. The caller clears check/force state and sends its final unlock to end the current check; this is deferral, not confirmed application, and does not clear LCD continuation NVS. Initial both-current checks and the paired LCD→Sense path remain unchanged. Receivers predating `boot_ready` can still answer ordinary/pretransfer queries, but LCD-only postboot proof safely defers after the bounded wait; use a target implementing the new field.
+**LCD-only resolved transfers require postboot proof.** `prod_proxy_lcd_inline()` uses that mode after a successful byte transfer or an at/above-target retry response. Only a confirmed boot persists `updated`/`noop`, the actual queried version and a fresh cache, then clears LCD debt. Failure records `lcd_postboot_unconfirmed`, clears the version cache, leaves `lcd_ota_due=1`, and stops the transfer loop so a second version-only attempt cannot bypass proof. The caller clears check/force state and sends a final unlock only when JSON mode is confirmed; this is deferral, not confirmed application, and does not clear LCD continuation NVS. The paired LCD→Sense path requires the same postboot proof before Sense advances. Receivers predating `boot_ready` can still answer ordinary/pretransfer queries, but LCD-only postboot proof safely defers after the bounded wait; use a target implementing the new field.
 
-**`prepare_lcd_ota_proxy_retry()`** (production wrapper) sends a fresh `OTA_LOCK`, then requires a new LCD query response before the second attempt. Both paired-update and LCD-only inline paths use it. A failed query leaves LCD unresolved without sending another BEGIN; a response at or above the target version resolves the update without another transfer, preserving `noop` and the actual queried version. In the paired path a completed transfer records `updated` with the target version and invalidates the cache. LCD-only resolution additionally requires the postboot proof above and keeps that fresh observed version. The receiver allows its existing 10s Home idle interval after failed cleanup for this exchange, then sleeps if no new lock arrives. At most one fresh-session retry runs, starting at byte zero; final failure keeps `lcd_ota_due=1`, unlocks, and defers Sense self-OTA.
+**`prepare_lcd_ota_proxy_retry()`** (production wrapper) first requires confirmed JSON mode and remaining shared budget, then sends a fresh `OTA_LOCK`, then requires a new LCD query response before the second attempt. Both paired-update and LCD-only inline paths use it. A failed query leaves LCD unresolved without sending another BEGIN; a response at or above the target version resolves the update without another transfer, preserving `noop` and the actual queried version. In the paired path a completed transfer records `updated` with the target version and invalidates the cache. LCD-only resolution additionally requires the postboot proof above and keeps that fresh observed version. The receiver allows its existing 10s Home idle interval after failed cleanup for this exchange, then sleeps if no new lock arrives. At most one fresh-session retry runs, starting at byte zero; final failure keeps `lcd_ota_due=1`, releases local state, unlocks only in confirmed JSON mode, and defers Sense self-OTA.
 
-**Terminal unlock:** `send_ota_uart_message("OTA_UNLOCK", true)` adds `terminal:true` only when the synchronous production check is finished (including the final both-current path, unresolved-LCD deferral, proven final error/policy returns and verified post-OTA boot). The LCD then clears generic/recovery stay-awake holds and resumes normal idle behavior. The pre-inline `release_waiting_lcd_ota()` unlock remains unmarked because a query/transfer may follow. Async task/proof and apply-failure handoffs retain legacy semantics; older LCD firmware ignores the optional field.
+**Terminal unlock:** Unknown control mode suppresses all ordinary UART controls, including this cleanup. Local teardown still completes. In confirmed JSON mode, `send_ota_uart_message("OTA_UNLOCK", true)` adds `terminal:true` only when the synchronous production check is finished (including the final both-current path, unresolved-LCD deferral, proven final error/policy returns and verified post-OTA boot). The LCD then clears generic/recovery stay-awake holds and resumes normal idle behavior. The pre-inline `release_waiting_lcd_ota()` unlock remains unmarked because a query/transfer may follow. Async task/proof and apply-failure handoffs retain legacy semantics; older LCD firmware ignores the optional field.
 
-**Stale-RX flush (hardening):** Inside the per-attempt loop, immediately after clearing the mailbox (`g_lcd_ota_query_resp_ready = false`) and before sending the query JSON, the function drains the hardware FIFO (`while (lcdSerial.available() > 0) lcdSerial.read();`) and resets the RX ring / partial-frame state (`uart_reset_rx_state()`). During the Sense's HTTPS-blocking self-OTA window the main-loop UART drain is starved, so a backlog/overflow can accumulate on `lcdSerial` and desync parsing of the fresh `LCD_OTA_QUERY_RESP` (the no-response failure mode). Ordering is mailbox-clear → raw-flush → send fresh query, so an already-parsed response cannot be dropped.
+**Stale-RX flush (hardening):** Inside the per-attempt loop, immediately after clearing the mailbox (`g_lcd_ota_query_resp_ready = false`) and before sending the query JSON, the function drains the hardware FIFO (`while (lcdSerial.available() > 0) lcdSerial.read();`) and resets the RX ring / partial-frame state (`uart_reset_rx_state()`). During the Sense's HTTPS-blocking self-OTA window the main-loop UART drain is starved, so a backlog/overflow can accumulate on `lcdSerial` and desync parsing of the fresh `LCD_OTA_QUERY_RESP` (the no-response failure mode). The drain is bounded by hardware capacity and the query deadline. This blocking transfer/postboot query is separate from the readiness gate: nonblocking readiness never drains or discards queued user/peer input.
 
 **`uart_send_fw_info(bool do_lcd_query = true)`** -- Emits a `FW_INFO` JSON reporting the Sense firmware version plus the LCD firmware. Both paths also include additive live Sense diagnostics: `sense_build`, `sense_running_part`, `sense_running_state`, `sense_boot_part`, and numeric ESP-IDF enums `sense_wake_cause` / `sense_reset_reason`. The running/boot partition APIs are read at reply time; `sense_running_state` is `NEW|PENDING_VERIFY|VALID|INVALID|ABORTED|UNDEFINED|UNKNOWN`. Missing partition pointers report `"?"`; a failed state read reports `"UNKNOWN"`, never an assumed valid state. Build identity is `kBuildId` (`"unknown"` in non-production builds). The JSON capacity is 640 bytes; message type, required protocol fields, and existing fields are unchanged. These fields let LCD USB diagnostics verify the Sense running image without opening Sense USB and changing its wake/reset evidence. The `do_lcd_query` parameter selects between two paths:
 
@@ -1060,7 +1113,7 @@ Observability only; does not affect OTA control flow.
 
 **Unplugged automatic-trigger evidence.** `nightly_maintenance_tick()` captures the original persistent `SENSE_DIAG` begin record in RAM: event (`ota/nightly_begin` or `ota/lcd_recovery_begin`), reason, raw wake code, and the original wake/reset/epoch detail. It sends that record when the episode begins, then repeats the same payload once after a fresh LCD query succeeds during that synchronous automatic check, before any binary BEGIN or UART quiet period. This covers both paired-update and Sense-current/LCD-only paths; retries cannot repeat it again. Only the envelope timestamp/message ID are new. A manual check, including one arriving while an earlier automatic episode is pending after a guard skip, cannot replay the automatic record. Queue/finish and reboot clear replay eligibility. The unchanged 96-byte detail capacity fits both production reasons even with maximum 32-bit numeric fields (66 bytes plus NUL).
 
-**Successful scheduled no-op evidence.** A TIMER episode emits one additional persistent `ota/nightly_noop` record, labeled `both_current`, only when Sense's validated manifest equals its running version and the initial fresh LCD query plus successful LCD manifest comparison finds the LCD already at or above its target. The detail preserves the original cached wake/reset/epoch/reason verbatim and appends the actual LCD and LCD-manifest versions. Its 192-byte buffer fits the existing detail plus both 31-character version fields. Manual checks, `lcd_due` recovery, guard skips, failed queries/manifests, and paths that transfer or retry do not emit this completion. The record proves that the two manifest checks reached the ordinary no-op branch; the earlier begin/replay alone does not. Delivery still has no acknowledgement and shares the LCD's bounded diagnostic ring, so missing evidence is not proof of failure. Scheduler, update decisions, locks and sleep timers are unchanged.
+**Successful scheduled no-op evidence.** A TIMER episode emits one additional persistent `ota/nightly_noop` record, labeled `both_current`, only when Sense's validated manifest equals its running version and the initial fresh LCD query plus successful LCD manifest comparison finds the LCD already at or above its target. The detail preserves the original cached wake/reset/epoch/reason verbatim and appends the actual LCD and LCD-manifest versions. Its 192-byte buffer fits the existing detail plus both 31-character version fields. Manual checks, `lcd_due` recovery, guard skips, failed queries/manifests, and paths that transfer or retry do not emit this completion. The record proves that the two manifest checks reached the ordinary no-op branch; the earlier begin/replay alone does not. Delivery still has no acknowledgement and shares the LCD's bounded diagnostic ring, so missing evidence is not proof of failure. The diagnostic reports a qualified no-op; it does not itself change scheduling or locks.
 
 The LCD's existing `persist=true` handler stores received copies in its error ring for later USB `errors` retrieval. This corroborates the original automatic trigger; it does not prove an image was applied or marked valid. Use fresh `FW_INFO` plus LCD `fw` for resulting versions and states. At most one corroborating repeat is added per automatic episode, with no per-loop NVS writes or scheduling changes. Delivery still has no diagnostic acknowledgment, and the bounded ring may overwrite old evidence.
 
@@ -1079,11 +1132,7 @@ The LCD's existing `persist=true` handler stores received copies in its error ri
 2. **Split guard — Sense self-OTA requires positively resolved LCD state.** Before `applyToOtaPartition`, any `!lcd_proxy_succeeded` defers Sense: failed LCD query, failed LCD manifest fetch, or failed transfer after the existing retry. A current LCD or successful proxy sets the flag true. On deferral, `lcd_ota_due=1` remains persisted, the result stays `lcd_proxy_failed_defer`, MQTT is restored, the request is cleared, and `OTA_UNLOCK` releases the finished attempt's update screen. A later boot/manual/nightly check retries. The breadcrumb `sense_apply_deferred lcd_split_guard` records the decision; no image-transfer or reboot code changes.
 3. **Otherwise** `g_ota_applier.applyToOtaPartition(...)` + reboot (success never returns; failure keeps the existing MQTT-reconnect / `OTA_UNLOCK` / `recordOtaResult` path).
 
-**`OTA_UNLOCK` is guaranteed on every non-reboot completion/early-return path of `maybeRunOtaCheck()`.** A manual OTA sends `OTA_LOCK` up front (`halo_prod_request_manual_ota()`), so any path that ends WITHOUT a Sense self-apply reboot must release the LCD or it stays stranded on the "Updating…" screen. The pre-existing `release_waiting_lcd_ota()` helper is gated on `g_lcd_ota_request_active`, which is never set true, so it does not actually unlock — explicit `send_ota_uart_message("OTA_UNLOCK")` calls were added:
-- **Manifest-error paths (no LCD proxy ever runs):** `manifest_url_invalid`, `manifest_fetch_fail`, `board_mismatch`, `bin_url_disallowed` — send `OTA_UNLOCK` unconditionally before returning.
-- **Gate/no-update paths that call `maybe_trigger_lcd_ota_check()`:** `downgrade_blocked`, `rollout_min_version`, `rollout_skip`, `apply_blocked` — send `OTA_UNLOCK` **inside** the existing `if (!g_lcd_ota_task_running)` block. When a proxy task DID start, that task sends its own `OTA_UNLOCK` at completion (and the proxy does NOT re-lock, so an early unlock here would strand the stream); guarding on `!g_lcd_ota_task_running` avoids the double-unlock/premature-unlock. A redundant `OTA_UNLOCK` on the LCD is idempotent/harmless.
-- **`up_to_date` path — inline LCD proxy (FIX B), NOT the background task.** When the Sense is already current and only the LCD may be behind, the `version_cmp==0` branch now calls the new static helper **`prod_proxy_lcd_inline()`** instead of `maybe_trigger_lcd_ota_check()`. The background `lcd_ota_proxy_task` DMA-starves and has many skip paths (window/ack gates, `g_lcd_ota_attempted_this_window`), so it frequently never ran — leaving a Sense-ahead/LCD-behind split un-healed. `prod_proxy_lcd_inline()` runs synchronously on the main task with the LCD held awake by `OTA_LOCK`: it does `g_manifest_client.releaseConnection()` → `sense_lcd_ota_query()` → `sense_lcd_ota_fetch_manifest()`; if the LCD is behind it sends `OTA_LOCK` and runs `sense_lcd_ota_proxy()` with ONE retry. On success it clears `lcd_ota_due` (and persists `lcd_ota_result="updated"`); on failure it sets `lcd_ota_due=1` and logs. It does NOT send the final `OTA_UNLOCK` — the caller's existing `if (!g_lcd_ota_task_running)` block does (always taken now, since no background task is spawned). This path heals a Sense-ahead/LCD-behind split on a manual, nightly, or bounded boot recovery check. `maybe_trigger_lcd_ota_check()` is still defined for the nightly/other callers.
-- **Untouched:** the successful Sense self-apply path (reboots; `handle_pending_ota_expectation()` sends `OTA_UNLOCK` post-reboot on version match, unless `lcd_ota_due` is still pending) and the existing apply-failure `OTA_UNLOCK`.
+**Foreground teardown:** the shared peer gate acquires a bounded owner lease after fresh readiness; manual input no longer sends a blind initial lock. Every returning transaction clears its local readiness/intent state. When JSON mode is confirmed, final cleanup releases the LCD with terminal unlock. When mode is unknown, the receiver's own bounded cleanup and a later independent fresh query govern recovery; sending an unlock into possible binary RX is forbidden. The paired split guard retains LCD debt and prevents Sense advancement in that case.
 
 **Automatic nightly and LCD recovery checks (`nightly_maintenance_tick()`).** The production path no longer calls `run_maintenance_if_needed()`. A raw `ESP_SLEEP_WAKEUP_TIMER` queues one automatic episode with reason `nightly`; `lcd_ota_due` at any boot queues reason `lcd_due` unless the timer episode is already queued. The existing 120-second bound covers readiness, not a transfer already in progress. No wake cause is inferred from USB reset or manual command.
 
@@ -1091,7 +1140,7 @@ Normal provisioning, time and health service run before the tick; the obsolete `
 
 A readiness skip leaves the episode pending. Only a check that actually started (`g_ota_check_done`, set after the OTA guards) or the readiness deadline consumes it; a manifest failure counts as an attempted check. The final sleep guard and OTA sleep-ack guard both honor `halo_prod_boot_ota_pending()` while the deadline is live. Completion clears the pending flag and legacy mode and marks the old mode handled, so later manual work and health validation remain serviceable. `lcd_ota_due` persists until the LCD is positively current; the next boot earns a new bounded recovery opportunity. The same inline LCD-first / Sense-second path above handles manual, nightly, and recovery checks.
 
-**Cooldown scope.** `OtaIntent` tracks the last attempt only in RAM for the current boot. A new boot gets a fresh discovery opportunity; within one boot the ten-minute cooldown and explicit-force bypass remain. Unsigned elapsed-time arithmetic handles `millis()` wrap, and an attempt at uptime zero still counts. Only the result string remains persisted. The removed `last_ota_attempt_ms` key was longer than ESP-IDF's 15-character NVS limit, so the old cross-boot uptime design was invalid but is not evidence that that particular key ever persisted on hardware.
+**Cooldown scope.** `OtaIntent` tracks the last attempt only in RAM for the current boot. A new boot gets a fresh discovery opportunity; within one boot the ten-minute cooldown and explicit-force bypass remain. A same-pending-ID continuation after a new LCD boot may bypass discovery cooldown only inside the original live work budget. Unsigned elapsed-time arithmetic handles `millis()` wrap, and an attempt at uptime zero still counts. Only the result string remains persisted. The removed `last_ota_attempt_ms` key was longer than ESP-IDF's 15-character NVS limit, so the old cross-boot uptime design was invalid but is not evidence that that particular key ever persisted on hardware.
 
 **Persistent OTA-orchestration breadcrumbs (black box, area `ota_orch`):** `maybeRunOtaCheck()` writes concise breadcrumbs to the persistent error-log black box via `diag_record_error_persistent("ota_orch", code, detail)` (forwards to `sense_errlog_store()` + `uart_send_sense_diag_persist()`, so they survive reboots and are readable later via the LCD error log). Because the API is `(stage, code, text)` rather than printf-style, each `detail` string is built with `snprintf` into a local `char crumb[96]` and is prefixed with the event name. Events:
 - Check entry (after readiness guards in `maybeRunOtaCheck`) -- `reason=<reason> manual=<override> t=<millis>`
@@ -1218,13 +1267,16 @@ full restart, but this path shares the existing restart budget with ordinary
 resume/disconnection recovery. Once the count reaches the cap, it closes the
 HTTP client, stops TLS, deletes the connection context and aborts the OTA handle,
 then returns `RESULT_FAILED_NO_PROGRESS` without another erase, SHA reset,
-counter increment or deadline reset. Allowed restarts and successful progress
+counter increment. Allowed restarts and successful progress
 retain their existing behavior.
 
-The Sense caller's 20-minute download timer still resets on a permitted full
-restart and is checked within the streaming loop. It is not an end-to-end paired
-OTA deadline. This cap does not change the separate LCD proxy's two attempts or
-30-second no-chunk timeout.
+The operation deadline starts once at invocation entry, before erase or network
+work, and never resets on progress or restart. The caller passes the smaller of
+20 minutes and the remaining original paired-work budget; zero refuses. Checks
+cover retry, backoff, read/write, finalization and the last precommit boundary.
+A successfully selected boot image remains committed even if that SDK call returns
+late. This cooperative deadline does not preempt a stalled SDK call or change the
+separate LCD proxy's two attempts or 30-second no-new-chunk timeout.
 
 ## Cross-Module Dependencies
 

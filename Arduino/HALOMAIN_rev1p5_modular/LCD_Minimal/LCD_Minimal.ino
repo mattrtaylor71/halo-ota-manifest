@@ -452,8 +452,89 @@ static const unsigned long LCD_MAINT_BOOT_GRACE_MS = 120000;
 // Production timer boots wait for Sense's WiFi/manifest work with the normal
 // dark UI and UART alive. This is not the interval until the next wake.
 static std::atomic<uint32_t> g_lcd_timer_receiver_wait_until_ms{0};
+// A boot identity is independent of RTC wall time and never survives reset.
+// It lets Sense distinguish a current correlated reply from a queued notice
+// sent before the LCD rebooted.
+static uint32_t g_lcd_coord_boot_id = 0;
+static std::atomic<uint32_t> g_lcd_coord_lease_until_ms{0};
+static uint32_t g_lcd_coord_sense_boot_id = 0;
+static uint32_t g_lcd_coord_sequence = 0;
+static char g_lcd_coord_owner[40] = {0}; // Written/read only by UART dispatch.
+struct LcdCoordNotice {
+  char schedule[64] = {0};
+  uint32_t epoch = 0;
+  int wake = -1, reset = -1;
+  uint8_t resumes = 0;
+  bool active = false;
+};
+static LcdCoordNotice g_lcd_coord_notice;
+static std::atomic<bool> g_lcd_coord_notice_clear{false};
+static uint32_t g_lcd_coord_notice_next_ms = 0;
+static void lcd_coord_cancel_preflight(bool only_if_expired);
+
+static const char* halo_lcd_coord_owner() {
+  const uint32_t until = g_lcd_coord_lease_until_ms.load();
+  return until && (int32_t)((uint32_t)millis() - until) < 0 ? g_lcd_coord_owner : "";
+}
+static uint32_t halo_lcd_coord_lease_ms() {
+  const uint32_t until = g_lcd_coord_lease_until_ms.load();
+  const int32_t left = (int32_t)(until - (uint32_t)millis());
+  return until && left > 0 ? (uint32_t)left : 0;
+}
+
+// Separate namespace: consuming a past sleep schedule must not erase an
+// in-flight origin. Persisted resumes are bounded; ordinary future sleeps do
+// not resurrect an abandoned transaction or manufacture a new TIMER cause.
+static void lcd_coord_store_notice() {
+  Preferences p;
+  if (!p.begin("lcd_coord", false)) return;
+  p.putString("schedule", g_lcd_coord_notice.schedule);
+  p.putUInt("epoch", g_lcd_coord_notice.epoch);
+  p.putInt("wake", g_lcd_coord_notice.wake);
+  p.putInt("reset", g_lcd_coord_notice.reset);
+  p.putUChar("resumes", g_lcd_coord_notice.resumes);
+  p.putBool("pending", true);
+  p.end();
+}
+static void lcd_coord_capture_timer(int wake, int reset) {
+  if (wake != (int)ESP_SLEEP_WAKEUP_TIMER || !g_lcd_maintenance_request_id[0]) return;
+  strlcpy(g_lcd_coord_notice.schedule, g_lcd_maintenance_request_id,
+          sizeof(g_lcd_coord_notice.schedule));
+  g_lcd_coord_notice.wake = wake; g_lcd_coord_notice.reset = reset;
+  g_lcd_coord_notice.epoch = (uint32_t)time(nullptr);
+  g_lcd_coord_notice.resumes = 0; g_lcd_coord_notice.active = true;
+  lcd_coord_store_notice();
+}
+static void lcd_coord_resume_notice(int current_reset) {
+  if (g_lcd_coord_notice.active) return;
+  Preferences p;
+  if (!p.begin("lcd_coord", false)) return;
+  if (p.getBool("pending", false) && current_reset != (int)ESP_RST_DEEPSLEEP &&
+      p.getUChar("resumes", 0) < 2) {
+    strlcpy(g_lcd_coord_notice.schedule, p.getString("schedule", "").c_str(),
+            sizeof(g_lcd_coord_notice.schedule));
+    g_lcd_coord_notice.wake = p.getInt("wake", -1);
+    g_lcd_coord_notice.reset = p.getInt("reset", -1);
+    g_lcd_coord_notice.epoch = p.getUInt("epoch", 0);
+    g_lcd_coord_notice.resumes = p.getUChar("resumes", 0) + 1;
+    g_lcd_coord_notice.active = g_lcd_coord_notice.schedule[0] &&
+        g_lcd_coord_notice.wake == (int)ESP_SLEEP_WAKEUP_TIMER;
+    if (g_lcd_coord_notice.active) {
+      p.putUChar("resumes", g_lcd_coord_notice.resumes);
+      g_lcd_timer_receiver_wait_until_ms.store((uint32_t)millis() + LCD_MAINT_BOOT_GRACE_MS);
+    }
+  }
+  if (!g_lcd_coord_notice.active) p.remove("pending");
+  p.end();
+}
+
 
 static void lcd_timer_receiver_wait_release(const char* reason) {
+  // Ownership handoff retains origin until terminal cleanup or timeout.
+  if (reason && (strcmp(reason, "user_input") == 0 || strcmp(reason, "sleep_aborted_by_touch") == 0)) {
+    lcd_coord_cancel_preflight(false);
+  }
+  if (!reason || strcmp(reason, "ota_lock") != 0) g_lcd_coord_notice_clear.store(true);
   if (g_lcd_timer_receiver_wait_until_ms.exchange(0) != 0) {
     Serial.printf("[LCD_MAINT] receiver_wait_end reason=%s\n", reason ? reason : "unknown");
   }
@@ -464,10 +545,13 @@ static bool lcd_timer_receiver_wait_active() {
   if (deadline == 0) return false;
   if ((int32_t)((uint32_t)millis() - deadline) < 0) return true;
   if (g_lcd_timer_receiver_wait_until_ms.compare_exchange_strong(deadline, 0)) {
+    g_lcd_coord_notice_clear.store(true);
     Serial.println("[LCD_MAINT] receiver_wait_end reason=timeout");
   }
   return false;
 }
+static uint32_t halo_lcd_coord_boot_id() { return g_lcd_coord_boot_id; }
+static bool halo_lcd_coord_waiting() { return lcd_timer_receiver_wait_active(); }
 static char s_wake_cause_label[32] = "cold_boot";
 static const char* LCD_MAINT_PREF_NAMESPACE = "lcd_maint";
 static const char* LCD_MAINT_PREF_KEY_VALID = "valid";
@@ -1265,6 +1349,25 @@ static unsigned long g_ota_lock_window_until_ms = 0;
 // Written/read by the UART task: distinguishes the short failed-OTA recovery
 // window from a live dual-board update when OTA_UNLOCK arrives.
 static bool g_lcd_ota_recovery_grace = false;
+// Main-task input/expiry and UART lease acquisition publish their state under
+// one short critical section. Deferred notice/NVS cleanup owns no lease.
+static portMUX_TYPE g_lcd_coord_mux = portMUX_INITIALIZER_UNLOCKED;
+struct LcdCoordCriticalGuard {
+  LcdCoordCriticalGuard() { portENTER_CRITICAL(&g_lcd_coord_mux); }
+  ~LcdCoordCriticalGuard() { portEXIT_CRITICAL(&g_lcd_coord_mux); }
+};
+static void lcd_coord_cancel_preflight(bool only_if_expired) {
+  portENTER_CRITICAL(&g_lcd_coord_mux);
+  const uint32_t until = g_lcd_coord_lease_until_ms.load();
+  if (until && !g_lcd_ota_uart_receiving &&
+      (!only_if_expired || (int32_t)((uint32_t)millis() - until) >= 0)) {
+    g_lcd_coord_lease_until_ms.store(0);
+    ota_locked = false; ota_check_pending = false; ota_check_requested = false;
+    ota_stay_awake_until_ms = 0; g_ota_lock_window_until_ms = 0;
+    g_ota_screen_active = false;
+  }
+  portEXIT_CRITICAL(&g_lcd_coord_mux);
+}
 static bool lcd_ota_request_active = false;
 static uint32_t lcd_ota_request_id = 0;
 static bool lcd_ota_request_allow_reboot = true;
@@ -3861,6 +3964,8 @@ static void lcd_errlog_store_with_context(const char* board, const char* area,
 // ── Arduino lifecycle ──────────────────────────────────────────────
 
 void setup() {
+  g_lcd_coord_boot_id = esp_random();
+  if (g_lcd_coord_boot_id == 0) g_lcd_coord_boot_id = 1;
   print_wakeup_diagnostics(HALO_BOARD_NAME);
   Serial.begin(115200);
   // Bound USB console backpressure, matching Sense. Core3.3.8 HWCDC::write
@@ -4010,6 +4115,7 @@ void setup() {
       (effective_timer_wake && maintenance_context && maintenance_resume_hint);
   if (g_lcd_maintenance_wake_window) {
 #ifdef HALO_LCD_PROD_WRAPPER
+    lcd_coord_capture_timer((int)wake_cause, (int)reset_reason);
     // Consume the schedule that woke us BEFORE UART starts. A new MAINT_WINDOW
     // received later belongs to the next sleep and must survive UI setup.
     g_lcd_maintenance_timer_armed = 0;
@@ -4095,6 +4201,7 @@ void setup() {
   Serial.println("LCD ESP32-S3: booted, PROTO OK v1.");
   
   // Initialize UART
+  lcd_coord_resume_notice((int)reset_reason);
   init_uart();
   
   // Release GPIO39 hold from previous deep sleep and detach JTAG

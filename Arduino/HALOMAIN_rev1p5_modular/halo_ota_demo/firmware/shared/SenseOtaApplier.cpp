@@ -160,6 +160,25 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
 #define LCD_OTA_RETURN_FAIL(r) return (r)
 #endif
 
+  // Immutable whole-invocation budget, including erase, connection setup,
+  // every recovery path and verification. Progress/rate timers may still reset.
+  // SDK calls are synchronous; a late result is rejected on return until the
+  // boot-partition commit starts. An actual successful late commit is retained.
+  const uint32_t invocation_started_ms = millis();
+  auto remaining_budget_ms = [&]() -> uint32_t {
+    const uint32_t elapsed = (uint32_t)(millis() - invocation_started_ms);
+    return elapsed < hard_deadline_ms ? hard_deadline_ms - elapsed : 0;
+  };
+  auto cap_wait_ms = [&](uint32_t wanted) -> uint32_t {
+    const uint32_t remaining = remaining_budget_ms();
+    return wanted < remaining ? wanted : remaining;
+  };
+  auto budget_delay = [&](uint32_t wanted) {
+    const uint32_t bounded = cap_wait_ms(wanted);
+    if (bounded) delay(bounded);
+  };
+  if (!remaining_budget_ms()) LCD_OTA_RETURN_FAIL(RESULT_FAILED_TIMEOUT);
+
   // Validate parameters
   if (!url || strlen(url) == 0 || !expected_sha256_hex || strlen(expected_sha256_hex) != 64) {
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "Invalid parameters");
@@ -232,9 +251,14 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   // that often gets no body on ESP32 TLS).
   
   // Begin OTA update
-  esp_ota_handle_t ota_handle;
+  esp_ota_handle_t ota_handle = 0;
   size_t ota_size = ota_begin_size_for_board(expected_size);
+  if (!remaining_budget_ms()) LCD_OTA_RETURN_FAIL(RESULT_FAILED_TIMEOUT);
   esp_err_t err = esp_ota_begin(update, ota_size, &ota_handle);
+  if (!remaining_budget_ms()) {
+    if (ota_handle) esp_ota_abort(ota_handle);
+    LCD_OTA_RETURN_FAIL(RESULT_FAILED_TIMEOUT);
+  }
   
   if (err != ESP_OK) {
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL: %s", esp_err_to_name(err));
@@ -262,13 +286,13 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   uint32_t STALL_GRACE_MS = 12000;  // First-bytes probe grace (12s) – still tolerant of weak Wi‑Fi
   
   // Wait for WiFi reconnect before HTTP retries (avoids connection refused when WiFi dropped)
-  auto waitForWifiReconnect = [](uint32_t timeout_ms) -> bool {
+  auto waitForWifiReconnect = [&](uint32_t timeout_ms) -> bool {
     unsigned long t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < timeout_ms) {
-      delay(100);
+    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < timeout_ms && remaining_budget_ms()) {
+      budget_delay(100);
       yield();
     }
-    return (WiFi.status() == WL_CONNECTED);
+    return remaining_budget_ms() && (WiFi.status() == WL_CONNECTED);
   };
   
   // Backoff jitter (0–500 ms) to avoid thundering herd on retries
@@ -314,9 +338,10 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       ctx_out->client.stop();
       delete ctx_out;
       ctx_out = nullptr;
-      delay(50);  // Brief delay to ensure connection fully closes
+      budget_delay(50);  // Brief delay to ensure connection fully closes
     }
     
+    if (!remaining_budget_ms()) return nullptr;
     // Create fresh context (fresh WiFiClientSecure instance)
     ctx_out = new HttpCtx();
     if (!ctx_out) {
@@ -333,10 +358,18 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       return nullptr;
     }
     
-    // Set connect timeout only before GET (safe); read timeout after GET to avoid errno=9
-    ctx_out->http.setConnectTimeout(15000);
+    if (!remaining_budget_ms()) { delete ctx_out; ctx_out = nullptr; return nullptr; }
+    const uint32_t connect_budget = cap_wait_ms(15000);
+    if (!connect_budget) { delete ctx_out; ctx_out = nullptr; return nullptr; }
+    ctx_out->http.setConnectTimeout(connect_budget);
+    ctx_out->client.setHandshakeTimeout((connect_budget + 999) / 1000);
+    // HTTPClient's disconnected setter only records the header-read timeout.
+    // Preserve its existing 5s default rather than enlarge it before GET.
+    const uint32_t header_budget = cap_wait_ms(5000);
+    if (!header_budget) { delete ctx_out; ctx_out = nullptr; return nullptr; }
+    ctx_out->http.setTimeout((uint16_t)header_budget);
     ctx_out->http.setReuse(false);  // Disable keep-alive reuse - force fresh connection per attempt
-    // Note: http.setTimeout() and client.setTimeout() must be set AFTER GET() succeeds (connection established)
+    // The socket-level timeout is set only after GET establishes the connection.
     
     // Add headers for better compatibility
     ctx_out->http.addHeader("Connection", "close");  // Force connection close
@@ -350,7 +383,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       ctx_out->http.addHeader("Range", range_header);
     }
     
+    if (!remaining_budget_ms()) { delete ctx_out; ctx_out = nullptr; return nullptr; }
     httpCode = ctx_out->http.GET();
+    if (!remaining_budget_ms()) { delete ctx_out; ctx_out = nullptr; return nullptr; }
     
     // NULL-SAFE: If HTTP failed (negative or invalid code), do not call getStreamPtr() or header() - clean up and return nullptr.
     bool valid_code = (offset == 0) ? (httpCode == HTTP_CODE_OK) : (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_PARTIAL_CONTENT);
@@ -373,8 +408,10 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     
     // NOW safe to set HTTP and client timeouts - connection is established. Prevents errno=9 (Bad file number)
     if (ctx_out->client.connected()) {
-      ctx_out->http.setTimeout(45000);  // 45s read timeout - only after GET so socket exists
-      ctx_out->client.setTimeout(2000);  // 2s timeout for blocking reads - allows readBytes() to block briefly
+      const uint32_t read_budget = cap_wait_ms(45000);
+      if (!read_budget) { delete ctx_out; ctx_out = nullptr; return nullptr; }
+      ctx_out->http.setTimeout((uint16_t)read_budget);
+      ctx_out->client.setTimeout(read_budget < 2000 ? read_budget : 2000);
     }
     
     contentLen = ctx_out->http.getSize();
@@ -502,6 +539,25 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   
   // Current HTTP context (raw pointer, manually managed)
   HttpCtx* current_ctx = nullptr;
+
+  auto deadline_failure = [&]() -> Result {
+    if (current_ctx) {
+      current_ctx->http.end();
+      current_ctx->client.stop();
+      delete current_ctx;
+      current_ctx = nullptr;
+    }
+    if (ota_handle) { esp_ota_abort(ota_handle); ota_handle = 0; }
+    LOG_ERROR_TAG(LOG_TAG_OTA_WRITE,
+                  "Operation deadline: elapsed=%lu budget=%lu bytes=%lu restarts=%d",
+                  (unsigned long)(uint32_t)(millis() - invocation_started_ms),
+                  (unsigned long)hard_deadline_ms, (unsigned long)downloaded_bytes, restart_attempt);
+    return RESULT_FAILED_TIMEOUT;
+  };
+#define OTA_CHECK_BUDGET() do { if (!remaining_budget_ms()) { \
+    const Result deadline_result = deadline_failure(); \
+    LCD_OTA_RETURN_FAIL(deadline_result); \
+  } } while (0)
   
   // Extract hostname from URL for logging (do this once before the loop)
   String hostname_str = "unknown";
@@ -521,6 +577,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   
   // Main download loop with retry/restart capability
   while (true) {
+    OTA_CHECK_BUDGET();
     // If we need to restart from scratch (restart_attempt > 0), abort current OTA and begin again
     if (restart_attempt > 0 && downloaded_bytes == 0) {
       LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Restarting OTA from scratch (attempt %d/%d)", restart_attempt, RESTART_MAX_ATTEMPTS);
@@ -550,7 +607,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       
       // Begin fresh OTA (next httpBeginAndGet will recreate HTTPClient/WiFiClient – objects_recreated=1)
       size_t ota_size = ota_begin_size_for_board(expected_size);
+      OTA_CHECK_BUDGET();
       err = esp_ota_begin(update, ota_size, &ota_handle);
+      OTA_CHECK_BUDGET();
       if (err != ESP_OK) {
         LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL on restart: %s", esp_err_to_name(err));
         LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
@@ -559,7 +618,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       // Reset all state for fresh restart
       downloaded_bytes = 0;
       resume_attempt = 0;
-      start_ms = millis();  // Reset timers for restart
+      start_ms = millis();  // Rate/progress epoch only; invocation deadline never resets
       last_progress_ms = start_ms;
       stall_offset = 0;
       stall_same_offset_count = 0;
@@ -592,7 +651,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
                    (unsigned long)downloaded_bytes, resume_attempt + 1, RESUME_MAX_ATTEMPTS);
     }
     
+    OTA_CHECK_BUDGET();
     WiFiClient* stream = httpBeginAndGet(downloaded_bytes, attempt_num, using_range, current_ctx, httpCode, contentLen);
+    OTA_CHECK_BUDGET();
     
     // Log resume support status early (after first HTTP attempt)
     if (attempt_num == 1) {
@@ -608,7 +669,10 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         unsigned long now_ms = millis();
         if (now_ms - last_hard_reset_ms >= HARD_RESET_COOLDOWN_MS) {
           LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "WiFi hard reset for OTA (httpCode=%d)", httpCode);
-          if (halo_wifi_hard_reset_for_ota("ota_http_retry", 8000)) {
+          OTA_CHECK_BUDGET();
+          const bool wifi_recovered = halo_wifi_hard_reset_for_ota("ota_http_retry", cap_wait_ms(8000));
+          OTA_CHECK_BUDGET();
+          if (wifi_recovered) {
             LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "WiFi hard reset succeeded");
           } else {
             LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "WiFi hard reset did not recover");
@@ -625,9 +689,11 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
                        httpCode, (unsigned long)backoff_ms, resume_attempt + 1, RESUME_MAX_ATTEMPTS, restart_attempt, RESTART_MAX_ATTEMPTS, downloaded_bytes);
           if (consecutive_transient_failures >= 2) {
             LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "FULL_HTTP_RESET: >=2 consecutive transient failures, extra delay 500ms before retry");
-            delay(500);
+            budget_delay(500);
+            OTA_CHECK_BUDGET();
           }
-          delay(backoff_ms);
+          budget_delay(backoff_ms);
+          OTA_CHECK_BUDGET();
           continue;  // Retry resume
         } else {
           // Resume exhausted - try full restart
@@ -638,7 +704,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             resume_attempt = 0;
             downloaded_bytes = 0;  // Trigger restart on next iteration
             uint32_t restart_backoff = backoffWithJitter(RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1]);
-            delay(restart_backoff);
+            budget_delay(restart_backoff);
+            OTA_CHECK_BUDGET();
             continue;
           } else {
             LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "All recovery attempts exhausted - failing (resume_attempt=%d/%d, restart_attempt=%d/%d)",
@@ -664,10 +731,12 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           }
           if (consecutive_transient_failures >= 2) {
             LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "FULL_HTTP_RESET: >=2 consecutive transient failures, extra delay 500ms before retry");
-            delay(500);
+            budget_delay(500);
+            OTA_CHECK_BUDGET();
           }
           uint32_t backoff_ms = backoffWithJitter(BACKOFF_DELAYS_MS[initial_get_fail_count - 1]);
-          delay(backoff_ms);
+          budget_delay(backoff_ms);
+          OTA_CHECK_BUDGET();
           continue;  // Retry from outer loop (will wait for WiFi again at loop top)
         } else {
           LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "Initial HTTP connection failed after %d retries (httpCode=%d) - aborting",
@@ -745,12 +814,14 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         resume_attempt = 0;
         stall_offset = 0;
         stall_same_offset_count = 0;
-        start_ms = millis();  // Reset timers
+        start_ms = millis();  // Rate/progress epoch only
         last_progress_ms = start_ms;
         
         // Begin fresh OTA
         size_t ota_size = ota_begin_size_for_board(expected_size);
+        OTA_CHECK_BUDGET();
         err = esp_ota_begin(update, ota_size, &ota_handle);
+        OTA_CHECK_BUDGET();
         if (err != ESP_OK) {
           LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL after Range detection: %s", esp_err_to_name(err));
           LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
@@ -808,7 +879,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         resume_attempt++;
         if (resume_attempt < RESUME_MAX_ATTEMPTS) {
           uint32_t backoff_ms = backoffWithJitter(BACKOFF_DELAYS_MS[resume_attempt - 1]);
-          delay(backoff_ms);
+          budget_delay(backoff_ms);
+          OTA_CHECK_BUDGET();
           continue;
         } else {
           // Try restart
@@ -817,7 +889,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             resume_attempt = 0;
             downloaded_bytes = 0;
             uint32_t restart_backoff = backoffWithJitter(restart_attempt <= 2 ? RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1] : 1000);
-            delay(restart_backoff);
+            budget_delay(restart_backoff);
+            OTA_CHECK_BUDGET();
             continue;
           } else {
             if (ota_handle) esp_ota_abort(ota_handle);
@@ -851,7 +924,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         uint32_t backoff_ms = backoffWithJitter(BACKOFF_DELAYS_MS[resume_attempt - 1]);
         LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Retrying resume with backoff %lu ms (resume_attempt=%d/%d)",
                      (unsigned long)backoff_ms, resume_attempt + 1, RESUME_MAX_ATTEMPTS);
-        delay(backoff_ms);
+        budget_delay(backoff_ms);
+        OTA_CHECK_BUDGET();
         continue;  // Retry from outer loop
       } else if (restart_attempt < RESTART_MAX_ATTEMPTS) {
         restart_attempt++;
@@ -875,7 +949,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Attempting full restart (restart_attempt=%d/%d)",
                      restart_attempt, RESTART_MAX_ATTEMPTS);
         uint32_t restart_backoff = backoffWithJitter(restart_attempt <= 2 ? RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1] : 1000);
-        delay(restart_backoff);
+        budget_delay(restart_backoff);
+        OTA_CHECK_BUDGET();
         continue;  // Retry from outer loop (will call esp_ota_begin in outer loop)
       } else {
         // All retries exhausted - only now return NO_STREAM
@@ -910,6 +985,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       unsigned long last_probe_yield_ms = millis();
       
       while (marker_read < to_read_max) {
+        OTA_CHECK_BUDGET();
         probe_elapsed = millis() - probe_start;
         if (!current_ctx->http.connected()) {
           probe_disconnected = true;
@@ -917,6 +993,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         }
         size_t chunk = (to_read_max - marker_read) < sizeof(probe_buf) ? (to_read_max - marker_read) : sizeof(probe_buf);
         int n = stream->read(probe_buf, chunk);
+        OTA_CHECK_BUDGET();
         if (n > 0) {
           memcpy(marker_check_buffer + marker_read, probe_buf, n);
           marker_read += n;
@@ -939,7 +1016,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             }
             break;
           }
-          delay(25);
+          budget_delay(25);
+          OTA_CHECK_BUDGET();
           yield();
         }
       }
@@ -990,7 +1068,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         }
         
         mbedtls_sha256_update(&sha256_ctx, marker_check_buffer, marker_read);
+        OTA_CHECK_BUDGET();
         err = esp_ota_write(ota_handle, marker_check_buffer, marker_read);
+        OTA_CHECK_BUDGET();
         if (err != ESP_OK) {
           LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_write FAIL on first chunk: %s", esp_err_to_name(err));
           if (current_ctx) { current_ctx->http.end(); current_ctx->client.stop(); delete current_ctx; current_ctx = nullptr; }
@@ -1009,6 +1089,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     } else {
       // Resume path: wait for next chunk (same as previous first-bytes probe)
       while (true) {
+        OTA_CHECK_BUDGET();
         probe_elapsed = millis() - probe_start;
         bool probe_connected = current_ctx->http.connected();
         if (!probe_connected) {
@@ -1017,6 +1098,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         }
         size_t probe_available = stream->available();
         probe_n = stream->read(probe_buf, probe_size);
+        OTA_CHECK_BUDGET();
         unsigned long now_probe_log = millis();
         if (probe_n != 0 || (now_probe_log - last_probe_log_ms >= 500)) {
           last_probe_log_ms = now_probe_log;
@@ -1029,7 +1111,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           probe_success = true;
           first_bytes_probe_fail_count = 0;
           mbedtls_sha256_update(&sha256_ctx, probe_buf, probe_n);
+          OTA_CHECK_BUDGET();
           err = esp_ota_write(ota_handle, probe_buf, probe_n);
+          OTA_CHECK_BUDGET();
           if (err != ESP_OK) {
             LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_write FAIL on probe bytes: %s", esp_err_to_name(err));
             if (current_ctx) { current_ctx->http.end(); current_ctx->client.stop(); delete current_ctx; current_ctx = nullptr; }
@@ -1052,7 +1136,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "First bytes probe: no-progress timeout");
           break;
         }
-        delay(25);
+        budget_delay(25);
+        OTA_CHECK_BUDGET();
         yield();
       }
     }
@@ -1111,7 +1196,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         uint32_t backoff_ms = backoffWithJitter(BACKOFF_DELAYS_MS[resume_attempt - 1]);
         LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Retrying resume with backoff %lu ms (resume_attempt=%d/%d, offset=%lu)",
                      (unsigned long)backoff_ms, resume_attempt + 1, RESUME_MAX_ATTEMPTS, downloaded_bytes);
-        delay(backoff_ms);
+        budget_delay(backoff_ms);
+        OTA_CHECK_BUDGET();
         continue;  // Retry from outer loop
       } else if (restart_attempt < RESTART_MAX_ATTEMPTS) {
         restart_attempt++;
@@ -1134,7 +1220,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Why restart: first_bytes no progress - full restart (restart_attempt=%d/%d) http_closed=1 ota_aborted=1 client_stopped=1 objects_recreated=1",
                      restart_attempt, RESTART_MAX_ATTEMPTS);
         uint32_t restart_backoff = backoffWithJitter(restart_attempt <= 2 ? RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1] : 1000);
-        delay(restart_backoff);
+        budget_delay(restart_backoff);
+        OTA_CHECK_BUDGET();
         continue;  // Retry from outer loop (will call esp_ota_begin in outer loop)
       } else {
         LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "First bytes probe failed and all retries exhausted - failing with NO_STREAM (probe_fail_count=%d)",
@@ -1149,6 +1236,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     // Do NOT call http.end() or client.stop() until we break out of this loop
     unsigned long last_download_yield_ms = millis();
     while (true) {
+      OTA_CHECK_BUDGET();
       unsigned long now_ms = millis();
       unsigned long elapsed_since_start = now_ms - start_ms;
       unsigned long elapsed_since_progress = now_ms - last_progress_ms;
@@ -1156,22 +1244,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       // Get fresh stream pointer (in case it changed)
       stream = current_ctx->http.getStreamPtr();
       
-      // Hard deadline check: absolute maximum time exceeded
-      if (elapsed_since_start > HARD_DEADLINE_TIMEOUT_MS) {
-        LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, 
-                      "Hard deadline timeout: downloaded=%lu, target=%lu, elapsed=%lu ms (deadline=%lu ms), last_progress_ago=%lu ms, resume_attempt=%d, restart_attempt=%d",
-                      downloaded_bytes, target_bytes, elapsed_since_start, (unsigned long)HARD_DEADLINE_TIMEOUT_MS,
-                      elapsed_since_progress, resume_attempt, restart_attempt);
-        // Teardown HTTP connection before aborting
-        if (current_ctx) {
-          current_ctx->http.end();
-          current_ctx->client.stop();
-          delete current_ctx;
-          current_ctx = nullptr;
-        }
-        if (ota_handle) esp_ota_abort(ota_handle);
-        LCD_OTA_RETURN_FAIL(RESULT_FAILED_TIMEOUT);
-      }
+      // Invocation deadline is independent of rate/progress timer restarts.
+      OTA_CHECK_BUDGET();
 
       // Heap watchdog: abort gracefully if free heap drops critically low
       {
@@ -1244,7 +1318,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           
           // Begin fresh OTA
           size_t ota_size = ota_begin_size_for_board(expected_size);
+          OTA_CHECK_BUDGET();
           err = esp_ota_begin(update, ota_size, &ota_handle);
+          OTA_CHECK_BUDGET();
           if (err != ESP_OK) {
             LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL on same-offset restart: %s", esp_err_to_name(err));
             LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
@@ -1285,7 +1361,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
                        resume_attempt, RESUME_MAX_ATTEMPTS, restart_attempt, RESTART_MAX_ATTEMPTS, downloaded_bytes);
           if (resume_attempt < RESUME_MAX_ATTEMPTS) {
             uint32_t backoff_ms = backoffWithJitter(BACKOFF_DELAYS_MS[resume_attempt - 1]);
-            delay(backoff_ms);
+            budget_delay(backoff_ms);
+            OTA_CHECK_BUDGET();
             break;  // Exit inner loop, retry resume in outer loop
           } else {
             // Resume attempts exhausted - try restart
@@ -1296,7 +1373,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
               LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Resume attempts exhausted, attempting full restart (restart_attempt=%d/%d)",
                            restart_attempt, RESTART_MAX_ATTEMPTS);
               uint32_t restart_backoff = backoffWithJitter(restart_attempt <= 2 ? RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1] : 1000);
-              delay(restart_backoff);
+              budget_delay(restart_backoff);
+              OTA_CHECK_BUDGET();
               break;  // Exit inner loop, trigger restart in outer loop
             } else {
               LOG_ERROR_TAG(LOG_TAG_OTA_WRITE,
@@ -1343,7 +1421,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             
             // Begin fresh OTA immediately (don't rely on outer loop)
             size_t ota_size = ota_begin_size_for_board(expected_size);
+            OTA_CHECK_BUDGET();
             err = esp_ota_begin(update, ota_size, &ota_handle);
+            OTA_CHECK_BUDGET();
             if (err != ESP_OK) {
               LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL on no-progress restart: %s", esp_err_to_name(err));
               LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
@@ -1359,7 +1439,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "No-progress timeout: resume_supported=%d, forcing full restart from 0 (restart_attempt=%d/%d, no_progress_timeout=%lu ms)",
                          resume_supported ? 1 : 0, restart_attempt, RESTART_MAX_ATTEMPTS, (unsigned long)NO_PROGRESS_TIMEOUT_MS);
             uint32_t restart_backoff = backoffWithJitter(restart_attempt <= 2 ? RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1] : 1000);
-            delay(restart_backoff);
+            budget_delay(restart_backoff);
+            OTA_CHECK_BUDGET();
             break;  // Exit inner loop, will restart from 0 in outer loop
           } else {
             LOG_ERROR_TAG(LOG_TAG_OTA_WRITE,
@@ -1393,7 +1474,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         if (resume_supported && using_range && resume_attempt < RESUME_MAX_ATTEMPTS) {
           resume_attempt++;
           uint32_t backoff_ms = backoffWithJitter(BACKOFF_DELAYS_MS[resume_attempt - 1]);
-          delay(backoff_ms);
+          budget_delay(backoff_ms);
+          OTA_CHECK_BUDGET();
           break;  // Exit inner loop, retry resume in outer loop
         } else {
           // Try restart (resume not supported or attempts exhausted)
@@ -1401,7 +1483,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             restart_attempt++;
             resume_attempt = 0;
             downloaded_bytes = 0;
-            delay(backoffWithJitter(1000));
+            budget_delay(backoffWithJitter(1000));
+            OTA_CHECK_BUDGET();
             break;  // Exit inner loop, trigger restart in outer loop
           } else {
             if (ota_handle) esp_ota_abort(ota_handle);
@@ -1427,7 +1510,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         if (resume_supported && using_range && resume_attempt < RESUME_MAX_ATTEMPTS) {
           resume_attempt++;
           uint32_t backoff_ms = backoffWithJitter(BACKOFF_DELAYS_MS[resume_attempt - 1]);
-          delay(backoff_ms);
+          budget_delay(backoff_ms);
+          OTA_CHECK_BUDGET();
           break;  // Exit inner loop, retry resume
         } else {
           // Try restart (resume not supported or attempts exhausted)
@@ -1435,7 +1519,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             restart_attempt++;
             resume_attempt = 0;
             downloaded_bytes = 0;
-            delay(backoffWithJitter(1000));
+            budget_delay(backoffWithJitter(1000));
+            OTA_CHECK_BUDGET();
             break;  // Exit inner loop, trigger restart
           } else {
             if (ota_handle) esp_ota_abort(ota_handle);
@@ -1457,6 +1542,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       // client.setTimeout(2000) is set in httpBeginAndGet, so readBytes() will block briefly (up to 2s)
       // This avoids dead time when available() returns 0 but data is still arriving
       size_t bytes_read = stream->readBytes(write_buffer, to_read);
+      OTA_CHECK_BUDGET();
       
       // Periodic stall logging (every ~5 seconds during stalls)
       static unsigned long last_stall_log_ms = 0;
@@ -1473,7 +1559,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         }
         
         // No bytes read - yield to WiFi stack and check timeout
-        delay(1);
+        budget_delay(1);
+        OTA_CHECK_BUDGET();
         yield();  // Service WiFi background tasks
         
         // Re-check elapsed time since last progress
@@ -1493,7 +1580,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       mbedtls_sha256_update(&sha256_ctx, write_buffer, bytes_read);
       
       // Write to OTA partition
+      OTA_CHECK_BUDGET();
       err = esp_ota_write(ota_handle, write_buffer, bytes_read);
+      OTA_CHECK_BUDGET();
       if (err != ESP_OK) {
         LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_write FAIL: %s", esp_err_to_name(err));
         // Teardown only when aborting
@@ -1571,11 +1660,13 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     current_ctx = nullptr;
   }
   
+  OTA_CHECK_BUDGET();
   // Finalize SHA256
   uint8_t hash[32];
   mbedtls_sha256_finish(&sha256_ctx, hash);
   char computed_sha256_hex[65];
   sha256ToHex(hash, computed_sha256_hex);
+  OTA_CHECK_BUDGET();
   
   LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Download complete: %lu bytes", downloaded_bytes);
   LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Final computed SHA256: %s", computed_sha256_hex);
@@ -1623,7 +1714,10 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   }
   
   // Finalize OTA
+  OTA_CHECK_BUDGET();
   err = esp_ota_end(ota_handle);
+  ota_handle = 0;  // esp_ota_end consumes the handle even on failure (SDK contract).
+  OTA_CHECK_BUDGET();
   if (err != ESP_OK) {
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_end FAIL: %s", esp_err_to_name(err));
     LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
@@ -1659,6 +1753,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       LCD_OTA_RETURN_FAIL(RESULT_SET_BOOT_FAIL);
     }
 
+    OTA_CHECK_BUDGET();
 #ifndef HALO_BOARD_LCD
     if (!OtaExpect::setPending(expected_version, running)) {
       LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "OtaExpect::setPending failed - aborting boot partition switch");
@@ -1669,10 +1764,22 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Setting boot partition to: %s (0x%x)", 
                  update->label, update->address);
     
+    // Last cancellable boundary. If recording the expectation used the budget,
+    // clear that uncommitted expectation instead of selecting a new boot slot.
+    if (!remaining_budget_ms()) {
+#ifndef HALO_BOARD_LCD
+      if (!OtaExpect::clearPending()) LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Could not clear expired OTA expectation");
+#endif
+      const Result deadline_result = deadline_failure();
+      LCD_OTA_RETURN_FAIL(deadline_result);
+    }
     err = esp_ota_set_boot_partition(update);
     if (err != ESP_OK) {
       LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_set_boot_partition FAIL: %s", esp_err_to_name(err));
       LCD_OTA_RETURN_FAIL(RESULT_SET_BOOT_FAIL);
+    }
+    if (!remaining_budget_ms()) {
+      LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Boot commit completed after cooperative deadline; preserving committed success");
     }
 #ifdef HALO_BOARD_LCD
     Serial.printf("[LCD_OTA] applier success set_boot_partition label=%s rebooting\n", update->label);
@@ -1709,9 +1816,12 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     return RESULT_SUCCESS;
   } else {
     LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "PASS: wrote image to OTA partition (no reboot - set_boot_and_reboot=false)");
+    OTA_CHECK_BUDGET();
     return RESULT_SUCCESS;
   }
 }
+
+#undef OTA_CHECK_BUDGET
 
 // REMOVED: downloadAndVerify() and applyUpdate() methods (dead code, unused).
 // These methods used Arduino Update library which may contain example GitHub URLs.

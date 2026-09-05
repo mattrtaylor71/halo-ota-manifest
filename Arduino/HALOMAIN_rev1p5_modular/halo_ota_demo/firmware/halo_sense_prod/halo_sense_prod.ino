@@ -326,6 +326,50 @@ struct BootOtaBeginRecord {
 };
 static BootOtaBeginRecord g_boot_ota_begin_record;
 static bool g_boot_ota_diag_context = false;
+// One main-loop readiness gate is shared by manual and automatic callers. Its
+// deadline is never renewed by a retry or a repeated LCD announcement.
+struct OtaPeerGate {
+  bool active = false, ready = false, querying = false, locked = false;
+  bool legacy = false, entered = false;
+  uint32_t deadline_ms = 0, next_query_ms = 0, proof_ms = 0, peer_boot = 0, sequence = 0;
+  char owner[40] = {0}, challenge[40] = {0};
+};
+static OtaPeerGate g_peer_gate;
+static uint32_t g_coord_sense_boot_id = 0;
+static uint32_t g_coord_sequence = 0;
+struct LcdTimerNotice {
+  char schedule[64] = {0};
+  uint32_t boot_id = 0, epoch = 0;
+  int wake = -1, reset = -1;
+  bool resumed = false, pending = false;
+};
+static LcdTimerNotice g_lcd_timer_notice;
+static LcdTimerNotice g_lcd_timer_origin;
+static uint32_t g_coord_seen_boots[3] = {0};
+static uint8_t g_coord_seen_count = 0;
+static uint32_t g_lcd_timer_seen_boot = 0;
+static char g_coord_schedule[64] = {0};
+static char g_coord_completed[64] = {0};
+static char g_coord_completed_ids[8][64] = {{0}};
+static uint8_t g_coord_completed_count = 0;
+static char g_coord_pending[64] = {0};
+static bool g_peer_episode_finished = false;
+static char g_coord_completion_target[32] = {0};
+static LcdOtaBudget g_lcd_work_budget;
+static bool g_lcd_work_budget_live = false, g_peer_continue_work = false;
+static char g_lcd_work_schedule[64] = {0};
+static uint32_t g_lcd_work_peer_boot = 0;
+// A reset during binary RX may leave the peer's control mode unknown without
+// an OTA request. One boot-local, query-only probe can restore normal UART.
+static bool g_control_probe_active = false, g_control_probe_finished = false;
+static bool g_control_probe_querying = false;
+static uint32_t g_control_probe_deadline_ms = 0, g_control_probe_next_ms = 0;
+static void ota_peer_service();
+static bool ota_peer_accept_new_request();
+static void ota_peer_cancel(const char* reason);
+static bool ota_peer_ready();
+static void ota_peer_schedule_complete();
+
 static volatile bool g_manual_ota_override = false;
 static unsigned long g_manual_ota_override_until_ms = 0;
 static const unsigned long MANUAL_OTA_OVERRIDE_TTL_MS = 5UL * 60UL * 1000UL;
@@ -802,6 +846,7 @@ static void ota_test_process_command(const char* cmd) {
     return;
   }
   if (strcmp(cmd, "OTA_NOW") == 0) {
+    if (!ota_peer_accept_new_request()) return;
     LOG_INFO("[OTA_TEST] OTA_NOW requested");
     uint32_t now_ts = (uint32_t)time(nullptr);
     OtaIntent::updateDesired(nullptr, nullptr, true, false, now_ts, "serial_cmd");
@@ -1817,7 +1862,7 @@ bool halo_prod_should_delay_sleep() {
 }
 
 static void send_ota_uart_message(const char* type, bool terminal = false) {
-  if (!type || !type[0]) return;
+  if (!type || !type[0] || !sense_lcd_ota_retry_safe()) return;
   StaticJsonDocument<128> doc;
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = type;
@@ -1878,28 +1923,31 @@ static void maybe_cancel_manual_ota_unready() {
 }
 
 
+static bool ota_peer_accept_new_request() {
+  if (g_ota_check_in_progress || g_ota_apply_in_progress || g_lcd_ota_task_running ||
+      g_lcd_ota_proxy_owns_uart || g_peer_gate.active || g_boot_ota_pending) return false;
+  g_peer_episode_finished = false;
+  g_ota_check_done = false;
+  g_lcd_work_budget_live = false; g_peer_continue_work = false;
+  g_lcd_work_schedule[0] = 0;
+  return true;
+}
+
 void halo_prod_request_manual_ota(const char* reason) {
+  if (!ota_peer_accept_new_request()) {
+    LOG_INFO("[OTA_MANUAL] joined existing bounded OTA episode");
+    return;
+  }
   manual_ota_override_set(reason ? reason : "manual");
   const uint32_t ts = is_time_valid() ? (uint32_t)time(nullptr) : 0;
   OtaIntent::updateDesired(nullptr, nullptr, true, false, ts, "manual");
   g_ota_check_requested = true;
   g_ota_check_done = false;
   g_ota_skip_logged = false;
-  if (g_ota_check_in_progress || g_ota_apply_in_progress) {
-    LOG_INFO("[OTA_MANUAL] request queued (busy)");
-  } else {
-    LOG_INFO("[OTA_MANUAL] request accepted");
-  }
-  // Queue the LCD OTA request behind an explicit lock so the LCD defers
-  // its own apply until Sense finishes and later sends OTA_UNLOCK.
-  // LCD OTA is now proxy-driven: Sense will fetch the manifest and stream
-  // the binary to LCD during the maintenance window via maybe_trigger_lcd_ota_check().
-  send_ota_uart_message("OTA_LOCK");
   g_lcd_ota_done = false;
-  strncpy(g_lcd_ota_result, "pending", sizeof(g_lcd_ota_result) - 1);
-  g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
+  strlcpy(g_lcd_ota_result, "pending", sizeof(g_lcd_ota_result));
   g_lcd_ota_attempted_this_window = false;
-  LOG_INFO("[LCD_OTA_ORCH] manual lcd ota queued (proxy mode)");
+  LOG_INFO("[OTA_MANUAL] accepted; waiting for fresh LCD readiness");
 }
 
 void halo_prod_request_maint_test(uint32_t duration_sec) {
@@ -2003,7 +2051,25 @@ static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
   if (wake_in_s == 0) {
     return;
   }
-  send_maint_window(nullptr, wake_in_s, wake_in_s, false);
+  MaintenanceWindow identity;
+  memset(&identity, 0, sizeof(identity));
+  const time_t target = time(nullptr) + wake_in_s;
+  struct tm local_target;
+  localtime_r(&target, &local_target);
+  if (sense_time_has_fresh_sync() && local_target.tm_hour == 2 && local_target.tm_min == 0) {
+    snprintf(identity.request_id, sizeof(identity.request_id), "nightly_%04d%02d%02d",
+             local_target.tm_year + 1900, local_target.tm_mon + 1, local_target.tm_mday);
+  } else {
+    snprintf(identity.request_id, sizeof(identity.request_id), "relative_%lu_%lu",
+             (unsigned long)target, (unsigned long)wake_in_s);
+  }
+  Preferences p;
+  if (p.begin("ota_coord", false)) {
+    p.putString("schedule", identity.request_id);
+    p.end();
+  }
+  strlcpy(g_coord_schedule, identity.request_id, sizeof(g_coord_schedule));
+  send_maint_window(&identity, wake_in_s, wake_in_s, false);
   LOG_INFO("[MAINT_COSCHED] told LCD to wake in %lus (align nightly maintenance)",
            (unsigned long)wake_in_s);
 }
@@ -2319,6 +2385,9 @@ static void lcd_ota_proxy_task(void* param) {
 }
 
 static void maybe_trigger_lcd_ota_check() {
+  // Foreground coordination owns this episode; never create a second worker
+  // from one of its failure/no-op cleanup branches. Debt survives to recovery.
+  if (g_peer_gate.active || g_peer_episode_finished || g_ota_check_in_progress) return;
   // Don't spawn a second proxy task
   if (g_lcd_ota_task_running) {
     return;
@@ -3032,8 +3101,10 @@ static bool load_lcd_ota_result_nvs() {
 // recovery check on boot. Both use the existing OTA implementation and normal
 // idle sleep; neither bypasses user work, provisioning, or OTA safety guards.
 bool halo_prod_boot_ota_pending() {
-  return g_boot_ota_pending &&
-         (int32_t)(millis() - g_boot_ota_deadline_ms) < 0;
+  return (g_boot_ota_pending && (int32_t)(millis() - g_boot_ota_deadline_ms) < 0) ||
+         (g_control_probe_active && (int32_t)(millis() - g_control_probe_deadline_ms) < 0) ||
+         (g_peer_gate.active && !g_peer_gate.entered &&
+          (int32_t)(millis() - g_peer_gate.deadline_ms) < 0);
 }
 
 static void boot_ota_queue(const char* reason) {
@@ -3046,6 +3117,25 @@ static void boot_ota_queue(const char* reason) {
   g_boot_ota_begin_record = {};
   g_boot_ota_diag_context = false;
   g_boot_ota_reason = reason;
+  const bool nightly = strcmp(reason, "nightly") == 0;
+  g_boot_ota_begin_record.event = nightly ? "nightly_begin" :
+      (strcmp(reason, "lcd_timer") == 0 ? "lcd_timer_begin" : "lcd_recovery_begin");
+  g_boot_ota_begin_record.reason = reason;
+  g_boot_ota_begin_record.code = (int32_t)esp_sleep_get_wakeup_cause();
+  snprintf(g_boot_ota_begin_record.detail, sizeof(g_boot_ota_begin_record.detail),
+           "wake=%d reset=%d epoch=%lu reason=%s",
+           (int)g_boot_ota_begin_record.code, (int)esp_reset_reason(),
+           (unsigned long)sense_now_epoch(), reason);
+  g_boot_ota_begin_record.repeat_pending = true;
+  // Keep the last true TIMER origin even if a later EXT0/debt boot replaces
+  // this RAM episode. Recovery diagnostics never relabel their current cause.
+  if (nightly) {
+    Preferences p;
+    if (p.begin("ota_coord", false)) {
+      p.putString("sense_origin", g_boot_ota_begin_record.detail);
+      p.end();
+    }
+  }
   Serial.printf("[BOOT_OTA] check pending reason=%s budget_ms=120000\n", reason);
 }
 
@@ -3058,6 +3148,316 @@ static void boot_ota_finish(const char* result) {
   g_maintenance_handled = true;
   Serial.printf("[BOOT_OTA] finished reason=%s result=%s\n", g_boot_ota_reason, result);
 }
+
+
+// UART dispatch only publishes a bounded mailbox. NVS and coordinator decisions
+// remain on the main task; announcements cannot run HTTP or renew a lease.
+void halo_prod_note_lcd_timer(const char* schedule_id, uint32_t boot_id, int wake,
+                              int reset, uint32_t epoch, bool resumed) {
+  if (!schedule_id || !schedule_id[0] || strlen(schedule_id) >= sizeof(g_lcd_timer_notice.schedule) ||
+      !boot_id || wake != (int)ESP_SLEEP_WAKEUP_TIMER || g_lcd_timer_notice.pending) return;
+  strlcpy(g_lcd_timer_notice.schedule, schedule_id, sizeof(g_lcd_timer_notice.schedule));
+  g_lcd_timer_notice.boot_id = boot_id;
+  g_lcd_timer_notice.wake = wake;
+  g_lcd_timer_notice.reset = reset;
+  g_lcd_timer_notice.epoch = epoch;
+  g_lcd_timer_notice.resumed = resumed;
+  g_lcd_timer_notice.pending = true;
+}
+
+static void ota_peer_send_lock(bool release) {
+  // An unconfirmed binary-to-JSON handoff permits local teardown only. A
+  // later independent nonblocking challenge must prove control readiness.
+  if (!sense_lcd_ota_retry_safe()) return;
+  StaticJsonDocument<256> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = release ? "OTA_UNLOCK" : "OTA_LOCK";
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  doc["coord_id"] = g_peer_gate.owner;
+  if (release) doc["terminal"] = true;
+  else {
+    const int32_t remaining = (int32_t)(g_peer_gate.deadline_ms - millis());
+    if (remaining <= 0) return;
+    doc["lease_ms"] = (uint32_t)remaining;
+    doc["peer_boot_id"] = g_peer_gate.peer_boot;
+    doc["sense_boot_id"] = g_coord_sense_boot_id;
+    doc["coord_seq"] = g_peer_gate.sequence;
+  }
+  String output; serializeJson(doc, output); uart_send_json(output.c_str());
+}
+
+static void ota_peer_cancel(const char* reason) {
+  if (g_peer_gate.locked) ota_peer_send_lock(true);
+  g_peer_gate.active = false;
+  g_peer_gate.ready = false;
+  g_peer_gate.querying = false;
+  g_peer_gate.locked = false;
+  Serial.printf("[OTA_PEER] finished reason=%s\n", reason);
+}
+
+static bool ota_peer_schedule_completed(const char* id) {
+  if (!id || !id[0]) return false;
+  if (strcmp(id, g_coord_completed) == 0) return true; // old-key migration
+  for (uint8_t i = 0; i < g_coord_completed_count; ++i)
+    if (strcmp(id, g_coord_completed_ids[i]) == 0) return true;
+  return false;
+}
+
+static bool ota_peer_continuation() {
+  return g_peer_continue_work && g_lcd_work_budget_live && g_lcd_work_budget.remaining_ms() &&
+      g_boot_ota_pending && strcmp(g_boot_ota_reason, "lcd_timer") == 0 &&
+      g_coord_pending[0] && strcmp(g_coord_pending, g_lcd_work_schedule) == 0;
+}
+
+static void ota_peer_load_completed_history(const char* encoded) {
+  if (!encoded || !encoded[0] || strlen(encoded) >= 512) return;
+  char parsed[8][64] = {{0}};
+  uint8_t count = 0;
+  const char* cursor = encoded;
+  while (*cursor) {
+    const char* end = strchr(cursor, '\n');
+    const size_t len = end ? (size_t)(end - cursor) : strlen(cursor);
+    if (!len || len >= 64 || count == 8 || memchr(cursor, '\r', len)) return;
+    memcpy(parsed[count++], cursor, len);
+    if (!end) break;
+    cursor = end + 1;
+    if (!*cursor) return;
+  }
+  memcpy(g_coord_completed_ids, parsed, sizeof(parsed));
+  g_coord_completed_count = count;
+  strlcpy(g_coord_completed, parsed[0], sizeof(g_coord_completed));
+}
+
+static void ota_peer_schedule_complete() {
+  if (!g_coord_pending[0]) return;
+  // Keep exact recent IDs, not a date high-water mark: a bad future clock
+  // must not suppress a legitimate nightly check after fresh correction.
+  if (strchr(g_coord_pending, '\n') || strchr(g_coord_pending, '\r')) return;
+  char next[8][64] = {{0}};
+  strlcpy(next[0], g_coord_pending, sizeof(next[0]));
+  uint8_t count = 1;
+  for (uint8_t i = 0; i <= g_coord_completed_count && count < 8; ++i) {
+    const char* id = i == g_coord_completed_count ? g_coord_completed : g_coord_completed_ids[i];
+    if (!id[0] || strchr(id, '\n') || strchr(id, '\r')) continue;
+    bool duplicate = false;
+    for (uint8_t j = 0; j < count; ++j) if (strcmp(next[j], id) == 0) duplicate = true;
+    if (!duplicate) strlcpy(next[count++], id, sizeof(next[0]));
+  }
+  char encoded[512] = {0};
+  for (uint8_t i = 0; i < count; ++i) {
+    if (i) strlcat(encoded, "\n", sizeof(encoded));
+    strlcat(encoded, next[i], sizeof(encoded));
+  }
+  Preferences p;
+  if (p.begin("ota_coord", false)) {
+    // The entire eight-ID history is one atomic NVS value. Publish RAM only
+    // after it succeeds; a reset before pending removal still finds the ID.
+    if (p.putString("done_ids", encoded) == strlen(encoded)) {
+      memcpy(g_coord_completed_ids, next, sizeof(next));
+      g_coord_completed_count = count;
+      strlcpy(g_coord_completed, g_coord_pending, sizeof(g_coord_completed));
+      g_coord_pending[0] = 0;
+      g_lcd_work_budget_live = false; g_peer_continue_work = false;
+      p.remove("pending");
+      p.remove("target");
+    }
+    p.end();
+  }
+}
+
+static bool ota_peer_ready() {
+  if (g_peer_episode_finished) return false;
+  if (!g_peer_gate.active) {
+    g_peer_gate = {};
+    g_peer_gate.active = true;
+    g_peer_gate.sequence = ++g_coord_sequence;
+    if (!g_peer_gate.sequence) g_peer_gate.sequence = ++g_coord_sequence;
+    g_peer_gate.deadline_ms = g_boot_ota_pending ? g_boot_ota_deadline_ms : millis() + 120000UL;
+    snprintf(g_peer_gate.owner, sizeof(g_peer_gate.owner), "%08lx%08lx",
+             (unsigned long)esp_random(), (unsigned long)esp_random());
+  }
+  ota_peer_service();
+  return g_peer_gate.active && g_peer_gate.ready &&
+         (int32_t)(millis() - g_peer_gate.deadline_ms) < 0;
+}
+
+static void ota_control_probe_service() {
+  if (sense_lcd_ota_retry_safe()) { g_control_probe_active = false; return; }
+  if (g_peer_gate.active || g_boot_ota_pending || g_ota_check_requested ||
+      g_ota_check_in_progress || g_ota_apply_in_progress || g_lcd_ota_task_running) {
+    // A real request owns the same query mailbox and its own original budget.
+    if (g_control_probe_active) g_control_probe_finished = true;
+    g_control_probe_active = false; g_control_probe_querying = false;
+    return;
+  }
+  if (g_control_probe_finished || g_peer_episode_finished) return;
+  const uint32_t now = millis();
+  if (!g_control_probe_active) {
+    g_control_probe_active = true;
+    g_control_probe_deadline_ms = now + 120000UL;
+  }
+  if ((int32_t)(now - g_control_probe_deadline_ms) >= 0) {
+    g_control_probe_active = false; g_control_probe_querying = false;
+    g_control_probe_finished = true;
+    set_lcd_ota_due_nvs(true);
+    return;
+  }
+  if (g_lcd_ota_proxy_owns_uart || sense_action_inflight() || foreground_active ||
+      voice_recording_active || g_list_screen_active || g_provisioning_manager.isSetupModeActive()) return;
+  if (g_control_probe_querying) {
+    LcdOtaQuerySnapshot snapshot;
+    const LcdOtaQueryPoll result = sense_lcd_ota_query_poll(snapshot);
+    if (result == LCD_QUERY_WAITING) return;
+    g_control_probe_querying = false; g_control_probe_next_ms = now + 200;
+    if (result == LCD_QUERY_READY) {
+      g_control_probe_active = false; g_control_probe_finished = true;
+    }
+    return;
+  }
+  if ((int32_t)(now - g_control_probe_next_ms) < 0) return;
+  char challenge[40];
+  snprintf(challenge, sizeof(challenge), "%08lx%08lx",
+           (unsigned long)esp_random(), (unsigned long)esp_random());
+  const uint32_t remaining = g_control_probe_deadline_ms - now;
+  g_control_probe_querying = sense_lcd_ota_query_start(challenge, remaining < 3000 ? remaining : 3000);
+}
+
+static void ota_peer_service() {
+  ota_control_probe_service();
+  // Do not consume/mark a new boot seen while the old transaction is busy or
+  // waiting to run its deadline teardown. The next loop can accept it after
+  // that teardown, preserving the late peer's independent opportunity.
+  const uint32_t notice_now = millis();
+  const bool old_wait_expired =
+      (g_boot_ota_pending && (int32_t)(notice_now - g_boot_ota_deadline_ms) >= 0) ||
+      (g_peer_gate.active && !g_peer_gate.entered &&
+       (int32_t)(notice_now - g_peer_gate.deadline_ms) >= 0);
+  if (g_lcd_timer_notice.pending && !old_wait_expired &&
+      !g_ota_check_in_progress && !g_ota_apply_in_progress && !g_lcd_ota_task_running &&
+      !(g_peer_gate.active && g_peer_gate.entered)) {
+    g_lcd_timer_notice.pending = false;
+    const bool expected =
+        ((g_coord_pending[0] && strcmp(g_lcd_timer_notice.schedule, g_coord_pending) == 0) ||
+         (g_coord_schedule[0] && strcmp(g_lcd_timer_notice.schedule, g_coord_schedule) == 0)) &&
+        !ota_peer_schedule_completed(g_lcd_timer_notice.schedule);
+    bool seen = false;
+    for (uint8_t i = 0; i < g_coord_seen_count; ++i) {
+      if (g_coord_seen_boots[i] == g_lcd_timer_notice.boot_id) seen = true;
+    }
+    if (expected && !seen && g_coord_seen_count < 3 &&
+        !g_ota_check_in_progress && !g_ota_apply_in_progress && !g_lcd_ota_task_running) {
+      g_coord_seen_boots[g_coord_seen_count++] = g_lcd_timer_notice.boot_id;
+      g_lcd_timer_seen_boot = g_lcd_timer_notice.boot_id;
+      g_lcd_timer_origin = g_lcd_timer_notice;
+      if (!g_coord_pending[0]) {
+        strlcpy(g_coord_pending, g_lcd_timer_notice.schedule, sizeof(g_coord_pending));
+        Preferences p;
+        if (p.begin("ota_coord", false)) { p.putString("pending", g_coord_pending); p.end(); }
+      }
+      if (!g_boot_ota_pending && !g_peer_gate.active) {
+        const bool same_work = g_lcd_work_budget_live && g_lcd_work_schedule[0] &&
+            strcmp(g_lcd_timer_notice.schedule, g_lcd_work_schedule) == 0;
+        if (same_work && (!g_lcd_work_budget.remaining_ms() ||
+                          g_lcd_timer_notice.boot_id == g_lcd_work_peer_boot)) return;
+        g_peer_continue_work = same_work;
+        g_peer_episode_finished = false;
+        g_ota_check_done = false;
+        boot_ota_queue("lcd_timer");
+      }
+      // A pending true Sense TIMER keeps its original kind and deadline.
+      if (g_peer_gate.active && g_peer_gate.peer_boot &&
+          g_peer_gate.peer_boot != g_lcd_timer_notice.boot_id) {
+        const uint32_t original_deadline = g_peer_gate.deadline_ms;
+        ota_peer_cancel("peer_reboot");
+        g_peer_gate = {};
+        g_peer_gate.active = true;
+        g_peer_gate.sequence = ++g_coord_sequence;
+        if (!g_peer_gate.sequence) g_peer_gate.sequence = ++g_coord_sequence;
+        g_peer_gate.deadline_ms = original_deadline;
+        snprintf(g_peer_gate.owner, sizeof(g_peer_gate.owner), "%08lx%08lx",
+                 (unsigned long)esp_random(), (unsigned long)esp_random());
+      }
+    }
+  }
+
+  if (!g_peer_gate.active || g_peer_gate.entered) return;
+  // Notice persistence can block; never use its entry timestamp as remaining
+  // readiness time after that work returns.
+  const uint32_t now = millis();
+  if ((int32_t)(now - g_peer_gate.deadline_ms) >= 0 ||
+      (g_peer_continue_work && !g_lcd_work_budget.remaining_ms())) {
+    ota_peer_cancel("readiness_deadline");
+    g_peer_episode_finished = true;
+    set_lcd_ota_due_nvs(true);
+    OtaIntent::clearForceAndCheck();
+    ota_set_last_result("peer_unavailable");
+    g_ota_check_done = true;
+    g_ota_check_requested = false;
+    manual_ota_override_clear("peer_unavailable");
+    return;
+  }
+  if (sense_action_inflight() || foreground_active || voice_recording_active ||
+      g_list_screen_active || g_provisioning_manager.isSetupModeActive()) {
+    // User work releases preflight ownership; the original budget continues.
+    if (g_peer_gate.locked) {
+      ota_peer_send_lock(true);
+      g_peer_gate.locked = false; g_peer_gate.ready = false;
+    }
+    return;
+  }
+  if (g_lcd_ota_proxy_owns_uart || g_lcd_ota_task_running) return;
+  if (g_peer_gate.ready && (uint32_t)(now - g_peer_gate.proof_ms) < 2000) return;
+  g_peer_gate.ready = false;
+  if (g_peer_gate.querying) {
+    LcdOtaQuerySnapshot snapshot;
+    const LcdOtaQueryPoll result = sense_lcd_ota_query_poll(snapshot);
+    if (result == LCD_QUERY_WAITING) return;
+    g_peer_gate.querying = false;
+    g_peer_gate.next_query_ms = now + 200;
+    if (result != LCD_QUERY_READY) return;
+    if (snapshot.correlated && !snapshot.peer_boot_id) return;
+    if (g_boot_ota_pending && strcmp(g_boot_ota_reason, "lcd_timer") == 0 &&
+        (!snapshot.correlated || snapshot.peer_boot_id != g_lcd_timer_seen_boot ||
+         (!snapshot.coord_waiting && !g_peer_gate.locked))) return;
+    if (g_peer_gate.peer_boot && snapshot.correlated && snapshot.peer_boot_id != g_peer_gate.peer_boot) {
+      g_peer_gate.peer_boot = 0; g_peer_gate.locked = false;
+      g_peer_gate.sequence = ++g_coord_sequence;
+      if (!g_peer_gate.sequence) g_peer_gate.sequence = ++g_coord_sequence;
+      snprintf(g_peer_gate.owner, sizeof(g_peer_gate.owner), "%08lx%08lx",
+               (unsigned long)esp_random(), (unsigned long)esp_random());
+      return;
+    }
+    g_peer_gate.peer_boot = snapshot.peer_boot_id;
+    g_peer_gate.legacy = !snapshot.correlated;
+    if (!g_peer_gate.locked) {
+      ota_peer_send_lock(false);
+      g_peer_gate.locked = true;
+      // Legacy14 has no ownership echo. A fresh VALID/ready reply is its
+      // explicit compatibility proof; its existing lock has a finite hold.
+      if (!g_peer_gate.legacy) return;
+    } else if (!g_peer_gate.legacy &&
+               (strcmp(snapshot.coord_owner, g_peer_gate.owner) != 0 || snapshot.coord_lease_ms == 0 ||
+                snapshot.coord_lease_ms > 120000)) return;
+    g_peer_gate.ready = true;
+    g_peer_gate.proof_ms = now;
+    Serial.printf("[OTA_PEER] ready boot=%lu correlated=%d\n",
+                  (unsigned long)snapshot.peer_boot_id, snapshot.correlated ? 1 : 0);
+    return;
+  }
+  if ((int32_t)(now - g_peer_gate.next_query_ms) < 0) return;
+  snprintf(g_peer_gate.challenge, sizeof(g_peer_gate.challenge), "%08lx%08lx",
+           (unsigned long)esp_random(), (unsigned long)esp_random());
+  const uint32_t left = g_peer_gate.deadline_ms - now;
+  g_peer_gate.querying = sense_lcd_ota_query_start(g_peer_gate.challenge, left < 3000 ? left : 3000);
+}
+
+struct OtaPeerTransactionCleanup {
+  ~OtaPeerTransactionCleanup() {
+    g_peer_episode_finished = true;
+    ota_peer_cancel("transaction_return");
+  }
+};
 
 // Called only after a fresh LCD query succeeds, before binary OTA takes UART.
 // A manual check can run while an earlier automatic episode remains pending;
@@ -3075,18 +3475,21 @@ static void boot_ota_repeat_begin_after_lcd_query() {
 // manifest validation. A begin/replay alone cannot prove a successful no-op.
 static void boot_ota_report_both_current(const char* lcd_fw, const char* manifest_fw) {
   if (!g_boot_ota_diag_context || !g_boot_ota_begin_reported ||
-      g_boot_ota_begin_record.noop_reported ||
-      !g_boot_ota_begin_record.event || !g_boot_ota_begin_record.reason ||
-      strcmp(g_boot_ota_begin_record.event, "nightly_begin") != 0 ||
-      strcmp(g_boot_ota_begin_record.reason, "nightly") != 0 ||
-      g_boot_ota_begin_record.code != (int32_t)ESP_SLEEP_WAKEUP_TIMER) return;
+      g_boot_ota_begin_record.noop_reported || !g_boot_ota_begin_record.event ||
+      !g_boot_ota_begin_record.reason) return;
+  const bool sense_timer = strcmp(g_boot_ota_begin_record.event, "nightly_begin") == 0 &&
+      strcmp(g_boot_ota_begin_record.reason, "nightly") == 0 &&
+      g_boot_ota_begin_record.code == (int32_t)ESP_SLEEP_WAKEUP_TIMER;
+  const bool lcd_timer = strcmp(g_boot_ota_begin_record.event, "lcd_timer_begin") == 0 &&
+      strcmp(g_boot_ota_begin_record.reason, "lcd_timer") == 0;
+  if (!sense_timer && !lcd_timer) return;
   // Both version inputs have 32-byte storage. Preserve the original trigger
   // detail verbatim; do not sample a later wake/reset/epoch at completion.
   char detail[192];
   snprintf(detail, sizeof(detail), "%s lcd=%.31s manifest=%.31s",
            g_boot_ota_begin_record.detail, lcd_fw, manifest_fw);
   g_boot_ota_begin_record.noop_reported = true;
-  uart_send_sense_diag_persist("ota", "nightly_noop", "both_current",
+  uart_send_sense_diag_persist("ota", sense_timer ? "nightly_noop" : "lcd_timer_noop", "both_current",
                               g_boot_ota_begin_record.code, detail);
 }
 
@@ -3102,6 +3505,8 @@ static void nightly_maintenance_note_wake() {
 // a check that began consumes it even if its manifest fetch or update failed.
 static void nightly_maintenance_tick() {
   if (!g_boot_ota_pending) return;
+  if (g_coord_completion_target[0] && strcmp(g_coord_completion_target, kFirmwareVersion) == 0 &&
+      g_ota_pending_verify_active) return;
   const bool nightly = strcmp(g_boot_ota_reason, "nightly") == 0;
   if (g_ota_check_done) {
     boot_ota_finish("check_already_started");
@@ -3111,6 +3516,10 @@ static void nightly_maintenance_tick() {
   if ((int32_t)(now_ms - g_boot_ota_deadline_ms) >= 0) {
     uart_send_sense_diag("ota", nightly ? "nightly_skip" : "lcd_recovery_skip",
                          g_boot_ota_reason, 0, "readiness_deadline");
+    ota_peer_cancel("readiness_deadline");
+    g_peer_episode_finished = true;
+    g_ota_check_done = true;
+    set_lcd_ota_due_nvs(true);
     boot_ota_finish("readiness_deadline");
     return;
   }
@@ -3127,6 +3536,34 @@ static void nightly_maintenance_tick() {
       g_provisioning_manager.isSetupModeActive() ||
       g_ota_check_in_progress || g_ota_apply_in_progress ||
       g_lcd_ota_task_running || g_lcd_ota_proxy_owns_uart) return;
+  if (!g_boot_ota_begin_reported && sense_lcd_ota_retry_safe()) {
+    g_boot_ota_begin_reported = true;
+    if (strcmp(g_boot_ota_reason, "nightly") != 0) {
+      Preferences p;
+      if (p.begin("ota_coord", true)) {
+        const String previous = p.getString("sense_origin", "");
+        if (previous.length()) uart_send_sense_diag_persist("ota", "previous_timer_origin",
+                                                         "retained", 0, previous.c_str());
+        p.end();
+      }
+    }
+    if (strcmp(g_boot_ota_reason, "lcd_timer") == 0) {
+      char origin[160];
+      snprintf(origin, sizeof(origin), "schedule=%.63s lcd_wake=%d lcd_reset=%d lcd_epoch=%lu boot=%lu resumed=%d",
+               g_lcd_timer_origin.schedule, g_lcd_timer_origin.wake, g_lcd_timer_origin.reset,
+               (unsigned long)g_lcd_timer_origin.epoch, (unsigned long)g_lcd_timer_seen_boot,
+               g_lcd_timer_origin.resumed ? 1 : 0);
+      uart_send_sense_diag_persist("ota", "lcd_timer_origin", "lcd_timer", g_lcd_timer_origin.wake, origin);
+    }
+    uart_send_sense_diag_persist("ota", g_boot_ota_begin_record.event,
+                                g_boot_ota_begin_record.reason,
+                                g_boot_ota_begin_record.code,
+                                g_boot_ota_begin_record.detail);
+  }
+  if (!ota_peer_ready()) return;
+  // A mode probe may have made UART safe in this tick. Publish the retained
+  // original begin on the next tick before any manifest/no-op work starts.
+  if (!g_boot_ota_begin_reported) return;
   if (!ProvisioningState::isProvisioned() ||
       ProvisioningState::getState() != ProvisioningState::STATE_CONNECTED ||
       !wifiReadyForHttps()) return;
@@ -3141,25 +3578,9 @@ static void nightly_maintenance_tick() {
   // HTTPS work. An unavailable NTP server must not suppress already-due OTA:
   // after the deadline, a plausible retained clock remains sufficient for TLS.
   if (sense_ntp_attempt_pending()) return;
-  if (!is_time_valid() || !OtaIntent::cooldownAllows()) return;
+  if (!is_time_valid() || (!OtaIntent::cooldownAllows() && !ota_peer_continuation())) return;
 
-  if (!g_boot_ota_begin_reported) {
-    g_boot_ota_begin_reported = true;
-    // Capture once: a later corroborating send must keep the real original
-    // wake/reset/epoch and event kind, not the time/cause of its delivery.
-    g_boot_ota_begin_record.event = nightly ? "nightly_begin" : "lcd_recovery_begin";
-    g_boot_ota_begin_record.reason = g_boot_ota_reason;
-    g_boot_ota_begin_record.code = (int32_t)esp_sleep_get_wakeup_cause();
-    snprintf(g_boot_ota_begin_record.detail, sizeof(g_boot_ota_begin_record.detail),
-             "wake=%d reset=%d epoch=%lu reason=%s",
-             (int)g_boot_ota_begin_record.code, (int)esp_reset_reason(),
-             (unsigned long)sense_now_epoch(), g_boot_ota_begin_record.reason);
-    g_boot_ota_begin_record.repeat_pending = true;
-    uart_send_sense_diag_persist("ota", g_boot_ota_begin_record.event,
-                                g_boot_ota_begin_record.reason,
-                                g_boot_ota_begin_record.code,
-                                g_boot_ota_begin_record.detail);
-  }
+
   g_boot_ota_diag_context = true;
   maybeRunOtaCheck(g_boot_ota_reason, true);
   g_boot_ota_diag_context = false;
@@ -3566,10 +3987,11 @@ static void handle_ota_proof() {
 }
 
 static bool prepare_lcd_ota_proxy_retry(char* lcd_fw, size_t fw_len) {
+  if (!sense_lcd_ota_retry_safe() || !g_lcd_work_budget.remaining_ms()) return false;
   // An abort clears the old lock. Reacquire it before a fresh query so the
   // receiver can finish cleanup and prove it is ready for another BEGIN.
   send_ota_uart_message("OTA_LOCK");
-  if (!sense_lcd_ota_query(lcd_fw, fw_len, nullptr)) {
+  if (!sense_lcd_ota_query(lcd_fw, fw_len, nullptr, nullptr, g_lcd_work_budget.remaining_ms())) {
     LOG_INFO("[OTA_ORCH] lcd retry query failed - leaving update unresolved");
     diag_record_error_persistent("ota_orch", -1, "lcd_retry_query_fail");
     return false;
@@ -3589,6 +4011,10 @@ static bool prepare_lcd_ota_proxy_retry(char* lcd_fw, size_t fw_len) {
 // (already current OR proxy succeeded); false if it needed an update but the
 // proxy failed (lcd_ota_due left set for the next cycle).
 static bool prod_proxy_lcd_inline() {
+  if (!sense_lcd_ota_retry_safe() || !g_lcd_work_budget.remaining_ms()) {
+    set_lcd_ota_due_nvs(true);
+    return false;
+  }
   // Free internal RAM for the LCD download/stream (mirrors the both-behind
   // inline block and lcd_ota_proxy_task). MQTT/camera DMA are already released
   // on the OTA path by the caller.
@@ -3604,18 +4030,19 @@ static bool prod_proxy_lcd_inline() {
              (unsigned long)millis(), (int)halo_uart_link_recent(3000));
     diag_record_error_persistent("ota_orch", 0, crumb);
   }
-  if (!sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr)) {
+  if (!sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr, nullptr, g_lcd_work_budget.remaining_ms())) {
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=lcd_query_fail");
     set_lcd_ota_due_nvs(true);
     return false;
   }
   boot_ota_repeat_begin_after_lcd_query();
-  if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest)) {
+  if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest, &g_lcd_work_budget)) {
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=manifest_fetch_fail");
     set_lcd_ota_due_nvs(true);
     return false;
   }
   if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) <= 0) {
+    if (!g_lcd_work_budget.remaining_ms()) { set_lcd_ota_due_nvs(true); return false; }
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd already current (lcd=%s manifest=%s)",
              lcd_fw, lcd_manifest.version);
     set_lcd_ota_due_nvs(false);
@@ -3630,6 +4057,7 @@ static bool prod_proxy_lcd_inline() {
   send_ota_uart_message("OTA_LOCK");
   bool ok = false;
   for (int attempt = 1; attempt <= 2 && !ok; ++attempt) {
+    if (!sense_lcd_ota_retry_safe() || !g_lcd_work_budget.remaining_ms()) break;
     if (attempt > 1 && !prepare_lcd_ota_proxy_retry(lcd_fw, sizeof(lcd_fw))) {
       break;
     }
@@ -3639,14 +4067,14 @@ static bool prod_proxy_lcd_inline() {
                lcd_manifest.version, attempt, (unsigned long)millis());
       diag_record_error_persistent("ota_orch", 0, crumb);
     }
-    const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
+    const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw, &g_lcd_work_budget);
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=%s (attempt=%d)",
              lcd_res ? lcd_res : "(null)", attempt);
     if (lcd_res && (strcmp(lcd_res, "success") == 0 || strcmp(lcd_res, "up_to_date") == 0)) {
       const bool updated = strcmp(lcd_res, "success") == 0;
       char confirmed_lcd_fw[32] = {0};
-      if (!sense_lcd_ota_query(confirmed_lcd_fw, sizeof(confirmed_lcd_fw), nullptr,
-                               updated ? lcd_manifest.version : lcd_fw)) {
+      if (!sense_lcd_ota_retry_safe() || !sense_lcd_ota_query(confirmed_lcd_fw, sizeof(confirmed_lcd_fw), nullptr,
+                               updated ? lcd_manifest.version : lcd_fw, g_lcd_work_budget.remaining_ms())) {
         // END_ACK proves bytes/boot selection, not completed boot/setup. Do not
         // retry into a version-only no-op and accidentally clear this debt.
         strncpy(g_lcd_ota_result, "lcd_postboot_unconfirmed", sizeof(g_lcd_ota_result) - 1);
@@ -3669,15 +4097,22 @@ static bool prod_proxy_lcd_inline() {
       LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy failed (attempt %d) — retrying once", attempt);
     }
   }
+  ok = ok && sense_lcd_ota_retry_safe() && g_lcd_work_budget.remaining_ms();
   set_lcd_ota_due_nvs(!ok);
   LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy done ok=%d", ok ? 1 : 0);
   return ok;
 }
 
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
+  if (g_peer_episode_finished) { g_ota_check_done = true; return; }
   if (g_ota_check_done || g_ota_apply_in_progress) {
     return;
   }
+  if (!ota_peer_ready()) {
+    if (!g_boot_ota_pending && !g_ota_check_done) g_ota_check_requested = true;
+    return;
+  }
+
   if (!SenseOtaPolicy::allowOtaWorkNow(reason)) {
     static bool g_ota_policy_skip_logged_this_boot = false;
     if (!g_ota_policy_skip_logged_this_boot) {
@@ -3687,7 +4122,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     }
     return;
   }
-  if (!OtaIntent::cooldownAllows()) {
+  if (!OtaIntent::cooldownAllows() && !ota_peer_continuation()) {
     if (!g_ota_skip_logged) {
       LOG_INFO("[OTA_INTENT] reason=cooldown result=0");
       g_ota_skip_logged = true;
@@ -3751,6 +4186,17 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   if (!skip_boot_delay && (millis() - g_boot_time_ms) < 5000) {
     return;
   }
+
+  g_peer_gate.entered = true;
+  OtaPeerTransactionCleanup peer_cleanup;
+  if (g_peer_continue_work) {
+    if (!ota_peer_continuation()) { g_ota_check_done = true; set_lcd_ota_due_nvs(true); return; }
+  } else {
+    g_lcd_work_budget = {millis(), 2400000UL};
+    g_lcd_work_budget_live = true;
+    strlcpy(g_lcd_work_schedule, g_coord_pending, sizeof(g_lcd_work_schedule));
+  }
+  g_lcd_work_peer_boot = g_peer_gate.peer_boot;
 
   // Record actual check entry after readiness guards, so skipped retries do
   // not write NVS. The manual-OTA decision/handshake trail survives reboots
@@ -3829,7 +4275,11 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
 
   LOG_INFO("[MANIFEST] Fetching manifest: %s", manifest_url);
   OtaManifest manifest;
-  if (!g_manifest_client.fetchManifest(manifest_url, manifest, 10000)) {
+  const uint32_t manifest_remaining_ms = g_lcd_work_budget.remaining_ms();
+  if (!manifest_remaining_ms ||
+      !g_manifest_client.fetchManifest(manifest_url, manifest,
+          manifest_remaining_ms < 10000 ? manifest_remaining_ms : 10000) ||
+      !g_lcd_work_budget.remaining_ms()) {
     truth_get_manifest_state().setErr();
     dump_system_truth("manifest_err");
     ota_set_last_result("manifest_fetch_fail");
@@ -3894,7 +4344,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     // LCD-behind split on this manual/nightly OTA instead of depending on the
     // DMA-starving background task that may never run.
     bool lcd_inline_ok = prod_proxy_lcd_inline();
-    (void)lcd_inline_ok;  // lcd_ota_due is set inside on failure for next cycle
+    if (lcd_inline_ok && g_lcd_work_budget.remaining_ms()) ota_peer_schedule_complete();
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     if (!g_lcd_ota_task_running) {
@@ -4053,7 +4503,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
                (unsigned long)millis(), (int)halo_uart_link_recent(3000));
       diag_record_error_persistent("ota_orch", 0, crumb);
     }
-    const bool lcd_query_ok = sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr);
+    const bool lcd_query_ok = sense_lcd_ota_retry_safe() && sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), nullptr, nullptr, g_lcd_work_budget.remaining_ms());
     if (lcd_query_ok) boot_ota_repeat_begin_after_lcd_query();
     if (!lcd_query_ok) {
       LOG_INFO("[OTA_ORCH] lcd proxy result=lcd_query_fail (will defer to lcd_ota_due)");
@@ -4061,7 +4511,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       char crumb[96];
       snprintf(crumb, sizeof(crumb), "lcd_query_fail t=%lu", (unsigned long)millis());
       diag_record_error_persistent("ota_orch", -1, crumb);
-    } else if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest)) {
+    } else if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest, &g_lcd_work_budget)) {
       LOG_INFO("[OTA_ORCH] lcd proxy result=manifest_fetch_fail (will defer to lcd_ota_due)");
       // Breadcrumb: query succeeded; record the LCD fw it reported.
       char crumb[96];
@@ -4080,6 +4530,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       // hiccup) on the first pass must not strand the LCD behind while the
       // Sense self-updates ahead of it.
       for (int attempt = 1; attempt <= 2 && !lcd_proxy_succeeded; ++attempt) {
+        if (!sense_lcd_ota_retry_safe() || !g_lcd_work_budget.remaining_ms()) break;
         if (attempt > 1 && !prepare_lcd_ota_proxy_retry(lcd_fw, sizeof(lcd_fw))) {
           break;
         }
@@ -4090,7 +4541,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
                    lcd_manifest.version, attempt, (unsigned long)millis());
           diag_record_error_persistent("ota_orch", 0, crumb);
         }
-        const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
+        const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw, &g_lcd_work_budget);
         LOG_INFO("[OTA_ORCH] lcd proxy result=%s (attempt=%d)",
                  lcd_res ? lcd_res : "(null)", attempt);
         {
@@ -4101,9 +4552,17 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
           diag_record_error_persistent("ota_orch", 0, crumb);
         }
         if (lcd_res && (strcmp(lcd_res, "success") == 0 || strcmp(lcd_res, "up_to_date") == 0)) {
-          lcd_proxy_succeeded = true;
-          // Persist the outcome across the imminent Sense self-OTA reboot.
           const bool updated = strcmp(lcd_res, "success") == 0;
+          char confirmed_lcd_fw[32] = {0};
+          if (!sense_lcd_ota_retry_safe() || !sense_lcd_ota_query(confirmed_lcd_fw, sizeof(confirmed_lcd_fw), nullptr,
+                                   updated ? lcd_manifest.version : lcd_fw,
+                                   g_lcd_work_budget.remaining_ms())) {
+            set_lcd_ota_result_nvs("lcd_postboot_unconfirmed", "");
+            diag_record_error_persistent("ota_orch", -1, "lcd_postboot_unconfirmed");
+            break;
+          }
+          lcd_proxy_succeeded = true;
+          // Persist only after target boot/setup/VALID was freshly proved.
           const char* result = updated ? "updated" : "noop";
           strncpy(g_lcd_ota_result, result, sizeof(g_lcd_ota_result) - 1);
           g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
@@ -4133,13 +4592,14 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       char crumb[96];
       snprintf(crumb, sizeof(crumb), "lcd_query_ok lcd_fw=%s t=%lu", lcd_fw, (unsigned long)millis());
       diag_record_error_persistent("ota_orch", 0, crumb);
-      lcd_proxy_succeeded = true;  // nothing owed; don't set lcd_ota_due
+      lcd_proxy_succeeded = g_lcd_work_budget.remaining_ms() > 0;
     }
   }
 
   // Fallback: only owe an lcd_ota_due retry on the next boot if the LCD was
   // NOT brought up-to-date here (query/manifest fail, or proxy non-success).
   // On success (or already up-to-date) clear it — the LCD is already done.
+  lcd_proxy_succeeded = lcd_proxy_succeeded && sense_lcd_ota_retry_safe() && g_lcd_work_budget.remaining_ms();
   set_lcd_ota_due_nvs(!lcd_proxy_succeeded);
   LOG_INFO("[OTA] lcd_ota_due=%d (lcd_proxy_succeeded=%d)",
            lcd_proxy_succeeded ? 0 : 1, lcd_proxy_succeeded ? 1 : 0);
@@ -4176,11 +4636,33 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
              manifest.version, (int)(!lcd_proxy_succeeded), (unsigned long)millis());
     diag_record_error_persistent("ota_orch", 0, crumb);
   }
+  if (!sense_lcd_ota_retry_safe() || !g_lcd_work_budget.remaining_ms()) {
+    OtaIntent::recordOtaResult("paired_deadline");
+    ota_set_last_result("paired_deadline");
+    clear_intent_once();
+    g_ota_check_in_progress = false; g_dma_reserve_suppressed = false;
+    return;
+  }
+  if (g_coord_pending[0]) {
+    Preferences p;
+    if (p.begin("ota_coord", false)) { p.putString("target", manifest.version); p.end(); }
+  }
   send_ota_uart_message("OTA_LOCK");
+  // NVS and UART calls consume the same pair budget. Sample at the actual
+  // applier boundary rather than giving it time spent in those operations.
+  const uint32_t pair_remaining_ms = g_lcd_work_budget.remaining_ms();
+  if (!sense_lcd_ota_retry_safe() || !pair_remaining_ms) {
+    OtaIntent::recordOtaResult("paired_deadline");
+    ota_set_last_result("paired_deadline");
+    clear_intent_once();
+    g_ota_check_in_progress = false; g_dma_reserve_suppressed = false;
+    return;
+  }
   g_ota_apply_in_progress = true;
 
   SenseOtaApplier::Result res = g_ota_applier.applyToOtaPartition(
-      manifest.url, manifest.sha256, manifest.size, 1200000, true, manifest.version);
+      manifest.url, manifest.sha256, manifest.size,
+      pair_remaining_ms < 1200000UL ? pair_remaining_ms : 1200000UL, true, manifest.version);
   g_ota_apply_in_progress = false;
   // NOTE: lcd_ota_due was already set above based on whether the inline LCD
   // proxy succeeded (clear) or was skipped/failed (set as next-boot fallback).
@@ -4208,6 +4690,8 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
 }
 
 void maybeRunOtaCheck(const char* reason) {
+  if (reason && strcmp(reason, "post_provision") == 0 &&
+      !g_provisioning_manager.isSetupModeActive() && !ota_peer_accept_new_request()) return;
   if (reason && strcmp(reason, "post_provision") == 0 && g_provisioning_manager.isSetupModeActive()) {
     g_defer_ota_post_provision = true;
     LOG_INFO("[OTA] defer post_provision check until setup mode ends");
@@ -4225,7 +4709,7 @@ void maybeRunOtaCheck(const char* reason) {
 // force a download while the user is busy.
 static void halo_request_ota_check(const char* why, bool allow_reboot) {
   const char* reason = (why && *why) ? why : "uart_cmd";
-  if (SenseOtaPolicy::allowOtaWorkNow(reason)) {
+  if (SenseOtaPolicy::allowOtaWorkNow(reason) && ota_peer_accept_new_request()) {
     g_ota_check_requested = true;
     LOG_INFO("[OTA_INTENT] reason=%s result=1 allow_reboot=%d (uart)", reason,
              allow_reboot ? 1 : 0);
@@ -4244,7 +4728,7 @@ static void handle_mqtt_commands() {
         halo_reboot("mqtt_cmd_reboot");
         break;
       case MQTT_CMD_OTA_CHECK:
-        if (SenseOtaPolicy::allowOtaWorkNow("cmd")) {
+        if (SenseOtaPolicy::allowOtaWorkNow("cmd") && ota_peer_accept_new_request()) {
           g_ota_check_requested = true;
           mqtt_ota_check_requested = true;
           LOG_INFO("[OTA_INTENT] reason=cmd result=1");
@@ -4253,7 +4737,7 @@ static void handle_mqtt_commands() {
         }
         break;
       case MQTT_CMD_OTA_FORCE_NOW: {
-        if (SenseOtaPolicy::allowOtaWorkNow("force_now")) {
+        if (SenseOtaPolicy::allowOtaWorkNow("force_now") && ota_peer_accept_new_request()) {
           const uint32_t ts = is_time_valid() ? (uint32_t)time(nullptr) : 0;
           OtaIntent::updateDesired(nullptr, nullptr, true, false, ts, "force_now");
           g_ota_check_requested = true;
@@ -4275,6 +4759,7 @@ static void handle_mqtt_commands() {
 }
 
 void halo_prod_loop() {
+  ota_peer_service();
   ota_notify_lcd_activity();
   if (sense_action_inflight()) {
     static unsigned long last_skip_log_ms = 0;
@@ -4388,9 +4873,10 @@ void halo_prod_loop() {
   }
   if (g_defer_ota_post_provision && !g_provisioning_manager.isSetupModeActive()) {
     g_defer_ota_post_provision = false;
-    g_ota_check_done = false;
-    g_ota_skip_logged = false;
-    maybeRunOtaCheck("post_provision", true);
+    if (ota_peer_accept_new_request()) {
+      g_ota_skip_logged = false;
+      maybeRunOtaCheck("post_provision", true);
+    }
   }
 
   if (wifi_connected) {
@@ -4432,6 +4918,20 @@ void halo_prod_loop() {
 
   g_health_gate.update();
   g_ota_pending_verify_active = g_health_gate.getPendingVerify() && !g_health_gate.getMarkedValid();
+  if (g_coord_pending[0] && g_coord_completion_target[0] &&
+      strcmp(g_coord_completion_target, kFirmwareVersion) == 0 && !get_lcd_ota_due_nvs()) {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    if (running && esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_VALID) {
+      ota_peer_schedule_complete();
+      if (!g_coord_pending[0]) g_coord_completion_target[0] = 0;
+      if (!g_coord_pending[0] && g_boot_ota_pending) {
+        g_ota_check_done = true; g_peer_episode_finished = true;
+        ota_peer_cancel("verified_postboot_complete");
+        boot_ota_finish("verified_postboot_complete");
+      }
+    }
+  }
   nightly_maintenance_tick();
   maybe_cancel_manual_ota_unready();
   handle_ota_proof();
@@ -4987,6 +5487,37 @@ uint32_t ota_get_timer_delta_s() {
 }
 
 void halo_prod_setup() {
+  {
+    Preferences p;
+    if (p.begin("ota_coord", false)) {
+      uint32_t next_boot = p.getUInt("generation", 0) + 1;
+      if (!next_boot) next_boot = 1;
+      if (p.putUInt("generation", next_boot) == sizeof(next_boot)) g_coord_sense_boot_id = next_boot;
+      strlcpy(g_coord_schedule, p.getString("schedule", "").c_str(), sizeof(g_coord_schedule));
+      strlcpy(g_coord_completed, p.getString("complete", "").c_str(), sizeof(g_coord_completed));
+      ota_peer_load_completed_history(p.getString("done_ids", "").c_str());
+      strlcpy(g_coord_pending, p.getString("pending", "").c_str(), sizeof(g_coord_pending));
+      strlcpy(g_coord_completion_target, p.getString("target", "").c_str(), sizeof(g_coord_completion_target));
+      p.end();
+    }
+  }
+  // A reset after the atomic history commit but before key removal must not
+  // attach a later manual request to the already completed pending ID.
+  if (ota_peer_schedule_completed(g_coord_pending)) g_coord_pending[0] = 0;
+  if (g_boot_ota_pending && strcmp(g_boot_ota_reason, "nightly") == 0 && g_coord_schedule[0]) {
+    if (ota_peer_schedule_completed(g_coord_schedule)) {
+      g_ota_check_done = true; g_peer_episode_finished = true;
+      boot_ota_finish("schedule_already_completed");
+    } else {
+      strlcpy(g_coord_pending, g_coord_schedule, sizeof(g_coord_pending));
+      Preferences p;
+      if (p.begin("ota_coord", false)) { p.putString("pending", g_coord_pending); p.end(); }
+    }
+  }
+  if (!g_boot_ota_pending && g_coord_pending[0] &&
+      !ota_peer_schedule_completed(g_coord_pending)) {
+    boot_ota_queue("coord_recovery");
+  }
   // Override mbedTLS allocator: allow PSRAM for TLS buffers.
   // The prebuilt libs use CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC which restricts
   // mbedTLS to internal SRAM only (~32KB available). Standard calloc/free
@@ -5037,6 +5568,9 @@ void halo_prod_setup() {
 
   if (get_lcd_ota_due_nvs()) {
     LOG_INFO("[MAINT] lcd_ota_due from NVS - queueing bounded recovery check");
+    // An independently recorded LCD debt can still heal after this date's
+    // scheduled check completed; it is a recovery, not another nightly run.
+    if (!g_boot_ota_pending) { g_peer_episode_finished = false; g_ota_check_done = false; }
     boot_ota_queue("lcd_due");
   }
 

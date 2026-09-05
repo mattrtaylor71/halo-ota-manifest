@@ -100,7 +100,10 @@ except ImportError:
         cmd.extend(list(args))
         return cmd
 
-    def ensure_s3_bucket(config, dry_run=False):
+    def ensure_s3_bucket(config, dry_run=False, require_existing=False):
+        if require_existing:
+            print("ERROR: Existing-bucket verification helper unavailable", file=sys.stderr)
+            return False
         return True
 
     def generate_manifest(version, bin_url, sha256, size, build_id, artifact_fw_version,
@@ -293,6 +296,7 @@ def main():
     parser.add_argument("--channel", default="dev", help="Channel: dev|prod")
     parser.add_argument("--version", required=True, help="Version X.Y.Z (must match binary marker)")
     parser.add_argument("--bin", required=True, help="Absolute path to LCD app .bin")
+    parser.add_argument("--require-existing-bucket", action="store_true", help="Fail on any bucket check error; never create a bucket or change its policy")
     parser.add_argument("--bucket", default=None, help="S3 bucket (default: halo-ota-<channel>)")
     parser.add_argument("--region", default="us-east-1", help="AWS region")
     parser.add_argument("--prefix", default="halo/ota", help="S3 prefix")
@@ -429,7 +433,7 @@ def main():
         print("ERROR: AWS credentials failed", file=sys.stderr)
         sys.exit(1)
 
-    if not ensure_s3_bucket(config):
+    if not ensure_s3_bucket(config, require_existing=args.require_existing_bucket):
         sys.exit(1)
 
     # Upload: artifact -> versioned manifest -> manifest_latest last (Cache-Control no-store)

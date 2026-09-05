@@ -698,8 +698,8 @@ def s3_head_proof(config, manifest_key, bin_key):
     ok = s3_head_object(config, bin_key, "bin") and ok
     return ok
 
-def ensure_s3_bucket(config, dry_run=False):
-    """Ensure S3 bucket exists, create if needed."""
+def ensure_s3_bucket(config, dry_run=False, require_existing=False):
+    """Require an existing bucket when requested; retain legacy bootstrap otherwise."""
     if dry_run:
         print(f"[DRY-RUN] Would check/create bucket: {config['bucket']}")
         return True
@@ -712,6 +712,10 @@ def ensure_s3_bucket(config, dry_run=False):
         # Bucket exists
         return True
     
+    if require_existing:
+        print(f"ERROR: Existing bucket check failed for {config['bucket']}; bucket creation and policy changes are disabled", file=sys.stderr)
+        return False
+
     # Bucket doesn't exist, create it
     print(f"Bucket {config['bucket']} does not exist, creating...")
     create_cmd = build_aws_cmd(
@@ -832,6 +836,7 @@ def main():
     global PUBLISH_OK
     parser = argparse.ArgumentParser(description="OTA Publishing Pipeline for HALO SENSE")
     parser.add_argument("--channel", default=None, help="Channel name (dev|prod, default: prod)")
+    parser.add_argument("--require-existing-bucket", action="store_true", help="Fail on any bucket check error; never create a bucket or change its policy")
     parser.add_argument("--bucket", default=None, help="S3 bucket name (or set OTA_BUCKET)")
     parser.add_argument("--prefix", default=None, help="S3 key prefix (default: halo/ota)")
     parser.add_argument("--region", default=None, help="AWS region (default: us-east-1)")
@@ -1177,7 +1182,7 @@ def main():
         return 0
     
     # Step 9: Ensure S3 bucket exists
-    if not ensure_s3_bucket(config, dry_run=args.dry_run):
+    if not ensure_s3_bucket(config, dry_run=args.dry_run, require_existing=args.require_existing_bucket):
         print("ERROR: Failed to ensure S3 bucket exists", file=sys.stderr)
         sys.exit(1)
     

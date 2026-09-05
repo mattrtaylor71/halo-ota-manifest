@@ -41,7 +41,7 @@ static uint32_t g_img_spool_failed = 0;
 static bool sense_spool_image_to_lcd_once(const UploadJob& job,
                                           const uint8_t* buf,
                                           size_t len) {
-  if (!buf || len == 0) return false;
+  if (!buf || len == 0 || !sense_uart_ordinary_tx_allowed()) return false;
   const uint32_t job_id = job.job_id;
   const char* mode = job.mode;
 
@@ -220,6 +220,7 @@ static bool sense_spool_image_to_lcd_once(const UploadJob& job,
 #endif
 
 static void sense_spool_hold_lcd_awake() {
+  if (!sense_uart_ordinary_tx_allowed()) return;
   StaticJsonDocument<128> k;
   k["ver"] = PROTOCOL_VERSION;
   k["type"] = "MAINT_KEEPALIVE";
@@ -238,6 +239,7 @@ static void sense_spool_hold_lcd_awake() {
 static bool sense_spool_image_to_lcd(const UploadJob& job,
                                      const uint8_t* buf,
                                      size_t len) {
+  if (!sense_uart_ordinary_tx_allowed()) return false;
   for (int attempt = 1; attempt <= SENSE_IMG_SPOOL_ATTEMPTS; attempt++) {
     sense_spool_hold_lcd_awake();
     if (sense_spool_image_to_lcd_once(job, buf, len)) {

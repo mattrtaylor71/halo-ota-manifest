@@ -290,7 +290,43 @@ static void runLcdOtaCheckOnce() {
   ota_check_in_progress = false;
 }
 
+static void lcd_coord_service() {
+  // Main-task NVS housekeeping; UART/input paths only publish a flag.
+  if (g_lcd_coord_notice_clear.exchange(false)) {
+    g_lcd_coord_notice.active = false;
+    Preferences p;
+    if (p.begin("lcd_coord", false)) { p.remove("pending"); p.end(); }
+  }
+  const uint32_t until = g_lcd_coord_lease_until_ms.load();
+  if (until && (int32_t)((uint32_t)millis() - until) >= 0 && !g_lcd_ota_uart_receiving) {
+    lcd_coord_cancel_preflight(true);
+    lcd_timer_receiver_wait_release("lease_expired");
+  }
+  if (!g_lcd_coord_notice.active || !g_lcd_boot_ready.load() ||
+      !lcd_timer_receiver_wait_active() || g_lcd_ota_uart_receiving || ota_locked) return;
+  const uint32_t now = millis();
+  if ((int32_t)(now - g_lcd_coord_notice_next_ms) < 0) return;
+  g_lcd_coord_notice_next_ms = now + 2000;
+  if (!sense_awake_confirmed || !sense_recently_heard(SENSE_AWAKE_TRUST_MS)) {
+    // Reuse the existing one-way GPIO handshake, including its stale-awake
+    // guard. A pulse before Sense actually sleeps must not lose rendezvous.
+    request_sense_wake("ota_peer_rendezvous");
+    if (!lcd_timer_receiver_wait_active()) return;
+  }
+  StaticJsonDocument<512> doc;
+  doc["ver"] = PROTOCOL_VERSION; doc["type"] = "OTA_PEER_READY";
+  doc["msg_id"] = get_next_msg_id(); doc["ts"] = now;
+  doc["schedule_id"] = g_lcd_coord_notice.schedule;
+  doc["peer_boot_id"] = g_lcd_coord_boot_id;
+  doc["origin_wake"] = g_lcd_coord_notice.wake;
+  doc["origin_reset"] = g_lcd_coord_notice.reset;
+  doc["origin_epoch"] = g_lcd_coord_notice.epoch;
+  doc["resumed"] = g_lcd_coord_notice.resumes != 0;
+  String output; serializeJson(doc, output); uart_send_json(output.c_str());
+}
+
 void halo_lcd_prod_loop() {
+  lcd_coord_service();
   if (ota_locked && (millis() - ota_lock_at_ms) >= OTA_LOCK_TIMEOUT_MS) {
     ota_locked = false;
     Serial.println("[LCD_OTA] auto-unlock after timeout");
