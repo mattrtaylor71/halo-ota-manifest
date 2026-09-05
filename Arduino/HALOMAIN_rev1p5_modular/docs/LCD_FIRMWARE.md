@@ -175,6 +175,10 @@ The LCD uses GPIO39 (INT_PIN) to wake the Sense board. Pin mode tracking (`lcd_w
 - Persisted in NVS namespace `test_cfg` key `test_mode`
 - Activated via USB `testmode` command, cleared via `testmodeoff`
 
+#### USB console backpressure
+
+`setup()` sets `Serial.setTxTimeoutMs(1)` immediately after `Serial.begin()`, matching Sense. The earlier claim that timeout 0 was safe on core 3.3.8 was incorrect: a connected/full BYTEBUF accepts a zero-byte send, and `HWCDC::write()` decrements its unsigned retry counter from 0 before checking for timeout. The positive 1 ms SDK timeout bounds no-progress write/flush retries and avoids the underflow; logs may be dropped. This is not a hard 1 ms total-write deadline when progress occurs. UART1, LVGL ownership, sleep timing and the installed SDK remain unchanged. The condition is host-source reproduced; the particular USB-close bench stall still needs physical evidence.
+
 #### setup() Flow
 
 1. Print wakeup diagnostics (reset reason, wake cause)

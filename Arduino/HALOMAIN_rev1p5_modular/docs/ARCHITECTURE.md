@@ -15,6 +15,10 @@ The device uses a **two-board ESP32-S3 architecture**:
 
 The boards communicate over a dedicated **UART link at 115200 baud**. The LCD board is the **sleep leader** -- it decides when the system sleeps based on user inactivity. The Sense board is the **network leader** -- it owns all WiFi, HTTPS and OTA downloads.
 
+### USB diagnostic console safety
+
+Both production boards set `Serial.setTxTimeoutMs(1)` at their sole USB-console initialization point. Arduino core 3.3.8 can underflow its unsigned no-progress counter with timeout 0 when a physically connected host stops draining a full TX byte ring: a zero-byte FreeRTOS ring send returns success, so the subsequent decrement wraps. A positive 1 ms SDK timeout bounds that write/flush no-progress path without patching the installed core. Console loss is preferable to blocking application work; this is not a 1 ms wall-clock limit on an entire partially progressing write. UART1 OTA framing and timeouts are unchanged. The source defect is independently reproduced; USB enumeration alone did not prove it caused a specific hardware episode.
+
 ### Physical Architecture
 
 ```

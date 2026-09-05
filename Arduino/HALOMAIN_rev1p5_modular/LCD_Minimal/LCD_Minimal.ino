@@ -35,10 +35,10 @@ typedef struct app_event_t app_event_t;
 // 2026-08-16 and again on 2026-08-20 (both needed a power cycle - even esptool
 // could not reach the ROM, and the 45s freeze watchdog did not recover it).
 //
-// CORRECTION 2026-08-20: this comment used to claim setTxTimeoutMs(0) does not
-// avoid it either. That is wrong for core 3.3.8 — see the detailed note at
-// Serial.begin() in setup(), where it is now set. Reducing log volume is still
-// worthwhile, but it is no longer the only line of defence.
+// CORRECTION 2026-09-04: timeout 0 is unsafe in core 3.3.8's connected/full-ring
+// write path: a zero-byte send succeeds and its unsigned retry counter wraps.
+// setup() uses a positive 1 ms SDK timeout to bound no-progress writes/flushes.
+// Reducing log volume remains useful; no installed core files are patched.
 #ifndef HALO_QUIET_SOAK
 #define HALO_QUIET_SOAK 0
 #endif
@@ -3841,34 +3841,14 @@ static void lcd_errlog_store_with_context(const char* board, const char* area,
 void setup() {
   print_wakeup_diagnostics(HALO_BOARD_NAME);
   Serial.begin(115200);
-  // Make the USB console non-blocking, as the Sense already does.
-  //
-  // On USB-Serial-JTAG a write BLOCKS when the TX ring fills and no host is
-  // draining it. That is what hard-wedged this board on 2026-08-16 and again on
-  // 2026-08-20 — port still enumerating, zero bytes out, esptool unable to sync,
-  // and (measured) NOT recovered by the 45s freeze watchdog, because the panic
-  // path needs the same blocked console. Both times it took a physical power
-  // cycle.
-  //
-  // The mitigation until now was HALO_QUIET_SOAK (log less). This addresses the
-  // mechanism instead. In core 3.3.8 HWCDC::write, tx_timeout_ms == 0 makes the
-  // lock acquire non-blocking AND turns the ring-buffer send into
-  // `xRingbufferSend(..., 0)`, which returns immediately when full and breaks
-  // out of the send loop rather than waiting:
-  //     while (connected && to_send) {
-  //       if (xRingbufferSend(..., tx_timeout_ms / portTICK_PERIOD_MS) != pdTRUE) break;
-  //
-  // The trade is that console output is DROPPED instead of stalling the caller
-  // when nothing is reading. That is the right trade here: a dropped log line
-  // costs a diagnostic, a blocked write costs the board. Production is unaffected
-  // either way — with no cable attached the !isCDC_Connected() path already
-  // discards output.
-  //
-  // NOTE: the block comment at the top of this file previously asserted that
-  // setTxTimeoutMs(0) "does not avoid it". The core source above contradicts
-  // that, and the Sense has run with it since the shopping-list refresh hang was
-  // traced to exactly this blocking behaviour.
-  Serial.setTxTimeoutMs(0);
+  // Bound USB console backpressure, matching Sense. Core3.3.8 HWCDC::write
+  // calls xRingbufferSend with size 0 when its BYTEBUF is full; that succeeds
+  // without progress. With timeout 0, the subsequent unsigned tries-- wraps
+  // before the zero test and can stall with a plugged-but-undrained host.
+  // A positive 1 ms SDK timeout avoids that underflow and bounds no-progress
+  // write/flush retries. It is not a hard wall-clock deadline per whole write.
+  // Logs may be dropped; UART1 transport and its OTA timings are unchanged.
+  Serial.setTxTimeoutMs(1);
   delay(100);
   boot_ms = millis();
   guardian_awake_start_ms = boot_ms;

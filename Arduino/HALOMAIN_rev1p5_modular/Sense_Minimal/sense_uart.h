@@ -84,15 +84,13 @@ static void initUarts() {
     return;
   }
   Serial.begin(115200);
-  // CRITICAL (root cause of the shopping-list refresh hang): the USB-CDC console
-  // (Serial) BLOCKS on Serial.write when the TX FIFO fills and NO host is draining
-  // it — which is the normal in-enclosure case (Sense USB unplugged). The heavy
-  // ~1KB/s of logging then stalls the op_worker mid list-fetch, breaking the TLS
-  // POST (-1) and hanging the retry ~20s. setTxTimeoutMs(0) makes the console
-  // non-blocking (drop output when no host) so logging can never stall the fetch.
-  // Verified on-bench: with the Sense USB connected (console drained) the hang
-  // vanished; in-enclosure (no drain) it returns every-few-refreshes.
-  Serial.setTxTimeoutMs(0);
+  // Keep USB console backpressure bounded when a cable remains attached but
+  // no host drains logs. Core3.3.8 HWCDC::write decrements its unsigned retry
+  // counter before checking zero; timeout 0 underflows when its BYTEBUF is full
+  // because a zero-byte ring send succeeds without progress. A positive 1 ms
+  // timeout bounds that no-progress path (and flush) without changing UART1.
+  // This is the SDK retry timeout, not a hard wall-clock deadline per write.
+  Serial.setTxTimeoutMs(1);
   delay(50);
   // 1024, matching the LCD. Until the SD-spool drain existed the Sense only
   // ever RECEIVED small JSON lines and only ever SENT binary, so the 256-byte
