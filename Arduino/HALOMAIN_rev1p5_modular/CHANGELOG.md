@@ -4,9 +4,9 @@
 
 A retry could wake within its15-second lead interval while the separate LCD timer-origin notice was still unavailable. The existing fresh clock and peer handshake were ready, but policy cancelled the entire opportunity before its due time. The correction lets a valid persisted shipping ARMED record wait inside that lead interval with a current correlated peer. It preserves the actual missing-origin diagnostic, original deadlines and all target/accounting gates. It returns false before due, so this wait grants no early transfer or reservation.
 
-The native test now starts from the observed due−12s timing with an absent origin rather than assuming that notice was accepted. Actual production builds and manual/scheduled installation remain pending. Version112 was not released; its on-device transfer failures and missed retry remain recorded below.
+The native test now starts from the observed due−12s timing with an absent origin rather than assuming that notice was accepted. Exact 113 private and 114 production builds and the portable 114 package have passed verification. The controlled 113 baseline is SDK VALID on both boards; manual and scheduled 114 acceptance remain pending. Version112 was not released; its on-device transfer failures and missed retry remain recorded below.
 
-## 6.4.112 — successor candidate, not yet released
+## 6.4.112 — superseded candidate, never released
 
 A verified early LCD timer notice could be rejected because retained OTA debt had already queued the boot check as `coord_recovery`. The queue preserves its first reason and deadline, but the retry readiness check incorrectly required that reason to equal `lcd_timer`. The correction uses the accepted timer origin and currently queried peer identity, while preserving the original deadline, stored arm identity and all retry accounting.
 
@@ -14,7 +14,7 @@ The native regression fails on the preceding source and passes with the correcti
 
 The actual September10 scheduled109→112 run failed during LCD transfer. Its armed retry woke but returned to sleep on109 without a second reservation, with an early readiness snapshot reporting `origin:false`. The queue-label fix is therefore insufficient for hardware recovery. The one-hour deadline was missed; production latest is unchanged, and this candidate has no release tag or production acceptance. Exact cause of the transfer failure remains unconfirmed.
 
-Deadline closure restored Pacific scheduling while preserving valid109 firmware, provisioning and failed-campaign accounting. Saved ring records identify an HTTP no-data abort at835,080 bytes and a later connection-loss abort at304,405 bytes; final policy is DEFERRED/gen8 with no second reservation. The recurring soak is paused. The next bounded-readiness correction is documented but has not been implemented.
+Deadline closure restored Pacific scheduling while preserving valid109 firmware, provisioning and failed-campaign accounting. Saved ring records identify an HTTP no-data abort at835,080 bytes and a later connection-loss abort at304,405 bytes; final policy is DEFERRED/gen8 with no second reservation. The recurring soak is paused. The bounded-readiness correction was subsequently implemented and natively tested in candidate 114.
 
 ## 6.4.108 — superseded candidate, never released
 

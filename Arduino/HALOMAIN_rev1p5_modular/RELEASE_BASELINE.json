@@ -31,7 +31,7 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Exact113 private and114 production canonical pairs and portable114 package independently verified. Observed missing-origin native regression passes with no early reservation and unchanged deadlines/accounting. Manual and normal-calendar scheduled installation of the same114 pair are pending; no production acceptance yet.",
+  "qualification_scope": "Exact 113 private and 114 production canonical pairs and portable 114 package verified. Focused actual-source missing-origin regression passes without early reservation or changed deadlines/accounting. Controlled 113 baseline is paired SDK VALID and Home/idle. Manual and normal-calendar scheduled installation of the same 114 pair are pending.",
   "artifact_source_commit": "1224f28ab2d1307d54cf71956b30da2bbccead3d",
   "artifact_source_firmware_tree": "83c178bde2020c4e2fff800caf9e33be33a4ef97",
   "autonomous_calendar_scope": "Manual113 to exact114 production, then a separate controlled113 calendar baseline to the same exact114 production artifacts. Distinct archived cases; no in-case credit refund. Restore2amPacific and verify actual SDKVALID/target accounting before release.",
@@ -228,27 +228,23 @@
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/lcd-retained-analysis001/result.json",
         "sha256": "e9fe15dc67d1702f1359e61a0c4d919eeec06b0090701dcc252c5ee96716b8cf"
       }
+    },
+    "113_controlled_manual_baseline": {
+      "status": "PASS",
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production113-manual-stage-run001/result.json",
+        "sha256": "b378eea3e324308815059ee2c69c2142b9d804878f6ac03071ef3432772514dd"
+      },
+      "identity": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production113-manual-stage-run001/application-identity.json",
+        "sha256": "9c22689936c064be64aaf80c0bfe0e1f9e48ec9c6b1991fc54e1d75803b46006"
+      },
+      "scope": "Both exact 113/app1, SDK VALID, Home/idle and later natural paired USB absence. Full readbacks preserve valid 109 fallback and provisioning. Terminal sleep marker and full current policy counters were not captured in the short Sense log; baseline telemetry is checked separately before manual OTA."
     }
   },
   "previous_recovery_package_108": {
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-recovery-package002/MANIFEST.json",
     "sha256": "3e4e7da8768ec49e779d7010e36feca7a0e047b53cd8a5fe9abab08f0adef727"
-  },
-  "release_scope_decision": {
-    "requested_by_user": "Make shippable; do not be a perfectionist; ship in one hour",
-    "recorded_local_date": "2026-09-10",
-    "target_local_deadline": "15:25 America/Los_Angeles",
-    "deferred": [
-      "deliberate integrity-fault run",
-      "additional clean scheduled repeat",
-      "separate exact-production manual reinstall",
-      "physical power-cut test",
-      "controlled network interruption",
-      "USB-free shipping operation",
-      "observed later-day recovery"
-    ],
-    "deadline_met": false,
-    "disposition": "Do not release112: actual scheduled installation and recovery failed the reduced acceptance gate."
   },
   "recovery_package": {
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-recovery-package001/MANIFEST.json",
@@ -261,28 +257,6 @@
   "portable_release_archive": {
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/HALO-6.4.114-production.zip",
     "sha256": "08056f5621b8e42e29d42206266357559c4bc90faee14b46ca511d9cf4aeb9ab"
-  },
-  "service_restoration": {
-    "status": "Pacific_NVS_and_saved_timer_selection_verified",
-    "timezone": "PST8PDT,M3.2.0,M11.1.0",
-    "result": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/result.json",
-      "sha256": "f3f952e4c75fdaf6fc191290fb43b258836d304ef1ebb5f582e72b13d47a0ac8"
-    },
-    "closure": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/overall-reap.json",
-      "sha256": "0bfd2e58d3454b8afb09a40b0eb6c7a1e0b379b4495670a0e3aa2e255fdb7d1e"
-    },
-    "next_sense_timer_epoch": 1789117200,
-    "next_lcd_timer_epoch": 1789117185,
-    "next_local_wake": "2026-09-11 02:00 America/Los_Angeles",
-    "scope": "One4KiB Sense sector changed only timezone. Full20KiB readback verified; canonical/provisioning and both VALID109 selectors/image bodies preserved. Both normally released; saved logs select correct Pacific timers and show LCD HOME after OTA lock clears. Initial qualification guard returned exit2 on firmware OTA_LOCK; no full post-release identity qualifier PASS claimed. No further hardware replay.",
-    "timer_observation": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/PACIFIC-TIMER-SELECTION-OBSERVATION.json",
-      "sha256": "f792fb8bbe6efea2dcf03da7efdd7e47e98574e0e8a76c3f6108867bb84acc05"
-    },
-    "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
-    "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
   "next_focused_fix": "docs/OTA_RETRY_NEXT_FIX.md",
   "test_automation_status": "PAUSED",
@@ -331,5 +305,70 @@
     "requested_local": "2026-09-10 15:57 America/Los_Angeles",
     "target_local": "2026-09-10 16:52 America/Los_Angeles",
     "scope": "Freeze runtime. Manual and scheduled install, pairedSDKhealth/accounting, Pacific, publication and tag/adoption only. No extendedsoak or added framework."
+  },
+  "previous_112_release_scope_decision": {
+    "requested_by_user": "Make shippable; do not be a perfectionist; ship in one hour",
+    "recorded_local_date": "2026-09-10",
+    "target_local_deadline": "15:25 America/Los_Angeles",
+    "deferred": [
+      "deliberate integrity-fault run",
+      "additional clean scheduled repeat",
+      "separate exact-production manual reinstall",
+      "physical power-cut test",
+      "controlled network interruption",
+      "USB-free shipping operation",
+      "observed later-day recovery"
+    ],
+    "deadline_met": false,
+    "disposition": "Do not release112: actual scheduled installation and recovery failed the reduced acceptance gate."
+  },
+  "previous_109_service_restoration": {
+    "status": "Pacific_NVS_and_saved_timer_selection_verified",
+    "timezone": "PST8PDT,M3.2.0,M11.1.0",
+    "result": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/result.json",
+      "sha256": "f3f952e4c75fdaf6fc191290fb43b258836d304ef1ebb5f582e72b13d47a0ac8"
+    },
+    "closure": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/overall-reap.json",
+      "sha256": "0bfd2e58d3454b8afb09a40b0eb6c7a1e0b379b4495670a0e3aa2e255fdb7d1e"
+    },
+    "next_sense_timer_epoch": 1789117200,
+    "next_lcd_timer_epoch": 1789117185,
+    "next_local_wake": "2026-09-11 02:00 America/Los_Angeles",
+    "scope": "One4KiB Sense sector changed only timezone. Full20KiB readback verified; canonical/provisioning and both VALID109 selectors/image bodies preserved. Both normally released; saved logs select correct Pacific timers and show LCD HOME after OTA lock clears. Initial qualification guard returned exit2 on firmware OTA_LOCK; no full post-release identity qualifier PASS claimed. No further hardware replay.",
+    "timer_observation": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/PACIFIC-TIMER-SELECTION-OBSERVATION.json",
+      "sha256": "f792fb8bbe6efea2dcf03da7efdd7e47e98574e0e8a76c3f6108867bb84acc05"
+    },
+    "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
+    "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
+  },
+  "service_restoration": {
+    "status": "pending_final_114_verification",
+    "timezone": "PST8PDT,M3.2.0,M11.1.0"
+  },
+  "release_scope_decision": {
+    "requested_by_user": "Production ready within one hour; cut corners as needed",
+    "recorded_local_date": "2026-09-10",
+    "target_local_deadline": "16:52 America/Los_Angeles",
+    "required": [
+      "manual installation of exact 114 production pair",
+      "normal-calendar scheduled installation of the same pair",
+      "paired health and settled accounting",
+      "Pacific restoration",
+      "production publication",
+      "local commit/tag and safe original-checkout adoption"
+    ],
+    "deferred": [
+      "extended repeated soak",
+      "deliberate integrity fault",
+      "controlled network interruption",
+      "physical power cut",
+      "USB-free operation",
+      "observed later-day recovery"
+    ],
+    "deadline_met": null,
+    "disposition": "Acceptance in progress; no production promotion yet."
   }
 }
