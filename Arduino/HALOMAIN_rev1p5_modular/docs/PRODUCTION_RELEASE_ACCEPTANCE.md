@@ -1,6 +1,6 @@
 # Production OTA acceptance — 6.4.114
 
-**Current disposition: exact artifacts verified; device acceptance pending.** The compiled source is commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, firmware tree `83c178bde2020c4e2fff800caf9e33be33a4ef97`. `RELEASE_BASELINE.json` contains the actual artifact hashes and saved test receipts. Publication, release tagging and original-checkout adoption are not yet complete.
+**Current disposition: manual installation passed; scheduled acceptance pending.** The compiled source is commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, firmware tree `83c178bde2020c4e2fff800caf9e33be33a4ef97`. `RELEASE_BASELINE.json` contains the actual artifact hashes and saved test receipts. Publication, release tagging and original-checkout adoption are not yet complete.
 
 ## Change and scope
 
@@ -18,9 +18,9 @@ The user directed a one-hour release effort on September 10. The remaining essen
 | Exact 113 private and 114 production builds | PASS. Canonical shipping flags, source provenance, image hashes, partition fit and resource comparison verified. 114 uses production endpoints; bench, one-shot and fault controls are disabled. |
 | Portable 114 recovery package | PASS. Exact application images, ELF/maps, bootloaders, partitions, flash arguments and provenance included; package and ZIP contents independently verified. |
 | Controlled 113 manual baseline | PASS. Both boards booted exact 113/app1, SDK VALID, with a current Home/idle observation and later natural paired USB absence. Provisioning and valid 109 fallback preserved. The short Sense log did not prove the terminal sleep marker or current policy counters. |
-| Manual 113→114 OTA | Pending. Supported LCD serial `ota` enters the manual input path; this will not claim physical menu-button coverage. |
+| Manual 113→114 OTA | PASS. One supported LCD serial request at 16:20:55.588 PDT, followed by natural paired sleep. Post-case USB health confirms exact 114/app0 SDK VALID on both boards and Home/idle. No physical menu-button coverage is claimed. |
 | Normal-calendar 113→114 OTA | Pending; a separate archived setup preserves the installed 114 fallback. |
-| Final paired 114 health and policy accounting | Pending. |
+| Manual paired 114 health and accounting | PASS after the separate USB health check: RESOLVED phase 8/generation 6, reserved 0, one network/apply attempt and one image begin per board. Remaining allowance is the reported 14 ms; no refund. Final scheduled health/accounting remains pending. |
 | Pacific restoration, production publication, commit/tag and checkout adoption | Pending. |
 
 ## Test conditions and limits

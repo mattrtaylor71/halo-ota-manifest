@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "production_artifacts_verified_manual_and_scheduled_acceptance_pending",
+  "status": "production_manual_ota_pass_scheduled_acceptance_pending",
   "candidate_version": "6.4.114",
   "canary_versions": [
     "6.4.113"
@@ -31,7 +31,7 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Exact 113 private and 114 production canonical pairs and portable 114 package verified. Focused actual-source missing-origin regression passes without early reservation or changed deadlines/accounting. Controlled 113 baseline is paired SDK VALID and Home/idle. Manual and normal-calendar scheduled installation of the same 114 pair are pending.",
+  "qualification_scope": "Exact production 114 artifacts and package verified; manual 113\u2192114 installation passed with exact paired SDK VALID/Home and resolved accounting. Normal-calendar scheduled installation of the same production pair is pending.",
   "artifact_source_commit": "1224f28ab2d1307d54cf71956b30da2bbccead3d",
   "artifact_source_firmware_tree": "83c178bde2020c4e2fff800caf9e33be33a4ef97",
   "autonomous_calendar_scope": "Manual113 to exact114 production, then a separate controlled113 calendar baseline to the same exact114 production artifacts. Distinct archived cases; no in-case credit refund. Restore2amPacific and verify actual SDKVALID/target accounting before release.",
@@ -240,6 +240,38 @@
         "sha256": "9c22689936c064be64aaf80c0bfe0e1f9e48ec9c6b1991fc54e1d75803b46006"
       },
       "scope": "Both exact 113/app1, SDK VALID, Home/idle and later natural paired USB absence. Full readbacks preserve valid 109 fallback and provisioning. Terminal sleep marker and full current policy counters were not captured in the short Sense log; baseline telemetry is checked separately before manual OTA."
+    },
+    "114_manual_install": {
+      "status": "PASS",
+      "trigger": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-manual114-trigger-run001/result.json",
+        "sha256": "d30e4992d2f876b430a244aedd4d5436e3263db3f1ffc7cbb208b899310000da"
+      },
+      "observer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/manual114-observer/result.json",
+        "sha256": "333e302eb2590f644777e934a6592e8a258505c95e208614f4bc67d2ebfcb1e4"
+      },
+      "observer_closure": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/manual114-observer/overall-reap.json",
+        "sha256": "c0d0b09a951ea0f8267ba712a8c72d7e34be1116e8738fab3e3c0704627da099"
+      },
+      "post_case_health": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-current-known113-114-health-run001/result.json",
+        "sha256": "a114cd748fe4736bced5ace46e0b86651660d99088e81fc468f903f9bbe4e23d"
+      },
+      "identity": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-current-known113-114-health-run001/application-identity.json",
+        "sha256": "7af5c1398406c67b3ddcfaa3d8e57962ca155cb95800a57d51f5955256673340"
+      },
+      "health_closure": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-current-known113-114-health-run001/overall-reap.json",
+        "sha256": "680d439f8fca5c80a7befcc0f5af4b001bf1579e0ce4f68d08947537c0f8c6d7"
+      },
+      "resolved_telemetry_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/manual114-observer/DOCS-MANUAL114-RESOLVED-TELEMETRY.json",
+        "sha256": "234780466a63d3f64a5c1bf4c4205acdd8348f0e45e7fbe7a27919452ff40e34"
+      },
+      "scope": "One supported LCD serial manual request at 16:20:55.588 PDT, followed by natural paired sleep and exact 114/app0 SDK VALID/Home on both boards. No intervening firmware installation. The post-case USB health check and subsequent telemetry confirm RESOLVED phase 8/generation 6, reserved 0, one network/application attempt and one image begin per board. Remaining allowance is the reported 14 ms, without refund. Autonomous post-install health timing and physical menu-button coverage are not claimed."
     }
   },
   "previous_recovery_package_108": {

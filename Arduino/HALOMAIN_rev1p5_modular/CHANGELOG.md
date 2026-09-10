@@ -4,7 +4,7 @@
 
 A retry could wake within its15-second lead interval while the separate LCD timer-origin notice was still unavailable. The existing fresh clock and peer handshake were ready, but policy cancelled the entire opportunity before its due time. The correction lets a valid persisted shipping ARMED record wait inside that lead interval with a current correlated peer. It preserves the actual missing-origin diagnostic, original deadlines and all target/accounting gates. It returns false before due, so this wait grants no early transfer or reservation.
 
-The native test now starts from the observed due−12s timing with an absent origin rather than assuming that notice was accepted. Exact 113 private and 114 production builds and the portable 114 package have passed verification. The controlled 113 baseline is SDK VALID on both boards; manual and scheduled 114 acceptance remain pending. Version112 was not released; its on-device transfer failures and missed retry remain recorded below.
+The native test now starts from the observed due−12s timing with an absent origin rather than assuming that notice was accepted. Exact 113 private and 114 production builds and the portable 114 package have passed verification. Manual 113→114 installation passed, with both exact 114 images SDK VALID, Home/idle and resolved accounting. Scheduled 114 acceptance remains pending. Version112 was not released; its on-device transfer failures and missed retry remain recorded below.
 
 ## 6.4.112 — superseded candidate, never released
 
