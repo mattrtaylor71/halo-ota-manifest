@@ -1,3 +1,7 @@
+# Current successor — 6.4.114, not released
+
+The active goal continues from committed release-candidate code with a focused correction for the observed early retry cancellation. Exact113/private and114/production artifacts will be built from the next clean committed source. Acceptance requires manual installation of114, a separate normal-calendar113→114 installation of the same artifacts, Pacific restoration, publication and checkout adoption. See `RELEASE_BASELINE.json` for actual current progress. The following112 record is historical; it is not a successful release or the source to rebuild by default.
+
 # Release baseline and future OTA development
 
 **Production candidate: 6.4.112. Release status: failed acceptance; not released.** The source is committed at `b6ff853e4e3aa4f014a45a48230351bbed802d7c`, firmware tree `8529653e0c187f0b2c1c47689f03de2efe11d5ea`. Two focused retry corrections pass native regression checks. The exact production build has passed independent artifact checks; the scheduled installation failed its reduced hardware release gate and the one-hour deadline was missed. Extended fault/repeat tests and a separate final manual reinstall are deferred, not passed. See `RELEASE_BASELINE.json` for actual artifacts, device results and publication status. Future firmware work must start from the adopted release once it is recorded; do not rebuild the older original checkout in the meantime.

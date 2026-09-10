@@ -563,9 +563,16 @@ static bool halo_policy_boot_ready(){
   const bool expired=(expiry&&c.epoch>=expiry)||
     (durable_ota::bench_active(*r)&&!durable_ota::bench_live(*r,c));
   if(due&&c.epoch<due&&!expired){
-    // Preserve the existing one-shot wait. Fast/deferred retries require this
-    // accepted LCD episode, not a transient or unrelated pending mailbox.
-    if((one_shot||accepted)&&uint64_t(due-c.epoch)*1000<uint32_t(readiness_left)){
+    // The LCD wakes up to 15s early. Its separate timer notice can lose a race
+    // with the peer lock or fresh-time service. A persisted shipping arm and
+    // current correlated peer suffice to WAIT inside that lead interval;
+    // they do not authorize work before due or renew either deadline.
+    const bool armed_peer_wait=r->phase==durable_ota::Phase::ARMED&&
+      !durable_ota::bench_active(*r)&&!one_shot&&
+      due-c.epoch<=durable_ota::kPeerLead&&g_boot_ota_pending&&
+      g_peer_gate.active&&g_peer_gate.ready&&!g_peer_gate.legacy&&g_peer_gate.peer_boot;
+    if((one_shot||accepted||armed_peer_wait)&&
+       uint64_t(due-c.epoch)*1000<uint32_t(readiness_left)){
       halo_policy_note_readiness("wait_due",c,due,accepted);return false;
     }
     wait=true;

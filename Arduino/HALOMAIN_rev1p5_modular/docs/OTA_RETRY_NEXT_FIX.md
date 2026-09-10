@@ -1,3 +1,5 @@
+The bounded-wait change described below is now implemented in the current successor source. Its focused native regression and production hardware validation are in progress; this note alone is not an acceptance result.
+
 # Next focused retry-readiness fix
 
 The 109 → 112 scheduled case did not complete. The first window reported `lcd_proxy_failed_defer`, then ARMED phase 5/generation 7 for retry at **1789078722 (15:18:42 PDT)**. Its second wake reported `not_due`, `accepted_origin=false` at **1789078710 (due − 12 seconds)**, with fresh time and 116733 ms left in the existing readiness opportunity. The subsequent report at **1789078726 (due + 4 seconds)** still had one network window, one APPLY attempt, two LCD begins and zero Sense begins. This report precedes final sleep and does not establish the final canonical phase.

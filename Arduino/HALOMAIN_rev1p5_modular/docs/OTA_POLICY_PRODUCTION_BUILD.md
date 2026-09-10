@@ -5,11 +5,11 @@ Start from the verified source commit in `RELEASE_BASELINE.json`. If that record
 Prepare a release snapshot from clean committed source, then compile that snapshot:
 
 ```sh
-python3 -B tools/prepare_production_release.py --version 6.4.102 --epoch <explicit-UTC-seconds> --out /absolute/path/to/new-snapshot
+python3 -B tools/prepare_production_release.py --version <allocated-version> --epoch <explicit-UTC-seconds> --out /absolute/path/to/new-snapshot
 python3 -B /absolute/path/to/new-snapshot/source/tools/build_ota_policy_production.py --out /absolute/path/to/new-build --private-canary
 ```
 
-Use allocated canary versions 6.4.102/6.4.103 for the fixed canary route. For final 6.4.104, prepare that explicit version and omit `--private-canary`. The preparer requires the committed path manifest and clean source scope, records full Git commit/tree and changes only three generated metadata headers in the external snapshot. Its build ID is deterministic for the explicit source/version/epoch. Repository metadata remains clearly precommit/source-only; the publisher rejects provisional proofs. Never publish a direct build of those provisional headers.
+Allocate unused versions from the current release record and immutable artifact inventory; do not reuse historical candidate numbers. For a final production version, prepare its explicit version and omit `--private-canary`. The preparer requires the committed path manifest and clean source scope, records full Git commit/tree and changes only three generated metadata headers in the external snapshot. Its build ID is deterministic for the explicit source/version/epoch. Repository metadata remains clearly precommit/source-only; the publisher rejects provisional proofs. Never publish a direct build of those provisional headers.
 
 Use `--board sense` or `--board lcd` for one target, or `--plan` to inspect the exact commands. Each output directory must be new. The entry verifies the partition-table hashes and records the compiler command, log and bounded process completion. Each compiler gets 600 seconds plus at most 10 seconds for cleanup.
 

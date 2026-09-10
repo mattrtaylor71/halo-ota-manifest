@@ -1,5 +1,11 @@
 # Firmware changelog
 
+## 6.4.114 — retry-readiness successor, not released
+
+A retry could wake within its15-second lead interval while the separate LCD timer-origin notice was still unavailable. The existing fresh clock and peer handshake were ready, but policy cancelled the entire opportunity before its due time. The correction lets a valid persisted shipping ARMED record wait inside that lead interval with a current correlated peer. It preserves the actual missing-origin diagnostic, original deadlines and all target/accounting gates. It returns false before due, so this wait grants no early transfer or reservation.
+
+The native test now starts from the observed due−12s timing with an absent origin rather than assuming that notice was accepted. Actual production builds and manual/scheduled installation remain pending. Version112 was not released; its on-device transfer failures and missed retry remain recorded below.
+
 ## 6.4.112 — successor candidate, not yet released
 
 A verified early LCD timer notice could be rejected because retained OTA debt had already queued the boot check as `coord_recovery`. The queue preserves its first reason and deadline, but the retry readiness check incorrectly required that reason to equal `lcd_timer`. The correction uses the accepted timer origin and currently queried peer identity, while preserving the original deadline, stored arm identity and all retry accounting.

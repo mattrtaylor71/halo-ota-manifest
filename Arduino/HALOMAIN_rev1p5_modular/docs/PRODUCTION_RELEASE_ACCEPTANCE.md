@@ -1,3 +1,7 @@
+# Active successor acceptance — 6.4.114
+
+The continued goal uses the narrow early-wake correction in `SenseDurablePolicyRuntime.h`, with a real-source regression for the observed missing-origin due−12s failure. Exact113/private and114/production artifacts, manual113→114 installation, a separate normal-calendar113→114 installation of the same production pair, Pacific restoration and production publication are pending. Each hardware case starts from a separately archived controlled baseline; no in-case budget refund or weaker shipping profile is allowed. No extended fault matrix is added. The112 case below remains failed historical evidence.
+
 # Production OTA acceptance — 6.4.112
 
 **Release disposition: failed acceptance; not released.** The successor source is commit `b6ff853e4e3aa4f014a45a48230351bbed802d7c`, firmware tree `8529653e0c187f0b2c1c47689f03de2efe11d5ea`. The final release record must bind the actual paired artifacts, hardware outcomes, production publication and development-checkout adoption in `RELEASE_BASELINE.json`. A later documentation commit does not change compiled source identity.

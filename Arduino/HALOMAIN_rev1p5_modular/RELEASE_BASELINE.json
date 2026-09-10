@@ -1,18 +1,15 @@
 {
   "schema_version": 1,
-  "status": "scheduled_install_failed_not_released",
-  "candidate_version": "6.4.112",
+  "status": "retry_readiness_fix_native_pass_build_pending",
+  "candidate_version": "6.4.114",
   "canary_versions": [
-    "6.4.109"
+    "6.4.113"
   ],
   "canary_profile": "shipping policy with only the fixed private OTA route changed",
   "release_commit": null,
   "release_tree": null,
   "release_tag": null,
-  "release_artifact_manifest": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/RELEASE-PAIR.json",
-    "sha256": "836a2d8a894a6a29338278fa8f58eaf192848d7810b236952f10f2559daf2398"
-  },
+  "release_artifact_manifest": null,
   "shipping_acceptance_receipt": null,
   "production_publication_receipt": null,
   "previous_production_manifest_archive": null,
@@ -31,10 +28,10 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Exact109 and production112 artifacts/package verified; native regressions pass. Actual109 to112 calendar transfer failed and retry returned to sleep without a second reservation. Saved canonical confirms DEFERRED/gen8. Valid109 images and provisioning preserved; Pacific configuration and next timers restored. No112 acceptance, production promotion, release tag or default-checkout adoption.",
-  "artifact_source_commit": "b6ff853e4e3aa4f014a45a48230351bbed802d7c",
-  "artifact_source_firmware_tree": "8529653e0c187f0b2c1c47689f03de2efe11d5ea",
-  "autonomous_calendar_scope": "User-directed one-hour release scope:109 controlled baseline then one clean normal-calendar109\u2192112 install using exact production112 artifacts. Restore Pacific02:00 before service. Deliberate fault/repeat and separate final manual reinstall deferred; no in-case policy refund.",
+  "qualification_scope": "Successor fixes observed cancellation during15s early retry wake. Native old-source reproducer fails; current correction under focused validation. Exact113 private and114 production builds and both manual/scheduled installation of the exact114 pair remain required. Previous112 failure and restored109 service evidence remain historical, not successor acceptance.",
+  "artifact_source_commit": null,
+  "artifact_source_firmware_tree": null,
+  "autonomous_calendar_scope": "Manual113 to exact114 production, then a separate controlled113 calendar baseline to the same exact114 production artifacts. Distinct archived cases; no in-case credit refund. Restore2amPacific and verify actual SDKVALID/target accounting before release.",
   "previous_candidate_artifacts": {
     "102": {
       "pair": {
@@ -105,9 +102,7 @@
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
         "sha256": "20b7fa728015ead039edf1890b1f3cc59f08ce734ac9b85bf5c4ddd9b351f1f3"
       }
-    }
-  },
-  "candidate_artifacts": {
+    },
     "109": {
       "pair": {
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release109-build001/RELEASE-PAIR.json",
@@ -129,6 +124,7 @@
       }
     }
   },
+  "candidate_artifacts": {},
   "previous_artifact_source_commit": "9d38091f2b23341f5a12f423efa5fa71cf0f6978",
   "previous_artifact_source_firmware_tree": "051516be8df264e70f4d53535b35722e1ca4995f",
   "acceptance_results": {
@@ -230,18 +226,9 @@
     "deadline_met": false,
     "disposition": "Do not release112: actual scheduled installation and recovery failed the reduced acceptance gate."
   },
-  "recovery_package": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-recovery-package001/MANIFEST.json",
-    "sha256": "5393923436079583f1f7fd611b632f88140cb7e3e808027c291d3b107c50a2d4"
-  },
-  "recovery_package_independent_peer": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/DOCS-PACKAGE001-PEER.json",
-    "sha256": "0914856eaa4e70c37d4573859d264befb1efe9f9eea4b29932ec1812ccb8accb"
-  },
-  "portable_release_archive": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/HALO-6.4.112-production.zip",
-    "sha256": "b0c616265e8626fefb753b51e632776144b40dd69db823d1fd4f1163a66f3701"
-  },
+  "recovery_package": null,
+  "recovery_package_independent_peer": null,
+  "portable_release_archive": null,
   "service_restoration": {
     "status": "Pacific_NVS_and_saved_timer_selection_verified",
     "timezone": "PST8PDT,M3.2.0,M11.1.0",
@@ -265,5 +252,45 @@
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
   "next_focused_fix": "docs/OTA_RETRY_NEXT_FIX.md",
-  "test_automation_status": "PAUSED"
+  "test_automation_status": "PAUSED",
+  "previous_112_artifact_source_commit": "b6ff853e4e3aa4f014a45a48230351bbed802d7c",
+  "previous_112_artifact_source_firmware_tree": "8529653e0c187f0b2c1c47689f03de2efe11d5ea",
+  "previous_112_release_artifact_manifest": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/RELEASE-PAIR.json",
+    "sha256": "836a2d8a894a6a29338278fa8f58eaf192848d7810b236952f10f2559daf2398"
+  },
+  "previous_112_recovery_package": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-recovery-package001/MANIFEST.json",
+    "sha256": "5393923436079583f1f7fd611b632f88140cb7e3e808027c291d3b107c50a2d4"
+  },
+  "previous_112_recovery_package_independent_peer": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/DOCS-PACKAGE001-PEER.json",
+    "sha256": "0914856eaa4e70c37d4573859d264befb1efe9f9eea4b29932ec1812ccb8accb"
+  },
+  "previous_112_portable_release_archive": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/HALO-6.4.112-production.zip",
+    "sha256": "b0c616265e8626fefb753b51e632776144b40dd69db823d1fd4f1163a66f3701"
+  },
+  "continuation_scope": {
+    "status": "active_goal_continuation",
+    "requirements": [
+      "focused observed-failure native regression",
+      "exact113 private and114 production canonical builds",
+      "manual113 to114 installation",
+      "new separate calendar113 to114 installation",
+      "Pacific service restoration",
+      "exact production promotion",
+      "release commit/tag",
+      "safe default-checkout adoption"
+    ],
+    "extended_fault_matrix": "not added"
+  },
+  "focused_successor_regression": {
+    "status": "PASS",
+    "test": "tools/test_retry_wake_ready.py",
+    "command": "python3 -B tools/test_retry_wake_ready.py",
+    "old_source_result": "FAIL at observed due\u221212s: not_due, origin0, pending0, cancels1",
+    "new_source_result": "PASS: boundedwait, noearly reservation, exactdue one charge, originaldeadlines/accounting and caller guards",
+    "scope": "Native real-source extracted wrapper and real codec; no hardware acceptance claim"
+  }
 }

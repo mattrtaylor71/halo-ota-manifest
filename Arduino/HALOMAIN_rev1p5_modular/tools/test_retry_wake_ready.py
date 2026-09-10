@@ -27,6 +27,17 @@ def definition(text, signature, structure=False):
 
 def harness():
     runtime = (SHARED / 'SenseDurablePolicyRuntime.h').read_text()
+    sketch = (SHARED.parent / 'halo_sense_prod/halo_sense_prod.ino').read_text()
+    caller = definition(sketch, 'static void nightly_maintenance_tick()')
+    guard_start = caller.index('if (sense_action_inflight()')
+    guard_end = caller.index('return;', guard_start) + len('return;')
+    assert guard_start < caller.index('if (!ota_peer_ready()) return;')
+    assert guard_end < caller.index('if (!self_retry_boot_admit()) return;')
+    # Exercise the real caller guard; only its void-return is adapted so that
+    # the harness can assert it. Busy state is not a policy-helper-local claim.
+    caller_guard = ('static bool production_user_or_transport_idle(){' +
+                    caller[guard_start:guard_end].replace('return;', 'return false;') +
+                    'return true;}')
     boundaries = r'''
 #include <cassert>
 #include <cstdio>
@@ -50,10 +61,19 @@ static bool nvs_capacity_image_valid(){return image_valid;}
 static void ota_peer_cancel(const char*){++cancel_calls;g_peer_gate.active=false;g_peer_gate.ready=false;}
 static void boot_ota_finish(const char*){++finish_calls;g_boot_ota_pending=false;}
 static struct {template<class... A> void printf(const char*,A...) {}} Serial;
+static bool action_inflight,foreground_active,voice_recording_active,g_list_screen_active;
+static bool setup_mode,g_ota_check_in_progress,g_ota_apply_in_progress;
+static bool g_lcd_ota_task_running,g_lcd_ota_proxy_owns_uart;
+static void* op_queue;
+static unsigned queue_messages;
+static bool sense_action_inflight(){return action_inflight;}
+static unsigned uxQueueMessagesWaiting(void*){return queue_messages;}
+static struct {bool isSetupModeActive(){return setup_mode;}} g_provisioning_manager;
 namespace sense_policy {
 static const Record* current(){return &live;}
 static bool absent(){return false;}
-static bool load_state(uint32_t,uint32_t){now_ms+=load_ms;return storage_ok;}
+// Model the real load boundary with the real record shape check.
+static bool load_state(uint32_t,uint32_t){now_ms+=load_ms;return storage_ok&&durable_ota::shape(live);}
 static bool normal_entry(){return false;}
 static durable_ota::Clock fresh_clock(bool normal=false){return {epoch,clock_fresh,normal};}
 static bool bench_retry_phase(const Record&){return false;}
@@ -79,9 +99,9 @@ static void unchanged(const Record& before){
   assert(!memcmp(a,b,sizeof(a)));
 }
 static void baseline(const char* reason="lcd_timer"){
-  constexpr uint32_t base=1789070722;
+  constexpr uint32_t base=1789077853;
   durable_ota::Target target{};
-  strcpy(target.version,"6.4.106");strcpy(target.peer_version,"6.4.106");
+  strcpy(target.version,"6.4.112");strcpy(target.peer_version,"6.4.112");
   strcpy(target.url,"https://example.com/sense.bin");target.sha256[0]=1;target.peer_sha256[0]=2;
   target.bytes=1803360;target.peer_bytes=1877264;
   uint8_t campaign[16]={1};Record r;
@@ -89,12 +109,14 @@ static void baseline(const char* reason="lcd_timer"){
   assert(durable_ota::bind_discovery(live,{base+5,true,true},target,true,true,r));live=r;
   assert(durable_ota::reserve_apply(live,{base+5,true,true},5000,2400000,true,r));live=r;
   assert(durable_ota::reserve_begin(live,{base+15,true,true},1,r));live=r;
-  assert(durable_ota::finish(live,{base+595,true,true},590000,true,
+  assert(durable_ota::reserve_begin(live,{base+16,true,true},1,r));live=r;
+  assert(durable_ota::finish(live,{base+569,true,true},564000,true,
       durable_ota::Failure::TEMPORARY,0,0,base+86400,"retry_test_1",r));live=r;
-  assert(durable_ota::confirm_arm(live,{base+596,true,true},live.arm_id,live.arm_epoch,
+  assert(durable_ota::confirm_arm(live,{base+570,true,true},live.arm_id,live.arm_epoch,
       300637462,300637462,true,true,r));live=r;
-  assert(live.phase==Phase::ARMED&&live.generation==6&&live.network_windows==1);
-  assert(live.day_attempts==1&&live.begins[1]==1&&live.arm_peer_boot==300637462);
+  assert(live.phase==Phase::ARMED&&live.generation==7&&live.network_windows==1);
+  assert(live.day_attempts==1&&live.begins[1]==2&&live.arm_peer_boot==300637462);
+  assert(live.fast_due==1789078722);
   canonical_roundtrip();
   now_ms=10000;epoch=live.fast_due-10;load_ms=0;
   clock_fresh=storage_ok=image_valid=true;
@@ -109,85 +131,157 @@ static void baseline(const char* reason="lcd_timer"){
   g_peer_gate={true,true,false,700,now_ms+110000};
   cancel_calls=finish_calls=0;g_policy_readiness={};
 }
-static void rejected_origin(){
+static void expect_wait(bool accepted=false){
   const Record before=live;
-  assert(!halo_policy_accepted_lcd_origin(live.arm_id));
-  assert(!halo_policy_boot_ready());assert(!strcmp(g_policy_readiness.decision,"not_due"));
-  assert(cancel_calls==1&&finish_calls==1&&!g_boot_ota_pending);
-  assert(g_peer_episode_finished&&g_ota_check_done);unchanged(before);
+  const uint32_t boot_end=g_boot_ota_deadline_ms,peer_end=g_peer_gate.deadline_ms;
+  assert(!halo_policy_boot_ready());
+  assert(!strcmp(g_policy_readiness.decision,"wait_due"));
+  assert(g_policy_readiness.accepted_origin==accepted);
+  assert(g_boot_ota_pending&&!cancel_calls&&!finish_calls);
+  assert(!g_peer_episode_finished&&!g_ota_check_done);
+  assert(g_boot_ota_deadline_ms==boot_end&&g_peer_gate.deadline_ms==peer_end);
+  unchanged(before);
+}
+static void expect_refusal(const char* decision,bool cancelled){
+  const Record before=live;
+  const uint32_t boot_end=g_boot_ota_deadline_ms,peer_end=g_peer_gate.deadline_ms;
+  assert(!halo_policy_boot_ready());assert(!strcmp(g_policy_readiness.decision,decision));
+  assert(cancel_calls==unsigned(cancelled)&&finish_calls==unsigned(cancelled));
+  assert(g_boot_ota_deadline_ms==boot_end&&g_peer_gate.deadline_ms==peer_end);
+  if(cancelled)assert(!g_boot_ota_pending&&g_peer_episode_finished&&g_ota_check_done);
+  unchanged(before);
+}
+static void no_origin(){g_lcd_timer_origin={};g_lcd_timer_seen_boot=0;}
+static void admit_once(){
+  const Record before=live;
+  assert(halo_policy_boot_ready()&&!strcmp(g_policy_readiness.decision,"ready"));
+  assert(!g_policy_readiness.accepted_origin);unchanged(before);
+  Record retry;assert(durable_ota::reserve_preflight(live,{epoch,true,false},false,retry)==durable_ota::Admission::ALLOWED);
+  assert(retry.network_windows==before.network_windows+1&&retry.fast_opportunities==before.fast_opportunities+1);
+  assert(retry.day_attempts==before.day_attempts&&retry.attempt_ordinal==before.attempt_ordinal);
+  assert(retry.begins[0]==0&&retry.begins[1]==2&&retry.attempt_begins[1]==2);
+  assert(retry.budget_day==before.budget_day&&retry.budget_granted==before.budget_granted);
+  assert(retry.created==before.created&&durable_ota::same_target(retry.target,before.target));
+  assert(retry.work_remaining_ms==before.work_remaining_ms-durable_ota::kPreflightMs);
+  assert(retry.reserved_work_ms==durable_ota::kPreflightMs);
+  live=retry;canonical_roundtrip();
 }
 int main(){
-  unsigned negatives=0;
-#define REJECT(change) do{baseline();change;rejected_origin();++negatives;}while(0)
-  REJECT(strcpy(g_lcd_timer_origin.schedule,"unrelated"));
-  REJECT(g_lcd_timer_origin.boot_id=0);
-  REJECT(g_lcd_timer_seen_boot=701);
-  REJECT(g_lcd_timer_origin.wake=2);
-  REJECT(g_peer_gate.peer_boot=701);
-  REJECT(g_peer_gate.legacy=true);
-  REJECT(g_peer_gate.ready=false);
-  REJECT(g_peer_gate.active=false);
-  REJECT(g_lcd_timer_origin={});
-  REJECT(g_boot_ota_pending=false);
-#undef REJECT
-  baseline();assert(!halo_policy_accepted_lcd_origin(nullptr));
-  assert(!halo_policy_accepted_lcd_origin(""));
-  baseline();clock_fresh=false;
-  {const Record before=live;assert(!halo_policy_boot_ready());
-   assert(!strcmp(g_policy_readiness.decision,"clock_wait"));
-   assert(g_boot_ota_pending&&!cancel_calls&&!finish_calls);unchanged(before);}
-  baseline();image_valid=false;assert(!halo_policy_boot_ready());
-  assert(!strcmp(g_policy_readiness.decision,"local_not_valid"));
-  baseline();storage_ok=false;assert(!halo_policy_boot_ready());
-  assert(!strcmp(g_policy_readiness.decision,"storage_wait"));
-  baseline();epoch=live.fast_expiry;assert(!halo_policy_boot_ready());
-  assert(!strcmp(g_policy_readiness.decision,"expired")&&cancel_calls==1);
-  baseline();g_boot_ota_deadline_ms=now_ms;assert(!halo_policy_boot_ready());
-  assert(!strcmp(g_policy_readiness.decision,"deadline")&&!cancel_calls);
-  baseline();load_ms=110001;assert(!halo_policy_boot_ready());
-  assert(!strcmp(g_policy_readiness.decision,"deadline")&&!cancel_calls);
-  // A due time equal to or beyond the remaining opportunity cannot be reached;
-  // neither the peer nor boot deadline may be renewed by accepting an origin.
-  for(uint32_t remaining:{9999U,10000U}){
-    baseline();g_peer_gate.deadline_ms=now_ms+remaining;
-    const uint32_t boot_end=g_boot_ota_deadline_ms,peer_end=g_peer_gate.deadline_ms;
-    assert(!halo_policy_boot_ready());assert(!strcmp(g_policy_readiness.decision,"not_due"));
-    assert(g_boot_ota_deadline_ms==boot_end&&g_peer_gate.deadline_ms==peer_end);
+  // Observed109 failure: fresh due-12, no accepted notice, correlated peer.
+  baseline("coord_recovery");epoch=1789078710;no_origin();
+  g_boot_ota_deadline_ms=g_peer_gate.deadline_ms=now_ms+116733;
+  const Record observed_before=live;
+  const bool observed_ready=halo_policy_boot_ready();
+  if(observed_ready||strcmp(g_policy_readiness.decision,"wait_due")||
+     g_policy_readiness.accepted_origin||!g_boot_ota_pending||cancel_calls||finish_calls){
+    fprintf(stderr,"FAIL: observed due-12 absent origin became %s (ready=%d, origin=%d, pending=%d, cancels=%u)\n",
+        g_policy_readiness.decision,observed_ready,g_policy_readiness.accepted_origin,g_boot_ota_pending,cancel_calls);return 1;
   }
-  // No early wait exception is needed at the actual due time.
-  baseline("coord_recovery");epoch=live.fast_due;g_lcd_timer_origin={};
-  assert(halo_policy_boot_ready()&&!strcmp(g_policy_readiness.decision,"ready"));
-  puts("PASS: ten wrong-origin refusals; stale clock, expiry, storage, deadline and exact due boundaries");
+  unchanged(observed_before);
+  assert(g_boot_ota_deadline_ms==126733&&g_peer_gate.deadline_ms==126733);
+
+  // The codec itself allows the lead. The actual wrapper must ALWAYS return
+  // false before due, so this proposal is not falsely tested at codec level.
+  Record codec_early;
+  assert(durable_ota::reserve_preflight(live,{epoch,true,false},false,codec_early)==durable_ota::Admission::ALLOWED);
+  unchanged(observed_before);
+  now_ms+=11000;epoch=live.fast_due-1;expect_wait();
+  now_ms+=1000;epoch=live.fast_due;
+  const uint32_t boot_end=g_boot_ota_deadline_ms,peer_end=g_peer_gate.deadline_ms;
+  admit_once();
+  assert(g_boot_ota_deadline_ms==boot_end&&g_peer_gate.deadline_ms==peer_end);
+  // At observed due+4 the admitted path already has exactly one new charge.
+  now_ms+=4000;epoch+=4;
+  const Record charged=live;Record duplicate;
+  assert(durable_ota::reserve_preflight(live,{epoch,true,false},false,duplicate)==durable_ota::Admission::BUSY);
+  assert(live.network_windows==2&&live.day_attempts==1);unchanged(charged);
+  // Also cover a first serviced tick four seconds after due, without a notice.
+  baseline();no_origin();epoch=live.fast_due+4;admit_once();
+  puts("PASS: observed due-12/no origin waits; due-1 unchanged; exact due charges once; due+4 cannot duplicate");
+
   for(const char* reason:{"lcd_timer","coord_recovery","lcd_due","nightly","policy_recovery"}){
-    baseline(reason);const Record before=live;
-    const uint32_t boot_end=g_boot_ota_deadline_ms,peer_end=g_peer_gate.deadline_ms;
-    const bool accepted=halo_policy_accepted_lcd_origin(live.arm_id);
-    const bool ready=halo_policy_boot_ready();
-    if(!accepted||ready||strcmp(g_policy_readiness.decision,"wait_due")||
-       !g_boot_ota_pending||cancel_calls||finish_calls){
-      fprintf(stderr,"FAIL: exact accepted LCD retry origin with queued reason=%s became %s (accepted=%d, pending=%d)\n",
-          reason,g_policy_readiness.decision,accepted,g_boot_ota_pending);return 1;
+    for(uint32_t lead:{15U,12U,1U}){
+      baseline(reason);no_origin();epoch=live.fast_due-lead;expect_wait();
     }
-    assert(g_boot_ota_deadline_ms==boot_end&&g_peer_gate.deadline_ms==peer_end);
-    unchanged(before);
-    // The canonical operation permits the existing15-second peer lead, but
-    // this caller must not invoke it while its readiness result is wait_due.
-    Record early;assert(durable_ota::reserve_preflight(live,{live.fast_due-16,true,false},false,early)==durable_ota::Admission::NOT_DUE);
-    now_ms+=10000;epoch=live.fast_due;
-    assert(halo_policy_boot_ready()&&!strcmp(g_policy_readiness.decision,"ready"));
-    assert(g_boot_ota_deadline_ms==boot_end&&g_peer_gate.deadline_ms==peer_end);
-    unchanged(before);
-    Record retry;assert(durable_ota::reserve_preflight(live,{epoch,true,false},false,retry)==durable_ota::Admission::ALLOWED);
-    assert(retry.network_windows==2&&retry.fast_opportunities==2&&retry.day_attempts==1);
-    assert(retry.begins[1]==1&&retry.attempt_begins[1]==1);
-    assert(retry.work_remaining_ms==before.work_remaining_ms-durable_ota::kPreflightMs);
-    live=retry;canonical_roundtrip();
   }
-  assert(negatives==10);
-  puts("PASS: exact LCD TIMER origin survives five queued reasons until due with unchanged deadlines and canonical debit");
+  // A wrong/missing notice no longer cancels a good current peer. It still
+  // MUST NOT be reported as accepted. Old arm ACK boot != fresh retry boot.
+  unsigned origin_refusals=0;
+#define ORIGIN_FALSE(change) do{baseline();change;assert(!halo_policy_accepted_lcd_origin(live.arm_id));expect_wait();++origin_refusals;}while(0)
+  ORIGIN_FALSE(strcpy(g_lcd_timer_origin.schedule,"unrelated"));
+  ORIGIN_FALSE(g_lcd_timer_origin.boot_id=0);
+  ORIGIN_FALSE(g_lcd_timer_seen_boot=701);
+  ORIGIN_FALSE(g_lcd_timer_origin.wake=2);
+  ORIGIN_FALSE(g_peer_gate.peer_boot=701);
+  ORIGIN_FALSE(no_origin());
+#undef ORIGIN_FALSE
+  assert(origin_refusals==6);
+  baseline();assert(live.arm_peer_boot!=g_peer_gate.peer_boot);
+  assert(halo_policy_accepted_lcd_origin(live.arm_id));expect_wait(true);
+  assert(!halo_policy_accepted_lcd_origin(nullptr)&&!halo_policy_accepted_lcd_origin(""));
+  // A late notice changes only observation, not the deadline or canonical.
+  baseline();const auto late_notice=g_lcd_timer_origin;no_origin();expect_wait();
+  g_lcd_timer_origin=late_notice;g_lcd_timer_seen_boot=late_notice.boot_id;expect_wait(true);
+  // Readiness can be evaluated stale, then fresh SNTP can arrive before the
+  // pending notice is serviced. It must wait without inventing that notice.
+  baseline();no_origin();clock_fresh=false;expect_refusal("clock_wait",false);
+  clock_fresh=true;expect_wait();
+  puts("PASS: five queue reasons,15-second lead, wrong/absent/late notices, truthful accepted_origin and SNTP ordering");
+
+#define PEER_REFUSE(change) do{baseline();no_origin();change;expect_refusal("not_due",true);}while(0)
+  PEER_REFUSE(g_peer_gate.legacy=true);
+  PEER_REFUSE(g_peer_gate.ready=false);
+  PEER_REFUSE(g_peer_gate.active=false);
+  PEER_REFUSE(g_peer_gate.peer_boot=0);
+  PEER_REFUSE(g_boot_ota_pending=false);
+#undef PEER_REFUSE
+  baseline();no_origin();epoch=live.fast_due-16;expect_refusal("not_due",true);
+  baseline();no_origin();epoch=live.high_water-1;expect_refusal("clock_wait",false);
+  baseline();image_valid=false;expect_refusal("local_not_valid",false);
+  baseline();storage_ok=false;expect_refusal("storage_wait",false);
+  baseline();live.arm_peer_boot=0;
+  {const Record malformed=live;assert(!durable_ota::shape(live));
+   assert(!halo_policy_boot_ready()&&!strcmp(g_policy_readiness.decision,"storage_wait"));
+   assert(!memcmp(&live,&malformed,sizeof(live))&&!cancel_calls&&!finish_calls);}
+  baseline();no_origin();epoch=live.fast_expiry;expect_refusal("expired",true);
+  baseline();g_boot_ota_deadline_ms=now_ms;expect_refusal("deadline",false);
+  baseline();g_peer_gate.deadline_ms=now_ms;expect_refusal("deadline",false);
+  baseline();load_ms=110001;expect_refusal("deadline",false);
+  // Due must fit STRICTLY inside BOTH original opportunities, including time
+  // spent loading. A limit equal to due is not extended or accepted.
+  for(bool boot_limit:{false,true})for(uint32_t remaining:{11999U,12000U}){
+    baseline();no_origin();epoch=live.fast_due-12;
+    (boot_limit?g_boot_ota_deadline_ms:g_peer_gate.deadline_ms)=now_ms+remaining;
+    expect_refusal("not_due",true);
+  }
+  baseline();no_origin();epoch=live.fast_due-12;
+  g_peer_gate.deadline_ms=now_ms+13000;load_ms=1000;expect_refusal("not_due",true);
+  // At due, existing budget/busy guards still own reservation. Waiting never
+  // replenishes exhausted credit and the wrapper is not a busy-state gate.
+  baseline();no_origin();live.work_remaining_ms=0;canonical_roundtrip();expect_wait();
+  epoch=live.fast_due;
+  {const Record before=live;Record denied;assert(halo_policy_boot_ready());
+   assert(durable_ota::reserve_preflight(live,{epoch,true,false},false,denied)==durable_ota::Admission::BUDGET);unchanged(before);}
+  baseline();no_origin();epoch=live.fast_due;
+  {const Record before=live;Record denied;assert(halo_policy_boot_ready());
+   assert(durable_ota::reserve_preflight(live,{epoch,true,false},true,denied)==durable_ota::Admission::BUSY);unchanged(before);}
+  // Each real caller guard remains ahead of policy readiness.
+  for(bool* busy:{&action_inflight,&foreground_active,&voice_recording_active,
+      &g_list_screen_active,&setup_mode,&g_ota_check_in_progress,
+      &g_ota_apply_in_progress,&g_lcd_ota_task_running,&g_lcd_ota_proxy_owns_uart}){
+    baseline();no_origin();const Record before=live;*busy=true;
+    assert(!production_user_or_transport_idle());*busy=false;
+    assert(!strcmp(g_policy_readiness.decision,"unobserved"));unchanged(before);
+  }
+  op_queue=&queue_messages;queue_messages=1;
+  assert(!production_user_or_transport_idle());
+  queue_messages=0;assert(production_user_or_transport_idle());op_queue=nullptr;
+  puts("PASS: invalid peers, early16, stale/high-water, malformed/storage/localVALID, expiry/deadlines and budget refusals");
+  puts("PASS: actual caller user/provisioning/queue/transport guards precede readiness");
 }
+
 '''
-    return '\n'.join((boundaries, functions, cases))
+    return '\n'.join((boundaries, caller_guard, functions, cases))
 
 
 class RetryWakeTests(unittest.TestCase):
