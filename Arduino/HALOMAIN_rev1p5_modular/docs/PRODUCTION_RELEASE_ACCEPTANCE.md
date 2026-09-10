@@ -1,6 +1,10 @@
+# Released 6.4.114 — September 10, 2026
+
+Manual and normal-calendar scheduled installations of the exact production pair passed. Both boards are SDK VALID and idle; 2 a.m. Pacific and paired natural sleep are restored. Production latest is 6.4.114. Scheduled accounting resolved on the subsequent verification wake; the opening wake transition and earlier LCD sleep boundary were unobserved. See RELEASE_BASELINE.json for the actual acceptance/publication and checkout records. Extended fault and soak testing is deferred.
+
 # Production OTA acceptance — 6.4.114
 
-**Current disposition: manual installation passed; scheduled acceptance pending.** The compiled source is commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, firmware tree `83c178bde2020c4e2fff800caf9e33be33a4ef97`. `RELEASE_BASELINE.json` contains the actual artifact hashes and saved test receipts. Publication, release tagging and original-checkout adoption are not yet complete.
+**Final disposition: accepted and published.** The compiled source is commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, firmware tree `83c178bde2020c4e2fff800caf9e33be33a4ef97`. `RELEASE_BASELINE.json` contains the actual artifact hashes and saved test receipts. Publication, release tagging and original-checkout adoption are not yet complete.
 
 ## Change and scope
 
@@ -19,9 +23,9 @@ The user directed a one-hour release effort on September 10. The remaining essen
 | Portable 114 recovery package | PASS. Exact application images, ELF/maps, bootloaders, partitions, flash arguments and provenance included; package and ZIP contents independently verified. |
 | Controlled 113 manual baseline | PASS. Both boards booted exact 113/app1, SDK VALID, with a current Home/idle observation and later natural paired USB absence. Provisioning and valid 109 fallback preserved. The short Sense log did not prove the terminal sleep marker or current policy counters. |
 | Manual 113→114 OTA | PASS. One supported LCD serial request at 16:20:55.588 PDT, followed by natural paired sleep. Post-case USB health confirms exact 114/app0 SDK VALID on both boards and Home/idle. No physical menu-button coverage is claimed. |
-| Normal-calendar 113→114 OTA | Pending; a separate archived setup preserves the installed 114 fallback. |
-| Manual paired 114 health and accounting | PASS after the separate USB health check: RESOLVED phase 8/generation 6, reserved 0, one network/apply attempt and one image begin per board. Remaining allowance is the reported 14 ms; no refund. Final scheduled health/accounting remains pending. |
-| Pacific restoration, production publication, commit/tag and checkout adoption | Pending. |
+| Normal-calendar 113→114 OTA | PASS: exact114/nightly telemetry before verification, followed by paired SDK VALID/Home and settled native accounting. |
+| Manual paired 114 health and accounting | PASS. The native RESOLVED phase 8/generation 6 record predates the post-case USB health check: admission at 16:21:00, resolution at 16:25:59 (299 seconds), reserved 0, one network/apply attempt and one begin per board. Remaining allowance is 14 ms, without refund. Final scheduled health/accounting passed on the verification wake. |
+| Pacific restoration and production publication | PASS; final commit/tag and checkout bindings are in RELEASE_BASELINE.json. |
 
 ## Test conditions and limits
 

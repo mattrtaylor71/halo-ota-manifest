@@ -1,6 +1,10 @@
+# Released 6.4.114 — September 10, 2026
+
+Manual and normal-calendar scheduled installations of the exact production pair passed. Both boards are SDK VALID and idle; 2 a.m. Pacific and paired natural sleep are restored. Production latest is 6.4.114. Scheduled accounting resolved on the subsequent verification wake; the opening wake transition and earlier LCD sleep boundary were unobserved. See RELEASE_BASELINE.json for the actual acceptance/publication and checkout records. Extended fault and soak testing is deferred.
+
 # Production baseline — 6.4.114
 
-The exact production artifacts are built and packaged. Manual installation and paired health/accounting have passed. Scheduled acceptance and production promotion are still pending. The artifact source is commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, firmware tree `83c178bde2020c4e2fff800caf9e33be33a4ef97`. `RELEASE_BASELINE.json` binds the actual paired binaries, build records, recovery package and acceptance receipts. Later documentation commits do not change this compiled source identity.
+The exact production artifacts are built and packaged. Manual installation and paired health/accounting have passed. Scheduled acceptance and production promotion have passed. The artifact source is commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, firmware tree `83c178bde2020c4e2fff800caf9e33be33a4ef97`. `RELEASE_BASELINE.json` binds the actual paired binaries, build records, recovery package and acceptance receipts. Later documentation commits do not change this compiled source identity.
 
 Version 6.4.113 is the private-route test baseline, using shipping policy. Version 6.4.114 uses the production route. Final acceptance covers a manual 113→114 update and a separate normal-calendar 113→114 update of the same exact production bytes, followed by paired health/accounting checks and restoration of 2 a.m. Pacific. The extended fault matrix is deferred under the user's one-hour shipping limit. Failed earlier candidates remain recorded in the changelog and baseline JSON; none is a released source to rebuild by default.
 

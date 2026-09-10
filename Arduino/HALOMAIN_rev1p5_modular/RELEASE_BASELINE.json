@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "production_manual_ota_pass_scheduled_acceptance_pending",
+  "status": "production_published_release_binding_pending",
   "candidate_version": "6.4.114",
   "canary_versions": [
     "6.4.113"
@@ -13,8 +13,14 @@
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-build001/RELEASE-PAIR.json",
     "sha256": "2158220d9bf3a74b78755af195ffc31faa67403a366efde284cfcdcad13beef4"
   },
-  "shipping_acceptance_receipt": null,
-  "production_publication_receipt": null,
+  "shipping_acceptance_receipt": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-final-disposition001/ROOT-ACCEPTANCE.json",
+    "sha256": "eb28fba092f9371f005679bf9ed091057a0b7dc6da6f11998b4a3598dc86ef3b"
+  },
+  "production_publication_receipt": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/114-global-promote/result.json",
+    "sha256": "d7ed3c610ec83dad234bd042340518dc3d66328bd62926d751ae339ee8d11744"
+  },
   "previous_production_manifest_archive": null,
   "factory_and_rollback_instructions": "docs/PRODUCTION_FACTORY_RECOVERY.md",
   "source_basis": {
@@ -31,7 +37,7 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Exact production 114 artifacts and package verified; manual 113\u2192114 installation passed with exact paired SDK VALID/Home and resolved accounting. Normal-calendar scheduled installation of the same production pair is pending.",
+  "qualification_scope": "Manual and normal-calendar scheduled installation of the same exact114 production pair passed. Final paired health, settled accounting, Pacific timers and natural sleep verified. Production latest is114; extended fault/soak tests deferred.",
   "artifact_source_commit": "1224f28ab2d1307d54cf71956b30da2bbccead3d",
   "artifact_source_firmware_tree": "83c178bde2020c4e2fff800caf9e33be33a4ef97",
   "autonomous_calendar_scope": "Manual113 to exact114 production, then a separate controlled113 calendar baseline to the same exact114 production artifacts. Distinct archived cases; no in-case credit refund. Restore2amPacific and verify actual SDKVALID/target accounting before release.",
@@ -271,7 +277,51 @@
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/manual114-observer/DOCS-MANUAL114-RESOLVED-TELEMETRY.json",
         "sha256": "234780466a63d3f64a5c1bf4c4205acdd8348f0e45e7fbe7a27919452ff40e34"
       },
-      "scope": "One supported LCD serial manual request at 16:20:55.588 PDT, followed by natural paired sleep and exact 114/app0 SDK VALID/Home on both boards. No intervening firmware installation. The post-case USB health check and subsequent telemetry confirm RESOLVED phase 8/generation 6, reserved 0, one network/application attempt and one image begin per board. Remaining allowance is the reported 14 ms, without refund. Autonomous post-install health timing and physical menu-button coverage are not claimed."
+      "scope": "One supported LCD serial manual request at 16:20:55.588 PDT, followed by natural paired sleep and exact 114/app0 SDK VALID/Home on both boards, with no intervening firmware installation. The native record confirms autonomous resolution at 16:25:59 PDT before the post-case USB health check: phase 8/generation 6, reserved 0, one network/application attempt and one begin per board. Remaining allowance is 14 ms, without refund. Physical menu-button coverage is not claimed.",
+      "native_canonical": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production113-calendar-stage-run002/current-policy-native.json",
+        "sha256": "eb71e5107e4dd8e1e1cc0f9c217ff56b1b89fd22bb5cefb6a0eccd97547eeda6"
+      },
+      "canonical_details": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production113-calendar-stage-run002/current-policy.json",
+        "sha256": "44d9350f1504e61c453bf5bdd25052911e24981b60a5e80a6294e2683cb311f9"
+      },
+      "next_case_admission": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production113-calendar-stage-run002/fresh-admission.json",
+        "sha256": "2f702ed53c5dfc913576ebf8e8534e9c2407cc2163f572796632b02626a59809"
+      },
+      "autonomous_resolution": {
+        "status": "PASS_FROM_RETAINED_NATIVE_RECORD",
+        "created_epoch": 1789082460,
+        "resolved_high_water_epoch": 1789082759,
+        "elapsed_from_admission_seconds": 299,
+        "first_post_case_health_started_epoch": 1789082896.68147,
+        "scope": "The native CRC-valid RESOLVED record predates the separate post-case USB health intervention. Both exact target hashes and one begin per board match the released pair. Record captured and archived before any subsequent case writes."
+      }
+    },
+    "114_scheduled_install": {
+      "status": "PASS",
+      "health": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-scheduled-known113-114-health-run001/result.json",
+        "sha256": "075c6238caf5f3e33bc1999b9f8229df090ff0f8abdb448efcf63d446212623c"
+      },
+      "identity": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-scheduled-known113-114-health-run001/application-identity.json",
+        "sha256": "523bbec2a87f88aea1f3e794131bbae4f87b58c65080c79c627f11efbafe3210"
+      },
+      "closure": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-scheduled-known113-114-health-run001/overall-reap.json",
+        "sha256": "604eef83bfb5a638987a6ac1bc9fba1beaf08cbdd7a918a2d0b8c6020e2a79e3"
+      },
+      "observer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/calendar114-observer/result.json",
+        "sha256": "5014dc8d5b1529354bd9c1a4ecb577744609b0f85d3cbefe1a4fe0bdfa14e4a8"
+      },
+      "native_policy": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/canonical-pretimezone-analysis001/PRESERVATION-AND-CHRONOLOGY.json",
+        "sha256": "ef02c3ab1334be0254e49ee5966ec1bc05550f9d00a27bb7fe0178b590a38634"
+      },
+      "scope": "Exact114 on both boards reported before verification with nightly_20260910 origin. Final SDK VALID/Home and durable RESOLVED phase8/gen6/reserved0 verified; one network/apply and one begin per board, remaining13ms. Accounting settled on the verification wake. Opening wake transition and pre-query LCD natural sleep were unobserved; no manual OTA command or firmware write occurred during the scheduled case."
     }
   },
   "previous_recovery_package_108": {
@@ -377,8 +427,24 @@
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
   "service_restoration": {
-    "status": "pending_final_114_verification",
-    "timezone": "PST8PDT,M3.2.0,M11.1.0"
+    "status": "PASS",
+    "timezone": "PST8PDT,M3.2.0,M11.1.0",
+    "result": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/result.json",
+      "sha256": "a0cb1876ffab529f6f054ca0135f2451f71cabfbf0b820cafc1ec0a26f245d6b"
+    },
+    "closure": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/overall-reap.json",
+      "sha256": "7ec7f22a593f3875e87983598719c759a60698f2d7770c7d8ab9a90bb646cdc7"
+    },
+    "timer_observation": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/ACTUAL-PACIFIC-TIMER-OBSERVATION.json",
+      "sha256": "e6dc1b40888f8a17972bcc756a5715751d025ebb7e67b91d0586f8f84bb4de20"
+    },
+    "next_sense_timer_epoch": 1789117200,
+    "next_lcd_timer_epoch": 1789117185,
+    "next_local_wake": "2026-09-11 02:00 America/Los_Angeles",
+    "scope": "Only timezone changed; exact canonical/provisioning preserved. Both114 SDK VALID/idle and paired natural sleep verified."
   },
   "release_scope_decision": {
     "requested_by_user": "Production ready within one hour; cut corners as needed",
@@ -401,6 +467,6 @@
       "observed later-day recovery"
     ],
     "deadline_met": null,
-    "disposition": "Acceptance in progress; no production promotion yet."
+    "disposition": "Accepted and published114 under the reduced user-directed scope."
   }
 }

@@ -1,4 +1,4 @@
-The bounded-wait change described below is now implemented in the current successor source. Its focused native regression and production hardware validation are in progress; this note alone is not an acceptance result.
+The bounded-wait change described below is implemented in source commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`. Its focused native regression and manual installation of production 114 have passed. Current scheduled acceptance and release status are recorded in `RELEASE_BASELINE.json` and `docs/PRODUCTION_RELEASE_ACCEPTANCE.md`; this historical design note is not a separate acceptance result.
 
 # Next focused retry-readiness fix
 
