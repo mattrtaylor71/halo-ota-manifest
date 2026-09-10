@@ -1,17 +1,15 @@
-# Production 6.4.108 factory and recovery package
+# Production 6.4.112 factory and recovery package
 
-**Successor 112 recovery package pending.** The 108 package and commands below are preserved historical recovery artifacts. Candidate 108 was never released; replace these bindings with the accepted 112 package before production release.
+This document describes the exact shipping artifacts built from commit `b6ff853e4e3aa4f014a45a48230351bbed802d7c`, with build ID `6.4.112-20260910T210730Z-b6ff853e4e3a`. The firmware uses the normal production OTA endpoints and reports channel `prod`; bench, one-shot, probe and fault controls are disabled. Artifact qualification has passed. Device acceptance and production promotion are separate receipts in `RELEASE_BASELINE.json`; this document does not claim those actions have happened.
 
-This document describes the exact shipping artifacts built from commit `9d38091f2b23341f5a12f423efa5fa71cf0f6978`, with build ID `6.4.108-20260910T191400Z-9d38091f2b23`. The production route and reported channel are both `prod`; bench, one-shot, probe and fault controls are disabled. Artifact qualification has passed. Device acceptance and production promotion are separate receipts in `RELEASE_BASELINE.json`; this document does not claim those actions have happened.
-
-The local package is `production-release108-recovery-package002` in the release evidence archive. `MANIFEST.json` lists every file's size and SHA-256; `SHA256SUMS` verifies the portable files. Each board has its exact application, bootloader, partition table, `boot_app0.bin`, 8 MiB merged factory image, `flash_args`, partition CSV, ELF and map. The provenance directory contains the committed source materialization and build proofs. Absolute references inside those proofs identify the separately retained evidence archive; they are not substitutes for the package's relative file hashes.
+The local package is `production-release112-recovery-package001` in the release evidence archive. `MANIFEST.json` lists every file's size and SHA-256; `SHA256SUMS` verifies the portable files. Each board has its exact application, bootloader, partition table, `boot_app0.bin`, 8 MiB merged factory image, `flash_args`, partition CSV, ELF and map. The provenance directory contains the committed source materialization and build proofs. Absolute references inside those proofs identify the separately retained evidence archive; they are not substitutes for the package's relative file hashes.
 
 The application hashes are:
 
 | Board | Bytes | SHA-256 |
 | --- | ---: | --- |
-| Sense | 1,803,280 | `e7f6aa5f5368a41085fd8ca1d6e08c3b3042a9859b9126f154a972c07e5912d4` |
-| LCD | 1,877,264 | `4afab434a1efa9d7ffe686bb8cf06dc602060ce83fa99a8e119341e878d249ce` |
+| Sense | 1,803,264 | `2bc2eb351c9b69819a7299b32ce481f24b971350ceb284a0a8d1f29262cfaed1` |
+| LCD | 1,877,264 | `f7a575adf95d919b9033737ce481a02d013e074fdecc7354daa7d52efaead6b9` |
 
 ## Identify the hardware before service
 
@@ -57,14 +55,14 @@ Do not use `erase-flash`, a merged factory image, or the stock `boot_app0.bin` o
 
 For a controlled USB installation that selects a candidate as NEW, retain both serial descriptors through final selector readback and coordinated application release. Do not end a staging process and later reconnect through ROM to release those NEW images. A further reset before SDK validation can abort a candidate and select the previous VALID bank. In the controlled102 test, both candidates were observed ABORTED after the separate-stage/release sequence; the same intact images reached VALID after selector-only re-arming and a retained-descriptor paired release0.1078seconds apart. The earlier electrical interval was not captured, so this does not identify which individual reset or delay caused the abort. Archive the actual policy and preserve current NVS during such service; re-arming a selector is not an autonomous OTA retry result.
 
-The separately archived fixture tools prepare declared new test cases. The planned initial setup uses a clean-policy fixture; exhausted-yesterday hardware testing remains deferred and is not a passed release-acceptance case. These fixtures are not customer recovery commands and must never be applied inside an active retry/failure case.
+The separately archived fixture tools prepare declared new test cases. The declared controlled test setup uses a clean-policy fixture; exhausted-yesterday hardware testing remains deferred and is not a passed release-acceptance case. These fixtures are not customer recovery commands and must never be applied inside an active retry/failure case.
 
 ## Fresh factory unit only
 
 Use this path only for a genuinely new unit or an explicitly authorized factory reset with the old state archived. It destroys existing provisioning and OTA history. Verify package hashes first, select each board's own directory, and keep both boards from starting their application until the pair has been written and verified.
 
 ```sh
-cd /absolute/path/to/production-release108-recovery-package002
+cd /absolute/path/to/production-release112-recovery-package001
 shasum -a 256 -c SHA256SUMS
 
 # Factory Sense: exact 8 MiB merged image, including erased NVS and initial selector.
@@ -96,8 +94,8 @@ A same-device full-flash backup is a disaster-recovery artifact, not an automati
 
 ## Evidence and release boundaries
 
-- Exact 108 pair: packaged `provenance/RELEASE-PAIR.json`, SHA-256 `695b37140d6fccf44db2aee33886442c88aa66f05221fd0c944899c4477c96c7`.
-- Independent 108 artifact peer: packaged `provenance/DOCS-INDEPENDENT-PAIR-PEER.json`, SHA-256 `20b7fa728015ead039edf1890b1f3cc59f08ce734ac9b85bf5c4ddd9b351f1f3` (exact source, arguments, artifacts, partitions, resources and build closure).
+- Exact 112 pair: packaged `provenance/RELEASE-PAIR.json`, SHA-256 `836a2d8a894a6a29338278fa8f58eaf192848d7810b236952f10f2559daf2398`.
+- Independent 112 artifact peer: packaged `provenance/DOCS-INDEPENDENT-PAIR-PEER.json`, SHA-256 `869cd1c6c2a98f635627704c9e680be6cba66032669c85fbfe77db7b5bf8ef2a` (exact source, arguments, artifacts, partitions, resources and build closure).
 - Actual prior hardware layout/security/full backups: `production101-backup-run001/result.json` and `SESSION-BACKUP-NVS-PEER.json`.
 - Publishing and the byte-identical canary bridge: repository document `halo_ota_demo/tools/ota/PAIRED_RELEASE.md`; this is a repository reference, not a file included in this artifact package.
 - Acceptance limits and final deployment state: repository documents `docs/PRODUCTION_RELEASE_ACCEPTANCE.md`, `docs/RELEASE_BASELINE.md` and `RELEASE_BASELINE.json`. These evolve with the separate acceptance/publication receipts; the artifact package does not claim a later device or deployment result.

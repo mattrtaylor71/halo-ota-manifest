@@ -1,17 +1,18 @@
 {
   "schema_version": 1,
-  "status": "retry_wake_correction_verified_successor_builds_pending",
+  "status": "production_artifacts_verified_scheduled_install_pending",
   "candidate_version": "6.4.112",
   "canary_versions": [
-    "6.4.109",
-    "6.4.110",
-    "6.4.111"
+    "6.4.109"
   ],
   "canary_profile": "shipping policy with only the fixed private OTA route changed",
   "release_commit": null,
   "release_tree": null,
   "release_tag": null,
-  "release_artifact_manifest": null,
+  "release_artifact_manifest": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/RELEASE-PAIR.json",
+    "sha256": "836a2d8a894a6a29338278fa8f58eaf192848d7810b236952f10f2559daf2398"
+  },
   "shipping_acceptance_receipt": null,
   "production_publication_receipt": null,
   "previous_production_manifest_archive": null,
@@ -30,10 +31,10 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Scheduled105\u2192106 failed after a confirmed retry arm: recovered canonical gen6ARMED was followed by gen7DEFERRED at due+7 without another network reservation. Native regression reproduced rejection of a verified early LCD timer origin when retained debt had already queued coord_recovery. Removing only the queue-label gate passes the regression and preserves identity, deadlines and accounting. Successor109\u2013112 builds and hardware acceptance remain pending.105\u2013108 artifacts are preserved;108 was never promoted.",
-  "artifact_source_commit": null,
-  "artifact_source_firmware_tree": null,
-  "autonomous_calendar_scope": "Planned109 controlled baseline,109\u2192110 scheduled recovery,110\u2192111 clean scheduled repeat, then111\u2192112 exact production manual bridge. New-case NVS fixtures only between closed archived cases; genuine UTC and shipping limits unchanged. Restore explicit Pacific before final acceptance.",
+  "qualification_scope": "Exact109 and production112 canonical artifact pairs independently verified. Focused native regressions pass. One clean scheduled109\u2192112 paired install and Pacific restoration pending. Earlier105\u2192106 failed after a confirmed retry arm; its initial network stall remains undiagnosed.",
+  "artifact_source_commit": "b6ff853e4e3aa4f014a45a48230351bbed802d7c",
+  "artifact_source_firmware_tree": "8529653e0c187f0b2c1c47689f03de2efe11d5ea",
+  "autonomous_calendar_scope": "User-directed one-hour release scope:109 controlled baseline then one clean normal-calendar109\u2192112 install using exact production112 artifacts. Restore Pacific02:00 before service. Deliberate fault/repeat and separate final manual reinstall deferred; no in-case policy refund.",
   "previous_candidate_artifacts": {
     "102": {
       "pair": {
@@ -106,7 +107,28 @@
       }
     }
   },
-  "candidate_artifacts": {},
+  "candidate_artifacts": {
+    "109": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release109-build001/RELEASE-PAIR.json",
+        "sha256": "3ec1c297e36237588bd0541f5669bd61277b21b0d08ee280ff5ca155c41143fc"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release109-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
+        "sha256": "22b3d374e8b0356486bfc1113ac710ee44134670167db735e9c388102bc101b8"
+      }
+    },
+    "112": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/RELEASE-PAIR.json",
+        "sha256": "836a2d8a894a6a29338278fa8f58eaf192848d7810b236952f10f2559daf2398"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
+        "sha256": "869cd1c6c2a98f635627704c9e680be6cba66032669c85fbfe77db7b5bf8ef2a"
+      }
+    }
+  },
   "previous_artifact_source_commit": "9d38091f2b23341f5a12f423efa5fa71cf0f6978",
   "previous_artifact_source_firmware_tree": "051516be8df264e70f4d53535b35722e1ca4995f",
   "acceptance_results": {
@@ -155,5 +177,27 @@
   "previous_recovery_package_108": {
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-recovery-package002/MANIFEST.json",
     "sha256": "3e4e7da8768ec49e779d7010e36feca7a0e047b53cd8a5fe9abab08f0adef727"
+  },
+  "release_scope_decision": {
+    "requested_by_user": "Make shippable; do not be a perfectionist; ship in one hour",
+    "recorded_local_date": "2026-09-10",
+    "target_local_deadline": "15:25 America/Los_Angeles",
+    "deferred": [
+      "deliberate integrity-fault run",
+      "additional clean scheduled repeat",
+      "separate exact-production manual reinstall",
+      "physical power-cut test",
+      "controlled network interruption",
+      "USB-free shipping operation",
+      "observed later-day recovery"
+    ]
+  },
+  "recovery_package": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-recovery-package001/MANIFEST.json",
+    "sha256": "5393923436079583f1f7fd611b632f88140cb7e3e808027c291d3b107c50a2d4"
+  },
+  "recovery_package_independent_peer": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/DOCS-PACKAGE001-PEER.json",
+    "sha256": "0914856eaa4e70c37d4573859d264befb1efe9f9eea4b29932ec1812ccb8accb"
   }
 }

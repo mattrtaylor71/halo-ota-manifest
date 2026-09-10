@@ -4,7 +4,7 @@
 
 A verified early LCD timer notice could be rejected because retained OTA debt had already queued the boot check as `coord_recovery`. The queue preserves its first reason and deadline, but the retry readiness check incorrectly required that reason to equal `lcd_timer`. The correction uses the accepted timer origin and currently queried peer identity, while preserving the original deadline, stored arm identity and all retry accounting.
 
-The native regression fails on the preceding source and passes with the correction. It covers the five queue reasons, ten invalid-origin conditions, clock/storage/expiry/deadline boundaries, and the actual canonical reservation/codec operations. The earlier post-transfer cleanup/arm regression also passes. Successor 109–112 builds and hardware acceptance are pending; 108 was never released.
+The native regression fails on the preceding source and passes with the correction. It covers the five queue reasons, ten invalid-origin conditions, clock/storage/expiry/deadline boundaries, and the actual canonical reservation/codec operations. The earlier post-transfer cleanup/arm regression also passes. Exact production112 build and one clean scheduled109→112 installation are the user-directed release gate. Additional fault/repeat runs and a separate final manual reinstall are deferred under the one-hour shipping scope. Candidate108 was never released.
 
 ## 6.4.108 — superseded candidate, never released
 
