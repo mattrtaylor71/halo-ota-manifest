@@ -1,8 +1,11 @@
 {
   "schema_version": 1,
-  "status": "candidate_pending_build_and_acceptance",
+  "status": "built_artifacts_verified_hardware_acceptance_pending",
   "candidate_version": "6.4.104",
-  "canary_versions": ["6.4.102", "6.4.103"],
+  "canary_versions": [
+    "6.4.102",
+    "6.4.103"
+  ],
   "canary_profile": "shipping policy with only the fixed private OTA route changed",
   "release_commit": null,
   "release_tree": null,
@@ -11,7 +14,7 @@
   "shipping_acceptance_receipt": null,
   "production_publication_receipt": null,
   "previous_production_manifest_archive": null,
-  "factory_and_rollback_instructions": null,
+  "factory_and_rollback_instructions": "docs/PRODUCTION_FACTORY_RECOVERY.md",
   "source_basis": {
     "name": "M8 bounded report, stack and watchdog integration",
     "checkpoint_sha256": "a74915125f46d8765de2027d698a5ca8cee901e3eadfa1b16a2d3c14765c4b54",
@@ -26,5 +29,40 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Three earlier bench scheduled installs passed. Canary102/103 and final production104 remain separate pending identities; no final104 build, hardware acceptance or publication is claimed by this record."
+  "qualification_scope": "Exact shipping-policy102/103 canary pairs and default-production104 pair are built and independently artifact/resource verified.102 is from6b4b326;103/104 froma54bb86. No on-device shipping case or104 publication has passed yet. Three earlier bench scheduled installs remain separate historical successes. Physical power interruption, hotspot loss and USB-free cases are deferred.",
+  "artifact_source_commit": "a54bb86b5e8e4fc96a4bb8f25ba8d08581489387",
+  "artifact_source_firmware_tree": "9ae109136f893b76c3bc285cc8be56906de315bb",
+  "candidate_artifacts": {
+    "102": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release102-build001/RELEASE-PAIR.json",
+        "sha256": "cda119ddf956e175a9a4a1a5babe400e09088a70156e4ad36b377fc0fd9776d5"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release102-build001/SESSION-RELEASE-PAIR-PEER.json",
+        "sha256": "05c80f4e056b699cbbb771a21f11a79d21304c42dfbc00a081fd8a40911d7619"
+      }
+    },
+    "103": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release103-build001/RELEASE-PAIR.json",
+        "sha256": "7ecb149b1fb3fb2a5540efa0513bcbc4981d3c273fe89fe759b4b343686dcf55"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release103-build001/SESSION-RELEASE-PAIR-PEER.json",
+        "sha256": "2fd8d2ff7335b541367d7bceca2072a88891fbc2720fadce0e57412d40acf28d"
+      }
+    },
+    "104": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release104-build001/RELEASE-PAIR.json",
+        "sha256": "9dccd7babe361ad6017645df84ef45842a8e33d1d966615f904f76990b729308"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release104-build001/SESSION-RELEASE-PAIR-PEER.json",
+        "sha256": "6f56257286e60f79c2d148a9e534e5094e7a2d8a6d347614bf211c39937e581d"
+      }
+    }
+  },
+  "autonomous_calendar_scope": "Existing timezone-only fixture preserving actual102 canonical policy and genuine UTC; no target-seeding extension. Hardware exhausted-previous-day recovery deferred."
 }
