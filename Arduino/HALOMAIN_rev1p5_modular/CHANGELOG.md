@@ -6,6 +6,8 @@ A verified early LCD timer notice could be rejected because retained OTA debt ha
 
 The native regression fails on the preceding source and passes with the correction. It covers the five queue reasons, ten invalid-origin conditions, clock/storage/expiry/deadline boundaries, and the actual canonical reservation/codec operations. The earlier post-transfer cleanup/arm regression also passes. Exact production112 build and one clean scheduled109→112 installation are the user-directed release gate. Additional fault/repeat runs and a separate final manual reinstall are deferred under the one-hour shipping scope. Candidate108 was never released.
 
+The actual September10 scheduled109→112 run failed during LCD transfer. Its armed retry woke but returned to sleep on109 without a second reservation, with an early readiness snapshot reporting `origin:false`. The queue-label fix is therefore insufficient for hardware recovery. The one-hour deadline was missed; production latest is unchanged, and this candidate has no release tag or production acceptance. Exact cause of the transfer failure remains unconfirmed.
+
 ## 6.4.108 — superseded candidate, never released
 
 The shipping102-to103 calendar case downloaded and acknowledged16924LCD bytes, then stalled; its immediate second HTTP request failed. Both boards retained valid102 images. The prepared five-minute retry closed without a verified arm and was deferred until the next daily wake despite remaining budget. The failed run did not capture the fresh query payload, so its exact rejected predicate is unknown. Source review found two deterministic gates that reject a healthy old LCD: a changed image-begin count and the requirement for a live coordinator lease that ordinary OTA_LOCK clears.

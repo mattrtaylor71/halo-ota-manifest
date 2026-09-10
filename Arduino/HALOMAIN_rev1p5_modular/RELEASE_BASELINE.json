@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "production_artifacts_verified_scheduled_install_pending",
+  "status": "scheduled_install_failed_not_released",
   "candidate_version": "6.4.112",
   "canary_versions": [
     "6.4.109"
@@ -31,7 +31,7 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Exact109 and production112 canonical artifact pairs independently verified. Focused native regressions pass. One clean scheduled109\u2192112 paired install and Pacific restoration pending. Earlier105\u2192106 failed after a confirmed retry arm; its initial network stall remains undiagnosed.",
+  "qualification_scope": "Exact109 and production112 canonical artifact pairs and package verified; native regressions pass. Actual normal-calendar109 to112 transfer failed and the armed retry returned to sleep without a second reservation or installation. Post-case diagnostic wake showed active OTA ownership; no112 acceptance, production promotion, release tag or default-checkout adoption.",
   "artifact_source_commit": "b6ff853e4e3aa4f014a45a48230351bbed802d7c",
   "artifact_source_firmware_tree": "8529653e0c187f0b2c1c47689f03de2efe11d5ea",
   "autonomous_calendar_scope": "User-directed one-hour release scope:109 controlled baseline then one clean normal-calendar109\u2192112 install using exact production112 artifacts. Restore Pacific02:00 before service. Deliberate fault/repeat and separate final manual reinstall deferred; no in-case policy refund.",
@@ -172,6 +172,30 @@
       },
       "controlled_integrity_fault_consumed": false,
       "scope": "Both boards remained105VALID. LCD accepted1,383,690 of1,877,264 bytes before HTTP no-data; subsequent GET failed before data. Historical gen6ARMED confirms peer ACK, followed by gen7DEFERRED at retry due+7 seconds with unchanged one network/apply attempt. Post-case USB/reset diagnostics are separate; exact live rejection payload was not captured."
+    },
+    "109_controlled_baseline": {
+      "status": "PASS",
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-stage-run002/result.json",
+        "sha256": "9e5d6662c5af40be92adb93233eadd74b7fb9fd7c06b49f3da6cc9cb68706b4e"
+      },
+      "closure": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-stage-run002/overall-reap.json",
+        "sha256": "8a3847674c336854ab413c0c6319c4f9fa78865d1bd0cc0260037738279533f3"
+      },
+      "identity": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-stage-run002/application-identity.json",
+        "sha256": "0578697e0dd3b347fdf387b9a1050072fc24bcedfa0b7bddb80bc4c320d16e7b"
+      },
+      "scope": "Controlled109 installation to app0; both SDK VALID, safe UI idle and natural paired sleep. Eight writes; complete physical readbacks preserve105 app1 fallback and unrelated data. First setup attempt stopped before writes on missing105 test metadata; corrected and rerun."
+    },
+    "112_scheduled_install": {
+      "status": "FAIL",
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production112-case-disposition001/OPERATOR-CLOSED-RESULT.json",
+        "sha256": "743d3c9ba37ffdae58e0816ba7a5bf4a7464eab65fb4a95b418a76f343ad991e"
+      },
+      "scope": "First scheduled window: LCD proxy failed after two LCD BEGINs, one network/apply attempt and no Sense BEGIN. Retry armed for15:18:42 PDT, woke early, reported origin:false/not_due, and returned to sleep still on109 with unchanged reservation counters. No112 paired success. Later host wake/USB activity is separate diagnostic evidence and stopped on active OTA ownership. Exact initial transport cause and final persisted post-retry phase remain unconfirmed."
     }
   },
   "previous_recovery_package_108": {
@@ -190,7 +214,9 @@
       "controlled network interruption",
       "USB-free shipping operation",
       "observed later-day recovery"
-    ]
+    ],
+    "deadline_met": false,
+    "disposition": "Do not release112: actual scheduled installation and recovery failed the reduced acceptance gate."
   },
   "recovery_package": {
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-recovery-package001/MANIFEST.json",
@@ -199,5 +225,15 @@
   "recovery_package_independent_peer": {
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/DOCS-PACKAGE001-PEER.json",
     "sha256": "0914856eaa4e70c37d4573859d264befb1efe9f9eea4b29932ec1812ccb8accb"
+  },
+  "portable_release_archive": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/HALO-6.4.112-production.zip",
+    "sha256": "b0c616265e8626fefb753b51e632776144b40dd69db823d1fd4f1163a66f3701"
+  },
+  "service_restoration": {
+    "status": "pending",
+    "required_timezone": "PST8PDT,M3.2.0,M11.1.0",
+    "last_verified_timezone": "RLS20:04:13",
+    "scope": "Restore only timezone while preserving failed policy and provisioning after active OTA ownership ends."
   }
 }

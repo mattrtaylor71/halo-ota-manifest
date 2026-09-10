@@ -1,6 +1,6 @@
 # Production OTA acceptance — 6.4.112
 
-**Release disposition: pending.** The successor source is commit `b6ff853e4e3aa4f014a45a48230351bbed802d7c`, firmware tree `8529653e0c187f0b2c1c47689f03de2efe11d5ea`. The final release record must bind the actual paired artifacts, hardware outcomes, production publication and development-checkout adoption in `RELEASE_BASELINE.json`. A later documentation commit does not change compiled source identity.
+**Release disposition: failed acceptance; not released.** The successor source is commit `b6ff853e4e3aa4f014a45a48230351bbed802d7c`, firmware tree `8529653e0c187f0b2c1c47689f03de2efe11d5ea`. The final release record must bind the actual paired artifacts, hardware outcomes, production publication and development-checkout adoption in `RELEASE_BASELINE.json`. A later documentation commit does not change compiled source identity.
 
 ## Corrections and evidence
 
@@ -12,6 +12,12 @@ Retained debt can queue a boot check as `coord_recovery` before an early LCD tim
 
 The exact rejected wire payload was not captured in the hardware run. The persisted sequence proves successful arming followed by missed admission; the identified source path is independently reproduced. The original network stall remains unexplained. Saved socket and memory snapshots do not prove router, TLS or heap failure, and source review found no specific transport defect to justify a speculative change.
 
+## September 10 final scheduled run
+
+The one-hour deadline was missed. Both boards woke automatically for the15:04:13 PDT calendar window. Sense later reported `lcd_proxy_failed_defer`, two LCD BEGINs, one network/application attempt and no Sense BEGIN. It armed a retry for15:18:42 while retaining1,813,863 ms of work allowance. Both boards woke at15:18:30.769. The saved readiness snapshot was `not_due` with `origin:false`; they returned to sleep by15:19:01 still reporting109 and unchanged attempt counters. The queue-label correction did not establish successful retry admission on this hardware run.
+
+A later diagnostic TAP and serial open are separate from the autonomous case. The reader saw live OTA ownership and stopped before sending identity commands. Saved unsolicited SDK reports identify109/app0 VALID, but do not establish an idle UI or112 completion. The current final canonical phase has not yet been read. Current wireless D3 export contains ProxyCleaned context but lacks the actual transfer failure record; RSSI−61 and saved heap measurements do not establish a transport root cause. The closed case and exact raw evidence are bound in the baseline.
+
 ## Acceptance matrix
 
 | Check | Actual result |
@@ -19,11 +25,11 @@ The exact rejected wire payload was not captured in the hardware run. The persis
 | Native transfer-cleanup and retry-arm regression | PASS: partial/late failure, live/cleared/expired lease, 25 identity/ownership negatives, cleanup before query, missing ACK and unchanged debit/caps. |
 | Native early-wake regression | Old source FAIL; successor PASS. Five queue reasons, ten invalid-origin conditions, clock/storage/expiry/deadline boundaries, original-window waiting and actual canonical reservation/codec. |
 | Exact production 112 artifacts | PASS: exact committed b6 source, canonical shipping profile, production endpoints/channel, image hashes/slots and unchanged frame/static/RTC sets. Actual112 pair and independent peer are bound in the baseline. |
-| 109 controlled setup | Pending. Preserve valid 105 fallback and provisioning; verify paired SDK VALID, normal UI initialization, sleep and calendar timer. |
-| 109→112 scheduled production install | Pending. One clean calendar-triggered update using exact production 112 binaries through byte-identical private bridge manifests. Require both boards on exact 112 with SDK VALID and settled target/accounting. |
+| 109 controlled setup | PASS:109/app0 on both boards, SDK VALID and safe UI idle, followed by natural paired sleep. Eight exact writes and full physical readbacks; valid105 fallback and provisioning preserved. First setup attempt stopped before writes because the harness lacked105 metadata; its corrected rerun passed. |
+| 109→112 scheduled production install | FAIL: first LCD proxy transfer failed. Automatic retry was armed for15:18:42 PDT, woke early and returned to sleep still on109 without a second network/apply reservation. No112 installation or paired SDK VALID proof. |
 | Pacific schedule | Pending restoration and verification of `PST8PDT,M3.2.0,M11.1.0`, next local 02:00. |
 | Recovery package | PASS:36 files,115,802,823 bytes,37 checksum entries, both merged-image component layouts and erased factory NVS/app1 independently verified. ELF, map and provenance included. |
-| Production promotion, local release tag and development checkout adoption | Pending installation result and exact served-byte verification. |
+| Production promotion, local release tag and development checkout adoption | Not performed: failed hardware acceptance. Shared production latest remains6.4.14. |
 
 The user explicitly limited release work to one hour on September 10. The release gate is the single clean scheduled install of the exact production pair plus packaging and service restoration. Additional deliberate integrity-fault testing, a second scheduled repeat, a separate final manual reinstall, physical power cuts, controlled network interruption, USB-free shipping operation and later-day recovery are deferred. They are not prerequisites introduced by this document and are not counted as passed.
 
