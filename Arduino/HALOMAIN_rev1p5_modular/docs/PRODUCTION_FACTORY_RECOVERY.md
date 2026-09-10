@@ -1,15 +1,15 @@
-# Production 6.4.104 factory and recovery package
+# Production 6.4.108 factory and recovery package
 
-This document describes the exact shipping artifacts built from commit `a54bb86b5e8e4fc96a4bb8f25ba8d08581489387`, with build ID `6.4.104-20260910T014009Z-a54bb86b5e8e`. The production route and reported channel are both `prod`; bench, one-shot, probe and fault controls are disabled. Artifact qualification has passed. Device acceptance and production promotion are separate receipts in `RELEASE_BASELINE.json`; this document does not claim those actions have happened.
+This document describes the exact shipping artifacts built from commit `9d38091f2b23341f5a12f423efa5fa71cf0f6978`, with build ID `6.4.108-20260910T191400Z-9d38091f2b23`. The production route and reported channel are both `prod`; bench, one-shot, probe and fault controls are disabled. Artifact qualification has passed. Device acceptance and production promotion are separate receipts in `RELEASE_BASELINE.json`; this document does not claim those actions have happened.
 
-The local package is `production-release104-recovery-package001` in the release evidence archive. `MANIFEST.json` lists every file's size and SHA-256; `SHA256SUMS` verifies the portable files. Each board has its exact application, bootloader, partition table, `boot_app0.bin`, 8 MiB merged factory image, `flash_args`, partition CSV, ELF and map. The provenance directory contains the committed source materialization and build proofs. Absolute references inside those proofs identify the separately retained evidence archive; they are not substitutes for the package's relative file hashes.
+The local package is `production-release108-recovery-package002` in the release evidence archive. `MANIFEST.json` lists every file's size and SHA-256; `SHA256SUMS` verifies the portable files. Each board has its exact application, bootloader, partition table, `boot_app0.bin`, 8 MiB merged factory image, `flash_args`, partition CSV, ELF and map. The provenance directory contains the committed source materialization and build proofs. Absolute references inside those proofs identify the separately retained evidence archive; they are not substitutes for the package's relative file hashes.
 
 The application hashes are:
 
 | Board | Bytes | SHA-256 |
 | --- | ---: | --- |
-| Sense | 1,803,008 | `78620893e66e63150570088464cef6cab790351da14accc694c325f900ad59fa` |
-| LCD | 1,877,264 | `5f85c91a207d4da4c7bce46617596453cdf31826169fe16f7bd3bd1ddd724d01` |
+| Sense | 1,803,280 | `e7f6aa5f5368a41085fd8ca1d6e08c3b3042a9859b9126f154a972c07e5912d4` |
+| LCD | 1,877,264 | `4afab434a1efa9d7ffe686bb8cf06dc602060ce83fa99a8e119341e878d249ce` |
 
 ## Identify the hardware before service
 
@@ -62,7 +62,7 @@ The separately archived fixture tools prepare declared new test cases. The plann
 Use this path only for a genuinely new unit or an explicitly authorized factory reset with the old state archived. It destroys existing provisioning and OTA history. Verify package hashes first, select each board's own directory, and keep both boards from starting their application until the pair has been written and verified.
 
 ```sh
-cd /absolute/path/to/production-release104-recovery-package001
+cd /absolute/path/to/production-release108-recovery-package002
 shasum -a 256 -c SHA256SUMS
 
 # Factory Sense: exact 8 MiB merged image, including erased NVS and initial selector.
@@ -94,10 +94,10 @@ A same-device full-flash backup is a disaster-recovery artifact, not an automati
 
 ## Evidence and release boundaries
 
-- Exact 104 pair: `production-release104-build001/RELEASE-PAIR.json`, SHA-256 `9dccd7babe361ad6017645df84ef45842a8e33d1d966615f904f76990b729308`.
-- Independent 104 artifact peer: `production-release104-build001/SESSION-RELEASE-PAIR-PEER.json` (the record binds exact source, arguments, artifacts, partitions, resources and closed owners).
+- Exact 108 pair: packaged `provenance/RELEASE-PAIR.json`, SHA-256 `695b37140d6fccf44db2aee33886442c88aa66f05221fd0c944899c4477c96c7`.
+- Independent 108 artifact peer: packaged `provenance/DOCS-INDEPENDENT-PAIR-PEER.json`, SHA-256 `20b7fa728015ead039edf1890b1f3cc59f08ce734ac9b85bf5c4ddd9b351f1f3` (exact source, arguments, artifacts, partitions, resources and build closure).
 - Actual prior hardware layout/security/full backups: `production101-backup-run001/result.json` and `SESSION-BACKUP-NVS-PEER.json`.
-- Publishing and byte-identical canary bridge: [Paired release](../halo_ota_demo/tools/ota/PAIRED_RELEASE.md).
-- Acceptance limits and final deployment state: [Production acceptance](PRODUCTION_RELEASE_ACCEPTANCE.md) and [Release baseline](RELEASE_BASELINE.md).
+- Publishing and the byte-identical canary bridge: repository document `halo_ota_demo/tools/ota/PAIRED_RELEASE.md`; this is a repository reference, not a file included in this artifact package.
+- Acceptance limits and final deployment state: repository documents `docs/PRODUCTION_RELEASE_ACCEPTANCE.md`, `docs/RELEASE_BASELINE.md` and `RELEASE_BASELINE.json`. These evolve with the separate acceptance/publication receipts; the artifact package does not claim a later device or deployment result.
 
 Do not turn historical notes in `PRODUCTION_PREP.md` into current release blockers or deployment claims. The finite current receipts determine what passed, what remains pending and which exact bytes may be promoted.

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "retry_gate_fix_in_progress_before_successor_builds",
+  "status": "successor_artifacts_verified_scheduled106_failed_further_correction_required",
   "candidate_version": "6.4.108",
   "canary_versions": [
     "6.4.105",
@@ -11,7 +11,10 @@
   "release_commit": null,
   "release_tree": null,
   "release_tag": null,
-  "release_artifact_manifest": null,
+  "release_artifact_manifest": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-recovery-package002/MANIFEST.json",
+    "sha256": "3e4e7da8768ec49e779d7010e36feca7a0e047b53cd8a5fe9abab08f0adef727"
+  },
   "shipping_acceptance_receipt": null,
   "production_publication_receipt": null,
   "previous_production_manifest_archive": null,
@@ -30,9 +33,9 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Shipping102 setup passed. Normal-calendar102-to103 failed during LCD HTTP transfer and deferred its fast retry; both boards remain102 SDKVALID. Existing102/103/104 artifacts are preserved and104 is superseded without production publication. A narrow retry readiness fix and105/106/107 canary plus108 production validation are pending. Historical bench passes and deferred physical fault cases remain separate.",
-  "artifact_source_commit": null,
-  "artifact_source_firmware_tree": null,
+  "qualification_scope": "All105\u2013108 artifact pairs passed canonical build and independent resource checks from9d38091. Controlled105 setup passed. Scheduled105\u2192106 failed: the LCD transfer stalled before the intended integrity fault; a confirmed five-minute retry arm woke both boards but closed to DEFERRED without a second network reservation.107/108 acceptance and publication are held. Historical bench passes and deferred physical cases remain separate.",
+  "artifact_source_commit": "9d38091f2b23341f5a12f423efa5fa71cf0f6978",
+  "artifact_source_firmware_tree": "051516be8df264e70f4d53535b35722e1ca4995f",
   "autonomous_calendar_scope": "Planned shipping105-to106 isolated LCD integrity-failure/recovery, then clean scheduled106-to107, followed by exact production108 manual bridge. New-case NVS fixtures apply only between closed archived cases; genuine UTC and shipping limits remain unchanged. Restore explicit Pacific before final acceptance.",
   "previous_candidate_artifacts": {
     "102": {
@@ -66,7 +69,91 @@
       }
     }
   },
-  "candidate_artifacts": {},
+  "candidate_artifacts": {
+    "105": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release105-build001/RELEASE-PAIR.json",
+        "sha256": "cccd7f0be550c1df08ad2da825efe1601262e6bb6d911a8c1b01d962891973b5"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release105-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
+        "sha256": "0fdb3853c4938bbbeb548f8884205d61aec9d69698f4785c2f8255f39d2e3403"
+      }
+    },
+    "106": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release106-build001/RELEASE-PAIR.json",
+        "sha256": "b30c01750c0df7d098f966883e9e09eea0cedff943123f6bc015e9f41c4850fc"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release106-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
+        "sha256": "0ea7a3a1272e5b2207cd1f70dc253ff89b1fdc689aec46d2d58a6aac7d355b98"
+      }
+    },
+    "107": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release107-build001/RELEASE-PAIR.json",
+        "sha256": "af040a1021fa5f65171467b0bb9b0a30a8650a5f704086a4ce0463e63538a63d"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release107-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
+        "sha256": "f3a50ffe11113b891de79736c9bc6c80c371474a693860680f85268f071c69f4"
+      }
+    },
+    "108": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-build001/RELEASE-PAIR.json",
+        "sha256": "695b37140d6fccf44db2aee33886442c88aa66f05221fd0c944899c4477c96c7"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
+        "sha256": "20b7fa728015ead039edf1890b1f3cc59f08ce734ac9b85bf5c4ddd9b351f1f3"
+      }
+    }
+  },
   "previous_artifact_source_commit": "a54bb86b5e8e4fc96a4bb8f25ba8d08581489387",
-  "previous_artifact_source_firmware_tree": "9ae109136f893b76c3bc285cc8be56906de315bb"
+  "previous_artifact_source_firmware_tree": "9ae109136f893b76c3bc285cc8be56906de315bb",
+  "acceptance_results": {
+    "105_controlled_baseline": {
+      "status": "PASS",
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production105-stage-run001/result.json",
+        "sha256": "e5f5abd241974ceba72dd9112629486beb17aafbac638edb1f3bbb8b75d47745"
+      },
+      "closure": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production105-stage-run001/overall-reap.json",
+        "sha256": "5d26682c1bc379ccb3a463d2b9ad0f6353936ece1f5e99523f2c42f1d2315376"
+      },
+      "timer_witness": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production105-stage-run001/timer-witness.json",
+        "sha256": "8c8f311d34ad939b24703fa48ca726bf4196501f7b6d042150c4f5992bd034b0"
+      },
+      "independent_peer": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production105-stage-run001/DOCS-ACTUAL105-RESULT-PEER.json",
+        "sha256": "9229576d77bcaa977d7292ab81e79232ad5d299f32695cfe738db3ee34d8788e"
+      },
+      "scope": "Controlled paired USB installation of exact105 on inactiveapp1; SDKVALID/Home, normal reporting, natural sleep and genuine normal-calendar timer. Preserved102 banks and provisioning. A controlled reset is not a physical cold boot."
+    },
+    "106_scheduled_failure_recovery": {
+      "status": "FAIL",
+      "passive_case": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production106-fault-case-run001/result.json",
+        "sha256": "42404a65c6b0845567575f43e82816b56fb0e66aeb3b9a4ddd548084ef7dffab"
+      },
+      "passive_closure": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production106-fault-case-run001/overall-reap.json",
+        "sha256": "c40f3ba822dc229bce57f8077e9def0c5e8a2f1ab8c1ecc411a989fb92ae1f85"
+      },
+      "current_canonical": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-current106-policy-read-run001/current-policy.json",
+        "sha256": "4319221769369cde057e4e2350601d99ff491a6c0a403ed8f48fcd514cab1a90"
+      },
+      "recovered_canonical_history": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-current106-policy-read-run001/sense-retained-analysis001/obsolete-canonical-audit.json",
+        "sha256": "2e35415bfb8bf5938e6ea8bcafc8bfdfe2651e65d1a2caa4216353caa5c2ccc8"
+      },
+      "controlled_integrity_fault_consumed": false,
+      "scope": "Both boards remained105VALID. LCD accepted1,383,690 of1,877,264 bytes before HTTP no-data; subsequent GET failed before data. Historical gen6ARMED confirms peer ACK, followed by gen7DEFERRED at retry due+7 seconds with unchanged one network/apply attempt. Post-case USB/reset diagnostics are separate; exact live rejection payload was not captured."
+    }
+  }
 }
