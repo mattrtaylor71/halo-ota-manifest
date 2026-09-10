@@ -53,6 +53,8 @@ Use normal paired OTA discovery and its supported manual action or daily mainten
 
 Do not use `erase-flash`, a merged factory image, or the stock `boot_app0.bin` on a provisioned device as an ordinary update. Those procedures overwrite selector and/or data state. There is deliberately no universal app-only USB command here: the correct inactive bank and selector transition depend on current full images, actual VALID state and unresolved paired policy. A service plan must verify both boards before writing either selector, preserve the current banks and unrelated bytes, and verify complete expected readback before application release.
 
+For a controlled USB installation that selects a candidate as NEW, retain both serial descriptors through final selector readback and coordinated application release. Do not end a staging process and later reconnect through ROM to release those NEW images. A further reset before SDK validation can abort a candidate and select the previous VALID bank. In the controlled102 test, both candidates were observed ABORTED after the separate-stage/release sequence; the same intact images reached VALID after selector-only re-arming and a retained-descriptor paired release0.1078seconds apart. The earlier electrical interval was not captured, so this does not identify which individual reset or delay caused the abort. Archive the actual policy and preserve current NVS during such service; re-arming a selector is not an autonomous OTA retry result.
+
 The separately archived fixture tools prepare declared new test cases. The planned initial setup uses a clean-policy fixture; exhausted-yesterday hardware testing remains deferred and is not a passed release-acceptance case. These fixtures are not customer recovery commands and must never be applied inside an active retry/failure case.
 
 ## Fresh factory unit only
@@ -73,6 +75,8 @@ esptool --chip esp32s3 --port "$LCD_PORT" --after no-reset erase-flash
 esptool --chip esp32s3 --port "$LCD_PORT" --after no-reset write-flash --flash-mode keep --flash-freq keep --flash-size keep 0x0 lcd/halo_lcd_prod.ino.merged.bin
 esptool --chip esp32s3 --port "$LCD_PORT" --after no-reset verify-flash 0x0 lcd/halo_lcd_prod.ino.merged.bin
 ```
+
+The commands above document the qualified component payloads and esptool options; they are not a verified paired station runner. The `--after no-reset` option applies to each invocation and does not establish that both descriptors remain held across separate commands. A station must implement and verify coordinated ownership/release before this procedure is treated as hardware-qualified.
 
 The merged files were checked byte-for-byte against bootloader at `0x0`, the exact board partition table at `0x8000`, `boot_app0.bin` at `0xe000`, and application at `0x10000`. Their NVS and app1 ranges are erased. Do not substitute a generic partition table, change flash mode/size, or mix board components. Independent hardware acceptance of the factory commands remains a separate gate; packaging checks are offline.
 
