@@ -8,6 +8,8 @@ The native regression fails on the preceding source and passes with the correcti
 
 The actual September10 scheduled109→112 run failed during LCD transfer. Its armed retry woke but returned to sleep on109 without a second reservation, with an early readiness snapshot reporting `origin:false`. The queue-label fix is therefore insufficient for hardware recovery. The one-hour deadline was missed; production latest is unchanged, and this candidate has no release tag or production acceptance. Exact cause of the transfer failure remains unconfirmed.
 
+Deadline closure restored Pacific scheduling while preserving valid109 firmware, provisioning and failed-campaign accounting. Saved ring records identify an HTTP no-data abort at835,080 bytes and a later connection-loss abort at304,405 bytes; final policy is DEFERRED/gen8 with no second reservation. The recurring soak is paused. The next bounded-readiness correction is documented but has not been implemented.
+
 ## 6.4.108 — superseded candidate, never released
 
 The shipping102-to103 calendar case downloaded and acknowledged16924LCD bytes, then stalled; its immediate second HTTP request failed. Both boards retained valid102 images. The prepared five-minute retry closed without a verified arm and was deferred until the next daily wake despite remaining budget. The failed run did not capture the fresh query payload, so its exact rejected predicate is unknown. Source review found two deterministic gates that reject a healthy old LCD: a changed image-begin count and the requirement for a live coordinator lease that ordinary OTA_LOCK clears.

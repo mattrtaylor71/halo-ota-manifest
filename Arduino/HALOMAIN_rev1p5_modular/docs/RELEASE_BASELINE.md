@@ -13,7 +13,7 @@ Before marking this baseline released, fill these fields from actual receipts:
 | Canonical compiler arguments, toolchain/SDK and partition hashes | PASS from actual112 canonical builds and independent peer; actual compiler paths/profiles and partition hashes are recorded. |
 | Finite shipping acceptance and documented limitations | 105 setup passed and105→106 failed. The109→112 scheduled transfer and automatic recovery failed; see the [acceptance record](PRODUCTION_RELEASE_ACCEPTANCE.md). |
 | Production manifests and exact served readback | Pending |
-| Previous production pointer, rollback/factory instructions and cleanup | Exact112 recovery package assembled; production promotion archive and final cleanup pending. |
+| Previous production pointer, rollback/factory instructions and cleanup | Exact112 recovery package assembled; Pacific configuration and saved next-timer selection restored; production promotion withheld. |
 
 The release becomes the default development baseline through the original checkout, not merely through these documents. After the verified commit exists, archive the original task-owned source/index and inspect a fresh working-tree/index diff. Advance the original development branch/checkout to that commit only after confirming ancestry and preserving unrelated dirty files. Do not use hard reset, clean or a wholesale copy to force adoption. If overlap prevents a safe fast-forward, reconcile those files explicitly and record the resulting adoption receipt. This operation does not change a remote default branch or another developer's branch. Fill `default_checkout_adoption` only after the actual result is verified.
 

@@ -31,7 +31,7 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Exact109 and production112 canonical artifact pairs and package verified; native regressions pass. Actual normal-calendar109 to112 transfer failed and the armed retry returned to sleep without a second reservation or installation. Post-case diagnostic wake showed active OTA ownership; no112 acceptance, production promotion, release tag or default-checkout adoption.",
+  "qualification_scope": "Exact109 and production112 artifacts/package verified; native regressions pass. Actual109 to112 calendar transfer failed and retry returned to sleep without a second reservation. Saved canonical confirms DEFERRED/gen8. Valid109 images and provisioning preserved; Pacific configuration and next timers restored. No112 acceptance, production promotion, release tag or default-checkout adoption.",
   "artifact_source_commit": "b6ff853e4e3aa4f014a45a48230351bbed802d7c",
   "artifact_source_firmware_tree": "8529653e0c187f0b2c1c47689f03de2efe11d5ea",
   "autonomous_calendar_scope": "User-directed one-hour release scope:109 controlled baseline then one clean normal-calendar109\u2192112 install using exact production112 artifacts. Restore Pacific02:00 before service. Deliberate fault/repeat and separate final manual reinstall deferred; no in-case policy refund.",
@@ -195,7 +195,19 @@
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production112-case-disposition001/OPERATOR-CLOSED-RESULT.json",
         "sha256": "743d3c9ba37ffdae58e0816ba7a5bf4a7464eab65fb4a95b418a76f343ad991e"
       },
-      "scope": "First scheduled window: LCD proxy failed after two LCD BEGINs, one network/apply attempt and no Sense BEGIN. Retry armed for15:18:42 PDT, woke early, reported origin:false/not_due, and returned to sleep still on109 with unchanged reservation counters. No112 paired success. Later host wake/USB activity is separate diagnostic evidence and stopped on active OTA ownership. Exact initial transport cause and final persisted post-retry phase remain unconfirmed."
+      "scope": "Scheduled LCD transfers failed at835080 bytes (HTTP no-data after400060ms) and304405 bytes (HTTP disconnect after178154ms; Wi-Fi connection lost). Automatic retry armed for15:18:42 PDT, woke early and cancelled readiness at due\u221212s with origin:false. Later saved canonical confirms DEFERRED/gen8, unchanged one network/apply attempt and two LCD begins. No112 paired success; initial stream-stall root cause remains unconfirmed. Retained diagnostics were captured after separate USB/ROM service.",
+      "current_canonical": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/canonical-pretimezone-analysis001/result.json",
+        "sha256": "b1e836ba9913edd11ef2d8d2446288a224b74c951e11fa7d5907e922d296d977"
+      },
+      "saved_transfer_diagnostics": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/sense-lcd-xfer-analysis001/result.json",
+        "sha256": "c207adb2bfe37bba39ba844b910cb576dd8a0057231e707e103a3ee276d25a98"
+      },
+      "lcd_retained_diagnostics": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/lcd-retained-analysis001/result.json",
+        "sha256": "e9fe15dc67d1702f1359e61a0c4d919eeec06b0090701dcc252c5ee96716b8cf"
+      }
     }
   },
   "previous_recovery_package_108": {
@@ -231,9 +243,27 @@
     "sha256": "b0c616265e8626fefb753b51e632776144b40dd69db823d1fd4f1163a66f3701"
   },
   "service_restoration": {
-    "status": "pending",
-    "required_timezone": "PST8PDT,M3.2.0,M11.1.0",
-    "last_verified_timezone": "RLS20:04:13",
-    "scope": "Restore only timezone while preserving failed policy and provisioning after active OTA ownership ends."
-  }
+    "status": "Pacific_NVS_and_saved_timer_selection_verified",
+    "timezone": "PST8PDT,M3.2.0,M11.1.0",
+    "result": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/result.json",
+      "sha256": "f3f952e4c75fdaf6fc191290fb43b258836d304ef1ebb5f582e72b13d47a0ac8"
+    },
+    "closure": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/overall-reap.json",
+      "sha256": "0bfd2e58d3454b8afb09a40b0eb6c7a1e0b379b4495670a0e3aa2e255fdb7d1e"
+    },
+    "next_sense_timer_epoch": 1789117200,
+    "next_lcd_timer_epoch": 1789117185,
+    "next_local_wake": "2026-09-11 02:00 America/Los_Angeles",
+    "scope": "One4KiB Sense sector changed only timezone. Full20KiB readback verified; canonical/provisioning and both VALID109 selectors/image bodies preserved. Both normally released; saved logs select correct Pacific timers and show LCD HOME after OTA lock clears. Initial qualification guard returned exit2 on firmware OTA_LOCK; no full post-release identity qualifier PASS claimed. No further hardware replay.",
+    "timer_observation": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production109-Pacific-restore-run001/PACIFIC-TIMER-SELECTION-OBSERVATION.json",
+      "sha256": "f792fb8bbe6efea2dcf03da7efdd7e47e98574e0e8a76c3f6108867bb84acc05"
+    },
+    "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
+    "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
+  },
+  "next_focused_fix": "docs/OTA_RETRY_NEXT_FIX.md",
+  "test_automation_status": "PAUSED"
 }
