@@ -1,6 +1,12 @@
 # Firmware changelog
 
-## 6.4.108 — planned production release, not yet released
+## 6.4.112 — successor candidate, not yet released
+
+A verified early LCD timer notice could be rejected because retained OTA debt had already queued the boot check as `coord_recovery`. The queue preserves its first reason and deadline, but the retry readiness check incorrectly required that reason to equal `lcd_timer`. The correction uses the accepted timer origin and currently queried peer identity, while preserving the original deadline, stored arm identity and all retry accounting.
+
+The native regression fails on the preceding source and passes with the correction. It covers the five queue reasons, ten invalid-origin conditions, clock/storage/expiry/deadline boundaries, and the actual canonical reservation/codec operations. The earlier post-transfer cleanup/arm regression also passes. Successor 109–112 builds and hardware acceptance are pending; 108 was never released.
+
+## 6.4.108 — superseded candidate, never released
 
 The shipping102-to103 calendar case downloaded and acknowledged16924LCD bytes, then stalled; its immediate second HTTP request failed. Both boards retained valid102 images. The prepared five-minute retry closed without a verified arm and was deferred until the next daily wake despite remaining budget. The failed run did not capture the fresh query payload, so its exact rejected predicate is unknown. Source review found two deterministic gates that reject a healthy old LCD: a changed image-begin count and the requirement for a live coordinator lease that ordinary OTA_LOCK clears.
 

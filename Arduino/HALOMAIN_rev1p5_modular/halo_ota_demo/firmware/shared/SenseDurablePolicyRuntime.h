@@ -511,8 +511,10 @@ static void halo_policy_note_readiness(const char* decision,durable_ota::Clock c
 static bool halo_policy_accepted_lcd_origin(const char* request) {
   // ota_peer_service consumes the mailbox before readiness. Its accepted
   // episode origin survives that consumption and is tied to the queried boot.
-  return request&&request[0]&&g_boot_ota_pending&&g_boot_ota_reason&&
-    !strcmp(g_boot_ota_reason,"lcd_timer")&&g_lcd_timer_origin.boot_id&&
+  // Retained debt may already have queued coord_recovery before that notice
+  // arrives. Keep its original deadline and reason; the verified timer origin,
+  // not the queue label, authorizes waiting for this arm's due time.
+  return request&&request[0]&&g_boot_ota_pending&&g_lcd_timer_origin.boot_id&&
     g_lcd_timer_origin.boot_id==g_lcd_timer_seen_boot&&
     g_lcd_timer_origin.wake==int(ESP_SLEEP_WAKEUP_TIMER)&&
     !strcmp(g_lcd_timer_origin.schedule,request)&&g_peer_gate.active&&

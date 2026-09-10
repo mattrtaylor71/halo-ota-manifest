@@ -1,5 +1,7 @@
 # Production 6.4.108 factory and recovery package
 
+**Successor 112 recovery package pending.** The 108 package and commands below are preserved historical recovery artifacts. Candidate 108 was never released; replace these bindings with the accepted 112 package before production release.
+
 This document describes the exact shipping artifacts built from commit `9d38091f2b23341f5a12f423efa5fa71cf0f6978`, with build ID `6.4.108-20260910T191400Z-9d38091f2b23`. The production route and reported channel are both `prod`; bench, one-shot, probe and fault controls are disabled. Artifact qualification has passed. Device acceptance and production promotion are separate receipts in `RELEASE_BASELINE.json`; this document does not claim those actions have happened.
 
 The local package is `production-release108-recovery-package002` in the release evidence archive. `MANIFEST.json` lists every file's size and SHA-256; `SHA256SUMS` verifies the portable files. Each board has its exact application, bootloader, partition table, `boot_app0.bin`, 8 MiB merged factory image, `flash_args`, partition CSV, ELF and map. The provenance directory contains the committed source materialization and build proofs. Absolute references inside those proofs identify the separately retained evidence archive; they are not substitutes for the package's relative file hashes.

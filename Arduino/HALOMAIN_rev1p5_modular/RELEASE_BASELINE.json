@@ -1,20 +1,17 @@
 {
   "schema_version": 1,
-  "status": "successor_artifacts_verified_scheduled106_failed_further_correction_required",
-  "candidate_version": "6.4.108",
+  "status": "retry_wake_correction_verified_successor_builds_pending",
+  "candidate_version": "6.4.112",
   "canary_versions": [
-    "6.4.105",
-    "6.4.106",
-    "6.4.107"
+    "6.4.109",
+    "6.4.110",
+    "6.4.111"
   ],
   "canary_profile": "shipping policy with only the fixed private OTA route changed",
   "release_commit": null,
   "release_tree": null,
   "release_tag": null,
-  "release_artifact_manifest": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-recovery-package002/MANIFEST.json",
-    "sha256": "3e4e7da8768ec49e779d7010e36feca7a0e047b53cd8a5fe9abab08f0adef727"
-  },
+  "release_artifact_manifest": null,
   "shipping_acceptance_receipt": null,
   "production_publication_receipt": null,
   "previous_production_manifest_archive": null,
@@ -33,10 +30,10 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "All105\u2013108 artifact pairs passed canonical build and independent resource checks from9d38091. Controlled105 setup passed. Scheduled105\u2192106 failed: the LCD transfer stalled before the intended integrity fault; a confirmed five-minute retry arm woke both boards but closed to DEFERRED without a second network reservation.107/108 acceptance and publication are held. Historical bench passes and deferred physical cases remain separate.",
-  "artifact_source_commit": "9d38091f2b23341f5a12f423efa5fa71cf0f6978",
-  "artifact_source_firmware_tree": "051516be8df264e70f4d53535b35722e1ca4995f",
-  "autonomous_calendar_scope": "Planned shipping105-to106 isolated LCD integrity-failure/recovery, then clean scheduled106-to107, followed by exact production108 manual bridge. New-case NVS fixtures apply only between closed archived cases; genuine UTC and shipping limits remain unchanged. Restore explicit Pacific before final acceptance.",
+  "qualification_scope": "Scheduled105\u2192106 failed after a confirmed retry arm: recovered canonical gen6ARMED was followed by gen7DEFERRED at due+7 without another network reservation. Native regression reproduced rejection of a verified early LCD timer origin when retained debt had already queued coord_recovery. Removing only the queue-label gate passes the regression and preserves identity, deadlines and accounting. Successor109\u2013112 builds and hardware acceptance remain pending.105\u2013108 artifacts are preserved;108 was never promoted.",
+  "artifact_source_commit": null,
+  "artifact_source_firmware_tree": null,
+  "autonomous_calendar_scope": "Planned109 controlled baseline,109\u2192110 scheduled recovery,110\u2192111 clean scheduled repeat, then111\u2192112 exact production manual bridge. New-case NVS fixtures only between closed archived cases; genuine UTC and shipping limits unchanged. Restore explicit Pacific before final acceptance.",
   "previous_candidate_artifacts": {
     "102": {
       "pair": {
@@ -67,9 +64,7 @@
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release104-build001/SESSION-RELEASE-PAIR-PEER.json",
         "sha256": "6f56257286e60f79c2d148a9e534e5094e7a2d8a6d347614bf211c39937e581d"
       }
-    }
-  },
-  "candidate_artifacts": {
+    },
     "105": {
       "pair": {
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release105-build001/RELEASE-PAIR.json",
@@ -111,8 +106,9 @@
       }
     }
   },
-  "previous_artifact_source_commit": "a54bb86b5e8e4fc96a4bb8f25ba8d08581489387",
-  "previous_artifact_source_firmware_tree": "9ae109136f893b76c3bc285cc8be56906de315bb",
+  "candidate_artifacts": {},
+  "previous_artifact_source_commit": "9d38091f2b23341f5a12f423efa5fa71cf0f6978",
+  "previous_artifact_source_firmware_tree": "051516be8df264e70f4d53535b35722e1ca4995f",
   "acceptance_results": {
     "105_controlled_baseline": {
       "status": "PASS",
@@ -155,5 +151,9 @@
       "controlled_integrity_fault_consumed": false,
       "scope": "Both boards remained105VALID. LCD accepted1,383,690 of1,877,264 bytes before HTTP no-data; subsequent GET failed before data. Historical gen6ARMED confirms peer ACK, followed by gen7DEFERRED at retry due+7 seconds with unchanged one network/apply attempt. Post-case USB/reset diagnostics are separate; exact live rejection payload was not captured."
     }
+  },
+  "previous_recovery_package_108": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-recovery-package002/MANIFEST.json",
+    "sha256": "3e4e7da8768ec49e779d7010e36feca7a0e047b53cd8a5fe9abab08f0adef727"
   }
 }
