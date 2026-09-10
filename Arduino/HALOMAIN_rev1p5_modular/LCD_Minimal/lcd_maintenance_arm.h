@@ -6,12 +6,35 @@ class LcdMaintenanceStorageGuard {
   LcdMaintenanceStorageGuard() { xSemaphoreTakeRecursive(mutex(), portMAX_DELAY); }
   ~LcdMaintenanceStorageGuard() { xSemaphoreGiveRecursive(mutex()); }
  private:
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  friend class LcdMaintenanceStorageTryGuard;
+#endif
   static SemaphoreHandle_t mutex() {
     static StaticSemaphore_t storage;
     static SemaphoreHandle_t handle = xSemaphoreCreateRecursiveMutexStatic(&storage);
     return handle;
   }
 };
+
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+// Optional diagnostics join the existing OTA/arm/sleep owner without waiting.
+class LcdMaintenanceStorageTryGuard {
+ public:
+  bool acquire() {
+    if (owned_) return true;
+    owned_ = xSemaphoreTakeRecursive(LcdMaintenanceStorageGuard::mutex(), 0) == pdTRUE;
+    return owned_;
+  }
+  ~LcdMaintenanceStorageTryGuard() {
+    if (owned_) xSemaphoreGiveRecursive(LcdMaintenanceStorageGuard::mutex());
+  }
+  LcdMaintenanceStorageTryGuard() = default;
+  LcdMaintenanceStorageTryGuard(const LcdMaintenanceStorageTryGuard&) = delete;
+  LcdMaintenanceStorageTryGuard& operator=(const LcdMaintenanceStorageTryGuard&) = delete;
+ private:
+  bool owned_ = false;
+};
+#endif
 
 // One NVS value is the authoritative arm OR disarm. Never fall back to old
 // per-key state when this key exists but is invalid: that resurrects old arms.
@@ -21,6 +44,9 @@ struct LcdMaintenanceArm {
   char request_id[64];
   uint32_t crc;
 };
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+static void lcd_sleep_witness_arm_committed(const LcdMaintenanceArm& arm);
+#endif
 static bool g_lcd_arm_storage_fault = false;
 static const char* LCD_MAINT_ARM_KEY = "arm_v1";
 static const uint32_t LCD_MAINT_ARM_MAGIC = 0x4c4d4131UL;
@@ -76,15 +102,26 @@ static bool lcd_arm_read(Preferences& p, LcdMaintenanceArm& a) {
   return p.getBytesLength(LCD_MAINT_ARM_KEY) == sizeof(a) &&
       p.getBytes(LCD_MAINT_ARM_KEY, &a, sizeof(a)) == sizeof(a) && lcd_arm_valid(a);
 }
-static bool lcd_arm_commit(const LcdMaintenanceArm& a) {
+static bool lcd_arm_commit(const LcdMaintenanceArm& a,const LcdNvsDeadline& deadline=LcdNvsDeadline()) {
   if (!lcd_arm_valid(a)) return false;
   LcdMaintenanceStorageGuard guard;
+  LcdNvsLease capacity_lease;
+  size_t available=0;
+  const size_t peak=lcd_nvs_blob_entries(sizeof(a))+1;
+  // arm_v1 is unchanged and remains readable by the previous firmware. It may
+  // be cleared after boot selection; only any new-codec/diagnostic reclamation
+  // path additionally needs the active VALID barrier.
+  if (!deadline.live() || !capacity_lease || g_lcd_nvs_uncertain || !lcd_nvs_available(available) ||
+      (available<peak && !lcd_nvs_prepare_essential(peak,deadline))) {
+    g_lcd_arm_storage_fault=true;return false;
+  }
   Preferences p;
-  if (!p.begin(LCD_MAINT_PREF_NAMESPACE, false)) {
+  if (!deadline.live() || !p.begin(LCD_MAINT_PREF_NAMESPACE, false)) {
     g_lcd_arm_storage_fault = true; return false;
   }
   LcdMaintenanceArm prior = {};
   const bool prior_valid = lcd_arm_read(p, prior);
+  if(!deadline.live()){p.end();g_lcd_arm_storage_fault=true;return false;}
   const size_t written = p.putBytes(LCD_MAINT_ARM_KEY, &a, sizeof(a));
   LcdMaintenanceArm readback = {};
   const bool readable = lcd_arm_read(p, readback);
@@ -94,15 +131,20 @@ static bool lcd_arm_commit(const LcdMaintenanceArm& a) {
   // Preferences returns zero when nvs_commit fails. Same-handle readback alone
   // cannot prove durability after that error. Keep the prior verified value.
   // A late SUCCESSFUL call is still a commit; callers must not invent rollback.
-  if (committed) lcd_arm_publish(readback);
+  if (committed) {
+    lcd_arm_publish(readback);
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+    lcd_sleep_witness_arm_committed(readback);
+#endif
+  }
   else if (prior_valid) lcd_arm_publish(prior);
   else { LcdMaintenanceArm empty = {}; lcd_arm_seal(empty); lcd_arm_publish(empty); }
   g_lcd_arm_storage_fault = !committed;
   return committed;
 }
-static bool lcd_clear_persisted_maintenance_state(const char* reason) {
+static bool lcd_clear_persisted_maintenance_state(const char* reason,const LcdNvsDeadline& deadline=LcdNvsDeadline()) {
   LcdMaintenanceArm disarm = {}; lcd_arm_seal(disarm);
-  const bool ok = lcd_arm_commit(disarm);
+  const bool ok = lcd_arm_commit(disarm,deadline);
   Serial.printf("[LCD_MAINT_NVS] disarm verified=%d reason=%s\n", ok ? 1 : 0, reason ? reason : "unknown");
   return ok;
 }

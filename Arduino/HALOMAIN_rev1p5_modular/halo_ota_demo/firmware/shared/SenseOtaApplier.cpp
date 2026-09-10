@@ -49,16 +49,30 @@ static inline size_t ota_begin_size_for_board(uint32_t expected_size) {
 
 SenseOtaApplier::SenseOtaApplier() {
   mbedtls_sha256_init(&sha256_ctx);
-#if OTA_TLS_INSECURE_DEBUG
-  client.setInsecure();
-#else
-  client.setCACert(kAmazonRootCa1);
-#endif
 }
 
 SenseOtaApplier::~SenseOtaApplier() {
   mbedtls_sha256_free(&sha256_ctx);
-  client.stop();
+}
+
+const char* SenseOtaApplier::getFailureStageString(FailureStage stage) {
+  switch (stage) {
+    case FailureStage::NONE: return "none";
+    case FailureStage::HEAP_START: return "heap_start";
+    case FailureStage::PARTITION: return "partition";
+    case FailureStage::BEGIN_INITIAL: return "begin_initial";
+    case FailureStage::BEGIN_RESTART: return "begin_restart";
+    case FailureStage::BEGIN_RANGE: return "begin_range";
+    case FailureStage::WRITE_MARKER: return "write_marker";
+    case FailureStage::WRITE_PROBE: return "write_probe";
+    case FailureStage::HEAP_STREAM: return "heap_stream";
+    case FailureStage::BEGIN_SAME_OFFSET: return "begin_same_offset";
+    case FailureStage::BEGIN_NO_PROGRESS: return "begin_no_progress";
+    case FailureStage::WRITE_STREAM: return "write_stream";
+    case FailureStage::END: return "end";
+    case FailureStage::SHA_CHECK: return "sha_check";
+    default: return "unknown";
+  }
 }
 
 const char* SenseOtaApplier::getResultString(Result result) {
@@ -81,6 +95,7 @@ const char* SenseOtaApplier::getResultString(Result result) {
     case RESULT_SET_BOOT_FAIL: return "SET_BOOT_FAIL";
     case RESULT_FAILED_MARKER_NOT_FOUND: return "MARKER_NOT_FOUND";
     case RESULT_FAILED_MARKER_MISMATCH: return "MARKER_VERSION_MISMATCH";
+    case RESULT_DEFERRED_POLICY: return "POLICY_DEFERRED";
     default: return "UNKNOWN";
   }
 }
@@ -153,7 +168,10 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     const char* url, const char* expected_sha256_hex, 
     uint32_t expected_size, uint32_t hard_deadline_ms, 
     bool set_boot_and_reboot,
-    const char* expected_version) {
+    const char* expected_version,
+    const BeginAdmission* admission) {
+  // Reset before every early return, including invalid input/deadline failure.
+  failure_snapshot_ = {};
 #ifdef HALO_BOARD_LCD
 #define LCD_OTA_RETURN_FAIL(r) do { Serial.printf("[LCD_OTA] applier FAIL reason=%s\n", SenseOtaApplier::getResultString(r)); return (r); } while(0)
 #else
@@ -176,6 +194,20 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   auto budget_delay = [&](uint32_t wanted) {
     const uint32_t bounded = cap_wait_ms(wanted);
     if (bounded) delay(bounded);
+  };
+  // A policy-enabled Sense cannot reach an erase through an unmetered caller.
+  // Optional callbacks also enforce their contract in default-off/native use.
+  auto admit_begin = [&](FailureStage site) -> bool {
+    if (!remaining_budget_ms()) return false;
+    if (!admission) {
+#if HALO_DURABLE_OTA_POLICY && !defined(HALO_BOARD_LCD)
+      return false;
+#else
+      return true;
+#endif
+    }
+    return admission->reserve &&
+        admission->reserve(admission->owner, site, invocation_started_ms, hard_deadline_ms);
   };
   if (!remaining_budget_ms()) LCD_OTA_RETURN_FAIL(RESULT_FAILED_TIMEOUT);
 
@@ -223,6 +255,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   const uint32_t MIN_HEAP_REQUIRED = OTA_MIN_HEAP_REQUIRED_BYTES;
   const uint32_t OTA_DOWNLOAD_MIN_HEAP = 8 * 1024;  // 8 KB: abort during download if heap drops below
   if (free_heap_start < MIN_HEAP_REQUIRED) {
+    captureWriteFailure(FailureStage::HEAP_START, 0, 0,
+                        expected_size, free_heap_start);
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE,
                   "Insufficient heap for OTA: free_heap=%lu, required>=%lu. Aborting.",
                   free_heap_start, MIN_HEAP_REQUIRED);
@@ -232,6 +266,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   // Choose target partition
   const esp_partition_t* update = esp_ota_get_next_update_partition(NULL);
   if (!update) {
+    captureWriteFailure(FailureStage::PARTITION, 0, 0,
+                        expected_size, ESP.getFreeHeap());
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "No OTA update partition found");
     LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
   }
@@ -254,6 +290,13 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   esp_ota_handle_t ota_handle = 0;
   size_t ota_size = ota_begin_size_for_board(expected_size);
   if (!remaining_budget_ms()) LCD_OTA_RETURN_FAIL(RESULT_FAILED_TIMEOUT);
+  if (!admit_begin(FailureStage::BEGIN_INITIAL)) {
+    LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Policy begin reservation declined: site=%u",
+                 (unsigned)FailureStage::BEGIN_INITIAL);
+    LCD_OTA_RETURN_FAIL(RESULT_DEFERRED_POLICY);
+  }
+  if (!remaining_budget_ms()) LCD_OTA_RETURN_FAIL(RESULT_FAILED_TIMEOUT);
+  ota_handle = 0;  // Only a handle published by this begin may be aborted below.
   esp_err_t err = esp_ota_begin(update, ota_size, &ota_handle);
   if (!remaining_budget_ms()) {
     if (ota_handle) esp_ota_abort(ota_handle);
@@ -261,7 +304,11 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   }
   
   if (err != ESP_OK) {
+    captureWriteFailure(FailureStage::BEGIN_INITIAL, err, 0,
+                        expected_size, ESP.getFreeHeap());
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL: %s", esp_err_to_name(err));
+    // SDK may publish a handle before an erase failure; preserve err/snapshot.
+    if (ota_handle) { esp_ota_abort(ota_handle); ota_handle = 0; }
     LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
   }
   
@@ -523,6 +570,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   // Retry state
   int resume_attempt = 0;
   int restart_attempt = 0;
+  bool restart_pending = false; // explicit request; zero progress alone never means re-erase
   int total_http_attempts = 0;  // Global counter for all HTTP attempts (for logging)
   int initial_get_fail_count = 0;  // Consecutive initial (non-range) GET failures; retry up to INITIAL_GET_MAX_RETRIES
   int consecutive_transient_failures = 0;  // Consecutive null stream / httpCode<0; triggers FULL_HTTP_RESET when >=2
@@ -578,8 +626,9 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   // Main download loop with retry/restart capability
   while (true) {
     OTA_CHECK_BUDGET();
-    // If we need to restart from scratch (restart_attempt > 0), abort current OTA and begin again
-    if (restart_attempt > 0 && downloaded_bytes == 0) {
+    // Service an explicit full-restart request exactly once. Inner recovery
+    // paths that already began a fresh session proceed directly to GET.
+    if (restart_pending) {
       LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Restarting OTA from scratch (attempt %d/%d)", restart_attempt, RESTART_MAX_ATTEMPTS);
       
       // Clean teardown: close HTTP client and stream so we don't retain a dead socket
@@ -608,13 +657,25 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       // Begin fresh OTA (next httpBeginAndGet will recreate HTTPClient/WiFiClient – objects_recreated=1)
       size_t ota_size = ota_begin_size_for_board(expected_size);
       OTA_CHECK_BUDGET();
+      if (!admit_begin(FailureStage::BEGIN_RESTART)) {
+        LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Policy begin reservation declined: site=%u",
+                     (unsigned)FailureStage::BEGIN_RESTART);
+        LCD_OTA_RETURN_FAIL(RESULT_DEFERRED_POLICY);
+      }
+      OTA_CHECK_BUDGET();
+      ota_handle = 0;  // Only a handle published by this begin may be aborted below.
       err = esp_ota_begin(update, ota_size, &ota_handle);
       OTA_CHECK_BUDGET();
       if (err != ESP_OK) {
+        captureWriteFailure(FailureStage::BEGIN_RESTART, err, 0,
+                            expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
         LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL on restart: %s", esp_err_to_name(err));
+        // SDK may publish a handle before an erase failure; preserve err/snapshot.
+        if (ota_handle) { esp_ota_abort(ota_handle); ota_handle = 0; }
         LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
       }
       
+      restart_pending = false; // this requested begin succeeded
       // Reset all state for fresh restart
       downloaded_bytes = 0;
       resume_attempt = 0;
@@ -701,6 +762,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
                        resume_attempt + 1, RESUME_MAX_ATTEMPTS, restart_attempt, RESTART_MAX_ATTEMPTS);
           if (restart_attempt < RESTART_MAX_ATTEMPTS) {
             restart_attempt++;
+            restart_pending = true;
             resume_attempt = 0;
             downloaded_bytes = 0;  // Trigger restart on next iteration
             uint32_t restart_backoff = backoffWithJitter(RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1]);
@@ -820,10 +882,21 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         // Begin fresh OTA
         size_t ota_size = ota_begin_size_for_board(expected_size);
         OTA_CHECK_BUDGET();
+        if (!admit_begin(FailureStage::BEGIN_RANGE)) {
+          LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Policy begin reservation declined: site=%u",
+                       (unsigned)FailureStage::BEGIN_RANGE);
+          LCD_OTA_RETURN_FAIL(RESULT_DEFERRED_POLICY);
+        }
+        OTA_CHECK_BUDGET();
+        ota_handle = 0;  // Only a handle published by this begin may be aborted below.
         err = esp_ota_begin(update, ota_size, &ota_handle);
         OTA_CHECK_BUDGET();
         if (err != ESP_OK) {
+          captureWriteFailure(FailureStage::BEGIN_RANGE, err, 0,
+                              expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
           LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL after Range detection: %s", esp_err_to_name(err));
+          // SDK may publish a handle before an erase failure; preserve err/snapshot.
+          if (ota_handle) { esp_ota_abort(ota_handle); ota_handle = 0; }
           LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
         }
         
@@ -886,6 +959,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           // Try restart
           if (restart_attempt < RESTART_MAX_ATTEMPTS) {
             restart_attempt++;
+            restart_pending = true;
             resume_attempt = 0;
             downloaded_bytes = 0;
             uint32_t restart_backoff = backoffWithJitter(restart_attempt <= 2 ? RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1] : 1000);
@@ -929,6 +1003,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         continue;  // Retry from outer loop
       } else if (restart_attempt < RESTART_MAX_ATTEMPTS) {
         restart_attempt++;
+        restart_pending = true;
         resume_attempt = 0;
         
         // Clean teardown before restart
@@ -1072,6 +1147,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         err = esp_ota_write(ota_handle, marker_check_buffer, marker_read);
         OTA_CHECK_BUDGET();
         if (err != ESP_OK) {
+          captureWriteFailure(FailureStage::WRITE_MARKER, err, downloaded_bytes,
+                              expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
           LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_write FAIL on first chunk: %s", esp_err_to_name(err));
           if (current_ctx) { current_ctx->http.end(); current_ctx->client.stop(); delete current_ctx; current_ctx = nullptr; }
           esp_ota_abort(ota_handle);
@@ -1115,6 +1192,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           err = esp_ota_write(ota_handle, probe_buf, probe_n);
           OTA_CHECK_BUDGET();
           if (err != ESP_OK) {
+            captureWriteFailure(FailureStage::WRITE_PROBE, err, downloaded_bytes,
+                                expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
             LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_write FAIL on probe bytes: %s", esp_err_to_name(err));
             if (current_ctx) { current_ctx->http.end(); current_ctx->client.stop(); delete current_ctx; current_ctx = nullptr; }
             esp_ota_abort(ota_handle);
@@ -1201,6 +1280,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
         continue;  // Retry from outer loop
       } else if (restart_attempt < RESTART_MAX_ATTEMPTS) {
         restart_attempt++;
+        restart_pending = true;
         resume_attempt = 0;
         
         if (current_ctx) {
@@ -1254,6 +1334,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           last_heap_check_ms = now_ms;
           uint32_t current_heap = ESP.getFreeHeap();
           if (current_heap < OTA_DOWNLOAD_MIN_HEAP) {
+            captureWriteFailure(FailureStage::HEAP_STREAM, 0, downloaded_bytes,
+                                expected_size ? expected_size : target_bytes, current_heap);
             LOG_ERROR_TAG(LOG_TAG_OTA_WRITE,
                           "Heap watchdog: free_heap=%lu < min=%lu - aborting OTA",
                           (unsigned long)current_heap, (unsigned long)OTA_DOWNLOAD_MIN_HEAP);
@@ -1319,10 +1401,21 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           // Begin fresh OTA
           size_t ota_size = ota_begin_size_for_board(expected_size);
           OTA_CHECK_BUDGET();
+          if (!admit_begin(FailureStage::BEGIN_SAME_OFFSET)) {
+            LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Policy begin reservation declined: site=%u",
+                         (unsigned)FailureStage::BEGIN_SAME_OFFSET);
+            LCD_OTA_RETURN_FAIL(RESULT_DEFERRED_POLICY);
+          }
+          OTA_CHECK_BUDGET();
+          ota_handle = 0;  // Only a handle published by this begin may be aborted below.
           err = esp_ota_begin(update, ota_size, &ota_handle);
           OTA_CHECK_BUDGET();
           if (err != ESP_OK) {
+            captureWriteFailure(FailureStage::BEGIN_SAME_OFFSET, err, 0,
+                                expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
             LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL on same-offset restart: %s", esp_err_to_name(err));
+            // SDK may publish a handle before an erase failure; preserve err/snapshot.
+            if (ota_handle) { esp_ota_abort(ota_handle); ota_handle = 0; }
             LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
           }
           
@@ -1342,7 +1435,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
                        "Full restart from 0: previous_offset=%lu, restart_count=%d, ota_begin result=OK",
                        previous_offset, restart_attempt);
           
-          break;  // Exit inner loop, will restart from 0 in outer loop
+          break;  // Reuse this fresh handle for the next outer-loop GET.
         }
         
         // Normal resume/reconnect logic
@@ -1368,6 +1461,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             // Resume attempts exhausted - try restart
             if (restart_attempt < RESTART_MAX_ATTEMPTS) {
               restart_attempt++;
+              restart_pending = true;
               resume_attempt = 0;
               downloaded_bytes = 0;
               LOG_INFO_TAG(LOG_TAG_OTA_WRITE, "Resume attempts exhausted, attempting full restart (restart_attempt=%d/%d)",
@@ -1422,10 +1516,21 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             // Begin fresh OTA immediately (don't rely on outer loop)
             size_t ota_size = ota_begin_size_for_board(expected_size);
             OTA_CHECK_BUDGET();
+            if (!admit_begin(FailureStage::BEGIN_NO_PROGRESS)) {
+              LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Policy begin reservation declined: site=%u",
+                           (unsigned)FailureStage::BEGIN_NO_PROGRESS);
+              LCD_OTA_RETURN_FAIL(RESULT_DEFERRED_POLICY);
+            }
+            OTA_CHECK_BUDGET();
+            ota_handle = 0;  // Only a handle published by this begin may be aborted below.
             err = esp_ota_begin(update, ota_size, &ota_handle);
             OTA_CHECK_BUDGET();
             if (err != ESP_OK) {
+              captureWriteFailure(FailureStage::BEGIN_NO_PROGRESS, err, 0,
+                                  expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
               LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_begin FAIL on no-progress restart: %s", esp_err_to_name(err));
+              // SDK may publish a handle before an erase failure; preserve err/snapshot.
+              if (ota_handle) { esp_ota_abort(ota_handle); ota_handle = 0; }
               LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
             }
             
@@ -1441,7 +1546,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
             uint32_t restart_backoff = backoffWithJitter(restart_attempt <= 2 ? RESTART_BACKOFF_DELAYS_MS[restart_attempt - 1] : 1000);
             budget_delay(restart_backoff);
             OTA_CHECK_BUDGET();
-            break;  // Exit inner loop, will restart from 0 in outer loop
+            break;  // Reuse this fresh handle for the next outer-loop GET.
           } else {
             LOG_ERROR_TAG(LOG_TAG_OTA_WRITE,
                           "No-progress timeout: all recovery attempts exhausted (downloaded=%lu, target=%lu, elapsed=%lu ms, no_progress_for=%lu ms, resume_supported=%d, restart_attempt=%d/%d)",
@@ -1481,6 +1586,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           // Try restart (resume not supported or attempts exhausted)
           if (restart_attempt < RESTART_MAX_ATTEMPTS) {
             restart_attempt++;
+            restart_pending = true;
             resume_attempt = 0;
             downloaded_bytes = 0;
             budget_delay(backoffWithJitter(1000));
@@ -1517,6 +1623,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
           // Try restart (resume not supported or attempts exhausted)
           if (restart_attempt < RESTART_MAX_ATTEMPTS) {
             restart_attempt++;
+            restart_pending = true;
             resume_attempt = 0;
             downloaded_bytes = 0;
             budget_delay(backoffWithJitter(1000));
@@ -1584,6 +1691,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       err = esp_ota_write(ota_handle, write_buffer, bytes_read);
       OTA_CHECK_BUDGET();
       if (err != ESP_OK) {
+        captureWriteFailure(FailureStage::WRITE_STREAM, err, downloaded_bytes,
+                            expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
         LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_write FAIL: %s", esp_err_to_name(err));
         // Teardown only when aborting
         if (current_ctx) {
@@ -1707,6 +1816,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   
   // Verify SHA256
   if (!compareSha256(computed_sha256_hex, expected_sha256_hex)) {
+    captureWriteFailure(FailureStage::SHA_CHECK, 0, downloaded_bytes,
+                        expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "SHA256 mismatch: expected %s, got %s", 
                   expected_sha256_hex, computed_sha256_hex);
     esp_ota_abort(ota_handle);
@@ -1719,6 +1830,8 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   ota_handle = 0;  // esp_ota_end consumes the handle even on failure (SDK contract).
   OTA_CHECK_BUDGET();
   if (err != ESP_OK) {
+    captureWriteFailure(FailureStage::END, err, downloaded_bytes,
+                        expected_size ? expected_size : target_bytes, ESP.getFreeHeap());
     LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "esp_ota_end FAIL: %s", esp_err_to_name(err));
     LCD_OTA_RETURN_FAIL(RESULT_FAILED_WRITE);
   }
@@ -1731,8 +1844,10 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
   // If set_boot_and_reboot is true, set boot partition and reboot
   if (set_boot_and_reboot) {
 #ifndef HALO_BOARD_LCD
-    // Record expectation before switching boot partition so we can verify
-    // on next boot that the running firmware version matches manifest.version.
+    // Default-off retains the legacy expectation. The policy-enabled caller
+    // already persisted full target identity and its APPLY reservation before
+    // every begin; preserve old expectation bytes and resolve that record only
+    // after actual next-boot pair identity/VALID proof.
 #endif
     const esp_partition_t* running = esp_ota_get_running_partition();
     if (!running) {
@@ -1754,7 +1869,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     }
 
     OTA_CHECK_BUDGET();
-#ifndef HALO_BOARD_LCD
+#if !defined(HALO_BOARD_LCD) && !HALO_DURABLE_OTA_POLICY
     if (!OtaExpect::setPending(expected_version, running)) {
       LOG_ERROR_TAG(LOG_TAG_OTA_WRITE, "OtaExpect::setPending failed - aborting boot partition switch");
       LCD_OTA_RETURN_FAIL(RESULT_SET_BOOT_FAIL);
@@ -1767,7 +1882,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
     // Last cancellable boundary. If recording the expectation used the budget,
     // clear that uncommitted expectation instead of selecting a new boot slot.
     if (!remaining_budget_ms()) {
-#ifndef HALO_BOARD_LCD
+#if !defined(HALO_BOARD_LCD) && !HALO_DURABLE_OTA_POLICY
       if (!OtaExpect::clearPending()) LOG_WARN_TAG(LOG_TAG_OTA_WRITE, "Could not clear expired OTA expectation");
 #endif
       const Result deadline_result = deadline_failure();
@@ -1797,8 +1912,7 @@ SenseOtaApplier::Result SenseOtaApplier::applyToOtaPartition(
       current_ctx = nullptr;
     }
     
-    // CRITICAL: Always stop member client before reboot (prevents errno=9 / Bad file number)
-    client.stop();
+    // Actual HttpCtx clients were closed above; no unused member client.
     
     // Safe WiFi disconnect (only if STA was started; skips if mode OFF to avoid STA not started)
     HALO_SAFE_DISCONNECT("ota_cleanup", false);

@@ -32,6 +32,8 @@ static void ui_show_screen(ScreenId next, const char* reason, const char* file, 
   // Snapshot the runtime UI screen state before the impl runs so we can detect
   // entering/leaving the shopping list and notify the Sense (LIST_ACTIVE).
   ui_screen_t prev_ui_screen = ui_screen_state;
+  if (from_meta != to_meta)
+    halo_ui_motion_stop(lv_scr_act());
   ui_show_screen_impl(next);
   // Tell the Sense to stay awake + keep WiFi up while on the list, and to
   // allow sleep again when leaving. Plain UART send — safe on the UI task.
@@ -118,44 +120,38 @@ static bool ship_choice_mode_is_discard(void) {
 }
 
 static void ship_configure_scan_choice_screen(void) {
-  if (!expiry_choice_quantity_label || !ship_expiry_choice_qty_prefix ||
-      !ship_expiry_choice_prompt || !ship_expiry_choice_skip_label ||
-      !ship_expiry_choice_add_label) {
+  if (!ship_expiry_choice_screen)
     return;
-  }
-
-  if (ship_choice_mode_is_discard()) {
-    lv_label_set_text(expiry_choice_quantity_label, "Shopping list");
-    lv_obj_set_width(expiry_choice_quantity_label, 220);
-    lv_obj_set_style_text_font(expiry_choice_quantity_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(expiry_choice_quantity_label, LV_ALIGN_TOP_MID, 0, SHIP_CHOICE_VALUE_Y);
+  bool discard = ship_choice_mode_is_discard();
+  lv_label_set_text(lv_obj_get_child(ship_choice_badge, 0), discard ? "DISCARD" : "ADD FOOD");
+  if (discard) {
     lv_obj_add_flag(ship_expiry_choice_qty_prefix, LV_OBJ_FLAG_HIDDEN);
-
-    lv_label_set_text(ship_expiry_choice_prompt, "Also add this item after discard?");
-    lv_obj_set_width(ship_expiry_choice_prompt, 220);
-    lv_obj_align(ship_expiry_choice_prompt, LV_ALIGN_TOP_MID, 0, SHIP_CHOICE_PROMPT_Y + 4);
-    lv_obj_clear_flag(ship_expiry_choice_prompt, LV_OBJ_FLAG_HIDDEN);
-
-    lv_label_set_text(ship_expiry_choice_skip_label, "Skip");
-    lv_label_set_text(ship_expiry_choice_add_label, "Add to\nShopping\nList");
-    lv_obj_set_width(ship_expiry_choice_add_label, 110);
+    lv_obj_set_style_text_font(expiry_choice_quantity_label, &nunito_24, 0);
+    lv_obj_set_style_text_color(expiry_choice_quantity_label, lv_color_hex(COL_DARK), 0);
+    lv_obj_set_pos(expiry_choice_quantity_label, 40, 110);
+    lv_obj_set_width(expiry_choice_quantity_label, 280);
+    lv_label_set_text(expiry_choice_quantity_label, "Add it to your\nshopping list?");
+    lv_obj_set_pos(ship_expiry_choice_prompt, 40, 186);
+    lv_label_set_text(ship_expiry_choice_prompt, "For the next grocery run.");
+    lv_obj_add_flag(ship_choice_question, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(ship_expiry_choice_skip_label, "NOT NOW");
+    lv_label_set_text(ship_expiry_choice_add_label, "ADD TO LIST");
+    lv_obj_set_y(ship_expiry_choice_skip_btn, 238);
+    lv_obj_set_y(ship_expiry_choice_add_btn, 238);
   } else {
-    lv_obj_set_width(expiry_choice_quantity_label, LV_SIZE_CONTENT);
-    lv_obj_set_style_text_font(expiry_choice_quantity_label, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_align(expiry_choice_quantity_label, LV_ALIGN_TOP_MID, 26, SHIP_CHOICE_VALUE_Y);
     lv_obj_clear_flag(ship_expiry_choice_qty_prefix, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(ship_expiry_choice_qty_prefix, "QTY:");
-    lv_obj_align(ship_expiry_choice_qty_prefix, LV_ALIGN_TOP_MID, -26, SHIP_CHOICE_VALUE_Y);
-
+    lv_obj_set_style_text_font(expiry_choice_quantity_label, &nunito_60, 0);
+    lv_obj_set_style_text_color(expiry_choice_quantity_label, lv_color_hex(COL_GREEN), 0);
+    lv_obj_set_pos(expiry_choice_quantity_label, 60, 92);
+    lv_obj_set_width(expiry_choice_quantity_label, 240);
     expiry_choice_update_quantity_label();
-    lv_label_set_text(ship_expiry_choice_prompt, "Turn knob to change QTY");
-    lv_obj_set_width(ship_expiry_choice_prompt, LV_SIZE_CONTENT);
-    lv_obj_align(ship_expiry_choice_prompt, LV_ALIGN_TOP_MID, 0, SHIP_CHOICE_PROMPT_Y);
-    lv_obj_clear_flag(ship_expiry_choice_prompt, LV_OBJ_FLAG_HIDDEN);
-
-    lv_label_set_text(ship_expiry_choice_skip_label, "Skip");
-    lv_label_set_text(ship_expiry_choice_add_label, "Add\nExpiration");
-    lv_obj_set_width(ship_expiry_choice_add_label, 110);
+    lv_obj_set_pos(ship_expiry_choice_prompt, 40, 160);
+    lv_label_set_text(ship_expiry_choice_prompt, "Turn the dial to adjust");
+    lv_obj_clear_flag(ship_choice_question, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(ship_expiry_choice_skip_label, "NO DATE");
+    lv_label_set_text(ship_expiry_choice_add_label, "ADD DATE");
+    lv_obj_set_y(ship_expiry_choice_skip_btn, 232);
+    lv_obj_set_y(ship_expiry_choice_add_btn, 232);
   }
 }
 
@@ -497,7 +493,7 @@ static bool expiry_choice_handle_touch(uint16_t check_x, uint16_t check_y) {
     g_ship_ui_finalized_job_id = g_ship_ui_job_id;
     UI_SHOW(SCREEN_SHIP_LOGGED, "expiry_choice_skip");
   } else if (add_pressed) {
-    ship_expiry_choice_shown_time = 0;
+    // Carry this opportunity's original deadline into the date picker.
     ship_show_expiry_screen();
   } else {
     Serial.println("[EXPIRY_CHOICE] tap ignored (outside buttons)");
@@ -524,10 +520,13 @@ static bool expiry_handle_touch(uint16_t check_x, uint16_t check_y) {
     if (check_x >= btn_area.x1 && check_x <= btn_area.x2 &&
         check_y >= btn_area.y1 && check_y <= btn_area.y2) {
       Serial.println("[EXPIRY] Back button pressed - canceling");
+      unsigned long original_start = expiry_screen_shown_time;
       ship_hide_expiry_screen();
       expiry_submitted = false;
 #if SHIP_MENU_UI
-      show_ship_main_menu();
+      ship_expiry_choice_shown_time = original_start;
+      ship_choice_returning_from_date = true;
+      ship_show_expiry_choice();
 #else
       if (list_container != NULL && g_active.count > 0) {
         lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
@@ -594,59 +593,21 @@ static void result_btn_home_event(lv_event_t * e);
 static void result_btn_retry_event(lv_event_t * e);
 
 static void result_screen_init() {
-  if (result_root) {
+  if (result_root)
     return;
-  }
-  result_root = lv_obj_create(NULL);
-  lv_obj_set_size(result_root, LV_PCT(100), LV_PCT(100));
-  lv_obj_clear_flag(result_root, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_bg_color(result_root, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(result_root, LV_OPA_COVER, LV_PART_MAIN);
-
-  result_icon_label = lv_label_create(result_root);
-  lv_obj_set_style_text_font(result_icon_label, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_set_style_text_color(result_icon_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(result_icon_label, LV_ALIGN_TOP_MID, 0, 24);
-
-  result_title_label = lv_label_create(result_root);
-  lv_label_set_long_mode(result_title_label, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(result_title_label, LV_PCT(90));
-  lv_obj_set_style_text_font(result_title_label, &lv_font_montserrat_24, LV_PART_MAIN);
-  lv_obj_set_style_text_color(result_title_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(result_title_label, LV_ALIGN_TOP_MID, 0, 100);
-
-  result_subtitle_label = lv_label_create(result_root);
-  lv_label_set_long_mode(result_subtitle_label, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(result_subtitle_label, LV_PCT(90));
-  lv_obj_set_style_text_font(result_subtitle_label, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_set_style_text_color(result_subtitle_label, lv_color_hex(0xA0A0A0), LV_PART_MAIN);
-  lv_obj_align(result_subtitle_label, LV_ALIGN_TOP_MID, 0, 140);
-
-  result_btn_home = lv_obj_create(result_root);
-  lv_obj_set_size(result_btn_home, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
-  lv_obj_align(result_btn_home, LV_ALIGN_BOTTOM_MID, 0, -72);
-  lv_obj_set_style_bg_color(result_btn_home, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(result_btn_home, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(result_btn_home, 0, LV_PART_MAIN);
+  result_root = halo_ui_page();
+  lv_obj_t* seal = halo_ui_card(result_root, 144, 40, 72, 72, COL_RED, 36);
+  result_icon_label =
+      halo_ui_label(seal, LV_SYMBOL_WARNING, &lv_font_montserrat_32, COL_WHITE, 4, 15, 60);
+  result_title_label = halo_ui_label(result_root, "", &nunito_22, COL_DARK, 40, 140, 280);
+  result_subtitle_label =
+      halo_ui_label(result_root, "", &lv_font_montserrat_14, COL_TEXT2, 48, 178, 264);
+  result_btn_home = halo_ui_button(result_root, 54, 236, 118, 54, "HOME", COL_WHITE, COL_DARK);
+  result_btn_home_label = lv_obj_get_child(result_btn_home, 0);
   lv_obj_add_event_cb(result_btn_home, result_btn_home_event, LV_EVENT_CLICKED, NULL);
-
-  result_btn_home_label = lv_label_create(result_btn_home);
-  lv_label_set_text(result_btn_home_label, "Back to Home");
-  lv_obj_set_style_text_color(result_btn_home_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_center(result_btn_home_label);
-
-  result_btn_retry = lv_obj_create(result_root);
-  lv_obj_set_size(result_btn_retry, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
-  lv_obj_align(result_btn_retry, LV_ALIGN_BOTTOM_MID, 0, -16);
-  lv_obj_set_style_bg_color(result_btn_retry, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(result_btn_retry, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(result_btn_retry, 0, LV_PART_MAIN);
+  result_btn_retry = halo_ui_button(result_root, 188, 236, 118, 54, "RETRY");
+  result_btn_retry_label = lv_obj_get_child(result_btn_retry, 0);
   lv_obj_add_event_cb(result_btn_retry, result_btn_retry_event, LV_EVENT_CLICKED, NULL);
-
-  result_btn_retry_label = lv_label_create(result_btn_retry);
-  lv_label_set_text(result_btn_retry_label, "Retry");
-  lv_obj_set_style_text_color(result_btn_retry_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_center(result_btn_retry_label);
 }
 
 static void ui_hide_result() {
@@ -659,17 +620,22 @@ static void ui_hide_result() {
 static void ui_show_result_impl(bool is_error, const char* title, const char* mode) {
   result_screen_init();
   const char* safe_title = (title && title[0]) ? title : (is_error ? "Something went wrong" : "Done");
-  const char* safe_mode = (mode && mode[0]) ? mode : "—";
+  const char* safe_mode = (mode && mode[0]) ? mode : "request";
   char subtitle[48];
   snprintf(subtitle, sizeof(subtitle), "Mode: %s", safe_mode);
 
-  lv_label_set_text(result_icon_label, is_error ? "⚠" : "✓");
+  lv_label_set_text(result_icon_label, is_error ? LV_SYMBOL_WARNING : LV_SYMBOL_OK);
   lv_label_set_text(result_title_label, safe_title);
   lv_label_set_text(result_subtitle_label, subtitle);
 
   if (is_error && g_last_action.valid) {
+    lv_obj_set_pos(result_btn_home, 54, 236);
+    lv_obj_set_width(result_btn_home, 118);
     lv_obj_clear_flag(result_btn_retry, LV_OBJ_FLAG_HIDDEN);
   } else {
+    lv_obj_set_pos(result_btn_home, 96, 240);
+    lv_obj_set_width(result_btn_home, 168);
+    lv_obj_center(result_btn_home_label);
     lv_obj_add_flag(result_btn_retry, LV_OBJ_FLAG_HIDDEN);
   }
   if (g_retry_disable_until_ms == 0) {
@@ -721,56 +687,22 @@ static void debug_btn_back_event(lv_event_t * e) {
 }
 
 static void debug_screen_init() {
-  if (debug_screen) {
+  if (debug_screen)
     return;
-  }
-  debug_screen = lv_obj_create(NULL);
-  lv_obj_set_size(debug_screen, LV_PCT(100), LV_PCT(100));
-  lv_obj_clear_flag(debug_screen, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_bg_color(debug_screen, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(debug_screen, LV_OPA_COVER, LV_PART_MAIN);
-
-  debug_title = lv_label_create(debug_screen);
-  lv_label_set_text(debug_title, "Debug");
-  lv_obj_set_style_text_color(debug_title, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(debug_title, LV_ALIGN_TOP_MID, 0, 16);
-
-  debug_label_status = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_status, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(debug_label_status, LV_ALIGN_TOP_LEFT, 12, 52);
-
-  debug_label_status2 = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_status2, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(debug_label_status2, LV_ALIGN_TOP_LEFT, 12, 76);
-
-  debug_label_sense = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_sense, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(debug_label_sense, LV_ALIGN_TOP_LEFT, 12, 108);
-
-  debug_label_hb = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_hb, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(debug_label_hb, LV_ALIGN_TOP_LEFT, 12, 132);
-
-  debug_label_wifi = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_wifi, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(debug_label_wifi, LV_ALIGN_TOP_LEFT, 12, 156);
-
-  debug_label_ui = lv_label_create(debug_screen);
-  lv_obj_set_style_text_color(debug_label_ui, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_align(debug_label_ui, LV_ALIGN_TOP_LEFT, 12, 180);
-
-  debug_btn_back = lv_obj_create(debug_screen);
-  lv_obj_set_size(debug_btn_back, SHIP_MENU_SETTINGS_BTN_W, SHIP_MENU_SETTINGS_BTN_H);
-  lv_obj_align(debug_btn_back, LV_ALIGN_BOTTOM_MID, 0, -20);
-  lv_obj_set_style_bg_color(debug_btn_back, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(debug_btn_back, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(debug_btn_back, 0, LV_PART_MAIN);
+  debug_screen = halo_ui_page(COL_DARK);
+  halo_ui_label(debug_screen, "SUPPORT", &nunito_12, COL_GOLD, 70, 30, 220);
+  debug_title = halo_ui_label(debug_screen, "Device info", &nunito_22, COL_WHITE, 50, 52, 260);
+  lv_obj_t* card = halo_ui_card(debug_screen, 62, 96, 236, 160, 0x303030, 18);
+  lv_obj_set_style_border_color(card, lv_color_hex(0x555555), 0);
+  debug_label_status = halo_ui_label(card, "", &lv_font_montserrat_12, COL_WHITE, 10, 10, 212);
+  debug_label_status2 = halo_ui_label(card, "", &lv_font_montserrat_12, COL_WHITE, 10, 32, 212);
+  debug_label_sense = halo_ui_label(card, "", &lv_font_montserrat_12, COL_WHITE, 10, 54, 212);
+  debug_label_hb = halo_ui_label(card, "", &lv_font_montserrat_12, COL_WHITE, 10, 76, 212);
+  debug_label_wifi = halo_ui_label(card, "", &lv_font_montserrat_12, COL_WHITE, 10, 98, 212);
+  debug_label_ui = halo_ui_label(card, "", &lv_font_montserrat_12, COL_WHITE, 10, 120, 212);
+  debug_btn_back = halo_ui_back(debug_screen);
+  debug_btn_back_label = NULL;
   lv_obj_add_event_cb(debug_btn_back, debug_btn_back_event, LV_EVENT_CLICKED, NULL);
-
-  debug_btn_back_label = lv_label_create(debug_btn_back);
-  lv_label_set_text(debug_btn_back_label, "Back");
-  lv_obj_set_style_text_color(debug_btn_back_label, lv_color_hex(COL_WHITE), LV_PART_MAIN);
-  lv_obj_center(debug_btn_back_label);
 }
 
 static void show_ship_debug_screen_impl() {

@@ -1,0 +1,43 @@
+# Production OTA build
+
+Start from the verified source commit in `RELEASE_BASELINE.json`. If that record is pending, the outputs are release candidates. Preserve exact source/build/publication provenance as described in [Release baseline](RELEASE_BASELINE.md). `halo_ota_demo/publish_both.sh` now delegates to the verified prebuilt-artifact publisher; it does not compile firmware.
+
+Prepare a release snapshot from clean committed source, then compile that snapshot:
+
+```sh
+python3 -B tools/prepare_production_release.py --version 6.4.102 --epoch <explicit-UTC-seconds> --out /absolute/path/to/new-snapshot
+python3 -B /absolute/path/to/new-snapshot/source/tools/build_ota_policy_production.py --out /absolute/path/to/new-build --private-canary
+```
+
+Use allocated canary versions 6.4.102/6.4.103 for the fixed canary route. For final 6.4.104, prepare that explicit version and omit `--private-canary`. The preparer requires the committed path manifest and clean source scope, records full Git commit/tree and changes only three generated metadata headers in the external snapshot. Its build ID is deterministic for the explicit source/version/epoch. Repository metadata remains clearly precommit/source-only; the publisher rejects provisional proofs. Never publish a direct build of those provisional headers.
+
+Use `--board sense` or `--board lcd` for one target, or `--plan` to inspect the exact commands. Each output directory must be new. The entry verifies the partition-table hashes and records the compiler command, log and bounded process completion. Each compiler gets 600 seconds plus at most 10 seconds for cleanup.
+
+The canonical entry supplies these flags automatically:
+
+| Setting | Sense | LCD |
+|---|---:|---:|
+| Durable OTA policy | 1 | Sense owns policy |
+| Durable diagnostics | 1 | 1 |
+| Diagnostic admission export | 1 | Sense owns export |
+| LCD sleep witness | 1 | 1 |
+| Idle-network recovery | 1 | Sense owns guard |
+| Scheduled one-shot test command | 0 | 0 |
+| Accelerated bench profile | 0 | 0 |
+| Local diagnostic credential provisioning | 0 | 0 |
+| Idle-network probe | 0 | Not enabled |
+| UI review / layout audit | Unchanged | 1 / 1 |
+
+It supplies no private channel, S3 route, capture fixture, snapshot-retirement or spool-disable override. Existing production configuration and spool defaults remain in use. Version headers and firmware metadata are not rewritten. Policy and diagnostics are enabled through this build entry across compilation units; low-level compatibility builds that omit these flags retain their existing source fallbacks and do not qualify as this production build.
+
+The explicit `--private-canary` option appends only the fixed dev-bucket channel/prefix for `halo/ota/canary/production-release-20260909`. All shipping limits and disabled bench/one-shot/probe/fault controls stay the same. Such artifacts are labeled canary and cannot be presented as default-route production builds. The default invocation above does not select this option.
+
+The exact Sense target is `esp32:esp32:XIAO_ESP32S3:PSRAM=opi,USBMode=hwcdc,CDCOnBoot=default`. The LCD target is `esp32:esp32:esp32s3:PartitionScheme=custom,FlashSize=8M,USBMode=hwcdc,CDCOnBoot=cdc,PSRAM=opi`. The configured LCD image layout is 8 MiB. Preserve the checked board libraries, pin assignments and partition tables when reproducing a qualified build.
+
+The production path uses the durable shipping limits. A stored full target binds both boards to their versioned manifests. Paired update orchestration updates LCD first, then Sense. SDK image validation requires real local readiness and checked selected/running image state. Fresh clock and peer qualification are separate OTA admission checks. Fast retry, deferred maintenance and remaining work retain their persisted limits across reboots; a new version alone does not clear unresolved debt.
+
+Compilation does not establish battery continuity, unattended shipping-limit maintenance, or on-device qualification of a newly reconciled source tree. Those runtime results must be recorded separately before installation or release.
+
+The qualified shipping profile retains the fixed HTTPS diagnostic admission endpoint already used by the M8 shipping build. This optional exporter is separate from the firmware download route and requires an existing scoped runtime credential; without one it is disabled. No key enters the build, and local credential provisioning remains off. Owner claim does not install the B1 key. Fresh units therefore skip this optional admission export before HTTP. Ordinary reporting, retained Diagnostic/H4 export, and OTA policy/download do not depend on that key.
+
+The tracked MQTT-disabled configuration supplies the existing public CA with empty client certificate/key. The canonical builder rejects `MqttSecrets.local.h` and `MqttSecrets.local.cpp` overrides before compiling. This packages the tested configuration reproducibly without enabling MQTT or committing credentials. Compile jobs are capped at two.

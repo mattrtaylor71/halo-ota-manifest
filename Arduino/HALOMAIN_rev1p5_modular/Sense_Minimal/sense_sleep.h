@@ -192,7 +192,7 @@ static uint32_t sleep_deny_retry_ms(const char* reason, unsigned long now_ms) {
 //
 // The caller guarantees timer_s > 0 (see the wake-timer block in
 // sense_enter_deep_sleep), so "no wake source at all" is no longer reachable.
-static void sense_config_deep_sleep_wakeup(bool enable_ext0, uint32_t timer_s) {
+static bool sense_config_deep_sleep_wakeup(bool enable_ext0, uint32_t& timer_s, uint32_t normal_or_user_s) {
   // Configure WAKE_GPIO for deep sleep wake on LOW (LCD pulses LOW)
   wake_pin_configure_rtc_input_inactive_pull();
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
@@ -208,7 +208,22 @@ static void sense_config_deep_sleep_wakeup(bool enable_ext0, uint32_t timer_s) {
   }
 
   if (timer_s > 0) {
+#if defined(HALO_DURABLE_OTA_POLICY) && HALO_DURABLE_OTA_POLICY
+    const esp_err_t actual_timer_result=halo_policy_arm_timer(timer_s,normal_or_user_s);
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    sense_diag_note_timer_sdk((uint64_t)timer_s*1000000ULL,actual_timer_result);
+#endif
+    if(actual_timer_result!=ESP_OK){
+      Serial.printf("[SLEEP] timer configuration failed sdk=%ld; sleep refused\n",(long)actual_timer_result);
+      return false;
+    }
+#elif defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    const uint64_t actual_timer_us=(uint64_t)timer_s*1000000ULL;
+    const esp_err_t actual_timer_result=esp_sleep_enable_timer_wakeup(actual_timer_us);
+    sense_diag_note_timer_sdk(actual_timer_us,actual_timer_result);
+#else
     esp_sleep_enable_timer_wakeup((uint64_t)timer_s * 1000000ULL);
+#endif
     Serial.printf("[SENSE] Wake timer armed: %lus (%.2fh) ext0=%d\n",
                   (unsigned long)timer_s, timer_s / 3600.0, enable_ext0 ? 1 : 0);
   } else {
@@ -216,6 +231,7 @@ static void sense_config_deep_sleep_wakeup(bool enable_ext0, uint32_t timer_s) {
     // sleeping with no wake source bricks the device until someone taps it.
     Serial.println("[SENSE] WARNING: no timer armed - device wakes only on tap");
   }
+  return timer_s>0;
 }
 
 // ── Wake pin quick-check for LCD pulsing ────────────────────────────
@@ -365,6 +381,8 @@ static void uart_send_wifi_diag_summary() {
 // 6h periodic timer and is not awake for the Sense's LCD-OTA proxy on the
 // unattended nightly path -- so a nightly OTA updates only the Sense.
 static void (*g_lcd_maint_coschedule_hook)(uint32_t wake_in_s) = nullptr;
+// Reports the actual selected interval on the next available cloud report.
+static void (*g_sleep_timer_selected_hook)(uint32_t seconds) = nullptr;
 
 static void sense_enter_deep_sleep(SenseSleepKind kind) {
 #ifdef STRESS_TEST_NO_SLEEP
@@ -792,6 +810,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   }
 #endif
   uint32_t timer_delta_s = nightly_s;
+  uint32_t normal_or_user_s = nightly_s;
   if (ota_timer_delta_s > 0 && ota_timer_delta_s < timer_delta_s) {
     timer_delta_s = ota_timer_delta_s;
   }
@@ -809,10 +828,14 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
                   (unsigned)SPOOL_DRAIN_WAKE_S, (unsigned)g_spool_last_known_depth,
                   (unsigned)g_spool_barren_wakes);
   }
+  if (sense_spool_wants_early_wake() && SPOOL_DRAIN_WAKE_S < normal_or_user_s)
+    normal_or_user_s = SPOOL_DRAIN_WAKE_S;
 #endif
   if (wake_pin_stuck && WAKE_PIN_FAILSAFE_TIMER_S < timer_delta_s) {
     timer_delta_s = WAKE_PIN_FAILSAFE_TIMER_S;
   }
+  if (wake_pin_stuck && WAKE_PIN_FAILSAFE_TIMER_S < normal_or_user_s)
+    normal_or_user_s = WAKE_PIN_FAILSAFE_TIMER_S;
   Serial.printf("[SLEEP] wake timer: nightly=%lus ota=%lus chosen=%lus\n",
                 (unsigned long)nightly_s, (unsigned long)ota_timer_delta_s,
                 (unsigned long)timer_delta_s);
@@ -826,7 +849,10 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   // Close the wake-cycle record before actually sleeping. An entry left open on
   // the next boot means the device never got here — panic, hang or brownout.
   wakelog_end_cycle(timer_delta_s, ext0_allowed, (uint16_t)g_spool_last_known_depth);
-  sense_config_deep_sleep_wakeup(ext0_allowed, timer_delta_s);
+  if(!sense_config_deep_sleep_wakeup(ext0_allowed, timer_delta_s, normal_or_user_s)){
+    sleep_notify_late_block("timer_configuration");return;
+  }
+  if (g_sleep_timer_selected_hook) g_sleep_timer_selected_hook(timer_delta_s);
   Serial.printf("[SLEEP_DIAG] wake_sources ext0_gpio=%d ext0_level=%d ext0_enabled=%d timer_delta_s=%lu ota_timer_delta_s=%lu wake_pin_stuck=%d kind=%d\n",
                 WAKE_GPIO,
                 WAKE_LEVEL,
@@ -886,6 +912,9 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   Serial.printf("[SLEEP] wake_gpio=%d\n", WAKE_GPIO);
   Serial.printf("[SLEEP] wake_level=%d\n", HALO_WAKE_LEVEL);
   Serial.println("=================================");
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+  halo_sleep_witness_enter();
+#endif
   esp_deep_sleep_start();
   (void)sleep_start_time;
 }

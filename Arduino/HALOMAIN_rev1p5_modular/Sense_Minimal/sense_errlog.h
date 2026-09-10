@@ -18,6 +18,7 @@
 #define SENSE_ERRLOG_H
 
 #include <Preferences.h>
+#include "sense_nvs_capacity.h"
 
 // ── Constants ────────────────────────────────────────────────────────
 static const int SENSE_ERRLOG_SLOTS = 8;
@@ -31,6 +32,10 @@ static uint32_t g_errlog_last_collect_seq = 0;
 // ── Store an error entry ─────────────────────────────────────────────
 
 static void sense_errlog_store(const char* area, int32_t code, const char* detail) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    (void)area;(void)code;(void)detail;return; // optional profile retired
+#else
+    NvsOptionalWrite admission(13);if(!admission)return;
     Preferences prefs;
     if (!prefs.begin(SENSE_ERRLOG_NS, false)) {
         Serial.println("[SENSE_ERRLOG] NVS open failed");
@@ -53,19 +58,20 @@ static void sense_errlog_store(const char* area, int32_t code, const char* detai
 
     char key[12];
     snprintf(key, sizeof(key), "slot_%d", head);
-    prefs.putString(key, entry);
+    if(prefs.putString(key,entry)!=strlen(entry)){prefs.end();return;}
 
     head = (head + 1) % SENSE_ERRLOG_SLOTS;
-    prefs.putInt("head", head);
+    if(prefs.putInt("head",head)!=sizeof(int32_t)){prefs.end();return;}
     if (count < SENSE_ERRLOG_SLOTS) {
-        prefs.putInt("count", count + 1);
+        if(prefs.putInt("count",count+1)!=sizeof(int32_t)){prefs.end();return;}
     }
-    prefs.putUInt("next_seq", seq + 1);
+    if(prefs.putUInt("next_seq",seq+1)!=sizeof(uint32_t)){prefs.end();return;}
     prefs.end();
 
     Serial.printf("[SENSE_ERRLOG] stored seq=%lu area=%s code=%ld slot=%d\n",
                   (unsigned long)seq, area ? area : "", (long)code,
                   (head - 1 + SENSE_ERRLOG_SLOTS) % SENSE_ERRLOG_SLOTS);
+#endif
 }
 
 // ── Collect undelivered entries as JSON array string ──────────────────
@@ -149,15 +155,20 @@ static uint32_t sense_errlog_collect_json(char* buf, size_t buf_size, int max_co
 // ── Mark errors as delivered ─────────────────────────────────────────
 
 static void sense_errlog_mark_delivered(uint32_t seq) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    (void)seq;return; // cannot regrow retired del_seq
+#else
     if (seq == 0) return;
+    NvsOptionalWrite admission(2);if(!admission)return;
     Preferences prefs;
     if (!prefs.begin(SENSE_ERRLOG_NS, false)) return;
     uint32_t cur = prefs.getUInt("del_seq", 0);
     if (seq > cur) {
-        prefs.putUInt("del_seq", seq);
+        if(prefs.putUInt("del_seq",seq)!=sizeof(uint32_t)){prefs.end();return;}
         Serial.printf("[SENSE_ERRLOG] delivered up to seq=%lu\n", (unsigned long)seq);
     }
     prefs.end();
+#endif
 }
 
 // ── Dump all entries to serial ───────────────────────────────────────
@@ -201,11 +212,15 @@ static void sense_errlog_dump(Print& out) {
 // ── Clear all error log data ─────────────────────────────────────────
 
 static void sense_errlog_clear() {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    Serial.println("[SENSE_ERRLOG] optional profile retired; no mutation");return;
+#else
     Preferences prefs;
     if (!prefs.begin(SENSE_ERRLOG_NS, false)) return;
     prefs.clear();
     prefs.end();
     Serial.println("[SENSE_ERRLOG] error log cleared");
+#endif
 }
 
 // ── Count stored entries ─────────────────────────────────────────────

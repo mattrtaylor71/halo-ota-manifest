@@ -1,0 +1,21 @@
+# Name,   Type, SubType, Offset,   Size,      Flags
+# OTA-enabled partition table for Sense board (8MB flash)
+# This allows safe OTA updates: update ota_1 while running from ota_0
+# 
+# Arduino IDE Setup:
+# 1. Ensure this file is named "partitions.csv" in the sketch folder
+# 2. Arduino IDE will auto-detect it when compiling
+# 3. If "Custom Partition Table" appears in Tools menu, select it
+# 4. Otherwise, Arduino IDE will use this file automatically
+#
+# Partition Layout (8MB total):
+# - nvs: 20KB (non-volatile storage)
+# - otadata: 8KB (OTA data - tracks active partition)
+# - app0 (ota_0): ~1.9MB (first OTA partition)
+# - app1 (ota_1): ~1.9MB (second OTA partition)
+# - spiffs: ~192KB (file system, optional)
+nvs,      data, nvs,     0x9000,   0x5000
+otadata,  data, ota,     0xe000,   0x2000
+app0,     app,  ota_0,   0x10000,  0x1E0000
+app1,     app,  ota_1,   0x1F0000, 0x1E0000
+spiffs,   data, spiffs,  0x3D0000, 0x30000

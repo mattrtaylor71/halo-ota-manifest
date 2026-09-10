@@ -43,6 +43,10 @@ RTC_DATA_ATTR static uint32_t g_time_cache_epoch = 0;
 static bool g_time_cache_loaded = false;
 static std::recursive_mutex g_time_mutex;
 static const uint32_t SENSE_NTP_ATTEMPT_MS = 15000;
+// Chosen once before DNS. An active durable OTA may need the SDK's next server:
+// 15s DNS + <5s SDK startup + 15s first receive + 15s second receive + 5s margin.
+// DNS retains its original15s deadline; no callback generation is reopened.
+static uint32_t g_ntp_attempt_budget_ms = SENSE_NTP_ATTEMPT_MS;
 static bool g_ntp_attempt_started = false;
 static bool g_ntp_attempt_finished = false;
 static bool g_ntp_running = false;
@@ -178,7 +182,7 @@ static bool sense_ntp_attempt_pending() {
   std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
   return g_ntp_attempt_started && !g_ntp_attempt_finished &&
          !g_ntp_sleep_quiesced && g_ntp_received_epoch.load() == 0 &&
-         ((uint32_t)millis() - g_ntp_attempt_start_ms) < SENSE_NTP_ATTEMPT_MS;
+         ((uint32_t)millis() - g_ntp_attempt_start_ms) < g_ntp_attempt_budget_ms;
 }
 
 static bool sense_time_has_fresh_sync() {
@@ -192,9 +196,12 @@ static void sense_ntp_begin() {
   if (!g_ntp_attempt_started) {
     g_ntp_attempt_started = true;
     g_ntp_attempt_start_ms = now_ms;
+#if defined(HALO_SENSE_PROD_WRAPPER) && HALO_DURABLE_OTA_POLICY
+    g_ntp_attempt_budget_ms = halo_policy_ntp_budget(now_ms);
+#endif
     g_ntp_resolve_until_ms.store(now_ms + SENSE_NTP_ATTEMPT_MS);
   }
-  if ((now_ms - g_ntp_attempt_start_ms) >= SENSE_NTP_ATTEMPT_MS ||
+  if ((now_ms - g_ntp_attempt_start_ms) >= g_ntp_attempt_budget_ms ||
       g_ntp_dns_users != 0 || g_ntp_running) return;
   for (SenseNtpServer& server : g_ntp_servers) {
     if (server.requested) continue;
@@ -217,7 +224,7 @@ static void sense_ntp_begin() {
     numeric[i] = g_ntp_numeric_servers[i];
     have_address = true;
   }
-  if (!have_address || ((uint32_t)millis() - g_ntp_attempt_start_ms) >= SENSE_NTP_ATTEMPT_MS) return;
+  if (!have_address || ((uint32_t)millis() - g_ntp_attempt_start_ms) >= g_ntp_attempt_budget_ms) return;
   const char* first_address = nullptr;
   for (const char* address : numeric) if (address) { first_address = address; break; }
   for (const char*& address : numeric) if (!address) address = first_address;
@@ -226,7 +233,7 @@ static void sense_ntp_begin() {
   sense_ntp_stop_locked();
   esp_sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
   esp_sntp_set_time_sync_notification_cb(sense_ntp_on_sync);
-  g_ntp_accept_until_ms.store(g_ntp_attempt_start_ms + SENSE_NTP_ATTEMPT_MS);
+  g_ntp_accept_until_ms.store(g_ntp_attempt_start_ms + g_ntp_attempt_budget_ms);
   // configTime replaces all three server-name slots. A numeric lookup returns
   // ERR_OK directly in lwIP, without registering its unsafe sntp_dns_found.
   configTime(0, 0, numeric[0], numeric[1], numeric[2]);
@@ -234,7 +241,7 @@ static void sense_ntp_begin() {
   tzset();
   g_ntp_running = true;
   Serial.printf("[TIME] SNTP attempt active remaining_ms=%lu\n",
-                (unsigned long)(SENSE_NTP_ATTEMPT_MS - (now_ms - g_ntp_attempt_start_ms)));
+                (unsigned long)(g_ntp_attempt_budget_ms - (now_ms - g_ntp_attempt_start_ms)));
 }
 
 // Quiescing before non-SNTP DNS is a crash fix, not tidiness.
@@ -300,7 +307,7 @@ static void time_cache_store(time_t now, bool authoritative = false) {
 static void sense_ntp_service() {
   std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
   const bool expired = g_ntp_attempt_started && !g_ntp_attempt_finished &&
-      ((uint32_t)millis() - g_ntp_attempt_start_ms) >= SENSE_NTP_ATTEMPT_MS;
+      ((uint32_t)millis() - g_ntp_attempt_start_ms) >= g_ntp_attempt_budget_ms;
   if (g_ntp_received_epoch.load() == 0 && !expired) return;
   g_ntp_resolve_until_ms.store(0);
   // Stop under the core lock before draining the mailbox. A timely callback

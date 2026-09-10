@@ -1,0 +1,3 @@
+# HALO release workflow
+
+Use [AGENTS.md](AGENTS.md) and [RELEASE_BASELINE.json](RELEASE_BASELINE.json) for the current source baseline. Production release builds use the committed snapshot preparer and canonical builder documented in [Production OTA build](docs/OTA_POLICY_PRODUCTION_BUILD.md). Direct Arduino commands without the declared durable-policy profile are compatibility builds, not release artifacts. `halo_ota_demo/publish_both.sh` delegates to the verified prebuilt-artifact publisher. Preserve actual source, artifact and acceptance receipts; pending release fields remain pending until verified.

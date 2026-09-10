@@ -55,7 +55,9 @@ typedef struct app_event_t app_event_t;
 #include "cst816.h"
 #include "lcd_bl_pwm_bsp.h"
 #include "lcd_config.h"
-#include "lcd_theme.h"       // Trepo design system: palette, type, primitives, layout audit
+#include "lcd_theme.h"
+#include "lcd_ui_design.h"
+#include "lcd_ui_motion.h"   // Trepo design system: palette, type, primitives, layout audit
 #include "lcd_captrace.h"    // end-to-end capture trace (diagnoses the capturing-screen strand)
 #include "lcd_freeze_wdt.h"  // system watchdog: a frozen LCD must reboot, not brick
 #include "lcd_sdspool.h"    // SD spool for capture images (Step 4)
@@ -415,6 +417,8 @@ static std::atomic<bool> g_lcd_sleep_commit_gate{false};
 static bool g_ui_initialized = false;
 // Published across cores only after continuation/UI setup and OTA self-test.
 static std::atomic<bool> g_lcd_boot_ready{false};
+static std::atomic<bool> g_lcd_validation_pending{false};
+static bool g_lcd_uart_task_created=false;
 static bool g_lcd_initialized = false;
 static bool g_backlight_initialized = false;
 static bool g_touch_initialized = false;
@@ -463,6 +467,8 @@ static std::atomic<uint32_t> g_lcd_coord_lease_until_ms{0};
 static uint32_t g_lcd_coord_sense_boot_id = 0;
 static uint32_t g_lcd_coord_sequence = 0;
 static char g_lcd_coord_owner[40] = {0}; // Written/read only by UART dispatch.
+#include "lcd_nvs_store.h"
+
 struct LcdCoordNotice {
   char schedule[64] = {0};
   uint32_t epoch = 0;
@@ -488,47 +494,63 @@ static uint32_t halo_lcd_coord_lease_ms() {
 // Separate namespace: consuming a past sleep schedule must not erase an
 // in-flight origin. Persisted resumes are bounded; ordinary future sleeps do
 // not resurrect an abandoned transaction or manufacture a new TIMER cause.
-static void lcd_coord_store_notice() {
-  Preferences p;
-  if (!p.begin("lcd_coord", false)) return;
-  p.putString("schedule", g_lcd_coord_notice.schedule);
-  p.putUInt("epoch", g_lcd_coord_notice.epoch);
-  p.putInt("wake", g_lcd_coord_notice.wake);
-  p.putInt("reset", g_lcd_coord_notice.reset);
-  p.putUChar("resumes", g_lcd_coord_notice.resumes);
-  p.putBool("pending", true);
-  p.end();
+static void lcd_coord_publish_notice(const LcdNvsRecords::Coord& record) {
+  strlcpy(g_lcd_coord_notice.schedule,record.schedule,sizeof(g_lcd_coord_notice.schedule));
+  g_lcd_coord_notice.epoch=record.epoch;g_lcd_coord_notice.wake=(int)record.wake;
+  g_lcd_coord_notice.reset=(int)record.reset;g_lcd_coord_notice.resumes=(uint8_t)record.resumes;
+  g_lcd_coord_notice.active=record.pending!=0;
 }
-static void lcd_coord_capture_timer(int wake, int reset) {
-  if (wake != (int)ESP_SLEEP_WAKEUP_TIMER || !g_lcd_maintenance_request_id[0]) return;
-  strlcpy(g_lcd_coord_notice.schedule, g_lcd_maintenance_request_id,
-          sizeof(g_lcd_coord_notice.schedule));
-  g_lcd_coord_notice.wake = wake; g_lcd_coord_notice.reset = reset;
-  g_lcd_coord_notice.epoch = (uint32_t)time(nullptr);
-  g_lcd_coord_notice.resumes = 0; g_lcd_coord_notice.active = true;
-  lcd_coord_store_notice();
+static bool lcd_coord_clear_notice() {
+  // Clear only this boot's retained origin, under the same writer lease.
+  // A newer/different pending record must not be retired by an old flag.
+  LcdNvsLease lease;if(!lease)return false;
+  const LcdNvsDeadline deadline;
+  LcdNvsRecords::Coord prior={};
+  const auto status=lcd_nvs_read_record_unlocked(LCD_COORD_KEY,prior);
+  if(status!=LcdNvsRecords::ReadStatus::Absent &&
+      status!=LcdNvsRecords::ReadStatus::Present)return false;
+  if(status==LcdNvsRecords::ReadStatus::Present && prior.pending &&
+      (strcmp(prior.schedule,g_lcd_coord_notice.schedule)!=0 ||
+       prior.epoch!=g_lcd_coord_notice.epoch || prior.wake!=(uint32_t)g_lcd_coord_notice.wake ||
+       prior.reset!=(uint32_t)g_lcd_coord_notice.reset || prior.resumes!=g_lcd_coord_notice.resumes))
+    return false;
+  LcdNvsRecords::Coord empty={};LcdNvsRecords::seal(empty);
+  const bool committed=lcd_nvs_commit_record_unlocked(LCD_COORD_KEY,empty,deadline);
+  // Suppression in this boot is separate from durable clear. Failed persistence
+  // leaves the service request outstanding and cannot grant another window.
+  g_lcd_coord_notice.active=false;
+  Serial.printf("[LCD_COORD_NVS] clear_verified=%u\n",committed?1:0);
+  return committed;
 }
+static void lcd_coord_service_clear();
+static void lcd_coord_capture_timer(int wake,int reset) {
+  if(wake!=(int)ESP_SLEEP_WAKEUP_TIMER || !g_lcd_maintenance_request_id[0])return;
+  LcdNvsRecords::Coord record={};record.pending=1;
+  strlcpy(record.schedule,g_lcd_maintenance_request_id,sizeof(record.schedule));
+  record.wake=(uint32_t)wake;record.reset=(uint32_t)reset;record.epoch=(uint32_t)time(nullptr);
+  LcdNvsRecords::seal(record);
+  const bool committed=lcd_nvs_commit_record(LCD_COORD_KEY,record);
+  if(committed)lcd_coord_publish_notice(record);
+  else g_lcd_coord_notice.active=false;
+  Serial.printf("[LCD_COORD_NVS] timer_origin_verified=%u\n",committed?1:0);
+}
+static bool g_lcd_coord_resume_attempted=false;
 static void lcd_coord_resume_notice(int current_reset) {
-  if (g_lcd_coord_notice.active) return;
-  Preferences p;
-  if (!p.begin("lcd_coord", false)) return;
-  if (p.getBool("pending", false) && current_reset != (int)ESP_RST_DEEPSLEEP &&
-      p.getUChar("resumes", 0) < 2) {
-    strlcpy(g_lcd_coord_notice.schedule, p.getString("schedule", "").c_str(),
-            sizeof(g_lcd_coord_notice.schedule));
-    g_lcd_coord_notice.wake = p.getInt("wake", -1);
-    g_lcd_coord_notice.reset = p.getInt("reset", -1);
-    g_lcd_coord_notice.epoch = p.getUInt("epoch", 0);
-    g_lcd_coord_notice.resumes = p.getUChar("resumes", 0) + 1;
-    g_lcd_coord_notice.active = g_lcd_coord_notice.schedule[0] &&
-        g_lcd_coord_notice.wake == (int)ESP_SLEEP_WAKEUP_TIMER;
-    if (g_lcd_coord_notice.active) {
-      p.putUChar("resumes", g_lcd_coord_notice.resumes);
-      g_lcd_timer_receiver_wait_until_ms.store((uint32_t)millis() + LCD_MAINT_BOOT_GRACE_MS);
-    }
+  if(g_lcd_coord_resume_attempted || g_lcd_coord_notice.active || !lcd_nvs_image_valid())return;
+  LcdNvsLease lease;if(!lease)return;
+  LcdNvsRecords::Coord prior={},next={};
+  const auto status=lcd_nvs_read_record_unlocked(LCD_COORD_KEY,prior);
+  // Legacy multi-key fields are preserved but cannot prove an atomic origin or
+  // resume count. Never manufacture a current TIMER cause from those fields.
+  if(status!=LcdNvsRecords::ReadStatus::Present ||
+      !LcdNvsRecords::nextResume(prior,current_reset==(int)ESP_RST_DEEPSLEEP,next))return;
+  g_lcd_coord_resume_attempted=true;
+  if(!lcd_nvs_commit_record_unlocked(LCD_COORD_KEY,next)){
+    Serial.println("[LCD_COORD_NVS] resume_granted=0 persistence_failed");return;
   }
-  if (!g_lcd_coord_notice.active) p.remove("pending");
-  p.end();
+  lcd_coord_publish_notice(next);
+  g_lcd_timer_receiver_wait_until_ms.store((uint32_t)millis()+LCD_MAINT_BOOT_GRACE_MS);
+  Serial.printf("[LCD_COORD_NVS] resume_granted=1 committed_count=%u\n",(unsigned)next.resumes);
 }
 
 
@@ -609,7 +631,7 @@ static bool lcd_time_valid() {
 // breadcrumbs (arm-time delivery race fix).
 static void lcd_errlog_store_with_context(const char* board, const char* area,
                                            const char* event, int32_t code,
-                                           const char* detail);
+                                           const char* detail,const LcdNvsDeadline& deadline=LcdNvsDeadline());
 
 static void lcd_set_clock_from_sense(uint64_t now_epoch, const char* reason) {
   if (now_epoch <= 1700000000ULL) {
@@ -703,35 +725,58 @@ static bool lcd_should_resume_maintenance_on_boot(bool restored_from_nvs,
          g_lcd_maintenance_request_id[0] != '\0';
 }
 
+#ifndef HALO_LCD_SLEEP_WITNESS
+#define HALO_LCD_SLEEP_WITNESS 0
+#endif
 #include "lcd_maintenance_arm.h"
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+#include "lcd_sleep_witness.h"
+#endif
 
 // ── OTA continuation flag (survives the LCD's own OTA reboot) ─────────────
 // One-shot: set true just before esp_restart() in lcd_ota_handle_end(), read +
 // cleared once on boot. Drives the post-reboot "Updating…" stay-lit hold.
-static void lcd_ota_set_continuation_pending(bool pending) {
-  Preferences prefs;
-  if (!prefs.begin(LCD_OTA_PREF_NAMESPACE, false)) {
-    Serial.println("[LCD_OTA_NVS] set_continuation open_failed");
-    return;
-  }
-  prefs.putBool(LCD_OTA_PREF_KEY_CONT, pending);
-  prefs.end();
-  Serial.printf("[LCD_OTA_NVS] ota_continuation_pending=%d\n", pending ? 1 : 0);
+static bool lcd_ota_clear_continuation_pending(const LcdNvsDeadline& deadline=LcdNvsDeadline()) {
+  LcdNvsRecords::Continuation empty={};LcdNvsRecords::seal(empty);
+  const bool committed=lcd_nvs_commit_record(LCD_CONTINUATION_KEY,empty,deadline);
+  Serial.printf("[LCD_OTA_NVS] continuation_clear_verified=%u\n",committed?1:0);
+  return committed;
 }
-
+static bool lcd_ota_prepare_continuation(const esp_partition_t* target,uint32_t image_size,const char* version,
+    const LcdNvsDeadline& deadline=LcdNvsDeadline()) {
+  const esp_partition_t* running=esp_ota_get_running_partition();
+  esp_app_desc_t descriptor={};
+  if(!deadline.live() || !target || !running || target->address==running->address ||
+      target->type!=ESP_PARTITION_TYPE_APP || target->size!=0x280000 ||
+      !((target->subtype==ESP_PARTITION_SUBTYPE_APP_OTA_0 && target->address==0x10000) ||
+        (target->subtype==ESP_PARTITION_SUBTYPE_APP_OTA_1 && target->address==0x290000)) ||
+      !image_size || image_size>target->size || !version || !version[0] || strlen(version)>=32 ||
+      esp_ota_get_partition_description(target,&descriptor)!=ESP_OK ||
+      LcdNvsRecords::zero(descriptor.app_elf_sha256,sizeof(descriptor.app_elf_sha256)))return false;
+  LcdNvsRecords::Continuation record={};record.pending=1;
+  record.target_address=target->address;record.image_size=image_size;
+  memcpy(record.app_elf_sha256,descriptor.app_elf_sha256,sizeof(record.app_elf_sha256));
+  strlcpy(record.version,version,sizeof(record.version));LcdNvsRecords::seal(record);
+  const bool committed=lcd_nvs_commit_record(LCD_CONTINUATION_KEY,record,deadline);
+  Serial.printf("[LCD_OTA_NVS] continuation_prepared_verified=%u\n",committed?1:0);
+  return committed;
+}
 static bool lcd_ota_take_continuation_pending() {
-  Preferences prefs;
-  if (!prefs.begin(LCD_OTA_PREF_NAMESPACE, false)) {
-    return false;
+  if(!lcd_nvs_image_valid())return false;
+  LcdNvsLease lease;if(!lease)return false;
+  LcdNvsRecords::Continuation record={};
+  if(lcd_nvs_read_record_unlocked(LCD_CONTINUATION_KEY,record)!=LcdNvsRecords::ReadStatus::Present ||
+      !record.pending)return false;
+  const esp_partition_t* running=esp_ota_get_running_partition();esp_app_desc_t descriptor={};
+  if(!running || running->address!=record.target_address || record.image_size>running->size ||
+      esp_ota_get_partition_description(running,&descriptor)!=ESP_OK ||
+      memcmp(descriptor.app_elf_sha256,record.app_elf_sha256,sizeof(record.app_elf_sha256))!=0)return false;
+  LcdNvsRecords::Continuation empty={};LcdNvsRecords::seal(empty);
+  if(!lcd_nvs_commit_record_unlocked(LCD_CONTINUATION_KEY,empty)){
+    Serial.println("[LCD_OTA_NVS] continuation_granted=0 clear_failed");return false;
   }
-  bool pending = prefs.getBool(LCD_OTA_PREF_KEY_CONT, false);
-  if (pending) {
-    prefs.putBool(LCD_OTA_PREF_KEY_CONT, false);  // one-shot: clear immediately
-  }
-  prefs.end();
-  return pending;
+  return true;
 }
-
 
 
 static uint32_t lcd_sched_compute_next_epoch(time_t now) {
@@ -1267,6 +1312,27 @@ static void lcd_coord_cancel_preflight(bool only_if_expired) {
   }
   portEXIT_CRITICAL(&g_lcd_coord_mux);
 }
+static void lcd_coord_service_clear() {
+  // Main-task NVS housekeeping; UART/input paths only publish a flag.
+  static uint32_t next_clear_attempt=0;
+  if (g_lcd_coord_notice_clear.load()) {
+    // BEGIN and LOCK use this same task mutex. Recheck after acquiring it:
+    // a delayed clear must not retire newly accepted work, even for this ID.
+    LcdMaintenanceStorageGuard storage_guard;
+    {
+      LcdCoordCriticalGuard guard;
+      if (g_lcd_ota_uart_receiving || ota_locked || g_ota_continuation_hold_start_ms ||
+          g_lcd_timer_receiver_wait_until_ms.load() || halo_lcd_coord_lease_ms()) return;
+    }
+    g_lcd_coord_notice.active=false;
+    const uint32_t now=millis();
+    if (!g_lcd_nvs_uncertain && (int32_t)(now-next_clear_attempt)>=0) {
+      next_clear_attempt=now+1000;
+      if (lcd_coord_clear_notice()) g_lcd_coord_notice_clear.store(false);
+    }
+  }
+}
+
 static bool lcd_ota_request_active = false;
 static uint32_t lcd_ota_request_id = 0;
 static bool lcd_ota_request_allow_reboot = true;
@@ -1614,64 +1680,54 @@ static lv_obj_t *menu_item_labels[MENU_MAX_ITEMS] = {NULL};  // Labels for each 
 #define SHIP_MENU_MID_Y (SHIP_MENU_H / 2)
 #define SHIP_MENU_PRESS_MS 150
 
-// Main Menu icon bounds
-#define SHIP_MENU_MAIN_ICON_W 120
-#define SHIP_MENU_MAIN_ICON_H 120
-#define SHIP_MENU_MAIN_PAD 10
-#define SHIP_MAIN_MENU_BTN_W 92
-#define SHIP_MAIN_MENU_BTN_H 92
+// Shipping cross Home: exact visible bounds shared by tap feedback and raw touch routing.
+#define SHIP_MENU_MAIN_ICON_W 92
+#define SHIP_MENU_MAIN_ICON_H 92
+#define SHIP_MAIN_MENU_BTN_W SHIP_MENU_MAIN_ICON_W
+#define SHIP_MAIN_MENU_BTN_H SHIP_MENU_MAIN_ICON_H
 #define SHIP_MAIN_MENU_BTN_RADIUS 26
-#define SHIP_MENU_MAIN_TOP_X (SHIP_MENU_MID_X - (SHIP_MENU_MAIN_ICON_W / 2))
-#define SHIP_MENU_MAIN_TOP_Y SHIP_MENU_MAIN_PAD
-#define SHIP_MENU_MAIN_LEFT_X SHIP_MENU_MAIN_PAD
-#define SHIP_MENU_MAIN_LEFT_Y (SHIP_MENU_MID_Y - (SHIP_MENU_MAIN_ICON_H / 2))
-#define SHIP_MENU_MAIN_RIGHT_X (SHIP_MENU_W - SHIP_MENU_MAIN_PAD - SHIP_MENU_MAIN_ICON_W)
-#define SHIP_MENU_MAIN_RIGHT_Y (SHIP_MENU_MID_Y - (SHIP_MENU_MAIN_ICON_H / 2))
-#define SHIP_MENU_MAIN_BOTTOM_X (SHIP_MENU_MID_X - (SHIP_MENU_MAIN_ICON_W / 2))
-#define SHIP_MENU_MAIN_BOTTOM_Y (SHIP_MENU_H - SHIP_MENU_MAIN_PAD - SHIP_MENU_MAIN_ICON_H)
-#define SHIP_MAIN_MENU_BTN_INSET_X ((SHIP_MENU_MAIN_ICON_W - SHIP_MAIN_MENU_BTN_W) / 2)
-#define SHIP_MAIN_MENU_BTN_INSET_Y ((SHIP_MENU_MAIN_ICON_H - SHIP_MAIN_MENU_BTN_H) / 2)
-#define SHIP_MAIN_MENU_TOP_BTN_X (SHIP_MENU_MAIN_TOP_X + SHIP_MAIN_MENU_BTN_INSET_X)
-#define SHIP_MAIN_MENU_TOP_BTN_Y (SHIP_MENU_MAIN_TOP_Y + SHIP_MAIN_MENU_BTN_INSET_Y)
-#define SHIP_MAIN_MENU_LEFT_BTN_X (SHIP_MENU_MAIN_LEFT_X + SHIP_MAIN_MENU_BTN_INSET_X)
-#define SHIP_MAIN_MENU_LEFT_BTN_Y (SHIP_MENU_MAIN_LEFT_Y + SHIP_MAIN_MENU_BTN_INSET_Y)
-#define SHIP_MAIN_MENU_RIGHT_BTN_X (SHIP_MENU_MAIN_RIGHT_X + SHIP_MAIN_MENU_BTN_INSET_X)
-#define SHIP_MAIN_MENU_RIGHT_BTN_Y (SHIP_MENU_MAIN_RIGHT_Y + SHIP_MAIN_MENU_BTN_INSET_Y)
-#define SHIP_MAIN_MENU_BOTTOM_BTN_X (SHIP_MENU_MAIN_BOTTOM_X + SHIP_MAIN_MENU_BTN_INSET_X)
-#define SHIP_MAIN_MENU_BOTTOM_BTN_Y (SHIP_MENU_MAIN_BOTTOM_Y + SHIP_MAIN_MENU_BTN_INSET_Y)
-#define SHIP_MAIN_MENU_CENTER_BTN_X (SHIP_MENU_MID_X - (SHIP_MAIN_MENU_BTN_W / 2))
-#define SHIP_MAIN_MENU_CENTER_BTN_Y (SHIP_MENU_MID_Y - (SHIP_MAIN_MENU_BTN_H / 2))
-
+#define SHIP_MENU_MAIN_TOP_X 134
+#define SHIP_MENU_MAIN_TOP_Y 24
+#define SHIP_MENU_MAIN_LEFT_X 24
+#define SHIP_MENU_MAIN_LEFT_Y 134
+#define SHIP_MENU_MAIN_RIGHT_X 244
+#define SHIP_MENU_MAIN_RIGHT_Y 134
+#define SHIP_MENU_MAIN_BOTTOM_X 134
+#define SHIP_MENU_MAIN_BOTTOM_Y 244
+#define SHIP_MAIN_MENU_TOP_BTN_X SHIP_MENU_MAIN_TOP_X
+#define SHIP_MAIN_MENU_TOP_BTN_Y SHIP_MENU_MAIN_TOP_Y
+#define SHIP_MAIN_MENU_LEFT_BTN_X SHIP_MENU_MAIN_LEFT_X
+#define SHIP_MAIN_MENU_LEFT_BTN_Y SHIP_MENU_MAIN_LEFT_Y
+#define SHIP_MAIN_MENU_RIGHT_BTN_X SHIP_MENU_MAIN_RIGHT_X
+#define SHIP_MAIN_MENU_RIGHT_BTN_Y SHIP_MENU_MAIN_RIGHT_Y
+#define SHIP_MAIN_MENU_BOTTOM_BTN_X SHIP_MENU_MAIN_BOTTOM_X
+#define SHIP_MAIN_MENU_BOTTOM_BTN_Y SHIP_MENU_MAIN_BOTTOM_Y
+#define SHIP_MENU_MAIN_CENTER_X 134
+#define SHIP_MENU_MAIN_CENTER_Y 134
+#define SHIP_MAIN_MENU_CENTER_BTN_X SHIP_MENU_MAIN_CENTER_X
+#define SHIP_MAIN_MENU_CENTER_BTN_Y SHIP_MENU_MAIN_CENTER_Y
 #define SHIP_MENU_MAIN_CENTER_HITBOX_W SHIP_MAIN_MENU_BTN_W
 #define SHIP_MENU_MAIN_CENTER_HITBOX_H SHIP_MAIN_MENU_BTN_H
-#define SHIP_MENU_MAIN_CENTER_X SHIP_MAIN_MENU_CENTER_BTN_X
-#define SHIP_MENU_MAIN_CENTER_Y SHIP_MAIN_MENU_CENTER_BTN_Y
-
-// Second Menu icon bounds (HOME center, SETTINGS bottom)
-#define SHIP_MENU_SECOND_HOME_W 130
-#define SHIP_MENU_SECOND_HOME_H 130
-#define SHIP_MENU_SECOND_HOME_X (SHIP_MENU_MID_X - (SHIP_MENU_SECOND_HOME_W / 2))
-#define SHIP_MENU_SECOND_HOME_Y (SHIP_MENU_MID_Y - (SHIP_MENU_SECOND_HOME_H / 2))
-#define SHIP_MENU_SECOND_SETTINGS_W SHIP_MENU_MAIN_ICON_W
-#define SHIP_MENU_SECOND_SETTINGS_H SHIP_MENU_MAIN_ICON_H
-#define SHIP_MENU_SECOND_SETTINGS_X SHIP_MENU_MAIN_BOTTOM_X
-#define SHIP_MENU_SECOND_SETTINGS_Y SHIP_MENU_MAIN_BOTTOM_Y
-
-// Second Menu — Shopping List button (TOP position)
-#define SHIP_MENU_SECOND_LIST_W SHIP_MENU_MAIN_ICON_W
-#define SHIP_MENU_SECOND_LIST_H SHIP_MENU_MAIN_ICON_H
-#define SHIP_MENU_SECOND_LIST_X SHIP_MENU_MAIN_TOP_X
-#define SHIP_MENU_SECOND_LIST_Y SHIP_MENU_MAIN_TOP_Y
-
-// Settings screen button bounds (four buttons, fit within round 360x360 display)
-#define SHIP_MENU_SETTINGS_BTN_W 220
-#define SHIP_MENU_SETTINGS_BTN_H 54
-#define SHIP_MENU_SETTINGS_BTN_X ((SHIP_MENU_W - SHIP_MENU_SETTINGS_BTN_W) / 2)
-#define SHIP_MENU_SETTINGS_RESET_Y 38
-#define SHIP_MENU_SETTINGS_BACKLIGHT_Y 108
-#define SHIP_MENU_SETTINGS_OTA_Y 178
-#define SHIP_MENU_SETTINGS_BACK_Y 248
-#define SHIP_MENU_SETTINGS_VERSION_Y 324
+#define SHIP_MENU_SECOND_HOME_X 156
+#define SHIP_MENU_SECOND_HOME_Y 291
+#define SHIP_MENU_SECOND_HOME_W 48
+#define SHIP_MENU_SECOND_HOME_H 48
+#define SHIP_MENU_SECOND_SETTINGS_X 58
+#define SHIP_MENU_SECOND_SETTINGS_Y 176
+#define SHIP_MENU_SECOND_SETTINGS_W 244
+#define SHIP_MENU_SECOND_SETTINGS_H 56
+#define SHIP_MENU_SECOND_LIST_X 58
+#define SHIP_MENU_SECOND_LIST_Y 104
+#define SHIP_MENU_SECOND_LIST_W 244
+#define SHIP_MENU_SECOND_LIST_H 56
+#define SHIP_MENU_SETTINGS_BTN_W 244
+#define SHIP_MENU_SETTINGS_BTN_H 52
+#define SHIP_MENU_SETTINGS_BTN_X 58
+#define SHIP_MENU_SETTINGS_RESET_Y 194
+#define SHIP_MENU_SETTINGS_BACKLIGHT_Y 70
+#define SHIP_MENU_SETTINGS_OTA_Y 132
+#define SHIP_MENU_SETTINGS_BACK_Y 291
+#define SHIP_MENU_SETTINGS_VERSION_Y 262
 
 #define MENU_INDEX_DISCARD 0
 #define MENU_INDEX_DISH 1
@@ -1690,22 +1746,21 @@ typedef struct {
 } ship_menu_hitbox_t;
 
 static const ship_menu_hitbox_t ship_menu_hitboxes_main[] = {
-  {SHIP_MENU_ACTION_LOG_DISH,  "LOG_DISH",  "Dish",     MENU_INDEX_DISH,
-   SHIP_MENU_MAIN_TOP_X, SHIP_MENU_MAIN_TOP_Y,
-   SHIP_MENU_MAIN_TOP_X + SHIP_MENU_MAIN_ICON_W - 1, SHIP_MENU_MAIN_TOP_Y + SHIP_MENU_MAIN_ICON_H - 1},
-  {SHIP_MENU_ACTION_CHECK_IN,  "CHECK_IN",  "Check-in", MENU_INDEX_CHECK_IN,
-   SHIP_MENU_MAIN_LEFT_X, SHIP_MENU_MAIN_LEFT_Y,
-   SHIP_MENU_MAIN_LEFT_X + SHIP_MENU_MAIN_ICON_W - 1, SHIP_MENU_MAIN_LEFT_Y + SHIP_MENU_MAIN_ICON_H - 1},
-  {SHIP_MENU_ACTION_CHECK_OUT, "CHECK_OUT", "Discard",  MENU_INDEX_DISCARD,
-   SHIP_MENU_MAIN_RIGHT_X, SHIP_MENU_MAIN_RIGHT_Y,
-   SHIP_MENU_MAIN_RIGHT_X + SHIP_MENU_MAIN_ICON_W - 1, SHIP_MENU_MAIN_RIGHT_Y + SHIP_MENU_MAIN_ICON_H - 1},
-  {SHIP_MENU_ACTION_MORE,      "MORE",      NULL,       -1,
-   SHIP_MENU_MAIN_BOTTOM_X, SHIP_MENU_MAIN_BOTTOM_Y,
-   SHIP_MENU_MAIN_BOTTOM_X + SHIP_MENU_MAIN_ICON_W - 1, SHIP_MENU_MAIN_BOTTOM_Y + SHIP_MENU_MAIN_ICON_H - 1},
-  {SHIP_MENU_ACTION_AI,        "AI",        NULL,       -1,
-   SHIP_MENU_MAIN_CENTER_X, SHIP_MENU_MAIN_CENTER_Y,
-   SHIP_MENU_MAIN_CENTER_X + SHIP_MENU_MAIN_CENTER_HITBOX_W - 1, SHIP_MENU_MAIN_CENTER_Y + SHIP_MENU_MAIN_CENTER_HITBOX_H - 1}
-};
+    {SHIP_MENU_ACTION_LOG_DISH, "LOG_DISH", "Dish", MENU_INDEX_DISH, SHIP_MENU_MAIN_TOP_X,
+     SHIP_MENU_MAIN_TOP_Y, SHIP_MENU_MAIN_TOP_X + SHIP_MENU_MAIN_ICON_W - 1,
+     SHIP_MENU_MAIN_TOP_Y + SHIP_MENU_MAIN_ICON_H - 1},
+    {SHIP_MENU_ACTION_CHECK_IN, "CHECK_IN", "Check-in", MENU_INDEX_CHECK_IN, SHIP_MENU_MAIN_LEFT_X,
+     SHIP_MENU_MAIN_LEFT_Y, SHIP_MENU_MAIN_LEFT_X + SHIP_MENU_MAIN_ICON_W - 1,
+     SHIP_MENU_MAIN_LEFT_Y + SHIP_MENU_MAIN_ICON_H - 1},
+    {SHIP_MENU_ACTION_CHECK_OUT, "CHECK_OUT", "Discard", MENU_INDEX_DISCARD, SHIP_MENU_MAIN_RIGHT_X,
+     SHIP_MENU_MAIN_RIGHT_Y, SHIP_MENU_MAIN_RIGHT_X + SHIP_MENU_MAIN_ICON_W - 1,
+     SHIP_MENU_MAIN_RIGHT_Y + SHIP_MENU_MAIN_ICON_H - 1},
+    {SHIP_MENU_ACTION_MORE, "MORE", NULL, -1, SHIP_MENU_MAIN_BOTTOM_X,
+     SHIP_MENU_MAIN_BOTTOM_Y, SHIP_MENU_MAIN_BOTTOM_X + SHIP_MENU_MAIN_ICON_W - 1,
+     SHIP_MENU_MAIN_BOTTOM_Y + SHIP_MENU_MAIN_ICON_H - 1},
+    {SHIP_MENU_ACTION_AI, "AI", NULL, -1, SHIP_MENU_MAIN_CENTER_X, SHIP_MENU_MAIN_CENTER_Y,
+     SHIP_MENU_MAIN_CENTER_X + SHIP_MENU_MAIN_CENTER_HITBOX_W - 1,
+     SHIP_MENU_MAIN_CENTER_Y + SHIP_MENU_MAIN_CENTER_HITBOX_H - 1}};
 
 static const ship_menu_hitbox_t ship_menu_hitboxes_second[] = {
   {SHIP_MENU_ACTION_SHOPPING_LIST, "SHOPPING_LIST", NULL, -1,
@@ -1720,19 +1775,16 @@ static const ship_menu_hitbox_t ship_menu_hitboxes_second[] = {
 };
 
 static const ship_menu_hitbox_t ship_menu_hitboxes_settings[] = {
-  {SHIP_MENU_ACTION_RESET_WIFI, "RESET_WIFI", NULL, -1,
-   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_RESET_Y,
-   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_RESET_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
-  {SHIP_MENU_ACTION_BACKLIGHT, "BACKLIGHT", NULL, -1,
-   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACKLIGHT_Y,
-   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_BACKLIGHT_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
-  {SHIP_MENU_ACTION_MANUAL_OTA, "MANUAL_OTA", NULL, -1,
-   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_OTA_Y,
-   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_OTA_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
-  {SHIP_MENU_ACTION_BACK, "BACK", NULL, -1,
-   SHIP_MENU_SETTINGS_BTN_X, SHIP_MENU_SETTINGS_BACK_Y,
-   SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1, SHIP_MENU_SETTINGS_BACK_Y + SHIP_MENU_SETTINGS_BTN_H - 1}
-};
+    {SHIP_MENU_ACTION_RESET_WIFI, "RESET_WIFI", NULL, -1, SHIP_MENU_SETTINGS_BTN_X,
+     SHIP_MENU_SETTINGS_RESET_Y, SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1,
+     SHIP_MENU_SETTINGS_RESET_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
+    {SHIP_MENU_ACTION_BACKLIGHT, "BACKLIGHT", NULL, -1, SHIP_MENU_SETTINGS_BTN_X,
+     SHIP_MENU_SETTINGS_BACKLIGHT_Y, SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1,
+     SHIP_MENU_SETTINGS_BACKLIGHT_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
+    {SHIP_MENU_ACTION_MANUAL_OTA, "MANUAL_OTA", NULL, -1, SHIP_MENU_SETTINGS_BTN_X,
+     SHIP_MENU_SETTINGS_OTA_Y, SHIP_MENU_SETTINGS_BTN_X + SHIP_MENU_SETTINGS_BTN_W - 1,
+     SHIP_MENU_SETTINGS_OTA_Y + SHIP_MENU_SETTINGS_BTN_H - 1},
+    {SHIP_MENU_ACTION_BACK, "BACK", NULL, -1, 156, 291, 203, 338}};
 
 // ── Logged Screen (for Discard mode) ─────────────────────────────────
 static lv_obj_t *logged_screen = NULL;  // Screen shown after discard image capture
@@ -1859,8 +1911,8 @@ typedef enum {
   EVT_LIST_REPLACED,
   EVT_RENDER_ACTIVE_LIST,
   EVT_TOGGLE_BUTTONS,
-  EVT_VOICE_ITEMS_ADDED,  // Optimistic voice items added - refresh UI without swapping
-  EVT_MENU_SELECTED,  // Menu item selected
+  EVT_VOICE_ITEMS_ADDED, // Optimistic voice items added - refresh UI without swapping
+  EVT_MENU_SELECTED,     // Menu item selected
   EVT_SHOW_PROVISION_QR,
   EVT_HIDE_PROVISION_QR,
   EVT_UPDATE_PROVISION_STATUS,
@@ -1868,23 +1920,27 @@ typedef enum {
   EVT_HIDE_PROVISION_INTRO,
   EVT_RESET_UI,
   EVT_HAPTIC_TICK,
-  EVT_STOP_GLOWING,   // From UART: UI task calls stop_glowing_animation + lv_timer_handler
-  EVT_START_GLOWING,  // From UART: UI task calls start_glowing_animation(reason)
-  EVT_UI_STATUS_IDLE, // From UART: UI task calls set_status_reset_visible(false), stop_glowing if needed
-  EVT_REFRESH_TIMEOUT, // Refresh stuck inflight too long: stop glowing, show "Couldn't refresh", re-render existing list
-  EVT_LINK_SEND_FAILED, // Sense never acked a user-intent message after all retries: resolve the screen with an honest error
-  EVT_SHIP_UI_STATUS, // From UART: Ship menu UI_STATUS -> update overlay/result
+  EVT_STOP_GLOWING,     // From UART: UI task calls stop_glowing_animation + lv_timer_handler
+  EVT_START_GLOWING,    // From UART: UI task calls start_glowing_animation(reason)
+  EVT_UI_STATUS_IDLE,   // From UART: UI task calls set_status_reset_visible(false), stop_glowing if
+                        // needed
+  EVT_REFRESH_TIMEOUT,  // Refresh stuck inflight too long: stop glowing, show "Couldn't refresh",
+                        // re-render existing list
+  EVT_LINK_SEND_FAILED, // Sense never acked a user-intent message after all retries: resolve the
+                        // screen with an honest error
+  EVT_SHIP_UI_STATUS,   // From UART: Ship menu UI_STATUS -> update overlay/result
   EVT_SHIP_UI_TOAST,
   EVT_SHIP_VOICE_JSON,
   // USB test-command injection (port 101). Posted by the Core-0 USB reader so the
   // real screen/list actions run on the UI task (Core 1) — never LVGL from Core 0.
-  EVT_USB_ENTER_LIST,   // emulate tapping List on the second menu
-  EVT_USB_REFRESH,      // emulate pull-to-refresh gesture on the list
-  EVT_USB_PULL,         // emulate the touch pull-to-refresh path ("usb_pull" reason)
-  EVT_USB_DELETE,       // emulate delete-touch on N-th visible item (data.usb_index)
-  EVT_USB_DELTOUCH,     // full touch-path delete: open overlay, then tap the real Delete button
-  EVT_USB_HOME,         // emulate returning to the main menu
-  EVT_USB_LISTSTATE,    // print one [LISTSTATE] JSON line from the UI task (e2e harness)
+  EVT_USB_ENTER_LIST, // emulate tapping List on the second menu
+  EVT_USB_REFRESH,    // emulate pull-to-refresh gesture on the list
+  EVT_USB_PULL,       // emulate the touch pull-to-refresh path ("usb_pull" reason)
+  EVT_USB_DELETE,     // emulate delete-touch on N-th visible item (data.usb_index)
+  EVT_USB_DELTOUCH,   // full touch-path delete: open overlay, then tap the real Delete button
+  EVT_USB_UI_REVIEW,  // optional, read-only current LVGL tree/heap inspection
+  EVT_USB_HOME,       // emulate returning to the main menu
+  EVT_USB_LISTSTATE,  // print one [LISTSTATE] JSON line from the UI task (e2e harness)
 } app_event_type_t;
 
 typedef struct app_event_t {
@@ -2506,19 +2562,12 @@ static void expiry_format_selected_date(char* output, size_t output_size) {
 }
 
 static void expiry_apply_segment_style(lv_obj_t* button, lv_obj_t* label, bool active) {
-  if (!button || !label) {
+  if (!button || !label)
     return;
-  }
-  lv_color_t bg = active ? lv_color_hex(COL_GREEN) : lv_color_hex(COL_WHITE);
-  lv_color_t border = active ? lv_color_hex(COL_GREEN) : lv_color_hex(COL_DARK);
-  lv_color_t text = active ? lv_color_hex(COL_WHITE) : lv_color_hex(COL_DARK);
-  lv_obj_set_style_bg_color(button, bg, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_color(button, border, LV_PART_MAIN);
-  lv_obj_set_style_border_width(button, active ? 0 : 2, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(button, 0, LV_PART_MAIN);
-  lv_obj_set_style_outline_width(button, 0, LV_PART_MAIN);
-  lv_obj_set_style_text_color(label, text, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(button, lv_color_hex(active ? COL_TEAL : COL_WHITE), 0);
+  lv_obj_set_style_border_color(button, lv_color_hex(COL_DARK), 0);
+  lv_obj_set_style_border_width(button, 2, 0);
+  lv_obj_set_style_text_color(label, lv_color_hex(active ? COL_WHITE : COL_DARK), 0);
 }
 
 static void expiry_refresh_picker_ui() {
@@ -2984,6 +3033,7 @@ static void log_sleep_decision(unsigned long now_ms,
 }
 
 static bool sleep_blocked_for_ota() {
+  if (g_lcd_validation_pending.load()) return true;
   // LCD OTA receive/finalization owns the device until restart or cleanup.
   if (g_lcd_ota_uart_receiving) {
     return true;
@@ -3015,6 +3065,8 @@ static bool sleep_blocked_for_ota() {
       g_ota_mode_active = false;
       g_ota_continuation_hold_start_ms = 0; g_ota_screen_active = false;
       provision_return_home_pending = true;
+      // The finite hold is abandoned; retain the next arm, not this old origin.
+      g_lcd_coord_notice_clear.store(true);
     }
   }
   if (hold_expired) Serial.println("[OTA] finite peer hold expired; normal schedule retained");
@@ -3397,12 +3449,31 @@ static void lcd_wake_pin_drive_level(int level, int mode) {
   lcd_wake_pin_set_mode(INT_PIN, mode);
 }
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+static void lcd_diag_timer_selected(uint64_t timer_us,int32_t sdk);
+#endif
+
 static void configure_sleep_sources(bool enable_ext0, uint32_t timer_sec) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+  lcd_sleep_witness_configure_begin();
+#endif
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
 #if HALO_ALLOW_TIMER_WAKE
   if (timer_sec > 0) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    const uint64_t timer_us=static_cast<uint64_t>(timer_sec)*1000000ULL;
+    const esp_err_t timer_sdk=esp_sleep_enable_timer_wakeup(timer_us);
+    lcd_diag_timer_selected(timer_us,timer_sdk);
+#if HALO_LCD_SLEEP_WITNESS
+    lcd_sleep_witness_after_sdk(timer_us,timer_sdk);
+#endif
+#else
     esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(timer_sec) * 1000000ULL);
+#endif
   }
+#endif
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+  lcd_sleep_witness_configure_end();
 #endif
   if (enable_ext0) {
     esp_sleep_enable_ext0_wakeup((gpio_num_t)HALO_WAKE_GPIO, HALO_WAKE_LEVEL);
@@ -3782,12 +3853,16 @@ static unsigned long wake_retry_interval_for_attempt(uint8_t attempt) {
 
 
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+#include "lcd_diagnostic_integration.h"
+#endif
+
 #include "lcd_sleep.h"
 
 // Forward declaration — defined after lcd_activity.h where all dependencies are available
 static void lcd_errlog_store_with_context(const char* board, const char* area,
                                            const char* event, int32_t code,
-                                           const char* detail);
+                                           const char* detail,const LcdNvsDeadline& deadline);
 
 #include "lcd_diag.h"
 #include "lcd_ota_uart.h"
@@ -3810,6 +3885,7 @@ bool lcd_ota_in_progress_for_sd_guard() {
 // ── UI Task ────────────────────────────────────────────────────────
 // ONLY the UI task (and loop() when it runs LVGL) may call LVGL; both hold example_lvgl_lock.
 
+#include "lcd_ui_review.h"
 #include "lcd_ui_task.h"
 
 
@@ -3833,7 +3909,7 @@ bool lcd_ota_in_progress_for_sd_guard() {
 // and ESP.getFreeHeap(), all of which are available after lcd_activity.h.
 static void lcd_errlog_store_with_context(const char* board, const char* area,
                                            const char* event, int32_t code,
-                                           const char* detail) {
+                                           const char* detail,const LcdNvsDeadline& deadline) {
     char ctx[64];
     snprintf(ctx, sizeof(ctx), "heap=%luK sense=%s screen=%s",
              (unsigned long)(ESP.getFreeHeap() / 1024),
@@ -3853,15 +3929,39 @@ static void lcd_errlog_store_with_context(const char* board, const char* area,
     entry["uptime_ms"] = millis();
     String json;
     serializeJson(entry, json);
-    errlog_store(json.c_str());
+    errlog_store(json.c_str(),deadline);
 }
 
 
 // ── Arduino lifecycle ──────────────────────────────────────────────
 
+// Called after actual validation, including delayed readiness in loop().
+static void lcd_post_validation_continuation() {
+  lcd_coord_resume_notice((int)esp_reset_reason());
+  // A checked target-bound continuation is consumed only after VALID. The Sense is
+  // still self-flashing (blocking, UART-silent). Re-show the "Updating…" hold
+  // and keep the panel LIT (via the loop() idle-dark ota_keep_lit guard) until
+  // OTA_UNLOCK arrives or the safety timeout fires. UI is initialized; its
+  // next frame observes the same OTA flags after successful durable consume.
+  // NOTE: lcd_ota_uart_restore_ui() (cited in the spec) does NOT run on a
+  // successful-OTA reboot — esp_restart() is called without it — so the boot
+  // continuation lives here in setup() where boot code actually executes.
+  if (lcd_ota_take_continuation_pending()) {
+    lcd_allow_visible_ui("ota_continuation");
+    g_ota_screen_active = true;                                  // ui_task draws "Updating…" overlay
+    g_ota_continuation_hold_start_ms = millis();                 // for the loop() safety timeout
+    ota_stay_awake_until_ms = millis() + OTA_CONTINUATION_HOLD_MS; // block sleep AND keep panel lit
+    Serial.println("[LCD_OTA] continuation hold armed — staying lit for Sense self-flash");
+  }
+
+}
+
 void setup() {
   g_lcd_coord_boot_id = esp_random();
   if (g_lcd_coord_boot_id == 0) g_lcd_coord_boot_id = 1;
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+  lcd_sleep_witness_on_boot();
+#endif
   print_wakeup_diagnostics(HALO_BOARD_NAME);
   Serial.begin(115200);
   // Bound USB console backpressure, matching Sense. Core3.3.8 HWCDC::write
@@ -4184,7 +4284,7 @@ void setup() {
   // inside setup(), so arming first is safe and removes the ordering trap.
   lcd_freeze_wdt_init();
 
-  xTaskCreatePinnedToCore(uart_task, "uart_task", 12288, NULL, 2, NULL, 0);
+  g_lcd_uart_task_created=(xTaskCreatePinnedToCore(uart_task, "uart_task", 12288, NULL, 2, NULL, 0)==pdPASS);
   
   // Initialize app state (double-buffered)
   g_active.count = 0;
@@ -4208,21 +4308,7 @@ void setup() {
     Serial.println("No saved list found - will fetch from Sense");
   }
 
-  // OTA continuation: if we just rebooted from our own OTA flash, the Sense is
-  // still self-flashing (blocking, UART-silent). Re-show the "Updating…" hold
-  // and keep the panel LIT (via the loop() idle-dark ota_keep_lit guard) until
-  // OTA_UNLOCK arrives or the safety timeout fires. Set BEFORE init_ui_stack so
-  // the ui_task draws the OTA overlay on its first pass instead of Home.
-  // NOTE: lcd_ota_uart_restore_ui() (cited in the spec) does NOT run on a
-  // successful-OTA reboot — esp_restart() is called without it — so the boot
-  // continuation lives here in setup() where boot code actually executes.
-  if (lcd_ota_take_continuation_pending()) {
-    lcd_allow_visible_ui("ota_continuation");
-    g_ota_screen_active = true;                                  // ui_task draws "Updating…" overlay
-    g_ota_continuation_hold_start_ms = millis();                 // for the loop() safety timeout
-    ota_stay_awake_until_ms = millis() + OTA_CONTINUATION_HOLD_MS; // block sleep AND keep panel lit
-    Serial.println("[LCD_OTA] continuation hold armed — staying lit for Sense self-flash");
-  }
+
 
   Serial.printf("[BOOT_DIAG] ship_ota=%d maint_wake=%d eff_timer=%d maint_ctx=%d resume_hint=%d timer_ovr=%d reset=%d wake=%d restored_nvs=%d\n",
                 g_ship_ota_wake_window ? 1 : 0,
@@ -4274,6 +4360,9 @@ void setup() {
   }
 
   lcd_ota_self_test();
+  lcd_coord_resume_notice((int)reset_reason);
+
+  lcd_post_validation_continuation();
 
 #ifdef HALO_LCD_PROD_WRAPPER
   halo_lcd_prod_setup();
@@ -4282,6 +4371,14 @@ void setup() {
 }
 
 void loop() {
+  if (g_lcd_validation_pending.load()) {
+    lcd_ota_self_test();
+    if (!g_lcd_validation_pending.load()) lcd_post_validation_continuation();
+  }
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  lcd_diag_boot();
+  lcd_diag_flush_failure();
+#endif
   // Report diagnostics (incl. SD health) on the way UP, not on the way down.
   //
   // Pre-sleep reporting does not work: the Sense sleeps on its own schedule and
@@ -4695,7 +4792,9 @@ void loop() {
       return;
     }
     if (ui_screen_state == SCREEN_VOICE_JSON) {
-      show_ship_main_menu();
+      const uint16_t vx = 359 - touch_press_x, vy = 359 - touch_press_y;
+      if (vx >= 148 && vx <= 211 && vy >= 283 && vy <= 346 && touch_move_max_d2 <= 100)
+        show_ship_main_menu();
       ui_lvgl_tick();
       resetActivityTimer();
       example_lvgl_unlock();
@@ -4706,17 +4805,7 @@ void loop() {
     uint16_t check_y = 359 - touch_press_y;
 
     if (!was_long_press && press_duration < LONG_PRESS_THRESHOLD_MS) {
-      if (provision_intro_visible) {
-        provision_intro_tapped = true;
-        provision_intro_pending = false;
-        if (provision_qr_cached) {
-          show_provisioning_screen(provision_qr_ssid, provision_qr_password, provision_qr_url);
-        } else if (status_screen != NULL && status_label != NULL) {
-          hide_provision_intro_screen("tap_wait_qr");
-          status_screen_use_text("Preparing\nWi-Fi...");
-          lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
-          status_screen_shown_time = millis();
-        }
+      if (provision_ui_handle_touch(check_x, check_y)) {
         resetActivityTimer();
         ui_lvgl_tick();
         example_lvgl_unlock();
@@ -4728,10 +4817,31 @@ void loop() {
         example_lvgl_unlock();
         return;
       }
+      if ((ui_screen_state == SCREEN_LOGGED || ui_screen_state == SCREEN_VOICE_ACK) &&
+          check_x >= 148 && check_x <= 211 && check_y >= 283 && check_y <= 346) {
+        ship_logged_hide_at_ms = 0;
+        ship_voice_ack_hide_at_ms = 0;
+        show_ship_main_menu();
+        ui_lvgl_tick();
+        resetActivityTimer();
+        example_lvgl_unlock();
+        return;
+      }
+      if (ui_screen_state == SCREEN_RESULT && lv_scr_act() == ship_error_screen && check_x >= 96 &&
+          check_x <= 263 && check_y >= 240 && check_y <= 293) {
+        ship_error_hide_at_ms = 0;
+        show_ship_main_menu();
+        ui_lvgl_tick();
+        resetActivityTimer();
+        example_lvgl_unlock();
+        return;
+      }
       if (ui_screen_state == SCREEN_BACKLIGHT) {
-        // Any tap saves the (already-applied) brightness and returns to Settings.
-        backlight_save_to_nvs();
-        show_ship_settings_screen();
+        // Only the visible Save button commits; the dial still previews immediately.
+        if (check_x >= 110 && check_x <= 249 && check_y >= 264 && check_y <= 311) {
+          backlight_save_to_nvs();
+          show_ship_settings_screen();
+        }
         ui_lvgl_tick();
         resetActivityTimer();
         example_lvgl_unlock();
@@ -5251,13 +5361,8 @@ void loop() {
       provision_qr_waiting = false;
       provision_qr_wait_start_ms = 0;
       Serial.printf("[PROVISION] wait_for_qr timeout after %lu ms\n", wait_ms);
-      if (status_screen != NULL && status_label != NULL) {
-        status_screen_use_text("Reset Wi-Fi\nNo QR from Sense");
-        lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
-        status_screen_shown_time = millis();
-        set_status_reset_visible(true);
-        lv_timer_handler();
-      }
+      provision_ui_qr_timeout();
+      lv_timer_handler();
     }
   }
 

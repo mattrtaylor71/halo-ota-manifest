@@ -1000,8 +1000,11 @@ bool ProvisioningManager::tryClaimOwnerId() {
       tz_str = resp_doc["tz"] | "";
     }
     if (tz_str && tz_str[0]) {
-      ProvisioningState::saveTimezone(tz_str);
-      LOG_INFO("[PROVISION] Timezone from claim: %s", tz_str);
+      if (ProvisioningState::saveTimezone(tz_str)) {
+        LOG_INFO("[PROVISION] Timezone from claim persisted");
+      } else {
+        LOG_WARN("[PROVISION] Timezone from claim not verified");
+      }
     } else {
       LOG_INFO("[PROVISION] Claim carried no timezone — keeping current/default");
     }

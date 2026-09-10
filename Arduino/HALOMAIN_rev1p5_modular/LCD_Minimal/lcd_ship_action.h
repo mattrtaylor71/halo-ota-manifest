@@ -361,27 +361,9 @@ static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
       Serial.println("[MENU] tap=SETTINGS");
       show_ship_settings_screen();
       break;
-    case SHIP_MENU_ACTION_RESET_WIFI: {
-      lcd_force_wake_sense("reset_wifi");
-      provision_user_requested = true;
-      StaticJsonDocument<128> doc;
-      doc["ver"] = PROTOCOL_VERSION;
-      doc["type"] = "INPUT_RESET_WIFI";
-      doc["msg_id"] = get_next_msg_id();
-      doc["ts"] = millis();
-      String output;
-      serializeJson(doc, output);
-      senseSerial.println(output);
-      provision_qr_wait_begin("menu_action");
-      if (status_screen != NULL && status_label != NULL) {
-        status_screen_use_text("Resetting\nWi-Fi...");
-        lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
-        status_screen_shown_time = millis();
-        set_status_reset_visible(false);
-        lv_timer_handler();
-      }
+    case SHIP_MENU_ACTION_RESET_WIFI:
+      show_provision_reset_confirm();
       break;
-    }
     case SHIP_MENU_ACTION_MANUAL_OTA:
       ship_menu_send_manual_ota("menu_action");
       break;
@@ -396,7 +378,7 @@ static void ship_menu_send_action(const ship_menu_hitbox_t* hb) {
       show_shopping_list_screen();
       break;
     case SHIP_MENU_ACTION_BACK:
-      show_ship_second_menu();
+      show_ship_main_menu();
       break;
     case SHIP_MENU_ACTION_CHECK_IN:
     case SHIP_MENU_ACTION_CHECK_OUT:
@@ -782,88 +764,26 @@ static void create_custom_ui() {
   lv_obj_add_flag(expiry_screen, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(expiry_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-  expiry_timeout_ring = lv_arc_create(expiry_screen);
-  lv_obj_remove_style(expiry_timeout_ring, NULL, LV_PART_KNOB);
-  lv_obj_set_size(expiry_timeout_ring, 352, 352);
-  lv_arc_set_range(expiry_timeout_ring, 0, 1000);
-  lv_arc_set_value(expiry_timeout_ring, 1000);
-  lv_arc_set_bg_angles(expiry_timeout_ring, 0, 360);
-  lv_arc_set_rotation(expiry_timeout_ring, 270);
-  lv_obj_set_style_arc_width(expiry_timeout_ring, 4, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(expiry_timeout_ring, 4, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(COL_MUTED), LV_PART_MAIN);
-  lv_obj_set_style_arc_opa(expiry_timeout_ring, (lv_opa_t)80, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(expiry_timeout_ring, lv_color_hex(COL_GREEN), LV_PART_INDICATOR);
-  lv_obj_set_style_arc_opa(expiry_timeout_ring, LV_OPA_COVER, LV_PART_INDICATOR);
-  lv_obj_set_style_outline_width(expiry_timeout_ring, 0, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(expiry_timeout_ring, 0, LV_PART_MAIN);
-  lv_obj_clear_flag(expiry_timeout_ring, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_center(expiry_timeout_ring);
-  
-  expiry_title_label = lv_label_create(expiry_screen);
-  lv_label_set_text(expiry_title_label, "Expiration");
-  lv_obj_set_style_text_font(expiry_title_label, &lv_font_montserrat_26, LV_PART_MAIN);
-  lv_obj_set_style_text_color(expiry_title_label, lv_color_hex(COL_DARK), LV_PART_MAIN);
-  lv_obj_set_style_text_align(expiry_title_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_align(expiry_title_label, LV_ALIGN_TOP_MID, 0, 32);
-  
-  expiry_back_button = NULL;
-  expiry_back_label = NULL;
-
-  expiry_month_button = lv_btn_create(expiry_screen);
-  lv_obj_set_size(expiry_month_button, 122, 64);
-  lv_obj_align(expiry_month_button, LV_ALIGN_TOP_MID, -74, 104);
-  lv_obj_set_style_radius(expiry_month_button, 22, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(expiry_month_button, 0, LV_PART_MAIN);
-
-  expiry_month_label = lv_label_create(expiry_month_button);
-  lv_label_set_text(expiry_month_label, "Jan");
-  lv_obj_set_style_text_font(expiry_month_label, &lv_font_montserrat_30, LV_PART_MAIN);
-  lv_obj_set_style_text_align(expiry_month_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  expiry_timeout_ring = halo_ui_ring(expiry_screen, 6, 6, 348, 4, COL_GOLD);
+  lv_obj_set_style_arc_opa(expiry_timeout_ring, LV_OPA_TRANSP, LV_PART_MAIN);
+  expiry_title_label =
+      halo_ui_label(expiry_screen, "Expiry date", &nunito_24, COL_DARK, 50, 32, 260);
+  expiry_hint_label = halo_ui_label(expiry_screen, "Tap a field, then turn the dial",
+                                    &lv_font_montserrat_14, COL_TEXT2, 38, 68, 284);
+  expiry_month_button = halo_ui_card(expiry_screen, 52, 104, 88, 70);
+  expiry_month_label = halo_ui_label(expiry_month_button, "Jan", &nunito_22, COL_DARK, 0, 0, 80);
   lv_obj_center(expiry_month_label);
-  expiry_date_label = expiry_month_label;
-
-  expiry_day_button = lv_btn_create(expiry_screen);
-  lv_obj_set_size(expiry_day_button, 122, 64);
-  lv_obj_align(expiry_day_button, LV_ALIGN_TOP_MID, 74, 104);
-  lv_obj_set_style_radius(expiry_day_button, 22, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(expiry_day_button, 0, LV_PART_MAIN);
-
-  expiry_day_label = lv_label_create(expiry_day_button);
-  lv_label_set_text(expiry_day_label, "01");
-  lv_obj_set_style_text_font(expiry_day_label, &lv_font_montserrat_30, LV_PART_MAIN);
-  lv_obj_set_style_text_align(expiry_day_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  expiry_day_button = halo_ui_card(expiry_screen, 150, 104, 60, 70);
+  expiry_day_label = halo_ui_label(expiry_day_button, "01", &nunito_24, COL_DARK, 0, 0, 52);
   lv_obj_center(expiry_day_label);
-
-  expiry_year_button = lv_btn_create(expiry_screen);
-  lv_obj_set_size(expiry_year_button, 168, 64);
-  lv_obj_align(expiry_year_button, LV_ALIGN_TOP_MID, 0, 192);
-  lv_obj_set_style_radius(expiry_year_button, 22, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(expiry_year_button, 0, LV_PART_MAIN);
-
-  expiry_year_label = lv_label_create(expiry_year_button);
-  lv_label_set_text(expiry_year_label, "2026");
-  lv_obj_set_style_text_font(expiry_year_label, &lv_font_montserrat_30, LV_PART_MAIN);
-  lv_obj_set_style_text_align(expiry_year_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  expiry_year_button = halo_ui_card(expiry_screen, 220, 104, 88, 70);
+  expiry_year_label = halo_ui_label(expiry_year_button, "2026", &nunito_22, COL_DARK, 0, 0, 80);
   lv_obj_center(expiry_year_label);
-
-  expiry_hint_label = NULL;
-
-  expiry_check_button = lv_btn_create(expiry_screen);
-  lv_obj_set_size(expiry_check_button, 132, 52);
-  lv_obj_align(expiry_check_button, LV_ALIGN_BOTTOM_MID, 0, -14);
-  lv_obj_set_style_bg_color(expiry_check_button, lv_color_hex(0xFFB703), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(expiry_check_button, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_radius(expiry_check_button, 20, LV_PART_MAIN);
-  lv_obj_set_style_border_width(expiry_check_button, 0, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(expiry_check_button, 0, LV_PART_MAIN);
-  lv_obj_set_style_outline_width(expiry_check_button, 0, LV_PART_MAIN);
-
-  lv_obj_t *check_label = lv_label_create(expiry_check_button);
-  lv_label_set_text(check_label, "OK");
-  lv_obj_set_style_text_font(check_label, &lv_font_montserrat_24, LV_PART_MAIN);
-  lv_obj_set_style_text_color(check_label, lv_color_hex(COL_DARK), LV_PART_MAIN);
-  lv_obj_center(check_label);
+  expiry_date_label = expiry_month_label;
+  expiry_check_button = halo_ui_button(expiry_screen, 96, 200, 168, 52, "SAVE DATE");
+  expiry_back_button =
+      halo_ui_button(expiry_screen, 120, 258, 120, 40, "CANCEL", COL_WHITE, COL_TEXT2, true);
+  expiry_back_label = lv_obj_get_child(expiry_back_button, 0);
 
   expiry_backspace_button = NULL;
   for (int i = 0; i < 10; ++i) {

@@ -615,6 +615,11 @@ namespace {
 }  // namespace
 
 void mqtt_init() {
+  // Preserve the public identity/prefix even when transport is disabled. The
+  // existing policy starts disallowed and cannot be re-enabled by its setter.
+  // Do not create an unreachable client, task or queue for that configuration.
+  update_prefix();
+  if (!s_allowed) return;
   if (!s_cmd_queue) {
     s_cmd_queue = xQueueCreate(kQueueDepth, sizeof(MqttCommand));
   }

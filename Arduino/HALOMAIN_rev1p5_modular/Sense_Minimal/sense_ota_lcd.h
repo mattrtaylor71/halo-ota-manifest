@@ -24,6 +24,9 @@
 #include "../halo_ota_demo/firmware/shared/UartOtaProtocol.h"
 #include "../halo_ota_demo/firmware/shared/ManifestClient.h"
 #include "sense_lcd_transport_snapshot.h"
+#if defined(HALO_OTA_BENCH_CASE)
+#include "../halo_ota_demo/firmware/shared/HaloOtaBenchFaults.h"
+#endif
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -375,6 +378,10 @@ static bool sense_lcd_ota_fetch_manifest(const char* base_dir,
                                          const char* channel,
                                          OtaManifest& manifest,
                                          const LcdOtaBudget* budget = nullptr) {
+#if defined(HALO_DURABLE_OTA_POLICY) && HALO_DURABLE_OTA_POLICY
+  if(!halo_policy_network_admitted())return false;
+#endif
+
   if (budget && !budget->remaining_ms()) return false;
   if (!base_dir || !channel) {
     Serial.println("[LCD_OTA_PROXY] fetch_manifest: null base_dir/channel");
@@ -385,6 +392,12 @@ static bool sense_lcd_ota_fetch_manifest(const char* base_dir,
   extern ManifestClient g_manifest_client;
 
   char url[512];
+#if defined(HALO_DURABLE_OTA_POLICY) && HALO_DURABLE_OTA_POLICY
+  const char* fixed_version=halo_policy_lcd_manifest_version();
+  if(fixed_version&&*fixed_version)
+    snprintf(url,sizeof(url),"%s/%s/lcd/manifest_%s.json",base_dir,channel,fixed_version);
+  else
+#endif
   snprintf(url, sizeof(url), "%s/%s/lcd/manifest_latest.json",
            base_dir, channel);
   url[sizeof(url) - 1] = '\0';
@@ -442,6 +455,12 @@ static bool sense_lcd_ota_fetch_manifest(const char* base_dir,
 static uint32_t s_lcd_terminal_store_failures = 0;
 static bool sense_lcd_terminal_store(const char* detail, int code) {
   sense_errlog_store("lcd_ota", code, detail);
+  // The nested error record is finished before this lease/stats admission.
+  if(!detail){++s_lcd_terminal_store_failures;return false;}
+  const size_t detail_size=strnlen(detail,224),build_size=strnlen(kBuildId,96);
+  if(detail_size>=224 || build_size>=96){++s_lcd_terminal_store_failures;return false;}
+  NvsOptionalWrite admission(6+nvs_capacity_string_entries(detail_size)+nvs_capacity_string_entries(build_size));
+  if(!admission){++s_lcd_terminal_store_failures;return false;}
   Preferences prefs;
   if (!prefs.begin("lcd_xfer", false)) {
     ++s_lcd_terminal_store_failures;
@@ -533,6 +552,7 @@ static void sense_lcd_terminal_dump(Stream& out) {
 
 static void sense_lcd_terminal_flush() {
   if (g_lcd_ota_proxy_owns_uart || !sense_lcd_ota_retry_safe()) return;
+  NvsOptionalWrite admission(5);if(!admission)return;
   Preferences prefs;
   if (!prefs.begin("lcd_xfer", false)) return;
   for (unsigned slot = 0; slot < 4; ++slot) {
@@ -580,7 +600,7 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
   const uint16_t session_id = (uint16_t)((esp_random() & 0xFFFE) + 1);
   bool control_v2 = false;
   bool json_ready = false;
-  bool receiver_open = false;
+  bool receiver_open = false, mode_marked = false;
   uint32_t bytes_read = 0, bytes_sent = 0, retries = 0;
   uint32_t last_read_ms = millis(), last_ack_ms = millis();
   uint16_t seq = 1;
@@ -603,6 +623,9 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
              seq, (unsigned long)retries, (unsigned long)protocol.crc_error_count(),
              (unsigned long)(millis() - last_read_ms), (unsigned long)(millis() - last_ack_ms));
     sense_lcd_terminal_store(terminal, code); // no UART side effect
+#if defined(HALO_OTA_BENCH_CASE)
+    halo_bench_finish(session_id);
+#endif
   };
   auto send_control = [&](const char* type, const char* reason) -> bool {
     StaticJsonDocument<512> doc;
@@ -667,12 +690,18 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     // diagnostics cannot turn this failure into a retry or change its result.
     const bool capture_transport = strcmp(phase, "http") == 0 || strcmp(phase, "chunk") == 0;
     LcdOtaTransportSnapshot transport;
-    if (capture_transport) transport = sense_lcd_transport_snapshot(tls_client);
+    char network_detail[224];
+    bool network_formatted = false;
+    if (capture_transport) {
+      transport = sense_lcd_transport_snapshot(tls_client);
+      network_formatted = sense_lcd_transport_format(session_id, transport, network_detail, sizeof(network_detail));
+      // Live USB evidence precedes optional NVS admission; no LCD UART output.
+      if (network_formatted) Serial.println(network_detail);
+    }
     close_stream();
     record(origin, code);
     if (capture_transport) {
-      char network_detail[224];
-      if (sense_lcd_transport_format(session_id, transport, network_detail, sizeof(network_detail))) {
+      if (network_formatted) {
         sense_lcd_terminal_store(network_detail, code);
       } else {
         ++s_lcd_terminal_store_failures;
@@ -688,12 +717,72 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     // Missing ACK never proves mode handoff. Release local ownership after the
     // bounded grace, but defer new controls until a later readiness episode
     // validates a fresh query response. Never silently renew this attempt.
-    if (json_ready || !receiver_open) sense_lcd_mode_confirm();
-    else g_lcd_ota_mode_unconfirmed.store(true);
-    g_lcd_ota_proxy_owns_uart = false;
+    if (json_ready || (!receiver_open && mode_marked)) sense_lcd_mode_confirm();
+    else if (receiver_open) g_lcd_ota_mode_unconfirmed.store(true);
+    if (receiver_open) g_lcd_ota_proxy_owns_uart = false;
     if (json_ready) sense_lcd_terminal_flush();
     return origin;
   };
+
+  uint8_t chunk[MAX_CHUNK_SIZE];
+  size_t buffered = 0;
+  auto read_chunk = [&]() -> const char* {
+    while (true) {
+      if (remaining_ms() <= LCD_OTA_PROXY_END_TIMEOUT_MS) return fail("attempt_deadline", -1);
+      size_t available = stream->available();
+      if (!available && !stream->connected()) return fail("http_disconnected", -1);
+      while (!available && stream->connected() &&
+             (uint32_t)(millis() - last_read_ms) < LCD_OTA_PROXY_STALL_WINDOW_MS &&
+             remaining_ms() > LCD_OTA_PROXY_END_TIMEOUT_MS) {
+        if (!receiver_open) pump_uart_rx_once(); // LCD remains in JSON mode during preflight
+        delay(10);
+        available = stream->available();
+      }
+      if (remaining_ms() <= LCD_OTA_PROXY_END_TIMEOUT_MS) return fail("attempt_deadline", -1);
+      if (!available && !stream->connected()) return fail("http_disconnected", -1);
+      if (!available && (uint32_t)(millis() - last_read_ms) >= LCD_OTA_PROXY_STALL_WINDOW_MS)
+        return fail("http_no_data", -1);
+      size_t wanted = manifest.size - bytes_sent;
+      if (wanted > sizeof(chunk)) wanted = sizeof(chunk);
+      if (available < wanted) wanted = available;
+      const size_t got = wanted ? stream->readBytes(chunk, wanted) : 0;
+      if (!remaining_ms()) return fail("attempt_deadline", -1);
+      if ((uint32_t)(millis() - last_read_ms) >= LCD_OTA_PROXY_STALL_WINDOW_MS)
+        return fail("http_read_stall", -1);
+      if (!got) continue;
+      if (got > wanted) return fail("http_read_size", -1);
+      bytes_read += got;
+      last_read_ms = millis();
+      buffered = got;
+      return nullptr;
+    }
+  };
+
+  // Do not erase/open the receiver until HTTP has supplied a real first chunk.
+  // JSON ownership stays available for the existing heartbeat/control pump.
+  phase = "http";
+  // Explicit library timeouts remain below the available budget. DNS/driver
+  // calls are synchronous: recheck on return and never accept late success.
+  http.setTimeout((uint16_t)phase_limit(5000));
+  http.setConnectTimeout((int32_t)phase_limit(5000));
+  tls_client.setHandshakeTimeout((phase_limit(15000) + 999) / 1000);
+  const int http_code = http.begin(tls_client, manifest.url) ? http.GET() : -1;
+  if (!remaining_ms()) return fail("attempt_deadline", http_code);
+  if (http_code != HTTP_CODE_OK) return fail("http_get_failed", http_code);
+  stream = http.getStreamPtr();
+  if (!stream) return fail("http_stream_missing", -1);
+  const int content_length = http.getSize();
+  if (content_length >= 0 && (uint32_t)content_length != manifest.size) return fail("http_size_mismatch", content_length);
+  stream->setTimeout(50);
+  last_read_ms = last_ack_ms = millis();
+  if (const char* failure = read_chunk()) return failure;
+  pump_uart_rx_once();
+  if (!sense_uart_ordinary_tx_allowed()) return fail("uart_busy", -1);
+  phase = "begin";
+#if defined(HALO_DURABLE_OTA_POLICY) && HALO_DURABLE_OTA_POLICY
+  if(!halo_policy_lcd_begin())return fail("policy_deferred",-1);
+  if(remaining_ms()<=LCD_OTA_PROXY_END_TIMEOUT_MS)return fail("attempt_deadline",-1);
+#endif
 
   // Clear every ACK field before TX; a fast response must not be erased.
   g_lcd_ota_begin_ack_ready = false;
@@ -702,6 +791,7 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
   g_lcd_ota_begin_ack_proto = 1;
   g_lcd_ota_begin_ack_session = 0;
   if (!sense_lcd_mode_before_begin()) return fail("mode_marker_failed", -1);
+  mode_marked = true;
   if (remaining_ms() <= LCD_OTA_PROXY_END_TIMEOUT_MS) return fail("attempt_deadline", -1);
   {
     StaticJsonDocument<512> doc;
@@ -750,49 +840,22 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
   if (remaining_ms() <= LCD_OTA_PROXY_END_TIMEOUT_MS) return fail("attempt_deadline", -1);
   g_lcd_ota_proxy_owns_uart = true;
   phase = "http";
-
-  // Explicit library timeouts remain below the available budget. DNS/driver
-  // calls are synchronous: recheck on return and never accept late success.
-  http.setTimeout((uint16_t)phase_limit(5000));
-  http.setConnectTimeout((int32_t)phase_limit(5000));
-  tls_client.setHandshakeTimeout((phase_limit(15000) + 999) / 1000);
-  const int http_code = http.begin(tls_client, manifest.url) ? http.GET() : -1;
-  if (!remaining_ms()) return fail("attempt_deadline", http_code);
-  if (http_code != HTTP_CODE_OK) return fail("http_get_failed", http_code);
-  stream = http.getStreamPtr();
-  if (!stream) return fail("http_stream_missing", -1);
-  const int content_length = http.getSize();
-  if (content_length >= 0 && (uint32_t)content_length != manifest.size) return fail("http_size_mismatch", content_length);
-  stream->setTimeout(50);
+  // BEGIN is a bounded control/erase wait, not an HTTP read stall.
+  // Resume the service window without changing either work-budget origin.
   last_read_ms = last_ack_ms = millis();
-  uint8_t chunk[MAX_CHUNK_SIZE];
+
   while (bytes_sent < manifest.size) {
     phase = "http";
+#if defined(HALO_OTA_BENCH_CASE)
+    halo_bench_withhold(session_id, seq, bytes_sent, remaining_ms());
+#endif
     if (remaining_ms() <= LCD_OTA_PROXY_END_TIMEOUT_MS) return fail("attempt_deadline", -1);
-    size_t available = stream->available();
-    if (!available && !stream->connected()) return fail("http_disconnected", -1);
-    while (!available && stream->connected() &&
-           (uint32_t)(millis() - last_read_ms) < LCD_OTA_PROXY_STALL_WINDOW_MS &&
-           remaining_ms() > LCD_OTA_PROXY_END_TIMEOUT_MS) {
-      delay(10);
-      available = stream->available();
+    if (!buffered) {
+      if (const char* failure = read_chunk()) return failure;
     }
-    if (remaining_ms() <= LCD_OTA_PROXY_END_TIMEOUT_MS) return fail("attempt_deadline", -1);
-    if (!available && !stream->connected()) return fail("http_disconnected", -1);
-    if (!available && (uint32_t)(millis() - last_read_ms) >= LCD_OTA_PROXY_STALL_WINDOW_MS)
-      return fail("http_no_data", -1);
-    size_t wanted = manifest.size - bytes_sent;
-    if (wanted > sizeof(chunk)) wanted = sizeof(chunk);
-    if (available < wanted) wanted = available;
-    const size_t got = wanted ? stream->readBytes(chunk, wanted) : 0;
-    if (!remaining_ms()) return fail("attempt_deadline", -1);
-    if ((uint32_t)(millis() - last_read_ms) >= LCD_OTA_PROXY_STALL_WINDOW_MS)
-      return fail("http_read_stall", -1);
-    if (!got) continue;
-    if (got > wanted) return fail("http_read_size", -1);
-    bytes_read += got;
+    const size_t got = buffered;
+    buffered = 0;
     phase = "chunk";
-    last_read_ms = millis();
     bool acked = false;
     const char* chunk_failure = "chunk_retry_exhausted";
     // A legacy receiver appends duplicate CHUNKs. Once an ACK is uncertain,

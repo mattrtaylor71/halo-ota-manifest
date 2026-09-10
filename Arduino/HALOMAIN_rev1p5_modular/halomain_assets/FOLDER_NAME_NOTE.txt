@@ -1,0 +1,9 @@
+IMPORTANT: When you extract this ZIP file, the folder name will be "halomain_assets".
+The .ino file inside is named "halomain_assets.ino" to match the folder name (required by Arduino IDE).
+
+If you rename the folder, you MUST also rename the .ino file to match the folder name.
+
+FILE EXTENSIONS:
+- navigation.cpp (NOT .c) - This file must have .cpp extension to compile correctly
+- If you see navigation.c in your folder, delete it - it's from an old export
+- All files in this ZIP are ready to use - no additional files needed from other folders

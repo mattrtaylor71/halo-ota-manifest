@@ -16,6 +16,7 @@
 
 #ifndef LCD_PERSIST_H
 #define LCD_PERSIST_H
+#include "lcd_nvs_capacity.h"
 
 static Preferences preferences;
 static const char* PREF_NAMESPACE = "shopping_list";
@@ -62,11 +63,6 @@ static void save_list_to_storage(const app_state_t *s) {
     return;
   }
 
-  if (!preferences.begin(PREF_NAMESPACE, false)) {
-    Serial.println("✗ Failed to open preferences for saving");
-    return;
-  }
-
   // Create JSON document to store items and IDs
   DynamicJsonDocument doc(LIST_PERSIST_JSON_CAPACITY);
   JsonArray items_array = doc.createNestedArray("items");
@@ -87,15 +83,27 @@ static void save_list_to_storage(const app_state_t *s) {
   // (synced from the Sense), else 0 = age unknown.
   uint32_t fetched_epoch = lcd_time_valid() ? (uint32_t)time(nullptr) : 0;
 
+  // Offline list state is protected: admission failure leaves every existing
+  // cache byte unchanged. This path never evicts list/settings/user data.
+  LcdNvsOptionalWrite admission(lcd_nvs_string_entries(json_str.length())+4);
+  if (!admission) {
+    Serial.println("[LIST_PERSIST] save skipped; previous offline cache retained (NVS reserve)");
+    return;
+  }
+  if (!preferences.begin(PREF_NAMESPACE, false)) {
+    Serial.println("✗ Failed to open preferences for saving");
+    return;
+  }
+
   // Save count, selected index, JSON string, and fetch timestamp
-  bool count_saved = preferences.putInt(PREF_KEY_COUNT, s->count);
-  bool selected_saved = preferences.putInt(PREF_KEY_SELECTED, s->selected_index);
-  bool items_saved = preferences.putString(PREF_KEY_ITEMS, json_str.c_str());
-  preferences.putUInt(PREF_KEY_FETCHED, fetched_epoch);
+  bool count_saved = preferences.putInt(PREF_KEY_COUNT, s->count) == sizeof(int32_t);
+  bool selected_saved = preferences.putInt(PREF_KEY_SELECTED, s->selected_index) == sizeof(int32_t);
+  bool items_saved = preferences.putString(PREF_KEY_ITEMS, json_str.c_str()) == json_str.length();
+  bool fetched_saved = preferences.putUInt(PREF_KEY_FETCHED, fetched_epoch) == sizeof(uint32_t);
 
   preferences.end();
 
-  if (count_saved && selected_saved && items_saved) {
+  if (count_saved && selected_saved && items_saved && fetched_saved) {
     g_list_cache_fetched_epoch = fetched_epoch;
     Serial.printf("✓ Saved %d items (selected_index=%d, fetched_at=%lu) to persistent storage\n",
                   s->count, s->selected_index, (unsigned long)fetched_epoch);

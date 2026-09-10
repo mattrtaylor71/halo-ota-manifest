@@ -17,6 +17,9 @@
 
 #ifndef LCD_SLEEP_H
 #define LCD_SLEEP_H
+#if defined(HALO_OTA_BENCH_CASE)
+#include "../halo_ota_demo/firmware/shared/HaloOtaBenchFaults.h"
+#endif
 
 static uint64_t buildWakeMaskForSleep() {
   uint64_t wakeMask = 0;
@@ -301,6 +304,11 @@ static void enterLightSleep() {
     abort_sleep_transition("ota_before_teardown");
     return;
   }
+#ifdef HALO_LCD_PROD_WRAPPER
+  // Wait expiry may have set the clear flag in this same sleep evaluation.
+  // Service it before deep sleep can bypass the bottom-of-loop housekeeping.
+  lcd_coord_service_clear();
+#endif
   g_lvgl_running = false;
   
   // Save shopping list to persistent storage before sleep (with reset index)
@@ -467,6 +475,9 @@ static void enterLightSleep() {
   Serial.printf("[SLEEP_GPIO] gpio=%d rtc_pullup=1 pulldown=0 level_now=%d\n",
                 (int)LCD_WAKE_GPIO, digitalRead(LCD_WAKE_GPIO));
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+  lcd_sleep_witness_prepare(timer_reason, maint_now_epoch, sleep_timer_sec, LCD_MAINT_WAKE_LEAD_S);
+#endif
   configure_sleep_sources(true, sleep_timer_sec);
   if (sleep_fallback_timer_sec > 0) {
     Serial.printf("[SLEEP_PROTO] fallback_timer_active timer_s=%lu\n",
@@ -516,6 +527,15 @@ static void enterLightSleep() {
   }
   lcd_sleep_touch_watch_end();
 
+#if defined(HALO_OTA_BENCH_CASE)
+  if (!halo_bench_timer_commit(sleep_timer_sec, HALO_ALLOW_TIMER_WAKE && g_lcd_maintenance_timer_armed &&
+                              !g_lcd_arm_storage_fault &&
+                              strcmp(timer_reason, "maintenance_abs") == 0,
+                              g_lcd_maintenance_request_id)) {
+    abort_sleep_transition("bench_timer_arm_failed");
+    return;
+  }
+#endif
   // Put touch IC into standby mode so it generates INT on touch during deep sleep
   if (g_touch_initialized) {
     Touch_Standby();
@@ -557,6 +577,9 @@ static void enterLightSleep() {
     sleep_fallback_reset("coordinated_sleep");
   }
   sleep_fallback_magic = SLEEP_FALLBACK_MAGIC;
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+  lcd_sleep_witness_enter();
+#endif
   esp_deep_sleep_start();
   
   // Deep sleep never returns. Wake policy and UI restoration live in setup().

@@ -29,6 +29,9 @@ static void list_refresh_mark_complete(const char* reason);
 
 static void list_refresh_fail(const char* reason) {
   Serial.printf("[LIST_REFRESH] fail reason=%s\n", reason ? reason : "unknown");
+  // Do not publish the RAM cache as a successful refresh. In particular, a
+  // fresh boot's zero count is not evidence that the backend list is empty.
+  // The existing LCD hard timeout preserves its cache and shows Couldn't refresh.
   uart_send_ui_status("IDLE");
 }
 
@@ -365,7 +368,7 @@ static bool list_tls_heap_ok(const char* why) {
   return false;
 }
 
-static void fetch_shopping_list_from_api() {
+static bool fetch_shopping_list_from_api() {
   if (WiFi.status() != WL_CONNECTED) {
     // Bounded, no-hard-reset connect attempt. ensure_wifi_connected() does NOT
     // escalate to wifi_hard_reset_and_reconnect() (only ensure_wifi_ready()
@@ -377,16 +380,12 @@ static void fetch_shopping_list_from_api() {
         WiFi.status() != WL_CONNECTED) {
       Serial.println("✗ Cannot fetch list: WiFi not connected (bounded budget exhausted)!");
       list_refresh_fail("wifi_not_connected");
-      return;
+      return false;
     }
     Serial.printf("[NET_DIAG] list_wifi_connect_ms=%lu\n",
                   (unsigned long)(millis() - wifi_start_ms));
   }
 
-  if (!list_tls_heap_ok("fetch_shopping_list")) {
-    list_refresh_fail("low_internal_heap");
-    return;
-  }
   Serial.println("\n=== Fetching Shopping List from Trepo API ===");
 
   // Build JSON request body
@@ -404,7 +403,7 @@ static void fetch_shopping_list_from_api() {
   if (!extract_host_from_url(list_url, list_host)) {
     Serial.println("✗ List fetch: Failed to parse host from URL");
     list_refresh_fail("host_parse_fail");
-    return;
+    return false;
   }
   bool wifi_ok = (WiFi.status() == WL_CONNECTED);
   IPAddress ip = WiFi.localIP();
@@ -412,7 +411,7 @@ static void fetch_shopping_list_from_api() {
   if (!wifi_ok || !ip_ok) {
     Serial.println("[NET] not ready - skipping list fetch");
     list_refresh_fail("net_not_ready");
-    return;
+    return false;
   }
   HaloNtpDnsGuard ntp_dns_guard;
   bool dns_ok = ensure_dns_ready(list_host.c_str());
@@ -438,38 +437,26 @@ static void fetch_shopping_list_from_api() {
                              String& err_str,
                              unsigned long& duration_ms,
                              bool& begin_ok,
+                             bool& heap_admitted,
                              int& tls_err,
                              String& tls_err_str) -> int {
     unsigned long start_ms = millis();
-    // Free the camera's 16 KB internal-DMA reserve for the duration of this TLS
-    // handshake, and take it back on every exit path.
-    //
-    // WHY: an mbedtls AES-DMA handshake needs a large slice of INTERNAL SRAM, and
-    // that is the same scarce pool the camera reserve sits in. During the
-    // post-provisioning burst -- SoftAP still tearing down, WiFi reconnecting,
-    // LIST_REFRESH and the OTA manifest fetch both wanting TLS -- internal heap
-    // fell to ~18 KB and the handshake could not even allocate a mutex for a
-    // printf: lock_init_generic -> abort(), device rebooted, and the user's first
-    // capture was destroyed (2026-08-31).
-    //
-    // The OTA path already does this ("[OTA] Camera DMA reservation released for
-    // TLS headroom"); the list path did not, and it is the one that runs first
-    // after provisioning. Measured margin: the synthetic repro bottomed out at
-    // ~20.5 KB versus the ~18.4 KB crash, so returning 16 KB here is ample.
-    struct ListTlsDmaGuard {
-      bool held;
-      ListTlsDmaGuard() : held(g_camera_dma_reserve != nullptr) {
-        if (held) camera_dma_reserve_release("list_tls");
-      }
-      ~ListTlsDmaGuard() { if (held) camera_dma_reserve_acquire("list_tls"); }
-    } list_tls_dma_guard;
-
+    begin_ok = false;
+    heap_admitted = false;
+    tls_err = 0;
+    tls_err_str = "";
+    // Test the memory available to TLS, after releasing the banked camera
+    // reserve. Testing before the guard rejected otherwise viable requests.
+    // Keep the threshold and request-scoped ownership unchanged.
+    if (!list_tls_heap_ok("fetch_shopping_list")) {
+      err_str = "low_internal_heap";
+      duration_ms = millis() - start_ms;
+      return -1;
+    }
+    heap_admitted = true;
     WiFiClientSecure req_client;
     HTTPClient req_http;
     req_client.setInsecure();
-    begin_ok = false;
-    tls_err = 0;
-    tls_err_str = "";
     if (!req_http.begin(req_client, list_url)) {
       err_str = "begin_failed";
       duration_ms = millis() - start_ms;
@@ -497,92 +484,121 @@ static void fetch_shopping_list_from_api() {
 
   const int kMaxAttempts = 2;
   for (int attempt = 0; attempt < kMaxAttempts; attempt++) {
-    String response_json = "";
-    String err_str = "";
-    unsigned long request_duration_ms = 0;
-    bool begin_ok = false;
-    int tls_err = 0;
-    String tls_err_str = "";
-    int httpResponseCode =
-        do_list_request(response_json, err_str, request_duration_ms, begin_ok, tls_err, tls_err_str);
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
-    if (httpResponseCode == 200) {
-      Serial.printf("[NET_DIAG] fetch_ok code=200 http_ms=%lu resp_len=%u attempt=%d\n",
-                    request_duration_ms,
-                    (unsigned)response_json.length(),
-                    attempt);
-      Serial.print("Response length: ");
-      Serial.println(response_json.length());
+    bool retry = false;
+    {
+      // The response buffer is owned by this attempt, not by HTTPClient. Keep
+      // the reserve released until parsing and all response/error temporaries
+      // are destroyed. TLS clients still close inside do_list_request().
+      struct ListTlsDmaGuard {
+        bool held;
+        ListTlsDmaGuard() : held(g_camera_dma_reserve != nullptr) {
+          if (held) camera_dma_reserve_release("list_tls");
+        }
+        ~ListTlsDmaGuard() {
+          if (!held) return;
+          const bool restored = camera_dma_reserve_acquire("list_tls");
+          Serial.printf("[LIST_TLS] reserve_restore ok=%d held=%d\n",
+                        restored ? 1 : 0, g_camera_dma_reserve != nullptr ? 1 : 0);
+        }
+      } list_tls_dma_guard;
+      String response_json = "";
+      String err_str = "";
+      unsigned long request_duration_ms = 0;
+      bool begin_ok = false;
+      bool heap_admitted = false;
+      int tls_err = 0;
+      String tls_err_str = "";
+      int httpResponseCode =
+          do_list_request(response_json, err_str, request_duration_ms, begin_ok,
+                          heap_admitted, tls_err, tls_err_str);
+      if (!heap_admitted) {
+        list_refresh_fail("low_internal_heap");
+        return false;  // No handshake occurred; do not enter the network retry path.
+      }
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+      if (httpResponseCode == 200) {
+        Serial.printf("[NET_DIAG] fetch_ok code=200 http_ms=%lu resp_len=%u attempt=%d\n",
+                      request_duration_ms,
+                      (unsigned)response_json.length(),
+                      attempt);
+        Serial.print("Response length: ");
+        Serial.println(response_json.length());
 
-      if (response_json.length() > 0 && response_json.charAt(0) == '{') {
-        Serial.println("✓ Response appears to be JSON");
-        unsigned long parse_start_ms = millis();
-        bool parse_ok = parse_and_update_shopping_list(response_json);
-        Serial.printf("[LIST_REFRESH] parse_ms=%lu ok=%d\n",
-                      (unsigned long)(millis() - parse_start_ms),
-                      parse_ok ? 1 : 0);
-        if (!parse_ok) {
+        if (response_json.length() > 0 && response_json.charAt(0) == '{') {
+          Serial.println("✓ Response appears to be JSON");
+          unsigned long parse_start_ms = millis();
+          bool parse_ok = parse_and_update_shopping_list(response_json);
+          Serial.printf("[LIST_REFRESH] parse_ms=%lu ok=%d\n",
+                        (unsigned long)(millis() - parse_start_ms),
+                        parse_ok ? 1 : 0);
+          if (!parse_ok) {
+            list_refresh_fail("json_parse");
+          }
+          return parse_ok;
+        } else {
+          Serial.println("⚠ Response doesn't look like JSON");
+          Serial.print("First 100 chars: ");
+          Serial.println(response_json.substring(0, 100));
           list_refresh_fail("json_parse");
         }
-      } else {
-        Serial.println("⚠ Response doesn't look like JSON");
-        Serial.print("First 100 chars: ");
-        Serial.println(response_json.substring(0, 100));
+        return false;
       }
-      return;
-    }
-    if (httpResponseCode > 0) {
-      Serial.printf("[NET] fetch_fail kind=HTTP code=%d errno=%d duration_ms=%lu\n",
+      if (httpResponseCode > 0) {
+        Serial.printf("[NET] fetch_fail kind=HTTP code=%d errno=%d duration_ms=%lu\n",
+                      httpResponseCode,
+                      errno,
+                      request_duration_ms);
+        list_refresh_fail("http_error");
+        return false;
+      }
+
+      String err_lower = err_str;
+      err_lower.toLowerCase();
+      IPAddress dns_ip;
+      bool dns_resolve_ok = WiFi.hostByName(list_host.c_str(), dns_ip);
+      const char* fail_kind = "TLS";
+      if (!dns_resolve_ok) {
+        fail_kind = "DNS";
+      } else if (httpResponseCode == HTTPC_ERROR_READ_TIMEOUT ||
+                 err_lower.indexOf("timeout") >= 0 ||
+                 err_lower.indexOf("timed out") >= 0 ||
+                 err_lower.indexOf("connect") >= 0) {
+        fail_kind = "TIMEOUT";
+      }
+      Serial.printf("[NET] fetch_fail kind=%s code=%d errno=%d duration_ms=%lu\n",
+                    fail_kind,
                     httpResponseCode,
                     errno,
                     request_duration_ms);
-      list_refresh_fail("http_error");
-      return;
-    }
+      Serial.printf("[NET] fetch_fail begin_ok=%d dns_ok=%d tls_err=%d tls_msg=%s\n",
+                    begin_ok ? 1 : 0,
+                    dns_resolve_ok ? 1 : 0,
+                    tls_err,
+                    tls_err_str.c_str());
 
-    String err_lower = err_str;
-    err_lower.toLowerCase();
-    IPAddress dns_ip;
-    bool dns_resolve_ok = WiFi.hostByName(list_host.c_str(), dns_ip);
-    const char* fail_kind = "TLS";
-    if (!dns_resolve_ok) {
-      fail_kind = "DNS";
-    } else if (httpResponseCode == HTTPC_ERROR_READ_TIMEOUT ||
-               err_lower.indexOf("timeout") >= 0 ||
-               err_lower.indexOf("timed out") >= 0 ||
-               err_lower.indexOf("connect") >= 0) {
-      fail_kind = "TIMEOUT";
-    }
-    Serial.printf("[NET] fetch_fail kind=%s code=%d errno=%d duration_ms=%lu\n",
-                  fail_kind,
-                  httpResponseCode,
-                  errno,
-                  request_duration_ms);
-    Serial.printf("[NET] fetch_fail begin_ok=%d dns_ok=%d tls_err=%d tls_msg=%s\n",
-                  begin_ok ? 1 : 0,
-                  dns_resolve_ok ? 1 : 0,
-                  tls_err,
-                  tls_err_str.c_str());
-
-    if (httpResponseCode == -1 && attempt == 0) {
+      if (httpResponseCode == -1 && attempt == 0) {
+        retry = true;
+      } else {
+        Serial.print("✗ HTTP request failed! Error: ");
+        Serial.println(err_str);
+        if (strcmp(fail_kind, "DNS") == 0) {
+          list_refresh_fail("dns_error");
+        } else if (strcmp(fail_kind, "TIMEOUT") == 0) {
+          list_refresh_fail("timeout");
+        } else {
+          list_refresh_fail("network_fail");
+        }
+        return false;
+      }
+    }  // Destroy response/error/JSON temporaries, then restore the camera reserve.
+    if (retry) {
       unsigned long backoff_ms = 500 + (unsigned long)random(0, 1001);
       Serial.printf("[HTTP] code=-1 retrying backoff_ms=%lu\n", backoff_ms);
       vTaskDelay(pdMS_TO_TICKS(backoff_ms));
-      continue;
     }
-
-    Serial.print("✗ HTTP request failed! Error: ");
-    Serial.println(err_str);
-    if (strcmp(fail_kind, "DNS") == 0) {
-      list_refresh_fail("dns_error");
-    } else if (strcmp(fail_kind, "TIMEOUT") == 0) {
-      list_refresh_fail("timeout");
-    } else {
-      list_refresh_fail("network_fail");
-    }
-    return;
   }
+  return false;
 }
 
 #endif // SENSE_LIST_H

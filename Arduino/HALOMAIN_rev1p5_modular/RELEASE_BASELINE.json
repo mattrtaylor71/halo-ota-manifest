@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "status": "candidate_pending_build_and_acceptance",
+  "candidate_version": "6.4.104",
+  "canary_versions": ["6.4.102", "6.4.103"],
+  "canary_profile": "shipping policy with only the fixed private OTA route changed",
+  "release_commit": null,
+  "release_tree": null,
+  "release_tag": null,
+  "release_artifact_manifest": null,
+  "shipping_acceptance_receipt": null,
+  "production_publication_receipt": null,
+  "previous_production_manifest_archive": null,
+  "factory_and_rollback_instructions": null,
+  "source_basis": {
+    "name": "M8 bounded report, stack and watchdog integration",
+    "checkpoint_sha256": "a74915125f46d8765de2027d698a5ca8cee901e3eadfa1b16a2d3c14765c4b54",
+    "integration_receipt": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-source-integration001/MATERIALIZATION.json"
+  },
+  "canonical_builder": "tools/build_ota_policy_production.py",
+  "acceptance_plan": "docs/PRODUCTION_RELEASE_ACCEPTANCE.md",
+  "workflow": "docs/RELEASE_BASELINE.md",
+  "changelog": "CHANGELOG.md",
+  "default_checkout_adoption": {
+    "status": "pending_verified_release_commit",
+    "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
+    "receipt": null
+  },
+  "qualification_scope": "Three earlier bench scheduled installs passed. Canary102/103 and final production104 remain separate pending identities; no final104 build, hardware acceptance or publication is claimed by this record."
+}

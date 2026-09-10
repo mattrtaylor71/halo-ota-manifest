@@ -23,6 +23,46 @@
 #define HALO_UART_SEND_WIFI_PASS 1
 
 #include <Arduino.h>
+#ifndef HALO_DURABLE_OTA_POLICY
+#define HALO_DURABLE_OTA_POLICY 0
+#endif
+#ifndef HALO_DIAGNOSTIC_ADMISSION
+#define HALO_DIAGNOSTIC_ADMISSION 0
+#endif
+#ifndef HALO_IDLE_NETWORK_PROBE
+#define HALO_IDLE_NETWORK_PROBE 0
+#endif
+#if HALO_IDLE_NETWORK_PROBE
+static bool halo_idle_probe_usb_line(const char*,size_t);
+#endif
+#ifndef HALO_OTA_ONE_SHOT
+#define HALO_OTA_ONE_SHOT 0
+#endif
+#if HALO_DURABLE_OTA_POLICY
+static bool halo_policy_network_admitted();
+static bool halo_policy_allocated_held();
+static bool halo_policy_lcd_begin();
+static const char* halo_policy_lcd_manifest_version();
+static bool halo_policy_arm_waiting();
+static uint32_t halo_policy_timer_delta();
+static bool halo_policy_bench_deferred_arm(uint32_t&,uint32_t&,char*,size_t);
+static bool halo_policy_notice_due(const char*);
+static bool halo_policy_boot_ready();
+static bool halo_policy_short_due();
+static void halo_policy_service_boot();
+static uint32_t halo_policy_ntp_budget(uint32_t);
+static int32_t halo_policy_arm_timer(uint32_t&,uint32_t);
+static bool halo_policy_one_shot_ack(uint32_t,uint32_t,bool,const char*,const char*,bool,uint64_t,uint32_t,uint32_t,uint32_t,const char*,uint32_t);
+#endif
+#include "../shared/OtaHeapTrace.h"
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+static void sense_diag_note_timer_sdk(uint64_t timer_us,int32_t sdk_result);
+static void sense_diag_presleep();
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_OTA_POLICY
+static void halo_sleep_witness_enter();
+static bool halo_diag_auth_usb_line(const char*,size_t);
+#endif
+#endif
 
 #include <mbedtls/platform.h>
 
@@ -56,6 +96,7 @@ struct LcdVerifiedArmAck {
   char challenge[40] = {0}, request_id[64] = {0};
 };
 static LcdVerifiedArmAck g_lcd_verified_arm;
+static LcdVerifiedArmAck g_self_retry_arm;
 static bool g_lcd_maint_ack_received = false;
 static unsigned long g_lcd_maint_ack_ms = 0;
 static uint32_t g_lcd_maint_ack_remaining_s = 0;
@@ -113,6 +154,8 @@ static volatile bool g_lcd_ota_task_running = false;
 #include "../shared/Version.h"
 #include "../shared/Log.h"
 #include "../shared/BootState.h"
+#include "../shared/CoordinatorCreditState.h"
+#include <nvs.h>
 
 // Forward-declared enum (must precede the .ino auto-prototype hoist of
 // ota_sched_revalidate(), whose return type is SchedRevalidate; definition is
@@ -128,6 +171,7 @@ enum SchedRevalidate { REVAL_VALID, REVAL_CANCELLED, REVAL_REPLACED, REVAL_FETCH
 #include "../shared/OtaIntent.h"
 #include "../shared/ManifestClient.h"
 #include "../shared/SenseOtaApplier.h"
+#include "../shared/SelfOtaRetry.h"
 #include "../shared/OtaExpect.h"
 #include "../shared/HealthGate.h"
 #include "../shared/WifiGuard.h"
@@ -362,6 +406,57 @@ static uint8_t g_coord_completed_count = 0;
 static char g_coord_pending[64] = {0};
 static bool g_peer_episode_finished = false;
 static char g_coord_completion_target[32] = {0};
+RTC_DATA_ATTR static SelfOtaRetry g_self_retry = {};
+RTC_DATA_ATTR static uint32_t g_last_selected_sleep_s = 0, g_last_selected_sleep_epoch = 0;
+static bool g_self_retry_boot = false, g_self_retry_execution = false;
+static uint32_t self_retry_now() {
+  const time_t now=time(nullptr);
+  return now>=1700000000 && uint64_t(now)<=UINT32_MAX ? (uint32_t)now : 0;
+}
+static bool self_retry_bound() {
+  return self_retry_identity(g_self_retry,g_coord_pending,g_coord_completion_target);
+}
+static uint32_t self_retry_selected_delta() {
+#if HALO_DURABLE_OTA_POLICY
+  return halo_policy_timer_delta();
+#else
+  // If user/retained work kept this boot awake through the opportunity, close
+  // it explicitly. A zero delta must not silently renew it or masquerade as an
+  // armed retry. No work is forced through the person's activity/ownership.
+  if (self_retry_bound() && g_self_retry.phase==SelfOtaRetryPhase::ARMED &&
+      !g_self_retry_boot && sense_time_has_fresh_sync() && self_retry_now()>=g_self_retry.due_epoch) {
+    g_self_retry.phase=SelfOtaRetryPhase::CLOSED;
+    LOG_INFO("[SELF_RETRY] closed reason=due_passed_while_awake origin=%s target=%s",
+             g_self_retry.origin,g_self_retry.version);
+  }
+  return self_retry_delta(g_self_retry,g_coord_pending,g_coord_completion_target,
+                          self_retry_now(),sense_time_has_fresh_sync());
+#endif
+}
+
+static bool self_retry_notice_due(const char* id) {
+#if HALO_DURABLE_OTA_POLICY
+  return halo_policy_notice_due(id);
+#else
+  const uint32_t now=self_retry_now();
+  return id && self_retry_bound() && g_self_retry.phase==SelfOtaRetryPhase::ARMED &&
+      !strcmp(id,g_self_retry.arm_id) && self_retry_time(g_self_retry,now,sense_time_has_fresh_sync()) &&
+      uint64_t(now)+SELF_OTA_RETRY_LCD_LEAD_S>=g_self_retry.due_epoch;
+#endif
+}
+
+static void self_retry_note_selected_timer(uint32_t seconds) {
+  g_last_selected_sleep_s=seconds;g_last_selected_sleep_epoch=self_retry_now();
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  sense_diag_presleep();
+#endif
+}
+static CoordinatorCreditState g_coord_credit;
+static bool g_coord_credit_loaded = false, g_coord_credit_load_attempted = false;
+// Any uncertain write closes this for the rest of this boot. NVS recovery on
+// the next normal boot, followed by validated load, is the only reopen path.
+static bool g_coord_credit_mutations = false, g_coord_credit_uncertain = false;
+static bool g_tz_initialized = false;
 static LcdOtaBudget g_lcd_work_budget;
 static bool g_lcd_work_budget_live = false, g_peer_continue_work = false;
 static char g_lcd_work_schedule[64] = {0};
@@ -375,7 +470,11 @@ static void ota_peer_service();
 static bool ota_peer_accept_new_request();
 static void ota_peer_cancel(const char* reason);
 static bool ota_peer_ready();
-static void ota_peer_schedule_complete();
+enum class CoordCompletion { Deferred, NoPending, Credited, ResolvedUncredited };
+static CoordCompletion ota_peer_schedule_complete();
+static bool coord_credit_store_arm(const char* id, uint32_t target);
+static bool coord_credit_prepare_work(const char* reason);
+static uint32_t lcd_verified_arm_apply_budget();
 
 static volatile bool g_manual_ota_override = false;
 static unsigned long g_manual_ota_override_until_ms = 0;
@@ -1180,6 +1279,15 @@ static void ota_report_add_optional_str(JsonObject obj, const char* key, const c
 // pre_sleep payload except report_type is parametrized and an optional small
 // set of extra string fields can be appended (used by window_armed /
 // ota_complete). Pass report_type == nullptr to default to "pre_sleep".
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+static void sense_diag_report_discovery(JsonObject& payload);
+#endif
+#if HALO_DURABLE_OTA_POLICY
+static void halo_policy_append_report(JsonDocument&);
+#endif
+#include "../shared/SenseIdleNetworkGuard.h"
+#include "../shared/SenseBoundedPost.h"
+
 static bool ota_report_build_payload(String& out,
                                      const char* report_type,
                                      const OtaReportExtras* extras) {
@@ -1226,6 +1334,23 @@ static bool ota_report_build_payload(String& out,
   payload["wake_cause_str"] = ota_report_wake_cause_str(truth_get_wake_cause());
   payload["reset_reason"] = ota_report_reset_reason_str(esp_reset_reason());
   payload["uptime_ms"] = millis();
+  // IDF returns bytes, not FreeRTOS words. This task-lifetime minimum includes
+  // earlier diagnostic/admission work, but not this payload's future POST.
+  payload["loop_stack_min_free_bytes"] = uint32_t(uxTaskGetStackHighWaterMark(nullptr));
+  payload["loop_stack_sample_ms"] = millis();
+  payload["last_sleep_timer_selected_s"]=g_last_selected_sleep_s;
+  payload["last_sleep_timer_selected_epoch"]=g_last_selected_sleep_epoch;
+#if HALO_DURABLE_OTA_POLICY
+  halo_policy_append_report(doc);
+#else
+  if (self_retry_shape(g_self_retry)) {
+    payload["self_retry_phase"]=(unsigned)g_self_retry.phase;
+    payload["self_retry_due_epoch"]=g_self_retry.due_epoch;
+    payload["self_retry_expires_epoch"]=g_self_retry.expires_epoch;
+    payload["self_retry_origin"]=g_self_retry.origin;
+    payload["self_retry_target"]=g_self_retry.version;
+  }
+#endif
   payload["maintenance_mode"] = truth_get_maintenance_mode() ? 1 : 0;
   payload["maintenance_in_window"] = truth_get_maintenance_in_window() ? 1 : 0;
   payload["maint_scheduled"] = truth_get_ota_sched_enable() ? 1 : 0;
@@ -1288,6 +1413,20 @@ static bool ota_report_build_payload(String& out,
   ota_report_add_optional_str(payload, "lcd_diag_last_tx", truth_get_lcd_diag_last_tx());
   ota_report_add_optional_str(payload, "lcd_diag_last_rx", truth_get_lcd_diag_last_rx());
   ota_report_add_optional_str(payload, "ota_result", g_last_ota_result);
+  // Same-loop applier/report ownership; detail is volatile and never a boot gate.
+  // Seven bounded scalar fields; preserve the existing high-level result string.
+  const auto failure = g_ota_applier.getFailureSnapshot();
+  if (failure.stage != SenseOtaApplier::FailureStage::NONE &&
+      strcmp(g_last_ota_result, "FAILED_WRITE") == 0) {
+    payload["ota_fail_stage"] = SenseOtaApplier::getFailureStageString(failure.stage);
+    payload["ota_fail_sdk"] = failure.sdk_error;
+    payload["ota_fail_offset"] = failure.offset;
+    payload["ota_fail_expected"] = failure.expected_bytes;
+    payload["ota_fail_heap"] = failure.free_heap;
+    payload["ota_fail_largest"] = failure.largest_internal;
+    payload["ota_fail_minimum"] = failure.minimum_internal;
+  }
+  ota_heap::report(payload);
   ota_report_add_optional_str(payload, "maint_followup_retry_reason", g_maint_followup_retry_reason);
   ota_report_add_optional_str(payload, "maint_followup_retry_request_id", g_maint_followup_retry_request_id);
 
@@ -1321,6 +1460,9 @@ static bool ota_report_build_payload(String& out,
     payload["manifest_version"] = manifest_state.version;
   }
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  if(!report_type||!strcmp(report_type,"pre_sleep"))sense_diag_report_discovery(payload);
+#endif
   // Caller-supplied extras (e.g. sense_fw_target on ota_complete). Added last
   // so they can override/augment without touching the common builder body.
   if (extras) {
@@ -1330,8 +1472,18 @@ static bool ota_report_build_payload(String& out,
   }
 
   out = "";
-  serializeJson(doc, out);
-  if (out.length() == 0) {
+  // ArduinoJson 7 does not enforce the legacy constructor capacity. Refuse an
+  // allocation-truncated document or output instead of reporting partial detail.
+  if (doc.overflowed()) {
+    LOG_WARN("[OTA_REPORT] document allocation failed");
+    return false;
+  }
+  sense_idle_network::append(doc);
+  const size_t expected_json_bytes = measureJson(doc);
+  const size_t written_json_bytes = serializeJson(doc, out);
+  if (written_json_bytes == 0 || written_json_bytes != expected_json_bytes ||
+      out.length() != written_json_bytes) {
+    out = "";
     LOG_WARN("[OTA_REPORT] serialize failed");
     return false;
   }
@@ -1340,13 +1492,12 @@ static bool ota_report_build_payload(String& out,
 
 // Generic device-state report POST. Builds the SAME rich payload as the
 // historical pre_sleep report but with an arbitrary report_type and an optional
-// small set of extra string fields. Non-blocking-ish: guards on wifi and uses
-// the existing bounded-timeout HTTP pattern, so it skips gracefully (no hang)
-// when WiFi is down. report_type == nullptr => "pre_sleep".
+// small set of extra string fields. Uses one cooperative POST deadline and
+// bounded cleanup; the existing watchdog remains the fallback for SDK stalls.
+// report_type == nullptr => "pre_sleep".
 static bool ota_report_post(const char* report_type,
                             const OtaReportExtras* extras,
                             uint32_t timeout_ms) {
-  HaloNtpDnsGuard ntp_dns_guard;
   const char* rt = (report_type && report_type[0]) ? report_type : "pre_sleep";
   if (!OTA_REPORT_HTTP_URL[0]) {
     return false;
@@ -1367,6 +1518,21 @@ static bool ota_report_post(const char* report_type,
   MaintenanceWindow mw;
   bool has_mw = maintenance_window_load(&mw);
 
+  const bool idle_report=HALO_IDLE_NETWORK_RECOVERY&&!strcmp(rt,"pre_sleep");
+  // Metadata/NVS reads above finish before the subscription. The guard outlives
+  // HTTP/TLS/DNS and DMA cleanup below; it never spans policy work or storage.
+  const uint32_t guard_deadline=idle_report?sense_idle_network::window_deadline:0;
+  const uint32_t post_started=millis();
+  // Non-idle window_armed reports are outside this isolated guard scope.
+  struct ReportGuard {
+    alignas(sense_idle_network::Guard) uint8_t memory[sizeof(sense_idle_network::Guard)];
+    sense_idle_network::Guard*guard=nullptr;
+    ReportGuard(bool enabled,uint32_t d){if(enabled)guard=new(memory)sense_idle_network::Guard(halo_idle_net::Op::Ordinary,d);}
+    ~ReportGuard(){if(guard)guard->~Guard();}
+    bool active()const{return !guard||guard->active();}
+  } recovery(idle_report,guard_deadline);
+  if(!recovery.active()){LOG_INFO("[OTA_REPORT] skip pre_sleep (network_guard=%u)",sense_idle_network::last_decision);return false;}
+  HaloNtpDnsGuard ntp_dns_guard;
   // Free the camera DMA reserve for the duration of the HTTPS handshake/POST and
   // auto-restore on every return path. This report can fire during a maintenance
   // window with the 16KB camera reserve held, which otherwise starves the TLS
@@ -1374,60 +1540,22 @@ static bool ota_report_post(const char* report_type,
   const bool report_is_https = ota_report_http_is_https(OTA_REPORT_HTTP_URL);
   ScopedTlsDmaReserve tls_dma_guard(report_is_https);
 
-  HTTPClient http;
-  WiFiClient plain_client;
-  WiFiClientSecure secure_client;
-  bool started = false;
-  if (report_is_https) {
-#if OTA_REPORT_HTTP_INSECURE
-    secure_client.setInsecure();
-#else
-    ota_http_configure_tls(secure_client, "OTA_REPORT", OTA_REPORT_HTTP_ROOT_CA);
-#endif
-    secure_client.setHandshakeTimeout(15);
-    secure_client.setTimeout(timeout_ms);
-    started = http.begin(secure_client, OTA_REPORT_HTTP_URL);
-  } else {
-    plain_client.setTimeout(timeout_ms);
-    started = http.begin(plain_client, OTA_REPORT_HTTP_URL);
-  }
-  if (!started) {
-    LOG_WARN("[OTA_REPORT] begin failed url=%s", OTA_REPORT_HTTP_URL);
-    return false;
-  }
-
-  http.setConnectTimeout(static_cast<int>(timeout_ms));
-  http.setTimeout(static_cast<int>(timeout_ms));
-  http.setReuse(false);
-  http.addHeader("Content-Type", "application/json");
-  if (device_id[0]) {
-    http.addHeader("X-Device-Id", device_id);
-  }
-  if (owner_ok && owner_id[0]) {
-    http.addHeader("X-Owner-Id", owner_id);
-  }
-  if (has_mw && mw.request_id[0]) {
-    http.addHeader("X-Request-Id", mw.request_id);
-  }
-
-  int http_code = http.POST(body);
-  String response;
-  if (http_code > 0) {
-    response = http.getString();
-  }
-  http.end();
-
-  bool ok = (http_code == HTTP_CODE_OK || http_code == HTTP_CODE_ACCEPTED);
-  if (ok) {
-    LOG_INFO("[OTA_REPORT] %s ok code=%d body_len=%u", rt, http_code, static_cast<unsigned>(body.length()));
-    return true;
-  }
-
-  String response_preview = response.length() ? response.substring(0, 160) : String("-");
-  LOG_WARN("[OTA_REPORT] %s failed code=%d resp=%s",
-           rt,
-           http_code,
-           response_preview.c_str());
+  const uint32_t budget=timeout_ms<sense_post::REQUEST_MS?timeout_ms:sense_post::REQUEST_MS;
+  const uint32_t owner_end=idle_report?guard_deadline:post_started+budget+sense_post::CLEANUP_MS;
+  const sense_post::Request request{OTA_REPORT_HTTP_URL,device_id,owner_ok?owner_id:nullptr,
+      has_mw?mw.request_id:nullptr,reinterpret_cast<const uint8_t*>(body.c_str()),body.length(),false};
+  const sense_post::Lease lease{const_cast<bool*>(&idle_report),[](void*arg){
+      return wifi_is_connected()&&(!*static_cast<bool*>(arg)||halo_idle_network_safe());
+    },owner_end,timeout_ms,post_started};
+  sense_post::Response response;
+  const sense_post::Result result=sense_post::post_once(request,lease,response);
+  // Bounded existing serial logging after TLS cleanup; this sample includes
+  // the just-returned POST. It creates no new report, wake or transport retry.
+  LOG_INFO("[OTA_STACK] after_post_min_free_bytes=%lu",static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
+  const bool ok=result==sense_post::Result::Received&&(response.status==HTTP_CODE_OK||response.status==HTTP_CODE_ACCEPTED);
+  if(ok){LOG_INFO("[OTA_REPORT] %s ok code=%d body_len=%u",rt,response.status,static_cast<unsigned>(body.length()));return true;}
+  LOG_WARN("[OTA_REPORT] %s failed code=%d stage=%u result=%u sent=%u cleanup=%u",rt,response.status,
+      unsigned(response.stage),unsigned(result),unsigned(response.bytes_sent),unsigned(response.cleanup_ok));
   return false;
 }
 
@@ -1647,6 +1775,10 @@ void halo_prod_on_lcd_maint_ack(uint32_t remaining_s,
                                 uint32_t grace_after_sec,
                                 const char* coord_id, uint32_t peer_boot_id) {
   if (coord_id && coord_id[0]) {
+#if HALO_DURABLE_OTA_POLICY && HALO_OTA_ONE_SHOT
+    if(halo_policy_one_shot_ack(remaining_s,wake_in_s,clear,request_id,status,persisted,start_epoch,
+       duration_sec,grace_before_sec,grace_after_sec,coord_id,peer_boot_id))return;
+#endif
     // A future sleep arm never completes or replaces the current OTA origin.
     if (g_lcd_verified_arm.waiting &&
         (uint32_t)(millis() - g_lcd_verified_arm.started_ms) < g_lcd_verified_arm.budget_ms &&
@@ -1659,6 +1791,22 @@ void halo_prod_on_lcd_maint_ack(uint32_t remaining_s,
         remaining_s == g_lcd_verified_arm.remaining_s && wake_in_s == remaining_s &&
         !duration_sec && !grace_before_sec && !grace_after_sec) {
       g_lcd_verified_arm.matched = true;
+    }
+    // Separate bounded arm proof: never renew the completed apply/work budget.
+    if (g_self_retry_arm.waiting &&
+#if HALO_DURABLE_OTA_POLICY
+        halo_policy_arm_waiting() &&
+#else
+        self_retry_bound() && g_self_retry.phase==SelfOtaRetryPhase::RESERVED &&
+#endif
+        (uint32_t)(millis()-g_self_retry_arm.started_ms)<g_self_retry_arm.budget_ms &&
+        strcmp(coord_id,g_self_retry_arm.challenge)==0 &&
+        peer_boot_id==g_self_retry_arm.peer_boot_id && request_id && status &&
+        strcmp(request_id,g_self_retry_arm.request_id)==0 && !clear && persisted &&
+        strcmp(status,"stored_verified")==0 && start_epoch==g_self_retry_arm.start_epoch &&
+        remaining_s==g_self_retry_arm.remaining_s && wake_in_s==remaining_s &&
+        !duration_sec && !grace_before_sec && !grace_after_sec) {
+      g_self_retry_arm.matched=true;
     }
     return;
   }
@@ -1948,10 +2096,13 @@ static void maybe_cancel_manual_ota_unready() {
 
 
 static bool ota_peer_accept_new_request() {
+  // Do not consume debt/requests or begin a new OTA before local VALID.
+  if (!nvs_capacity_image_valid()) return false;
   if (g_ota_check_in_progress || g_ota_apply_in_progress || g_lcd_ota_task_running ||
       g_lcd_ota_proxy_owns_uart || g_peer_gate.active || g_boot_ota_pending) return false;
   g_peer_episode_finished = false;
   g_ota_check_done = false;
+  g_self_retry_boot = false; g_self_retry_execution = false; // explicit new request keeps its own policy
   g_lcd_work_budget_live = false; g_peer_continue_work = false;
   g_lcd_work_schedule[0] = 0;
   return true;
@@ -2018,6 +2169,10 @@ void halo_prod_request_maint_test(uint32_t duration_sec) {
   Serial.println("[MAINT_TEST] maintenance mode armed — will run on next loop()");
 }
 
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+static void halo_sleep_witness_sent(const MaintenanceWindow*,uint32_t,uint32_t,bool,uint32_t,bool);
+static void halo_sleep_witness_boot();
+#endif
 static void send_maint_window(const MaintenanceWindow* mw,
                               uint32_t remaining_s,
                               uint32_t wake_in_s,
@@ -2054,9 +2209,21 @@ static void send_maint_window(const MaintenanceWindow* mw,
   if (clear_schedule) {
     doc["clear"] = true;
   }
+  // Optional observational identity. Reuse the checked boot counter carried by
+  // OTA_LOCK; an old LCD may ignore it. Never grow an existing frame beyond the
+  // peer limit or prevent an otherwise unchanged schedule from being sent.
+  if (g_coord_sense_boot_id) {
+    doc["sense_boot_id"] = g_coord_sense_boot_id;
+    if (doc.overflowed() || measureJson(doc) > UART_RX_FRAME_MAX)
+      doc.remove("sense_boot_id");
+  }
   String output;
   serializeJson(doc, output);
   uart_send_json(output.c_str());
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+  halo_sleep_witness_sent(mw,remaining_s,wake_in_s,clear_schedule,peer_boot_id,
+                         doc["sense_boot_id"].is<uint32_t>()&&doc["sense_boot_id"].as<uint32_t>()==g_coord_sense_boot_id);
+#endif
   LOG_INFO("[MAINT_TX] to_lcd remaining_s=%lu wake_in_s=%lu clear=%d request_id=%s start_epoch=%llu now_epoch=%llu",
            (unsigned long)remaining_s,
            (unsigned long)wake_in_s,
@@ -2070,6 +2237,20 @@ static void send_maint_window(const MaintenanceWindow* mw,
 // pre-apply fallback. Private shortened test sleeps retain their relative ID.
 static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
   if (!wake_in_s) return;
+  // This exact future arm was readback-ACKed before OTA_UNLOCK. Do not replace
+  // it with an unverified relative/calendar message on an intervening user wake
+  // or an earlier drain/pin timer. Original pending credit remains separate.
+  uint32_t bench_due=0,bench_delta=0;char bench_id[64]{};
+#if HALO_DURABLE_OTA_POLICY
+  bool bench_arm=halo_policy_bench_deferred_arm(bench_due,bench_delta,bench_id,sizeof(bench_id));
+#else
+  bool bench_arm=false;
+#endif
+  if (self_retry_selected_delta()&&!bench_arm) {
+    LOG_INFO("[SELF_RETRY] retain_verified_arm id=%s target=%lu selected=%lu",
+             g_self_retry.arm_id,(unsigned long)g_self_retry.due_epoch,(unsigned long)wake_in_s);
+    return;
+  }
   // Do not replace a previously verified absolute arm with an untrusted
   // relative fallback after reboot. Without an arm LCD already has periodic
   // six-hour fallback; no exact fallback co-scheduling claim is made.
@@ -2077,6 +2258,16 @@ static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
     LOG_WARN("[MAINT_COSCHED] no fresh clock; existing LCD arm and schedule retained");
     return;
   }
+#if HALO_DURABLE_OTA_POLICY
+  // selected_delta may just have closed a missed short opportunity. Never
+  // transmit its earlier delta as a new peer arm; keep the normal fallback.
+  {
+    std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+    bench_arm=halo_policy_bench_deferred_arm(bench_due,bench_delta,bench_id,sizeof(bench_id));
+    wake_in_s=bench_arm?bench_delta:halo_seconds_until_maintenance(time(nullptr));
+  }
+  if(!wake_in_s)return;
+#endif
   MaintenanceWindow identity = {};
   // Timer-only arm: the maintenance constructor defaults are not zero.
   identity.duration_sec = 0;
@@ -2095,7 +2286,9 @@ static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
   if (now < 1700000000 || uint64_t(now) + wake_in_s > UINT32_MAX) return;
   identity.start_epoch = (uint64_t)target;
 #endif
-  if (calendar) {
+  if(bench_arm){
+    identity.start_epoch=bench_due;strlcpy(identity.request_id,bench_id,sizeof(identity.request_id));
+  } else if (calendar) {
     const uint32_t delta = halo_seconds_until_maintenance(now);
     if (!delta || uint64_t(now) + delta > UINT32_MAX) return;
     identity.start_epoch = uint64_t(now) + delta;
@@ -2107,12 +2300,7 @@ static void prod_co_schedule_lcd_maint_wake(uint32_t wake_in_s) {
     snprintf(identity.request_id, sizeof(identity.request_id), "relative_%lu_%lu",
              (unsigned long)target, (unsigned long)wake_in_s);
   }
-  Preferences p;
-  if (!p.begin("ota_coord", false)) return;
-  const size_t written = p.putString("schedule", identity.request_id);
-  const bool committed = written == strlen(identity.request_id) &&
-      p.getString("schedule", "") == identity.request_id;
-  p.end();
+  const bool committed = coord_credit_store_arm(identity.request_id, (uint32_t)identity.start_epoch);
   if (!committed) {
     LOG_WARN("[MAINT_COSCHED] schedule identity storage failed; prior arm retained");
     return;
@@ -2349,90 +2537,6 @@ static void maintenance_resync_on_time_jump(const char* reason) {
   g_last_time_valid_epoch = now_epoch;
 }
 
-static void lcd_ota_proxy_task(void* param) {
-  HaloNtpDnsGuard ntp_dns_guard;
-  LOG_INFO("[LCD_OTA_PROXY_TASK] started stack=%u",
-           (unsigned)uxTaskGetStackHighWaterMark(NULL));
-
-  // Release camera DMA reservation to free 16KB of internal SRAM for TLS.
-  // Camera is not used during OTA. Device reboots after LCD OTA, re-reserving in setup().
-  if (g_camera_dma_reserve) {
-    heap_caps_free(g_camera_dma_reserve);
-    g_camera_dma_reserve = nullptr;
-    LOG_INFO("[LCD_OTA_PROXY] Camera DMA reservation released for TLS headroom");
-  }
-
-  // Step 1: Query LCD for its current firmware version
-  char lcd_fw[32] = {0};
-  uint32_t lcd_part_size = 0;
-  if (!sense_lcd_ota_query(lcd_fw, sizeof(lcd_fw), &lcd_part_size)) {
-    LOG_INFO("[LCD_OTA_ORCH] lcd_query_fail (proxy)");
-    strncpy(g_lcd_ota_result, "lcd_query_fail", sizeof(g_lcd_ota_result) - 1);
-    g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-    g_lcd_ota_done = true;
-    send_ota_uart_message("OTA_UNLOCK");
-    LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (lcd_query_fail)");
-    g_lcd_ota_task_running = false;
-    ntp_dns_guard.release();
-    vTaskDelete(NULL);
-    return;
-  }
-
-  // Step 2: Fetch LCD manifest from S3
-  // (MQTT + manifest client already released before task creation)
-  const OtaUrlConfig* cfg = ota_get_config();
-  OtaManifest lcd_manifest;
-  if (!sense_lcd_ota_fetch_manifest(cfg->base_dir, cfg->channel, lcd_manifest)) {
-    LOG_INFO("[LCD_OTA_ORCH] manifest_fetch_fail (proxy)");
-    strncpy(g_lcd_ota_result, "manifest_fetch_fail", sizeof(g_lcd_ota_result) - 1);
-    g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-    g_lcd_ota_done = true;
-    send_ota_uart_message("OTA_UNLOCK");
-    LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (manifest_fetch_fail)");
-    mqtt_force_connect();
-    g_lcd_ota_task_running = false;
-    ntp_dns_guard.release();
-    vTaskDelete(NULL);
-    return;
-  }
-
-  // Step 4: Proxy the update (downloads binary, streams to LCD via UART)
-  const char* proxy_result = sense_lcd_ota_proxy(lcd_manifest, lcd_fw);
-  LOG_INFO("[LCD_OTA_ORCH] proxy_result=%s", proxy_result);
-
-  // Map proxy result to g_lcd_ota_result
-  if (strcmp(proxy_result, "success") == 0) {
-    strncpy(g_lcd_ota_result, "updated", sizeof(g_lcd_ota_result) - 1);
-    // Do NOT assume the manifest version is now running. The LCD reboots into
-    // the new image; the cloud-reported lcd_fw must reflect the REAL running
-    // version from a future LCD_OTA_QUERY_RESP, not the OTA target. Invalidate
-    // the cached value so the pre-sleep / periodic query path re-queries the
-    // LCD and overwrites it with the actual booted version.
-    g_lcd_ota_version[0] = '\0';
-    g_lcd_fw_query_ms = 0;
-    LOG_INFO("[LCD_OTA_ORCH] cleared cached lcd_fw; will re-query real version post-reboot");
-  } else if (strcmp(proxy_result, "up_to_date") == 0) {
-    strncpy(g_lcd_ota_result, "noop", sizeof(g_lcd_ota_result) - 1);
-  } else {
-    strncpy(g_lcd_ota_result, proxy_result, sizeof(g_lcd_ota_result) - 1);
-  }
-  g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-  g_lcd_ota_done = true;
-
-  // Unlock LCD so it can sleep (success case: LCD reboots, but unlock is harmless)
-  send_ota_uart_message("OTA_UNLOCK");
-  LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (proxy_result=%s)", proxy_result);
-
-  // Restore MQTT connection
-  mqtt_force_connect();
-
-  LOG_INFO("[LCD_OTA_PROXY_TASK] done stack_remaining=%u",
-           (unsigned)uxTaskGetStackHighWaterMark(NULL));
-  g_lcd_ota_task_running = false;
-  ntp_dns_guard.release();
-  vTaskDelete(NULL);
-}
-
 static void maybe_trigger_lcd_ota_check() {
   // Foreground coordination owns this episode; never create a second worker
   // from one of its failure/no-op cleanup branches. Debt survives to recovery.
@@ -2447,6 +2551,12 @@ static void maybe_trigger_lcd_ota_check() {
   if (!maintenance_allowed && !manual_pending) {
     return;
   }
+#if HALO_DURABLE_OTA_POLICY
+  // Route legacy proof/background triggers through the same persisted paired
+  // admission. No second worker can fetch or erase outside those budgets.
+  g_ota_check_requested=true;
+  return;
+#endif
   // Skip maintenance-sync gates for manual requests
   if (maintenance_allowed && !manual_pending) {
     if (maintenance_schedule_pending_sync_to_lcd()) {
@@ -2468,37 +2578,11 @@ static void maybe_trigger_lcd_ota_check() {
   if (g_lcd_ota_attempted_this_window) {
     return;
   }
-  ProvisioningState::State prov_state = ProvisioningState::getState();
-  maybe_send_lcd_wifi_creds(prov_state);
-
-  // ── LCD OTA proxy: run on dedicated task (TLS needs ~12KB stack) ──
-  g_lcd_ota_attempted_this_window = true;
-  g_lcd_ota_task_running = true;
-
-  // Free internal RAM before task creation — the 12KB stack needs contiguous
-  // internal memory, and MQTT + manifest client can hold ~2-4KB.
-  g_manifest_client.releaseConnection();
-  mqtt_stop_for_ota();
-  vTaskDelay(pdMS_TO_TICKS(300));  // Let memory coalesce
-
-  LOG_INFO("[LCD_OTA_ORCH] heap before task: free=%u largest=%u psram_free=%u",
-           (unsigned)esp_get_free_heap_size(),
-           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-  BaseType_t rc = xTaskCreatePinnedToCore(
-    lcd_ota_proxy_task, "lcd_ota_proxy", 12288, NULL, 3, NULL, tskNO_AFFINITY);
-  if (rc != pdPASS) {
-    LOG_ERROR("[LCD_OTA_ORCH] task create FAILED rc=%d", (int)rc);
-    g_lcd_ota_task_running = false;
-    send_ota_uart_message("OTA_UNLOCK");
-    LOG_INFO("[LCD_OTA_ORCH] OTA_UNLOCK sent (task create failed)");
-    strncpy(g_lcd_ota_result, "task_create_fail", sizeof(g_lcd_ota_result) - 1);
-    g_lcd_ota_result[sizeof(g_lcd_ota_result) - 1] = '\0';
-    g_lcd_ota_done = true;
-    mqtt_force_connect();
-  } else {
-    LOG_INFO("[LCD_OTA_ORCH] proxy task spawned");
-  }
+  // Proof reporting remains observational. Queue the existing paired owner;
+  // do not reset terminal flags, owner state, readiness or work deadlines.
+  g_lcd_ota_attempted_this_window=true;
+  g_ota_check_requested=true;
+  LOG_INFO("[LCD_OTA_ORCH] queued existing paired owner (proof/fallback)");
 }
 
 static void send_provision_status(const char* state) {
@@ -2708,32 +2792,21 @@ static bool is_time_valid() {
   return now > 1700000000;
 }
 
-static bool g_tz_initialized = false;
-
-// Apply the owner's timezone once, at the first point we have a network.
-//
-// This used to hardcode `setenv("TZ", "PST8PDT,...")`. It runs on WiFi connect,
-// i.e. AFTER setup() has already applied the zone loaded from NVS — so it
-// silently overwrote it and forced US Pacific on every device in the fleet. The
-// nightly maintenance wake is defined in LOCAL time, so an owner in New York was
-// being woken at 05:00 and one in London at 10:00, and the boot log looked
-// perfectly healthy because `nextwake` faithfully reported the wrong zone.
-//
-// Reading NVS here (rather than trusting what setup() applied) is deliberate:
-// this runs well after ProvisioningState::init(), so it is the first moment the
-// stored zone is guaranteed readable.
+// Refresh from typed persisted configuration, including a same-boot backend
+// update. Only definite absence selects the default. Unknown storage leaves
+// the current display/runtime zone but cannot make calendar readiness true.
 static void ensure_timezone_pt(const char* reason) {
-  if (g_tz_initialized) {
-    return;
-  }
+  std::lock_guard<std::recursive_mutex> config_lock(ProvisioningState::timezoneMutex());
   char saved_tz[64];
-  const bool have = ProvisioningState::loadTimezone(saved_tz, sizeof(saved_tz)) && saved_tz[0];
-  sense_set_timezone(have ? saved_tz : nullptr);   // nullptr -> HALO_DEFAULT_TZ
-  g_tz_initialized = true;
-  LOG_INFO("[TZ] set=%s source=%s reason=%s",
-           have ? saved_tz : HALO_DEFAULT_TZ,
-           have ? "nvs" : "default",
-           reason ? reason : "unknown");
+  const auto status=ProvisioningState::loadTimezoneStatus(saved_tz,sizeof(saved_tz));
+  std::lock_guard<std::recursive_mutex> time_lock(g_time_mutex);
+  if(status==ProvisioningState::TimezoneStatus::Unknown){g_tz_initialized=false;return;}
+  const char* desired=status==ProvisioningState::TimezoneStatus::Present?saved_tz:HALO_DEFAULT_TZ;
+  if(!g_tz_initialized || strcmp(g_tz_current,desired) || !nightly_credit_timezone_matches(desired)){
+    sense_set_timezone(desired);
+    LOG_INFO("[TZ] confirmed source=%s reason=%s",status==ProvisioningState::TimezoneStatus::Present?"nvs":"absent-default",reason?reason:"unknown");
+  }
+  g_tz_initialized=true;
 }
 
 // Start SNTP/NTP the instant WiFi (STA) connects, so the owner-claim TLS and OTA
@@ -3081,27 +3154,8 @@ static void mark_lcd_ota_still_pending(const char* reason) {
   g_lcd_ota_request_active = false;
 }
 
-static void set_lcd_ota_due_nvs(bool value) {
-  Preferences p;
-  if (p.begin("halo", false)) {
-    if (value) {
-      p.putUInt("lcd_ota_due", 1);
-    } else {
-      p.remove("lcd_ota_due");
-    }
-    p.end();
-  }
-}
-
-static bool get_lcd_ota_due_nvs() {
-  Preferences p;
-  bool due = false;
-  if (p.begin("halo", true)) {
-    due = (p.getUInt("lcd_ota_due", 0) == 1);
-    p.end();
-  }
-  return due;
-}
+static bool set_lcd_ota_due_nvs(bool value);
+static bool get_lcd_ota_due_nvs();
 
 // Persist an inline LCD OTA outcome: updated/target or noop/queried version.
 // The Sense self-OTAs and reboots immediately after the inline proxy returns
@@ -3189,6 +3243,9 @@ static void boot_ota_queue(const char* reason) {
 }
 
 static void boot_ota_finish(const char* result) {
+  // The readiness opportunity has ended even when user work prevented its
+  // retry-admission hook from running. Never retain that per-boot gate forever.
+  g_self_retry_boot = false;
   g_boot_ota_pending = false;
   g_boot_ota_begin_record.repeat_pending = false;
   g_boot_ota_begin_record.noop_reported = false;
@@ -3253,6 +3310,517 @@ static bool ota_peer_schedule_completed(const char* id) {
   return false;
 }
 
+
+// BEGIN COORDINATOR_CREDIT_INTEGRATION
+static bool coord_credit_budget_open() {
+  return !(g_lcd_work_budget_live && !g_lcd_work_budget.remaining_ms()) &&
+      !(g_peer_gate.active && !g_peer_gate.entered &&
+        (int32_t)(millis() - g_peer_gate.deadline_ms) >= 0) &&
+      (!g_lcd_verified_arm.waiting || lcd_verified_arm_apply_budget() > 0);
+}
+static void coord_credit_clock(uint64_t& now, bool& fresh, char (&tz)[64], bool& finished) {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  now = (uint64_t)time(nullptr);
+  fresh = sense_time_has_fresh_sync() && g_tz_initialized;
+  strlcpy(tz, g_tz_initialized ? g_tz_current : "", sizeof(tz));
+  finished = (g_ntp_attempt_finished && !sense_time_has_fresh_sync()) ||
+      (g_boot_ota_deadline_ms != 0 && (int32_t)(millis() - g_boot_ota_deadline_ms) >= 0);
+}
+static NightlyCreditOrigin g_calendar_timer_origin;
+static bool g_coord_credit_persisted=false;
+static bool coord_credit_same_persisted(const CoordinatorCreditState& candidate) {
+  if(!g_coord_credit_persisted || g_coord_credit_uncertain || !g_coord_credit_mutations)return false;
+  uint8_t before[COORDINATOR_CREDIT_BYTES],after[COORDINATOR_CREDIT_BYTES];
+  return credit_encode(g_coord_credit,before) && credit_encode(candidate,after) && !memcmp(before,after,sizeof(before));
+}
+// Standard Arduino upload installs this exact two-bank UNDEFINED template.
+// Blank otadata is a distinct bootloader path that normally becomes VALID.
+static bool g_serial_install_checked=false,g_serial_install_uncertain=false;
+static bool coord_credit_known_serial_template(const esp_partition_t* running) {
+  if(!running || running->type!=ESP_PARTITION_TYPE_APP ||
+      running->subtype!=ESP_PARTITION_SUBTYPE_APP_OTA_0 ||
+      running->address!=0x10000 || running->size!=0x1e0000)return false;
+  const esp_partition_t* metadata=nvs_capacity_known_layout();
+  if(!metadata)return false;
+  uint8_t bytes[256];static const uint8_t first_crc[4]={0x9a,0x98,0x43,0x47};
+  for(size_t offset=0;offset<8192;offset+=sizeof(bytes)){
+    if(esp_partition_read(metadata,offset,bytes,sizeof(bytes))!=ESP_OK)return false;
+    for(size_t i=0;i<sizeof(bytes);++i){
+      const size_t at=offset+i;uint8_t expected=0xff;
+      if(at<4)expected=at==0?1:0;
+      else if(at>=28 && at<32)expected=first_crc[at-28];
+      else if(at>=4096 && at<4100)expected=0;
+      if(bytes[i]!=expected)return false;
+    }
+  }
+  return true;
+}
+static void coord_credit_service_serial_install() {
+  if(g_serial_install_checked || g_health_gate.getSkipMarkValid() ||
+      !g_health_gate.hasRuntimeReadiness() || g_ota_apply_in_progress)return;
+  // Existing logical repair/check budgets may need VALID to persist resolution.
+  // Do not make that obligation a prerequisite for validating this same image.
+#ifdef CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK
+  return; // this narrow serial-install contract does not change secure-version fuses
+#else
+  const esp_partition_t* running=esp_ota_get_running_partition();
+  const esp_partition_t* selected=esp_ota_get_boot_partition();
+  esp_ota_img_states_t state;
+  if(!running || !selected || running->address!=selected->address ||
+      esp_ota_get_state_partition(running,&state)!=ESP_OK || state!=ESP_OTA_IMG_UNDEFINED)return;
+  g_serial_install_checked=true; // one finite validation/mutation attempt per boot
+  if(!coord_credit_known_serial_template(running)){
+    Serial.println("[OTA_NVS_BOOT] serial_template=0 metadata_unchanged=1");return;
+  }
+  selected=esp_ota_get_boot_partition();
+  if(!selected || selected->address!=running->address || g_ota_apply_in_progress ||
+      g_health_gate.getSkipMarkValid() || !g_health_gate.hasRuntimeReadiness() ||
+      esp_ota_get_state_partition(running,&state)!=ESP_OK || state!=ESP_OTA_IMG_UNDEFINED)return;
+  // The SDK changes the selected active record directly to VALID. No NEW,
+  // forced reboot or additional first-provisioning rollback exposure is added.
+  g_serial_install_uncertain=true;
+  const esp_err_t result=esp_ota_mark_app_valid_cancel_rollback();
+  selected=esp_ota_get_boot_partition();
+  if(result==ESP_OK && selected && selected->address==running->address &&
+      esp_ota_get_state_partition(running,&state)==ESP_OK && state==ESP_OTA_IMG_VALID &&
+      nvs_capacity_image_valid())
+    g_serial_install_uncertain=false;
+  Serial.printf("[OTA_NVS_BOOT] serial_template=1 verified_valid=%u sdk_result=%d\n",
+      g_serial_install_uncertain?0:1,(int)result);
+#endif
+}
+
+// No new-format NVS while an automatic rollback to an older reader is possible.
+// A first upgraded PENDING_VERIFY boot may read v1, but cannot persist v2.
+static bool coord_credit_format_write_ready() {
+  if(g_serial_install_uncertain)return false;
+  return nvs_capacity_image_valid();
+}
+// Boot-only failure/uncertainty latch. Optional report-cache semantics remain
+// separate; no read failure can manufacture a cleared LCD obligation.
+static bool g_ota_storage_uncertain=false,g_lcd_due_ram_obligation=false;
+static bool ota_storage_read_debt(bool& due) {
+  due=true;
+  if(g_ota_storage_uncertain)return false;
+  nvs_handle_t h;const esp_err_t opened=nvs_open("halo",NVS_READONLY,&h);
+  if(opened==ESP_ERR_NVS_NOT_FOUND){due=false;return true;}
+  if(opened!=ESP_OK){g_ota_storage_uncertain=true;return false;}
+  uint32_t value=0;const esp_err_t result=nvs_get_u32(h,"lcd_ota_due",&value);nvs_close(h);
+  if(result==ESP_ERR_NVS_NOT_FOUND){due=false;return true;}
+  if(result!=ESP_OK || value>1){g_ota_storage_uncertain=true;return false;}
+  due=value==1;return true;
+}
+static bool get_lcd_ota_due_nvs() {
+  bool due=true;return !ota_storage_read_debt(due) || due || g_lcd_due_ram_obligation;
+}
+static bool ota_storage_known_clear() {
+  return !g_ota_storage_uncertain && !get_lcd_ota_due_nvs();
+}
+static bool ota_storage_mutation_open() {
+  return !g_ota_storage_uncertain && !g_coord_credit_uncertain && !g_nvs_reclaim_uncertain &&
+      coord_credit_format_write_ready() && coord_credit_budget_open();
+}
+static bool set_lcd_ota_due_nvs(bool value) {
+  if(value)g_lcd_due_ram_obligation=true;
+  if(!ota_storage_mutation_open())return false;
+  bool old=true;if(!ota_storage_read_debt(old))return false;
+  if(old==value){g_lcd_due_ram_obligation=value;return true;}
+  NvsCapacityLease lease;
+  if(!lease || !wakelog_nvs_prepare_essential(2,coord_credit_budget_open))return false;
+  nvs_handle_t h;
+  if(nvs_open("halo",NVS_READWRITE,&h)!=ESP_OK){g_ota_storage_uncertain=true;return false;}
+  if(!ota_storage_mutation_open()){nvs_close(h);return false;}
+  g_ota_storage_uncertain=true;
+  const esp_err_t wrote=value?nvs_set_u32(h,"lcd_ota_due",1):nvs_erase_key(h,"lcd_ota_due");
+  const esp_err_t committed=wrote==ESP_OK?nvs_commit(h):wrote;
+  uint32_t actual=0;const esp_err_t read=committed==ESP_OK?nvs_get_u32(h,"lcd_ota_due",&actual):committed;
+  const bool verified=committed==ESP_OK && (value?(read==ESP_OK && actual==1):read==ESP_ERR_NVS_NOT_FOUND);
+  nvs_close(h);
+  if(verified){g_ota_storage_uncertain=false;g_lcd_due_ram_obligation=value;}
+  else g_lcd_due_ram_obligation=true;
+  Serial.printf("[OTA_NVS] key=lcd_ota_due due=%u verified=%u\n",value?1:0,verified?1:0);
+  return verified;
+}
+static bool ota_storage_bind_target(const char* version) {
+  if(!ota_storage_mutation_open() || !ota_storage_known_clear() || !version || !version[0] ||
+      strlen(version)>=sizeof(g_coord_completion_target))return false;
+  if(!g_coord_pending[0])return true;
+  NvsCapacityLease lease;
+  if(!lease || !wakelog_nvs_prepare_essential(1+nvs_capacity_string_entries(strlen(version)),coord_credit_budget_open))return false;
+  nvs_handle_t h;
+  if(nvs_open("ota_coord",NVS_READWRITE,&h)!=ESP_OK){g_ota_storage_uncertain=true;return false;}
+  if(!ota_storage_mutation_open() || !ota_storage_known_clear()){nvs_close(h);return false;}
+  g_ota_storage_uncertain=true;
+  const esp_err_t wrote=nvs_set_str(h,"target",version);
+  const esp_err_t committed=wrote==ESP_OK?nvs_commit(h):wrote;
+  char actual[sizeof(g_coord_completion_target)]={0};size_t size=sizeof(actual);
+  const bool verified=committed==ESP_OK && nvs_get_str(h,"target",actual,&size)==ESP_OK &&
+      size==strlen(version)+1 && !strcmp(actual,version);
+  nvs_close(h);
+  if(verified){g_ota_storage_uncertain=false;strlcpy(g_coord_completion_target,version,sizeof(g_coord_completion_target));}
+  Serial.printf("[OTA_NVS] key=target verified=%u\n",verified?1:0);
+  return verified;
+}
+static bool ota_storage_init_generation() {
+  g_coord_sense_boot_id=0;
+  if(g_ota_storage_uncertain || g_serial_install_uncertain || g_coord_credit_uncertain || g_nvs_reclaim_uncertain)return false;
+  nvs_handle_t h;const esp_err_t opened=nvs_open("ota_coord",NVS_READONLY,&h);
+  uint32_t previous=0;esp_err_t read=ESP_ERR_NVS_NOT_FOUND;
+  if(opened==ESP_OK){read=nvs_get_u32(h,"generation",&previous);nvs_close(h);}
+  else if(opened!=ESP_ERR_NVS_NOT_FOUND){g_ota_storage_uncertain=true;return false;}
+  if(read!=ESP_OK && read!=ESP_ERR_NVS_NOT_FOUND){g_ota_storage_uncertain=true;return false;}
+  const uint32_t next=previous==UINT32_MAX?1:previous+1; // existing wire wrap rule
+  NvsCapacityLease lease;size_t available=0;
+  if(!lease){g_ota_storage_uncertain=true;return false;}
+  // The generation scalar is old-reader compatible. Before VALID it can use
+  // available room, but cannot trigger new-codec reclamation or bootstrap.
+  const bool room=coord_credit_format_write_ready()?
+      wakelog_nvs_prepare_essential(2,coord_credit_budget_open):
+      (nvs_capacity_available(available) && available>=2 && coord_credit_budget_open());
+  if(!room){g_ota_storage_uncertain=true;return false;}
+  if(nvs_open("ota_coord",NVS_READWRITE,&h)!=ESP_OK){g_ota_storage_uncertain=true;return false;}
+  if(!coord_credit_budget_open()){nvs_close(h);g_ota_storage_uncertain=true;return false;}
+  g_ota_storage_uncertain=true;
+  const esp_err_t wrote=nvs_set_u32(h,"generation",next);
+  const esp_err_t committed=wrote==ESP_OK?nvs_commit(h):wrote;
+  uint32_t actual=0;
+  const bool verified=committed==ESP_OK && nvs_get_u32(h,"generation",&actual)==ESP_OK && actual==next;
+  nvs_close(h);
+  if(verified){g_coord_sense_boot_id=next;g_ota_storage_uncertain=false;}
+  Serial.printf("[OTA_NVS] key=generation verified=%u\n",verified?1:0);
+  return verified;
+}
+
+// Caller holds NvsCapacityLease through this proof and boot selection. An old
+// automatic previous-slot revert is allowed only while storage is known to be
+// readable by the legacy firmware. Do not guess compatibility from its version.
+static bool coord_credit_legacy_revert_safe() {
+  if(!g_coord_credit_loaded || !g_coord_credit_mutations || g_coord_credit_uncertain ||
+     g_ota_storage_uncertain || g_serial_install_uncertain || g_nvs_reclaim_uncertain)return false;
+  auto unknown=[](){g_coord_credit_uncertain=true;g_coord_credit_mutations=false;return false;};
+  nvs_handle_t h;const esp_err_t opened=nvs_open("ota_coord",NVS_READONLY,&h);
+  if(opened==ESP_ERR_NVS_NOT_FOUND)return true;
+  if(opened!=ESP_OK)return unknown();
+  size_t needed=0;const esp_err_t sized=nvs_get_blob(h,"elig_v1",nullptr,&needed);
+  if(sized==ESP_ERR_NVS_NOT_FOUND){nvs_close(h);return true;}
+  if(sized!=ESP_OK){nvs_close(h);return unknown();}
+  if(needed!=COORDINATOR_CREDIT_V1_BYTES){nvs_close(h);return needed==COORDINATOR_CREDIT_BYTES?false:unknown();}
+  uint8_t bytes[COORDINATOR_CREDIT_V1_BYTES];size_t actual=sizeof(bytes);
+  const esp_err_t read=nvs_get_blob(h,"elig_v1",bytes,&actual);nvs_close(h);
+  CoordinatorCreditState legacy;
+  if(read!=ESP_OK || actual!=sizeof(bytes) || !credit_decode(bytes,sizeof(bytes),legacy))return unknown();
+  return true;
+}
+
+static CoordinatorCreditState coord_credit_base() {
+  CoordinatorCreditState candidate = g_coord_credit;
+  if(candidate.deferred.id[0] && ota_peer_schedule_completed(candidate.deferred.id))candidate.deferred={};
+  if(candidate.schedule_observed && ota_peer_schedule_completed(candidate.schedule.id))candidate.schedule_observed=false;
+  if (candidate.pending.id[0] && ota_peer_schedule_completed(candidate.pending.id)) {
+    candidate.pending = {}; candidate.pending_resolved = false;
+    candidate.pending_credit_admitted = false; candidate.admitted_epoch = 0;
+  }
+  return candidate;
+}
+static void coord_credit_publish() {
+  strlcpy(g_coord_schedule, g_coord_credit.schedule.id, sizeof(g_coord_schedule));
+  const bool inactive = g_coord_credit.pending_resolved ||
+      ota_peer_schedule_completed(g_coord_credit.pending.id);
+  strlcpy(g_coord_pending, inactive ? "" : g_coord_credit.pending.id, sizeof(g_coord_pending));
+  if (inactive) g_coord_completion_target[0] = 0;
+}
+static bool coord_credit_save(const CoordinatorCreditState& candidate) {
+  if (!g_coord_credit_loaded || !g_coord_credit_mutations || !coord_credit_budget_open() ||
+      !coord_credit_format_write_ready() || g_nvs_reclaim_uncertain || g_ota_storage_uncertain) return false;
+  if(coord_credit_same_persisted(candidate))return true;
+  NvsCapacityLease lease;
+  if(!lease || !wakelog_nvs_prepare_essential(2+(COORDINATOR_CREDIT_BYTES+31)/32,coord_credit_budget_open))return false;
+  Preferences p;
+  if (!p.begin("ota_coord", false)) return false;
+  if (!coord_credit_budget_open() || !coord_credit_format_write_ready()) { p.end(); return false; }
+  const bool ok = credit_commit(p, candidate, g_coord_credit, g_coord_credit_mutations);
+  if (!ok) g_coord_credit_uncertain = true;
+  p.end();
+  Serial.printf("[OTA_NVS] key=elig_v1 codec=2 verified=%u bytes=%u\n",ok?1:0,(unsigned)COORDINATOR_CREDIT_BYTES);
+  if (ok) {g_coord_credit_persisted=true;coord_credit_publish();}
+  return ok;
+}
+static bool coord_credit_read_text(nvs_handle_t handle, const char* key, char* out, size_t capacity) {
+  size_t needed = 0;
+  esp_err_t status = nvs_get_str(handle, key, nullptr, &needed);
+  if (status == ESP_ERR_NVS_NOT_FOUND) { out[0] = 0; return true; }
+  if (status != ESP_OK || needed == 0 || needed > capacity) return false;
+  size_t actual = needed;
+  status = nvs_get_str(handle, key, out, &actual);
+  return status == ESP_OK && actual == needed && out[needed - 1] == 0 &&
+      memchr(out, 0, needed - 1) == nullptr;
+}
+static bool coord_credit_history_valid(const char* text) {
+  if (!text[0]) return true;
+  unsigned count = 0; const char* cursor = text;
+  while (*cursor) {
+    const char* end = strchr(cursor, '\n');
+    const size_t size = end ? (size_t)(end - cursor) : strlen(cursor);
+    if (!size || size >= 64 || ++count > 8 || memchr(cursor, '\r', size)) return false;
+    if (!end) return true;
+    cursor = end + 1;
+    if (!*cursor) return false;
+  }
+  return true;
+}
+static void coord_credit_load(Preferences& p) {
+  if (g_coord_credit_load_attempted) return;
+  g_coord_credit_load_attempted = true;
+  // Only explicit NOT_FOUND means absent. Preferences isKey/getString collapse
+  // read/type failures, which must never authorize import or empty history.
+  nvs_handle_t handle;
+  if (nvs_open("ota_coord", NVS_READONLY, &handle) != ESP_OK) return;
+  char schedule[64] = {}, pending[64] = {}, complete[64] = {}, history[512] = {}, target[32] = {};
+  const bool text_ok = coord_credit_read_text(handle, "schedule", schedule, sizeof(schedule)) &&
+      coord_credit_read_text(handle, "pending", pending, sizeof(pending)) &&
+      coord_credit_read_text(handle, "complete", complete, sizeof(complete)) &&
+      coord_credit_read_text(handle, "done_ids", history, sizeof(history)) &&
+      coord_credit_read_text(handle, "target", target, sizeof(target));
+  size_t blob_size = 0;
+  const esp_err_t blob_status = nvs_get_blob(handle, "elig_v1", nullptr, &blob_size);
+  nvs_close(handle);
+  if (!text_ok || (blob_status != ESP_OK && blob_status != ESP_ERR_NVS_NOT_FOUND) ||
+      !credit_text(schedule, sizeof(schedule), true) || !credit_text(pending, sizeof(pending), true) ||
+      !credit_text(complete, sizeof(complete), true) || !credit_text(target, sizeof(target), true) ||
+      !coord_credit_history_valid(history)) return;
+  strlcpy(g_coord_schedule, schedule, sizeof(g_coord_schedule));
+  strlcpy(g_coord_pending, pending, sizeof(g_coord_pending));
+  strlcpy(g_coord_completed, complete, sizeof(g_coord_completed));
+  ota_peer_load_completed_history(history);
+  strlcpy(g_coord_completion_target, target, sizeof(g_coord_completion_target));
+  // Preferences/NVS startup recovery has happened before this first load.
+  // Do not reload after a write failure in this boot: REMOVE_FAILED may leave
+  // duplicate indexes requiring normal initialization recovery.
+  if (blob_status == ESP_OK) {
+    g_coord_credit_loaded = credit_reload(p, g_coord_credit, g_coord_credit_mutations);
+    g_coord_credit_persisted=g_coord_credit_loaded;
+  } else {
+    CoordinatorCreditState imported;
+    strlcpy(imported.schedule.id, schedule, sizeof(imported.schedule.id));
+    strlcpy(imported.pending.id, pending, sizeof(imported.pending.id));
+    if (!credit_state_shape(imported)) return;
+    // Legacy IDs have no trustworthy target/TZ/admission; never infer them.
+    g_coord_credit_mutations = true;
+    if(coord_credit_format_write_ready()){
+      NvsCapacityLease lease;
+      if(!lease || !wakelog_nvs_prepare_essential(2+(COORDINATOR_CREDIT_BYTES+31)/32,coord_credit_budget_open)){
+        g_coord_credit_mutations=false;return;
+      }
+      g_coord_credit_loaded = credit_commit(p, imported, g_coord_credit, g_coord_credit_mutations);
+      g_coord_credit_persisted=g_coord_credit_loaded;
+      Serial.printf("[OTA_NVS] key=elig_v1 codec=2 import=1 verified=%u bytes=%u\n",g_coord_credit_loaded?1:0,(unsigned)COORDINATOR_CREDIT_BYTES);
+      if (!g_coord_credit_loaded) g_coord_credit_uncertain = true;
+    }else{
+      // Definitive absent blob + typed legacy values are authoritative RAM
+      // input only. Leave rollback-readable storage untouched before VALID.
+      g_coord_credit=imported;g_coord_credit_loaded=true;
+    }
+  }
+  if (g_coord_credit_loaded) coord_credit_publish();
+}
+static bool coord_credit_timezone_matches_configuration(char (&confirmed)[64]) {
+  const auto status=ProvisioningState::loadTimezoneStatus(confirmed,sizeof(confirmed));
+  if(status==ProvisioningState::TimezoneStatus::Unknown)return false;
+  if(status==ProvisioningState::TimezoneStatus::Absent)strlcpy(confirmed,HALO_DEFAULT_TZ,sizeof(confirmed));
+  return g_tz_initialized && !strcmp(confirmed,g_tz_current) && nightly_credit_timezone_matches(confirmed);
+}
+static bool coord_credit_retire_configured_timezone() {
+  std::lock_guard<std::recursive_mutex> config_lock(ProvisioningState::timezoneMutex());
+  std::lock_guard<std::recursive_mutex> time_lock(g_time_mutex);
+  char confirmed[64];
+  // Temporary readiness/unknown configuration does not discard origins or
+  // prevent independent repair. Calendar arm binding separately requires proof.
+  if(!coord_credit_timezone_matches_configuration(confirmed))return true;
+  if(!g_coord_credit_loaded || !g_coord_credit_mutations || g_ota_apply_in_progress)return true;
+  CoordinatorCreditState candidate;
+  const unsigned retired=credit_retire_timezone(g_coord_credit,confirmed,g_calendar_timer_origin,candidate);
+  if(!retired)return true;
+  const bool timer_retired=((retired&1)&&credit_same_origin(g_calendar_timer_origin,g_coord_credit.deferred)) ||
+      ((retired&2)&&credit_same_origin(g_calendar_timer_origin,g_coord_credit.schedule));
+  char old_deferred[64],old_schedule[64];
+  strlcpy(old_deferred,g_coord_credit.deferred.id,sizeof(old_deferred));
+  strlcpy(old_schedule,g_coord_credit.schedule.id,sizeof(old_schedule));
+  if(!coord_credit_save(candidate))return false;
+  if(timer_retired)g_calendar_timer_origin={};
+  Serial.printf("[OTA_TZ_RETIRE] deferred=%s observed_schedule=%s verified=1 credited=0\n",
+      (retired&1)?old_deferred:"-",(retired&2)?old_schedule:"-");
+  return true;
+}
+
+static bool coord_credit_reserve_timer() {
+  if(!coord_credit_retire_configured_timezone())return false;
+  if(!g_calendar_timer_origin.id[0])return true;
+  if(!g_coord_credit_loaded || !g_coord_credit_mutations || g_coord_credit_uncertain)return false;
+  const CoordinatorCreditState base=coord_credit_base();
+  if(ota_peer_schedule_completed(g_calendar_timer_origin.id) ||
+     (base.pending_credit_admitted && !strcmp(base.pending.id,g_calendar_timer_origin.id)))return true;
+  CoordinatorCreditState candidate;
+  if(!credit_observe_calendar(base,g_calendar_timer_origin,candidate))return false;
+  if(credit_same_origin(candidate.deferred,base.deferred) &&
+     candidate.schedule_observed==base.schedule_observed)return true;
+  return coord_credit_save(candidate);
+}
+static bool coord_credit_store_arm(const char* id, uint32_t target) {
+  std::lock_guard<std::recursive_mutex> config_lock(ProvisioningState::timezoneMutex());
+  if (!g_coord_credit_loaded || !g_coord_credit_mutations || !id || !id[0]) return false;
+  if(!coord_credit_reserve_timer())return false;
+  NightlyCreditOrigin origin;
+  {
+    std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+    if (nightly_credit_is_calendar(id)) {
+      char confirmed[64];
+      if(!coord_credit_timezone_matches_configuration(confirmed))return false;
+      if (!g_tz_initialized || !nightly_credit_bind(origin, id, target, g_tz_current,
+                                                    sense_time_has_fresh_sync())) return false;
+    } else {
+      if (strlen(id) >= sizeof(origin.id)) return false;
+      strlcpy(origin.id, id, sizeof(origin.id));
+    }
+  }
+  CoordinatorCreditState candidate;
+  return credit_next_arm(coord_credit_base(), origin, candidate) && coord_credit_save(candidate);
+}
+static bool coord_credit_notice_matches(const char* id) {
+  return id && id[0] &&
+      (self_retry_notice_due(id) ||
+       (g_coord_pending[0] && !strcmp(id,g_coord_pending)) ||
+       (g_coord_schedule[0] && !strcmp(id,g_coord_schedule)) ||
+       (g_coord_credit_loaded && g_coord_credit.deferred.id[0] &&
+        !strcmp(id,g_coord_credit.deferred.id)));
+}
+static bool coord_credit_notice_ready() {
+  if(!coord_credit_retire_configured_timezone())return false;
+  // This due arm only wakes the existing unresolved repair; it is not a new
+  // calendar origin and never substitutes for its pending completion identity.
+  if (self_retry_notice_due(g_lcd_timer_notice.schedule)) return true;
+  if (!g_coord_credit_loaded || !g_coord_credit_mutations) {
+    // Existing unknown debt can still repair, but cannot gain nightly credit.
+    return g_coord_pending[0] && strcmp(g_lcd_timer_notice.schedule, g_coord_pending) == 0;
+  }
+  const CoordinatorCreditState base = coord_credit_base();
+  const bool original = base.pending.id[0] && !base.pending_resolved &&
+      strcmp(g_lcd_timer_notice.schedule, base.pending.id) == 0;
+  const bool deferred=base.deferred.id[0] && !strcmp(g_lcd_timer_notice.schedule,base.deferred.id);
+  const NightlyCreditOrigin& origin = original ? base.pending : deferred ? base.deferred : base.schedule;
+  if (strcmp(g_lcd_timer_notice.schedule, origin.id) != 0) return false;
+  if (original || !origin.bound) return true; // uncredited repair keeps original pending
+  uint64_t now; bool fresh, finished; char tz[64]; coord_credit_clock(now, fresh, tz, finished);
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  const auto decision = nightly_credit_decide(origin, origin.id, now, fresh, tz);
+  return decision == NightlyCreditDecision::Due || decision == NightlyCreditDecision::NonCalendar;
+}
+// A matching future calendar announcement is not itself a repair obligation.
+// Unknown clock/storage/configuration and independently owed work keep their
+// existing bootstrap/recovery path. Use the same bound-origin calendar policy
+// as notice readiness and work admission, never the peer's claimed wake epoch.
+static bool coord_credit_notice_future_without_repair(const char* id) {
+  if (!id || !id[0] || !g_coord_credit_loaded || !g_coord_credit_mutations ||
+      g_coord_credit_uncertain || g_nvs_reclaim_uncertain || g_serial_install_uncertain ||
+      g_ota_storage_uncertain || g_peer_continue_work || g_lcd_work_budget_live ||
+      g_ota_check_requested || g_ota_check_in_progress || g_ota_apply_in_progress ||
+      g_lcd_ota_task_running) return false;
+  const CoordinatorCreditState base = coord_credit_base();
+  if (g_coord_pending[0] || (base.pending.id[0] && !base.pending_resolved) ||
+      base.deferred.id[0] || !base.schedule.bound || strcmp(id, base.schedule.id)) return false;
+  {
+    std::lock_guard<std::recursive_mutex> config_lock(ProvisioningState::timezoneMutex());
+    std::lock_guard<std::recursive_mutex> time_lock(g_time_mutex);
+    char confirmed[64];
+    if (!coord_credit_timezone_matches_configuration(confirmed)) return false;
+    uint64_t now; bool fresh, finished; char tz[64]; coord_credit_clock(now, fresh, tz, finished);
+    if (nightly_credit_decide(base.schedule, id, now, fresh, tz) != NightlyCreditDecision::Future) return false;
+  }
+  // Read debt only for a positively future origin; a failed typed read returns
+  // owed/unknown, so it cannot turn an uncertain repair into a cancellation.
+  return !get_lcd_ota_due_nvs();
+}
+static bool coord_credit_cancel_future_notice() {
+  // Clock proof can arrive after the unknown-time readiness opportunity was
+  // queued. Classify its captured ID, not a newer mailbox notice or next arm.
+  if (!g_boot_ota_pending || strcmp(g_boot_ota_reason, "lcd_timer") ||
+      g_peer_gate.entered || !coord_credit_notice_future_without_repair(g_lcd_timer_origin.schedule)) return false;
+  ota_peer_cancel("calendar_future_rearm");
+  boot_ota_finish("calendar_future_rearm");
+  // No debt, credit, manual-intent change or sticky episode-finished latch.
+  return true;
+}
+// Returns false while the existing automatic request waits, or after ending
+// an unreachable early opportunity. Independent repair retains its old path.
+static bool coord_credit_calendar_entry(const char* reason) {
+  if(!reason || strcmp(reason,"nightly"))return true;
+  if(!coord_credit_reserve_timer())return false;
+  const CoordinatorCreditState base=coord_credit_base();
+  NightlyCreditOrigin origin=base.deferred.id[0]?base.deferred:g_calendar_timer_origin;
+  if(!origin.bound || (base.pending.id[0] && !base.pending_resolved) || get_lcd_ota_due_nvs())return true;
+  uint64_t now;bool fresh,finished;char tz[64];coord_credit_clock(now,fresh,tz,finished);
+  NightlyCreditDecision decision;
+  {std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+   if(credit_due_origin(base,now,fresh,tz,!ota_peer_schedule_completed(base.schedule.id)))return true;
+   decision=nightly_credit_decide(origin,origin.id,now,fresh,tz);
+   const auto schedule_decision=nightly_credit_decide(base.schedule,base.schedule.id,now,fresh,tz);
+   if(schedule_decision==NightlyCreditDecision::Future &&
+      (decision!=NightlyCreditDecision::Future || base.schedule.target_epoch<origin.target_epoch)){
+     origin=base.schedule;decision=schedule_decision;
+   }}
+  if(decision==NightlyCreditDecision::ClockUnconfirmed ||
+     decision==NightlyCreditDecision::TimezoneUnconfirmed)return false;
+  if(decision!=NightlyCreditDecision::Future)return true;
+  const uint64_t until_due_ms=(uint64_t(origin.target_epoch)-15ULL-now)*1000ULL;
+  int32_t remaining=(int32_t)(g_boot_ota_deadline_ms-millis());
+  if(g_peer_gate.active && !g_peer_gate.entered){
+    const int32_t peer_remaining=(int32_t)(g_peer_gate.deadline_ms-millis());
+    if(peer_remaining<remaining)remaining=peer_remaining;
+  }
+  if(remaining<=0 || until_due_ms>=(uint32_t)remaining){
+    ota_peer_cancel("calendar_future_rearm");
+    g_peer_episode_finished=true;g_ota_check_done=true;g_ota_check_requested=false;
+    boot_ota_finish("calendar_future_rearm");
+  }
+  // No new readiness/work/SNTP budget and no timestamp is moved to the due time.
+  return false;
+}
+static bool coord_credit_prepare_work(const char* reason) {
+  // Existing continuation is checked again at actual entry against its exact
+  // original ID, lcd_timer cause and live budget. It gains no new admission.
+  if (g_peer_continue_work) return true;
+  if (g_coord_credit_uncertain || g_nvs_reclaim_uncertain || g_serial_install_uncertain || g_ota_storage_uncertain || !g_coord_sense_boot_id) return false; // no new entry after uncertain persistence this boot
+#if HALO_DURABLE_OTA_POLICY
+  // A verified short arm resumes its own durable campaign. It cannot claim or
+  // overwrite a future calendar origin merely because the RTC wake is TIMER.
+  if(halo_policy_short_due())return true;
+#endif
+  ensure_timezone_pt("credit_entry");
+  if(!coord_credit_retire_configured_timezone())return false;
+  if (reason && !strcmp(reason, "lcd_timer") && coord_credit_cancel_future_notice()) return false;
+  if (!coord_credit_calendar_entry(reason)) return false;
+  if (!g_coord_credit_loaded || !g_coord_credit_mutations) return !g_ota_storage_uncertain; // repair only; never enter after a newly failed debt read
+  CoordinatorCreditState base = coord_credit_base(), candidate;
+  uint64_t now; bool fresh, finished; char tz[64]; coord_credit_clock(now, fresh, tz, finished);
+  bool changed = false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+    if (base.pending.id[0] && !base.pending_resolved) {
+      changed = credit_admit_pending(base, now, fresh, tz, candidate);
+    } else if ((base.deferred.id[0] ||
+                (reason && (!strcmp(reason, "nightly") || !strcmp(reason, "lcd_timer")))) &&
+               !ota_peer_schedule_completed(base.deferred.id[0]?base.deferred.id:base.schedule.id)) {
+      changed = credit_claim_due(base, now, fresh, tz, candidate, !ota_peer_schedule_completed(base.schedule.id));
+    }
+  }
+  if (changed && !coord_credit_save(candidate)) return false;
+  // A future scheduled notice cannot become unsolicited work just because
+  // its clock wait finished. Independent LCD debt retains its old repair path.
+  if (reason && !strcmp(reason, "lcd_timer") && !g_coord_pending[0] &&
+      base.schedule.bound && !get_lcd_ota_due_nvs()) return false;
+  return !g_ota_storage_uncertain; // debt reads above may have closed this boot
+}
+// END COORDINATOR_CREDIT_INTEGRATION
+
 static bool ota_peer_continuation() {
   return g_peer_continue_work && g_lcd_work_budget_live && g_lcd_work_budget.remaining_ms() &&
       g_boot_ota_pending && strcmp(g_boot_ota_reason, "lcd_timer") == 0 &&
@@ -3278,11 +3846,11 @@ static void ota_peer_load_completed_history(const char* encoded) {
   strlcpy(g_coord_completed, parsed[0], sizeof(g_coord_completed));
 }
 
-static void ota_peer_schedule_complete() {
-  if (!g_coord_pending[0]) return;
+static bool coord_history_commit() {
+  if (!g_coord_pending[0] || g_nvs_reclaim_uncertain || !coord_credit_format_write_ready() || !ota_storage_known_clear()) return false;
   // Keep exact recent IDs, not a date high-water mark: a bad future clock
   // must not suppress a legitimate nightly check after fresh correction.
-  if (strchr(g_coord_pending, '\n') || strchr(g_coord_pending, '\r')) return;
+  if (strchr(g_coord_pending, '\n') || strchr(g_coord_pending, '\r')) return false;
   char next[8][64] = {{0}};
   strlcpy(next[0], g_coord_pending, sizeof(next[0]));
   uint8_t count = 1;
@@ -3298,17 +3866,25 @@ static void ota_peer_schedule_complete() {
     if (i) strlcat(encoded, "\n", sizeof(encoded));
     strlcat(encoded, next[i], sizeof(encoded));
   }
+  NvsCapacityLease lease;
+  if(!lease || !wakelog_nvs_prepare_essential(nvs_capacity_string_entries(strlen(encoded)),coord_credit_budget_open))return false;
   Preferences p;
   if (p.begin("ota_coord", false)) {
     // Opening NVS can block too. Do not begin a new completion commit after
     // the current work budget expires; a successful write below is final.
     if (g_lcd_work_budget_live && !g_lcd_work_budget.remaining_ms()) {
       p.end();
-      return;
+      return false;
     }
     // The entire eight-ID history is one atomic NVS value. Publish RAM only
     // after it succeeds; a reset before pending removal still finds the ID.
-    if (p.putString("done_ids", encoded) == strlen(encoded)) {
+    g_coord_credit_mutations = false;
+    g_coord_credit_uncertain = true;
+    if (p.putString("done_ids", encoded) == strlen(encoded) &&
+        p.getString("done_ids", "") == encoded) {
+      Serial.println("[OTA_NVS] key=done_ids verified=1");
+      g_coord_credit_mutations = true;
+      g_coord_credit_uncertain = false;
       memcpy(g_coord_completed_ids, next, sizeof(next));
       g_coord_completed_count = count;
       strlcpy(g_coord_completed, g_coord_pending, sizeof(g_coord_completed));
@@ -3316,9 +3892,36 @@ static void ota_peer_schedule_complete() {
       g_lcd_work_budget_live = false; g_peer_continue_work = false;
       p.remove("pending");
       p.remove("target");
+      p.end(); return true;
     }
     p.end();
   }
+  return false;
+}
+
+static CoordCompletion ota_peer_schedule_complete() {
+  if(!ota_storage_known_clear())return CoordCompletion::Deferred;
+  if (!g_coord_pending[0]) return CoordCompletion::NoPending;
+  if (!g_coord_credit_loaded || !g_coord_credit_mutations ||
+      strcmp(g_coord_credit.pending.id, g_coord_pending) != 0 || !coord_credit_budget_open())
+    return CoordCompletion::Deferred;
+  uint64_t now; bool fresh, finished; char tz[64]; coord_credit_clock(now, fresh, tz, finished);
+  CoordinatorCreditState candidate; CreditResolution resolution;
+  {
+    std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+    resolution = credit_resolve(g_coord_credit, true, now, fresh, tz, finished, candidate);
+  }
+  if (resolution == CreditResolution::Unresolved) return CoordCompletion::Deferred;
+  if (resolution == CreditResolution::CreditDue)
+    return coord_history_commit() ? CoordCompletion::Credited : CoordCompletion::Deferred;
+  if (!coord_credit_save(candidate)) return CoordCompletion::Deferred;
+  // The authoritative blob resolves repair before compatibility cleanup.
+  // Failures below cannot resurrect it or credit the nightly ID after reboot.
+  g_coord_completion_target[0] = 0;
+  g_lcd_work_budget_live = false; g_peer_continue_work = false;
+  Preferences p;
+  if (p.begin("ota_coord", false)) { p.remove("pending"); p.remove("target"); p.end(); }
+  return CoordCompletion::ResolvedUncredited;
 }
 
 static bool ota_peer_ready() {
@@ -3379,22 +3982,42 @@ static void ota_control_probe_service() {
 }
 
 static void ota_peer_service() {
+  coord_credit_cancel_future_notice();
+  if (g_lcd_timer_notice.pending &&
+      coord_credit_notice_future_without_repair(g_lcd_timer_notice.schedule))
+    g_lcd_timer_notice.pending = false; // Leave room for a later due/relative notice.
   ota_control_probe_service();
   // Do not consume/mark a new boot seen while the old transaction is busy or
   // waiting to run its deadline teardown. The next loop can accept it after
   // that teardown, preserving the late peer's independent opportunity.
   const uint32_t notice_now = millis();
+  if (g_lcd_timer_notice.pending && !g_boot_ota_pending && !g_peer_gate.active &&
+      !g_peer_episode_finished && !g_ota_check_in_progress && !g_ota_apply_in_progress &&
+      !g_lcd_ota_task_running &&
+      coord_credit_notice_matches(g_lcd_timer_notice.schedule) &&
+      !ota_peer_schedule_completed(g_lcd_timer_notice.schedule)) {
+    // Establish the existing readiness opportunity once; a deferred notice
+    // neither renews it nor blocks the rest of this service function.
+    const bool same_work = g_lcd_work_budget_live && g_lcd_work_schedule[0] &&
+        !strcmp(g_lcd_timer_notice.schedule, g_lcd_work_schedule);
+    if (!same_work || (g_lcd_work_budget.remaining_ms() &&
+                      g_lcd_timer_notice.boot_id != g_lcd_work_peer_boot)) {
+      g_peer_continue_work = same_work;
+      g_lcd_timer_origin = g_lcd_timer_notice;
+      g_lcd_timer_seen_boot = g_lcd_timer_notice.boot_id;
+      boot_ota_queue("lcd_timer");
+    }
+  }
   const bool old_wait_expired =
       (g_boot_ota_pending && (int32_t)(notice_now - g_boot_ota_deadline_ms) >= 0) ||
       (g_peer_gate.active && !g_peer_gate.entered &&
        (int32_t)(notice_now - g_peer_gate.deadline_ms) >= 0);
   if (g_lcd_timer_notice.pending && !old_wait_expired &&
       !g_ota_check_in_progress && !g_ota_apply_in_progress && !g_lcd_ota_task_running &&
-      !(g_peer_gate.active && g_peer_gate.entered)) {
+      !(g_peer_gate.active && g_peer_gate.entered) && coord_credit_notice_ready()) {
     g_lcd_timer_notice.pending = false;
     const bool expected =
-        ((g_coord_pending[0] && strcmp(g_lcd_timer_notice.schedule, g_coord_pending) == 0) ||
-         (g_coord_schedule[0] && strcmp(g_lcd_timer_notice.schedule, g_coord_schedule) == 0)) &&
+        coord_credit_notice_matches(g_lcd_timer_notice.schedule) &&
         !ota_peer_schedule_completed(g_lcd_timer_notice.schedule);
     bool seen = false;
     for (uint8_t i = 0; i < g_coord_seen_count; ++i) {
@@ -3405,11 +4028,8 @@ static void ota_peer_service() {
       g_coord_seen_boots[g_coord_seen_count++] = g_lcd_timer_notice.boot_id;
       g_lcd_timer_seen_boot = g_lcd_timer_notice.boot_id;
       g_lcd_timer_origin = g_lcd_timer_notice;
-      if (!g_coord_pending[0]) {
-        strlcpy(g_coord_pending, g_lcd_timer_notice.schedule, sizeof(g_coord_pending));
-        Preferences p;
-        if (p.begin("ota_coord", false)) { p.putString("pending", g_coord_pending); p.end(); }
-      }
+      // Pending creation and due admission occur only at actual work entry.
+      // The notice itself is not proof of an eligible nightly obligation.
       if (!g_boot_ota_pending && !g_peer_gate.active) {
         const bool same_work = g_lcd_work_budget_live && g_lcd_work_schedule[0] &&
             strcmp(g_lcd_timer_notice.schedule, g_lcd_work_schedule) == 0;
@@ -3555,10 +4175,43 @@ static void nightly_maintenance_note_wake() {
   }
 }
 
+// A user/EXT0 wake before the verified retry target is not permission to run
+// the short retry early. Finish that readiness opportunity without moving any
+// deadline; the already persisted LCD arm and RTC due time remain unchanged.
+static bool self_retry_boot_admit() {
+#if HALO_DURABLE_OTA_POLICY
+  return halo_policy_boot_ready();
+#else
+  // Do not consume debt/requests or begin a new OTA before local VALID.
+  if (!nvs_capacity_image_valid()) return false;
+  if (!g_self_retry_boot) return true;
+  if (!self_retry_bound() || !self_retry_time(g_self_retry,self_retry_now(),sense_time_has_fresh_sync())) {
+    if (!sense_time_has_fresh_sync()) return false; // existing readiness bound still expires
+    g_self_retry.phase=SelfOtaRetryPhase::CLOSED;
+    ota_peer_cancel("self_retry_expired");boot_ota_finish("self_retry_expired");
+    g_peer_episode_finished=true;g_ota_check_done=true;return false;
+  }
+  if (!self_retry_consume(g_self_retry,g_coord_pending,g_coord_completion_target,
+                          self_retry_now(),sense_time_has_fresh_sync())) {
+    ota_peer_cancel("self_retry_not_due");boot_ota_finish("self_retry_not_due");
+    g_self_retry_boot=false;
+    g_peer_episode_finished=true;g_ota_check_done=true;return false;
+  }
+  g_self_retry_boot=false;g_self_retry_execution=true;
+  LOG_INFO("[SELF_RETRY] consumed origin=%s target=%s expires=%lu",
+           g_self_retry.origin,g_self_retry.version,(unsigned long)g_self_retry.expires_epoch);
+  return true;
+#endif
+}
+
 // Called after normal provisioning/time/health service, independent of the old
 // maintenance flags. A readiness skip keeps the request alive until the bound;
 // a check that began consumes it even if its manifest fetch or update failed.
+
 static void nightly_maintenance_tick() {
+  // Do not consume debt/requests or begin a new OTA before local VALID.
+  if (!nvs_capacity_image_valid()) return;
+  if (coord_credit_cancel_future_notice()) return;
   if (!g_boot_ota_pending) return;
   if (g_coord_completion_target[0] && strcmp(g_coord_completion_target, kFirmwareVersion) == 0 &&
       g_ota_pending_verify_active) return;
@@ -3633,6 +4286,7 @@ static void nightly_maintenance_tick() {
   // HTTPS work. The common entrypoint requires an actual fresh reply; a
   // retained TLS clock alone cannot authorize the paired absolute sleep arm.
   if (sense_ntp_attempt_pending()) return;
+  if (!self_retry_boot_admit()) return;
   if (!is_time_valid() || (!OtaIntent::cooldownAllows() && !ota_peer_continuation())) return;
 
 
@@ -3647,10 +4301,19 @@ static void nightly_maintenance_tick() {
 }
 
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+static void sense_diag_export_retained(uint32_t deadline);
+static void sense_diag_export_budget_skipped(uint32_t deadline);
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_OTA_POLICY
+static void halo_diag_admission_export(uint32_t deadline);
+#endif
+#endif
+
 void halo_prod_pre_sleep() {
   LOG_INFO("[PRE_SLEEP] window start");
   const unsigned long pre_sleep_budget_ms = 20000;
   const unsigned long pre_sleep_start_ms = millis();
+  sense_idle_network::Window idle_window(uint32_t(pre_sleep_start_ms+pre_sleep_budget_ms));
   auto remaining_budget_ms = [&]() -> unsigned long {
     unsigned long elapsed = millis() - pre_sleep_start_ms;
     if (elapsed >= pre_sleep_budget_ms) {
@@ -3826,12 +4489,26 @@ void halo_prod_pre_sleep() {
     LOG_INFO("[PRE_SLEEP] abort (lcd_pulsing before report)");
     return;
   }
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  // Reserve6s for ordinary-report detector admission and local preparation.
+  // Reset completion is not claimed within this window. Exports use only the rest
+  // of this original20s window and never open an OTA/network retry opportunity.
+  if(remaining_budget_ms()>sense_idle_network::REPORT_RESERVE_MS+sense_idle_network::POST_ADMISSION_MS)
+    sense_diag_export_retained(uint32_t(pre_sleep_start_ms+pre_sleep_budget_ms-sense_idle_network::REPORT_RESERVE_MS));
+  else sense_diag_export_budget_skipped(uint32_t(pre_sleep_start_ms+pre_sleep_budget_ms-sense_idle_network::REPORT_RESERVE_MS));
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_OTA_POLICY
+  // Sequential to avoid nesting the full exporter frame. Keep the original
+  // deadline and ordinary-report reserve; this call grants no extra allowance.
+  if(remaining_budget_ms()>sense_idle_network::REPORT_RESERVE_MS+sense_idle_network::POST_ADMISSION_MS)
+    halo_diag_admission_export(uint32_t(pre_sleep_start_ms+pre_sleep_budget_ms-sense_idle_network::REPORT_RESERVE_MS));
+#endif
+#endif
   {
     uint32_t report_timeout_ms = (uint32_t)remaining_budget_ms();
     if (report_timeout_ms > OTA_REPORT_HTTP_TIMEOUT_MS) {
       report_timeout_ms = OTA_REPORT_HTTP_TIMEOUT_MS;
     }
-    if (report_timeout_ms >= 500) {
+    if (remaining_budget_ms() >= sense_idle_network::POST_ADMISSION_MS) {
       ota_report_post_pre_sleep(report_timeout_ms);
     } else {
       LOG_INFO("[OTA_REPORT] skip pre_sleep (budget_exhausted)");
@@ -3925,6 +4602,12 @@ void halo_prod_reset_wifi() {
 }
 
 static void handle_pending_ota_expectation() {
+#if HALO_DURABLE_OTA_POLICY
+  // The checked policy owns completion/rollback. Preserve legacy expectation
+  // bytes for its read-only migration; unchecked partial clears are not proof.
+  return;
+#endif
+  if (!nvs_capacity_image_valid()) return; // No expectation/peer side effects before actual VALID.
   if (!OtaExpect::isPending()) {
     return;
   }
@@ -3970,6 +4653,11 @@ static void handle_pending_ota_expectation() {
       esp_partition_iterator_release(it);
     }
     if (prev_part) {
+      NvsCapacityLease storage_lease;
+      if(!storage_lease || !coord_credit_legacy_revert_safe()) {
+        Serial.println("[OTA_EXPECT] previous-slot revert blocked: storage compatibility unproven; pending retained");
+        return;
+      }
       Serial.printf("[OTA_EXPECT][INFO] reverting to partition=%s (0x%x)\n",
                     prev_part->label, prev_part->address);
       esp_err_t set_boot_err = esp_ota_set_boot_partition(prev_part);
@@ -3987,6 +4675,11 @@ static void handle_pending_ota_expectation() {
     return;
   }
 
+  // Actual VALID is already proven. Keep metadata for a later boot if the
+  // existing expectation API refuses the clear; do not emit success/unlock.
+  if (!OtaExpect::clearPending()) return;
+  OtaExpect::setLastSuccessTs((uint32_t)(millis() / 1000));
+
   // OTA succeeded; release LCD OTA lock — unless LCD OTA is still pending
   if (get_lcd_ota_due_nvs()) {
     Serial.println("[OTA_EXPECT] version match — keep OTA_LOCK (lcd_ota_due pending)");
@@ -3994,9 +4687,6 @@ static void handle_pending_ota_expectation() {
     Serial.println("[OTA_EXPECT] version match -> send OTA_UNLOCK to LCD");
     send_ota_uart_message("OTA_UNLOCK", true);
   }
-  // Clear expectation after a successful version match to avoid repeated OTA_UNLOCK.
-  OtaExpect::setLastSuccessTs((uint32_t)(millis() / 1000));
-  OtaExpect::clearPending();
 
 #if HALO_SIMPLE_OTA_PROOF
   g_ota_validated_this_boot = true;
@@ -4007,8 +4697,27 @@ static void handle_pending_ota_expectation() {
 #endif
 }
 
+static void service_pending_ota_expectation_after_validation() {
+#if HALO_DURABLE_OTA_POLICY
+  // The checked policy owns completion/rollback. Preserve legacy expectation
+  // bytes for its read-only migration; unchecked partial clears are not proof.
+  return;
+#endif
+  // Reuse the existing once-per-boot validation flag. Setup may have deferred
+  // this event; HealthGate retains its expected/previous metadata until here.
+  if (g_ota_validated_this_boot || !nvs_capacity_image_valid()) return;
+  g_ota_validated_this_boot = true;
+  handle_pending_ota_expectation();
+}
+
 static void handle_ota_proof() {
+#if HALO_DURABLE_OTA_POLICY
+  // The checked policy owns completion/rollback. Preserve legacy expectation
+  // bytes for its read-only migration; unchecked partial clears are not proof.
+  return;
+#endif
 #if HALO_SIMPLE_OTA_PROOF
+  if (!nvs_capacity_image_valid()) return; // Deferred proof remains pending until actual VALID.
   if (!g_ota_simple_proof_started || g_ota_simple_proof_done) {
     return;
   }
@@ -4022,8 +4731,7 @@ static void handle_ota_proof() {
   bool wifi_ok = !ProvisioningState::isProvisioned() || wifi_is_connected();
   bool uart_ok = true;
   if (uart_ok && wifi_ok) {
-    OtaExpect::setLastSuccessTs((uint32_t)(proof_elapsed_ms / 1000));
-    OtaExpect::clearPending();
+    // Expectation success belongs to the validated handler, not this connectivity proof.
     send_ota_uart_message("OTA_UNLOCK");
     maybe_trigger_lcd_ota_check();
     g_ota_simple_proof_done = true;
@@ -4041,6 +4749,11 @@ static void handle_ota_proof() {
 #endif
 }
 
+#if HALO_DURABLE_OTA_POLICY
+static bool halo_policy_bind_pair(const OtaManifest&,const char*);
+static bool halo_policy_resolve_pair();
+static bool halo_policy_resolve_superseded();
+#endif
 static bool prepare_lcd_ota_proxy_retry(char* lcd_fw, size_t fw_len) {
   if (!sense_lcd_ota_retry_safe() || !g_lcd_work_budget.remaining_ms()) return false;
   // An abort clears the old lock. Reacquire it before a fresh query so the
@@ -4070,10 +4783,8 @@ static bool prod_proxy_lcd_inline(bool report_both_current = true) {
     set_lcd_ota_due_nvs(true);
     return false;
   }
-  // Free internal RAM for the LCD download/stream (mirrors the both-behind
-  // inline block and lcd_ota_proxy_task). MQTT/camera DMA are already released
-  // on the OTA path by the caller.
-  g_manifest_client.releaseConnection();
+  // MQTT/camera DMA are already released on the OTA path by the caller.
+  // Manifest fetch owns and destroys its request-local TLS client.
   delay(100);  // Let memory coalesce before the LCD TLS download
 
   const OtaUrlConfig* lcd_cfg = ota_get_config();
@@ -4096,6 +4807,9 @@ static bool prod_proxy_lcd_inline(bool report_both_current = true) {
     set_lcd_ota_due_nvs(true);
     return false;
   }
+#if HALO_DURABLE_OTA_POLICY
+  if(!halo_policy_bind_pair(lcd_manifest,lcd_fw))return false;
+#endif
   if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) <= 0) {
     if (!g_lcd_work_budget.remaining_ms()) { set_lcd_ota_due_nvs(true); return false; }
     if (!report_both_current) {
@@ -4117,7 +4831,7 @@ static bool prod_proxy_lcd_inline(bool report_both_current = true) {
     }
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd already current (lcd=%s manifest=%s)",
              lcd_fw, lcd_manifest.version);
-    set_lcd_ota_due_nvs(false);
+    if(!set_lcd_ota_due_nvs(false))return false;
     if (report_both_current) boot_ota_report_both_current(lcd_fw, lcd_manifest.version);
     return true;
   }
@@ -4139,6 +4853,8 @@ static bool prod_proxy_lcd_inline(bool report_both_current = true) {
                lcd_manifest.version, attempt, (unsigned long)millis());
       diag_record_error_persistent("ota_orch", 0, crumb);
     }
+    if(!set_lcd_ota_due_nvs(true))break; // durable retry obligation before mutating LCD
+    ota_heap::proxy_invoked();
     const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw, &g_lcd_work_budget);
     LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy result=%s (attempt=%d)",
              lcd_res ? lcd_res : "(null)", attempt);
@@ -4170,7 +4886,7 @@ static bool prod_proxy_lcd_inline(bool report_both_current = true) {
     }
   }
   ok = ok && sense_lcd_ota_retry_safe() && g_lcd_work_budget.remaining_ms();
-  set_lcd_ota_due_nvs(!ok);
+  if(!set_lcd_ota_due_nvs(!ok))ok=false;
   LOG_INFO("[OTA_ORCH] up_to_date inline lcd proxy done ok=%d", ok ? 1 : 0);
   return ok;
 }
@@ -4193,8 +4909,8 @@ static bool complete_downgrade_policy_check(const char* manifest_fw, const char*
 
   const bool had_pending = g_coord_pending[0] != 0;
   if (!g_lcd_work_budget.remaining_ms()) return false;
-  ota_peer_schedule_complete();  // The atomic completion write precedes RAM/pending removal.
-  if (had_pending && g_coord_pending[0]) return false;
+  const CoordCompletion resolution = ota_peer_schedule_complete();
+  if (resolution == CoordCompletion::Deferred) return false;
   if (had_pending) g_coord_completion_target[0] = 0;
 
   char detail[192];
@@ -4204,11 +4920,16 @@ static bool complete_downgrade_policy_check(const char* manifest_fw, const char*
   if (g_boot_ota_diag_context && g_boot_ota_begin_reported) {
     snprintf(detail, sizeof(detail), "%s policy=downgrade_blocked lcd=%.31s result=%.15s",
              g_boot_ota_begin_record.detail, g_lcd_ota_version, g_lcd_ota_result);
-    uart_send_sense_diag_persist("ota", "policy_complete", g_boot_ota_begin_record.reason,
+    uart_send_sense_diag_persist("ota", resolution == CoordCompletion::ResolvedUncredited ?
+                                "repair_resolved" : "policy_complete", g_boot_ota_begin_record.reason,
                                 g_boot_ota_begin_record.code, detail);
   } else {
-    uart_send_sense_diag_persist("ota", "policy_complete", reason ? reason : "manual", 0, detail);
+    uart_send_sense_diag_persist("ota", resolution == CoordCompletion::ResolvedUncredited ?
+                                "repair_resolved" : "policy_complete", reason ? reason : "manual", 0, detail);
   }
+#if HALO_DURABLE_OTA_POLICY
+  if(!halo_policy_resolve_superseded())return false;
+#endif
   return true;
 }
 
@@ -4296,14 +5017,8 @@ static bool prepare_lcd_absolute_sleep_before_apply() {
     pump_uart_rx_once();
     if (g_lcd_verified_arm.matched) {
       if (!lcd_verified_arm_apply_budget()) return false;
-      Preferences p;
-      if (!p.begin("ota_coord", false)) return false;
-      if (!lcd_verified_arm_apply_budget()) { p.end(); return false; }
-      // Store only the NEXT sleep identity; pending remains the original cause.
-      const size_t written = p.putString("schedule", mw.request_id);
-      const bool committed = written == strlen(mw.request_id) &&
-          p.getString("schedule", "") == mw.request_id;
-      p.end();
+      // One record preserves the NEXT arm and the original pending separately.
+      const bool committed = coord_credit_store_arm(mw.request_id, (uint32_t)mw.start_epoch);
       if (!committed) return false;
       strlcpy(g_coord_schedule, mw.request_id, sizeof(g_coord_schedule));
       LOG_INFO("[OTA_ARM] stored_verified id=%s target=%lu lcd_boot=%lu pending=%s",
@@ -4315,6 +5030,116 @@ static bool prepare_lcd_absolute_sleep_before_apply() {
   }
   return false;
 }
+
+// Reserve at failure and try once while the LCD may still be awake/locked.
+// The query+ACK share a five-second deadline. No old OTA deadline is extended,
+// no legacy followup field is used, and failed proof returns to calendar sleep.
+static bool self_retry_user_busy() {
+  return sense_action_inflight() || foreground_active || voice_recording_active ||
+      g_list_screen_active || (op_queue && uxQueueMessagesWaiting(op_queue)>0) ||
+      g_provisioning_manager.isSetupModeActive();
+}
+static void self_retry_reserve_and_arm(const OtaManifest& manifest) {
+  if (!g_coord_pending[0] || strcmp(g_coord_completion_target,manifest.version) ||
+      !self_retry_reserve(g_self_retry,g_coord_pending,manifest.version,manifest.sha256,
+                          manifest.size,self_retry_now(),sense_time_has_fresh_sync())) return;
+  struct CloseUnverified {
+    ~CloseUnverified() {
+      g_self_retry_arm.waiting=false;
+      if(g_self_retry.phase==SelfOtaRetryPhase::RESERVED)g_self_retry.phase=SelfOtaRetryPhase::CLOSED;
+      LOG_INFO("[SELF_RETRY] arm phase=%u origin=%s target=%s due=%lu expires=%lu",
+          (unsigned)g_self_retry.phase,g_self_retry.origin,g_self_retry.version,
+          (unsigned long)g_self_retry.due_epoch,(unsigned long)g_self_retry.expires_epoch);
+    }
+  } close_unverified;
+  if (self_retry_user_busy() || g_lcd_ota_proxy_owns_uart || g_lcd_ota_task_running ||
+      !sense_lcd_ota_retry_safe()) return;
+  const uint32_t started=millis(),budget=5000;
+  // The confirmed pre-apply query survives the deliberate display-version
+  // cache clear after LCD update. Snapshot it before this new query runs.
+  char expected_fw[32];strlcpy(expected_fw,g_lcd_ota_query_resp_fw,sizeof(expected_fw));
+  if (!expected_fw[0]) return;
+  char challenge[40];snprintf(challenge,sizeof(challenge),"%08lx%08lx",
+      (unsigned long)esp_random(),(unsigned long)esp_random());
+  if (!sense_lcd_ota_query_start(challenge,budget)) return;
+  LcdOtaQuerySnapshot peer={};bool ready=false;
+  while ((uint32_t)(millis()-started)<budget) {
+    if (self_retry_user_busy()) return;
+    pump_uart_rx_once();const auto result=sense_lcd_ota_query_poll(peer);
+    if(result==LCD_QUERY_READY){ready=peer.correlated && peer.peer_boot_id &&
+        !strcmp(peer.fw,expected_fw);break;}
+    if(result==LCD_QUERY_TIMEOUT)return;
+    delay(10);
+  }
+  uint32_t now=self_retry_now();
+  if (!ready || !self_retry_time(g_self_retry,now,sense_time_has_fresh_sync()) ||
+      uint64_t(now)+SELF_OTA_RETRY_LCD_LEAD_S>=g_self_retry.due_epoch ||
+      (uint32_t)(millis()-started)>=budget) return;
+  MaintenanceWindow mw={};mw.duration_sec=mw.grace_before_sec=mw.grace_after_sec=0;
+  mw.start_epoch=g_self_retry.due_epoch;
+  snprintf(g_self_retry.arm_id,sizeof(g_self_retry.arm_id),"self_retry_%08lx_%08lx",
+      (unsigned long)g_self_retry.due_epoch,(unsigned long)esp_random());
+  strlcpy(mw.request_id,g_self_retry.arm_id,sizeof(mw.request_id));
+  g_self_retry_arm={};g_self_retry_arm.started_ms=started;g_self_retry_arm.budget_ms=budget;
+  g_self_retry_arm.peer_boot_id=peer.peer_boot_id;g_self_retry_arm.start_epoch=g_self_retry.due_epoch;
+  g_self_retry_arm.remaining_s=g_self_retry.due_epoch-now;
+  strlcpy(g_self_retry_arm.request_id,mw.request_id,sizeof(g_self_retry_arm.request_id));
+  snprintf(g_self_retry_arm.challenge,sizeof(g_self_retry_arm.challenge),"%08lx%08lx",
+      (unsigned long)esp_random(),(unsigned long)esp_random());
+  g_self_retry_arm.waiting=true;
+  send_maint_window(&mw,g_self_retry_arm.remaining_s,g_self_retry_arm.remaining_s,false,
+                    g_self_retry_arm.challenge,peer.peer_boot_id);
+  while((uint32_t)(millis()-started)<budget) {
+    if(self_retry_user_busy() || !self_retry_time(g_self_retry,self_retry_now(),sense_time_has_fresh_sync()))return;
+    pump_uart_rx_once();
+    if(g_self_retry_arm.matched){
+      if ((uint32_t)(millis()-started)<budget && !self_retry_user_busy() &&
+          self_retry_time(g_self_retry,self_retry_now(),sense_time_has_fresh_sync()))
+        g_self_retry.phase=SelfOtaRetryPhase::ARMED;
+      return;
+    }
+    delay(10);
+  }
+}
+
+#if HALO_DURABLE_OTA_POLICY
+static bool halo_policy_diagnostic_identity(const OtaManifest&,uint8_t(&)[16],char(&)[64],uint32_t&);
+#endif
+// Production user-work owners: parked images remain owned even with an empty
+// queue and no active upload. OTA ownership stays in each caller's own gate.
+static bool halo_primary_user_work_busy() {
+  return current_job.active || upload_inflight || http_inflight ||
+      voice_recording_active || scan_ui_inflight || dish_scan_inflight ||
+      foreground_active || upload_worker_has_parked_job || upload_queue_count()!=0 ||
+      (op_queue && uxQueueMessagesWaiting(op_queue)) || halo_provisioning_active();
+}
+
+#include "../shared/SenseDiagnosticIntegration.h"
+#include "../shared/SenseDiagnosticUart.h"
+#include "../../../Sense_Minimal/sense_diagnostic_transport.h"
+#include "../shared/SenseDiagnosticExport.h"
+#include "../shared/SenseDurablePolicyRuntime.h"
+#include "../shared/SenseSleepWitnessIntegration.h"
+#include "../shared/SenseAdmissionBreadcrumb.h"
+#include "../shared/SenseAdmissionExport.h"
+#include "../shared/SenseOneShotControl.h"
+#include "../shared/SenseBenchControl.h"
+#include "../shared/SenseDiagnosticAuth.h"
+#include "../shared/SenseDurablePolicyDispatch.h"
+#include "../shared/SenseIdleNetworkProbe.h"
+
+static bool halo_idle_network_safe(){
+#if HALO_IDLE_NETWORK_RECOVERY && HALO_DURABLE_DIAGNOSTICS
+  return nvs_capacity_image_valid()&&sense_diag_export_idle(nullptr)&&!g_diag_budget_ms&&!g_peer_gate.active&&!g_ota_pending_verify_active&&!xPortInIsrContext();
+#else
+  return false;
+#endif
+}
+static uint32_t halo_idle_network_boot_id(){return g_coord_sense_boot_id;}
+static bool halo_idle_network_fresh(){return sense_time_has_fresh_sync();}
+static uint32_t halo_idle_network_epoch(){const time_t n=time(nullptr);return n>=halo_idle_net::MIN_EPOCH&&uint64_t(n)<=halo_idle_net::MAX_EPOCH?uint32_t(n):0;}
+
+
 
 // Complete the existing per-boot SNTP opportunity before a long DNS guard
 // can suspend it. Pending is a normal-loop retry, not a consumed OTA attempt.
@@ -4343,12 +5168,17 @@ static bool ota_clock_ready_before_work() {
 }
 
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
+  // Do not consume debt/requests or begin a new OTA before local VALID.
+  if (!nvs_capacity_image_valid()) return;
   if (g_peer_episode_finished) { g_ota_check_done = true; return; }
   if (g_ota_check_done || g_ota_apply_in_progress) {
     return;
   }
+  const bool automatic_request = g_boot_ota_pending;
   if (!ota_peer_ready()) {
-    if (!g_boot_ota_pending && !g_ota_check_done) g_ota_check_requested = true;
+    // Peer service may finish an automatic request after fresh clock proof.
+    // That cancellation must not become an unrelated generic/manual retry.
+    if (!automatic_request && !g_boot_ota_pending && !g_ota_check_done) g_ota_check_requested = true;
     return;
   }
 
@@ -4430,16 +5260,39 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     return;
   }
 
+  if (g_self_retry_execution &&
+      !self_retry_work_ms(g_self_retry,g_coord_pending,g_coord_completion_target,
+                          self_retry_now(),sense_time_has_fresh_sync(),2400000UL)) {
+    g_ota_check_done=true;return;
+  }
+#if HALO_DURABLE_OTA_POLICY
+  const bool retained_legacy=sense_policy::unresolved_legacy();
+#endif
+  if (!coord_credit_prepare_work(reason)) return;
+  // Admission persistence can block; recheck the original readiness deadline.
+  if (!ota_peer_ready()) return;
   g_peer_gate.entered = true;
   OtaPeerTransactionCleanup peer_cleanup;
   if (g_peer_continue_work) {
     if (!ota_peer_continuation()) { g_ota_check_done = true; set_lcd_ota_due_nvs(true); return; }
   } else {
-    g_lcd_work_budget = {millis(), 2400000UL};
+    const uint32_t work_ms = g_self_retry_execution
+        ? self_retry_work_ms(g_self_retry,g_coord_pending,g_coord_completion_target,
+                             self_retry_now(),sense_time_has_fresh_sync(),2400000UL)
+        : 2400000UL;
+    if (!work_ms) { g_ota_check_done=true; return; }
+    g_lcd_work_budget = {millis(), work_ms};
     g_lcd_work_budget_live = true;
     strlcpy(g_lcd_work_schedule, g_coord_pending, sizeof(g_lcd_work_schedule));
   }
   g_lcd_work_peer_boot = g_peer_gate.peer_boot;
+#if HALO_DURABLE_OTA_POLICY
+  if(!sense_policy::enter(reason,retained_legacy)) {
+    ota_set_last_result(sense_policy::current()&&sense_policy::current()->phase==durable_ota::Phase::RESOLVED?
+                        "policy_target_valid":"policy_deferred");g_ota_check_done=true;return;
+  }
+#endif
+  sense_policy::WorkCleanup policy_cleanup;
 
   // Record actual check entry after readiness guards, so skipped retries do
   // not write NVS. The manual-OTA decision/handshake trail survives reboots
@@ -4460,6 +5313,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   ota_set_last_result("check_begin");
   g_ota_check_in_progress = true;
   g_ota_check_done = true;
+  ota_heap::reset();ota_heap::sample(ota_heap::BeforeDma);
   // Release camera DMA reservation to free 16KB of internal SRAM for TLS.
   // Camera is not used during OTA. Device reboots after OTA, re-reserving in setup().
   // Hold it released for the WHOLE check, not just this instant. Freeing it here
@@ -4472,6 +5326,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     g_camera_dma_reserve = nullptr;
     LOG_INFO("[OTA] Camera DMA reservation released for TLS headroom");
   }
+  ota_heap::sample(ota_heap::AfterDma);
   OtaIntent::recordOtaAttempt("begin");
   dump_system_truth("ota_check_begin");
   auto clear_intent_once = []() {
@@ -4484,7 +5339,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     LOG_INFO("[LCD_OTA_ORCH] unlock deferred lcd reason=%s request_id=%lu",
              why ? why : "unknown",
              (unsigned long)g_lcd_ota_request_id);
-    send_ota_uart_message("OTA_UNLOCK");
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK");
   };
 
   OtaUrlConfig* cfg_mut = ota_get_config_mutable();
@@ -4492,6 +5347,12 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   const OtaUrlConfig* cfg = ota_get_config();
 
   char manifest_url[512];
+#if HALO_DURABLE_OTA_POLICY
+  const auto* fixed_policy=sense_policy::current();
+  if(fixed_policy&&fixed_policy->phase!=durable_ota::Phase::DISCOVERY&&durable_ota::target_valid(fixed_policy->target))
+    snprintf(manifest_url,sizeof(manifest_url),"%s/%s/manifest_%s.json",cfg->base_dir,cfg->channel,fixed_policy->target.version);
+  else
+#endif
   snprintf(manifest_url, sizeof(manifest_url), "%s?v=%s-boot%lu",
            cfg->manifest_url, kFirmwareVersion, g_boot_count);
 
@@ -4502,7 +5363,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("manifest_url_invalid");
     // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
     // (prod:1877) is holding its "Updating…" screen.
-    send_ota_uart_message("OTA_UNLOCK", true);
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     clear_intent_once();
@@ -4515,21 +5376,37 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   mqtt_stop_for_ota();
   delay(100);
   Serial.printf("[OTA] Post-MQTT-disconnect heap free=%lu\n", (unsigned long)ESP.getFreeHeap());
+  ota_heap::sample(ota_heap::AfterMqtt);
 
   LOG_INFO("[MANIFEST] Fetching manifest: %s", manifest_url);
   OtaManifest manifest;
+#if HALO_DURABLE_OTA_POLICY
+  halo_policy_diagnostic_prefetch(g_lcd_work_budget.remaining_ms());
+#endif
   const uint32_t manifest_remaining_ms = g_lcd_work_budget.remaining_ms();
-  if (!manifest_remaining_ms ||
-      !g_manifest_client.fetchManifest(manifest_url, manifest,
-          manifest_remaining_ms < 10000 ? manifest_remaining_ms : 10000) ||
-      !g_lcd_work_budget.remaining_ms()) {
+  ManifestOutcome manifest_outcome{};
+  bool manifest_fetched=false;
+  if(manifest_remaining_ms){
+    manifest_fetched=g_manifest_client.fetchManifest(manifest_url,manifest,
+        manifest_remaining_ms<10000?manifest_remaining_ms:10000);
+    manifest_outcome=g_manifest_client.outcome();
+  } else manifest_outcome.stage=ManifestStage::DeadlineBefore;
+  const uint32_t manifest_left_ms=g_lcd_work_budget.remaining_ms();
+  if(!manifest_left_ms){
+    manifest_outcome.deadline_after=manifest_remaining_ms?1:0;
+    if(manifest_fetched)manifest_outcome.stage=ManifestStage::DeadlineAfter;
+  }
+  if (!manifest_fetched || !manifest_left_ms) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    sense_diag_manifest_failure(manifest_outcome,manifest_left_ms);
+#endif
     truth_get_manifest_state().setErr();
     dump_system_truth("manifest_err");
     ota_set_last_result("manifest_fetch_fail");
     release_waiting_lcd_ota("manifest_fetch_fail");
     // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
     // (prod:1877) is holding its "Updating…" screen.
-    send_ota_uart_message("OTA_UNLOCK", true);
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -4538,8 +5415,20 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     return;
   }
 
+  if(!sense_policy::manifest_matches(manifest)) {
+    ota_set_last_result("policy_target_mismatch");g_ota_check_in_progress=false;g_dma_reserve_suppressed=false;return;
+  }
+  ota_heap::sample(ota_heap::AfterSenseManifest);
   truth_get_manifest_state().setOk(manifest.version);
   dump_system_truth("manifest_ok");
+  if (g_self_retry_execution &&
+      (strcmp(manifest.version,g_self_retry.version) ||
+       strcasecmp(manifest.sha256,g_self_retry.sha256) || manifest.size!=g_self_retry.expected_bytes)) {
+    LOG_WARN("[SELF_RETRY] target_changed; original recovery opportunity consumed");
+    ota_set_last_result("retry_target_changed");
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK",true);mqtt_set_allowed(true);mqtt_force_connect();
+    clear_intent_once();g_ota_check_in_progress=false;g_dma_reserve_suppressed=false;return;
+  }
 
   if (manifest.board_specified && strcasecmp(manifest.board, HALO_BOARD_NAME) != 0) {
     LOG_ERROR("[OTA] board_mismatch manifest=%s device=%s",
@@ -4548,7 +5437,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("board_mismatch");
     // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
     // (prod:1877) is holding its "Updating…" screen.
-    send_ota_uart_message("OTA_UNLOCK", true);
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -4563,7 +5452,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     release_waiting_lcd_ota("bin_url_disallowed");
     // No LCD proxy runs on this path; release the LCD in case a manual OTA_LOCK
     // (prod:1877) is holding its "Updating…" screen.
-    send_ota_uart_message("OTA_UNLOCK", true);
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
     mqtt_set_allowed(true);
@@ -4585,7 +5474,16 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     // LCD-behind split on this manual/nightly OTA instead of depending on the
     // DMA-starving background task that may never run.
     bool lcd_inline_ok = prod_proxy_lcd_inline();
-    if (lcd_inline_ok && g_lcd_work_budget.remaining_ms()) ota_peer_schedule_complete();
+#if HALO_DURABLE_OTA_POLICY
+    if(lcd_inline_ok&&!halo_policy_resolve_pair())lcd_inline_ok=false;
+#endif
+    if (lcd_inline_ok && g_lcd_work_budget.remaining_ms()) {
+      const CoordCompletion resolution = ota_peer_schedule_complete();
+      if (resolution == CoordCompletion::ResolvedUncredited)
+        LOG_INFO("[OTA_CREDIT] repair_resolved nightly_credit=0");
+      // Even deferred persistence must release the repaired peer below; its
+      // original pending/target remain the retry obligation for a later boot.
+    }
     OtaIntent::markNoUpdateNeeded();
     release_waiting_lcd_ota("up_to_date");
     g_ota_check_in_progress = false;
@@ -4595,7 +5493,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       mqtt_force_connect();
       // The inline proxy above took/held the LCD lock; release it now so a
       // manual OTA_LOCK (prod:1877) doesn't strand the LCD on "Updating…".
-      send_ota_uart_message("OTA_UNLOCK", true);
+      sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     }
     clear_intent_once();
     return;
@@ -4621,7 +5519,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       mqtt_force_connect();
       // No LCD proxy task will run to release the lock; unlock the LCD now so a
       // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
-      send_ota_uart_message("OTA_UNLOCK", true);
+      sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     }
     clear_intent_once();
     return;
@@ -4654,7 +5552,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       mqtt_force_connect();
       // No LCD proxy task will run to release the lock; unlock the LCD now so a
       // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
-      send_ota_uart_message("OTA_UNLOCK", true);
+      sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     }
     clear_intent_once();
     return;
@@ -4681,7 +5579,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
         mqtt_force_connect();
         // No LCD proxy task will run to release the lock; unlock the LCD now so
         // a manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
-        send_ota_uart_message("OTA_UNLOCK", true);
+        sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
       }
       clear_intent_once();
       return;
@@ -4706,7 +5604,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       mqtt_force_connect();
       // No LCD proxy task will run to release the lock; unlock the LCD now so a
       // manual OTA_LOCK (prod:1877) doesn't strand it on "Updating…".
-      send_ota_uart_message("OTA_UNLOCK", true);
+      sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     }
     clear_intent_once();
     return;
@@ -4734,11 +5632,12 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   {
     // Free internal RAM for the LCD download/stream + later Sense apply.
     // MQTT is already stopped (mqtt_stop_for_ota() above) and camera DMA is
-    // already released; release the manifest-client connection too so the
-    // TLS download of the LCD binary has headroom — same as
-    // maybe_trigger_lcd_ota_check() / lcd_ota_proxy_task().
-    g_manifest_client.releaseConnection();
+    // already released. Manifest fetch destroyed its request-local TLS client;
+    // there is no persistent connection to release here.
     delay(100);  // Let memory coalesce before the LCD TLS download
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && !HALO_DURABLE_OTA_POLICY
+    sense_diag_begin(manifest,g_lcd_work_budget.remaining_ms());
+#endif
 
     const OtaUrlConfig* lcd_cfg = ota_get_config();
     char lcd_fw[32] = {0};
@@ -4759,12 +5658,23 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       snprintf(crumb, sizeof(crumb), "lcd_query_fail t=%lu", (unsigned long)millis());
       diag_record_error_persistent("ota_orch", -1, crumb);
     } else if (!sense_lcd_ota_fetch_manifest(lcd_cfg->base_dir, lcd_cfg->channel, lcd_manifest, &g_lcd_work_budget)) {
+      ota_heap::sample(ota_heap::AfterLcdManifest);
       LOG_INFO("[OTA_ORCH] lcd proxy result=manifest_fetch_fail (will defer to lcd_ota_due)");
       // Breadcrumb: query succeeded; record the LCD fw it reported.
       char crumb[96];
       snprintf(crumb, sizeof(crumb), "lcd_query_ok lcd_fw=%s t=%lu", lcd_fw, (unsigned long)millis());
       diag_record_error_persistent("ota_orch", 0, crumb);
-    } else if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0) {
+    }
+#if HALO_DURABLE_OTA_POLICY
+    else if(!halo_policy_bind_pair(lcd_manifest,lcd_fw)) {
+      LOG_WARN("[OTA_POLICY] pair identity/admission deferred");
+    }
+#endif
+    else if (ManifestClient::compareVersions(lcd_manifest.version, lcd_fw) > 0) {
+      ota_heap::sample(ota_heap::AfterLcdManifest);
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+      sense_diag_lcd_context(lcd_manifest,lcd_fw,g_lcd_work_budget.remaining_ms());
+#endif
       // The LCD is behind: proxy with one retry before allowing Sense to advance.
       // Breadcrumb: query succeeded; record the LCD fw it reported.
       {
@@ -4788,7 +5698,15 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
                    lcd_manifest.version, attempt, (unsigned long)millis());
           diag_record_error_persistent("ota_orch", 0, crumb);
         }
+        if(!set_lcd_ota_due_nvs(true))break; // durable retry obligation before mutating LCD
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+        sense_diag_note_stage(halo_diag::Stage::ProxyBegin,g_lcd_work_budget.remaining_ms());
+#endif
+        ota_heap::proxy_invoked();
         const char* lcd_res = sense_lcd_ota_proxy(lcd_manifest, lcd_fw, &g_lcd_work_budget);
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+        sense_diag_note_stage(halo_diag::Stage::ProxyCleaned,g_lcd_work_budget.remaining_ms());
+#endif
         LOG_INFO("[OTA_ORCH] lcd proxy result=%s (attempt=%d)",
                  lcd_res ? lcd_res : "(null)", attempt);
         {
@@ -4833,6 +5751,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
       // reboot handles re-sleeping. (On the up-to-date branch below no lock
       // was taken, so nothing to unlock.)
     } else {
+      ota_heap::sample(ota_heap::AfterLcdManifest);
       LOG_INFO("[OTA_ORCH] lcd proxy result=up_to_date (lcd=%s manifest=%s)",
                lcd_fw, lcd_manifest.version);
       // Breadcrumb: query succeeded; LCD already up-to-date.
@@ -4843,11 +5762,13 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     }
   }
 
+  ota_heap::sample(ota_heap::AfterLcdScope);
+
   // Fallback: only owe an lcd_ota_due retry on the next boot if the LCD was
   // NOT brought up-to-date here (query/manifest fail, or proxy non-success).
   // On success (or already up-to-date) clear it — the LCD is already done.
   lcd_proxy_succeeded = lcd_proxy_succeeded && sense_lcd_ota_retry_safe() && g_lcd_work_budget.remaining_ms();
-  set_lcd_ota_due_nvs(!lcd_proxy_succeeded);
+  if(!set_lcd_ota_due_nvs(!lcd_proxy_succeeded))lcd_proxy_succeeded=false;
   LOG_INFO("[OTA] lcd_ota_due=%d (lcd_proxy_succeeded=%d)",
            lcd_proxy_succeeded ? 0 : 1, lcd_proxy_succeeded ? 1 : 0);
 
@@ -4865,7 +5786,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     OtaIntent::recordOtaResult("lcd_proxy_failed_defer");
     ota_set_last_result("lcd_proxy_failed_defer");
     // Return to normal operation without advancing Sense.
-    send_ota_uart_message("OTA_UNLOCK", true);
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     mqtt_set_allowed(true);
     mqtt_force_connect();
     clear_intent_once();
@@ -4879,7 +5800,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     diag_record_error_persistent("ota_orch", -1, "sense_apply_deferred arm_unverified");
     OtaIntent::recordOtaResult("lcd_arm_unverified_defer");
     ota_set_last_result("lcd_arm_unverified_defer");
-    send_ota_uart_message("OTA_UNLOCK", true);
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK", true);
     clear_intent_once();
     g_ota_check_in_progress = false; g_dma_reserve_suppressed = false;
     return;
@@ -4901,13 +5822,19 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     g_ota_check_in_progress = false; g_dma_reserve_suppressed = false;
     return;
   }
-  if (g_coord_pending[0]) {
-    Preferences p;
-    if (p.begin("ota_coord", false)) { p.putString("target", manifest.version); p.end(); }
+  if(!ota_storage_bind_target(manifest.version)) {
+    OtaIntent::recordOtaResult("target_storage_unverified");
+    ota_set_last_result("target_storage_unverified");
+    clear_intent_once();
+    g_ota_check_in_progress=false;g_dma_reserve_suppressed=false;
+    return; // actual transaction destructor releases the peer; pending stays
   }
   send_ota_uart_message("OTA_LOCK");
   // NVS and UART calls consume the same pair budget. Sample at the actual
   // applier boundary rather than giving it time spent in those operations.
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  sense_diag_note_stage(halo_diag::Stage::SelfBegin,g_lcd_work_budget.remaining_ms());
+#endif
   const uint32_t pair_remaining_ms = lcd_verified_arm_apply_budget();
   if (!sense_lcd_ota_retry_safe() || !pair_remaining_ms) {
     OtaIntent::recordOtaResult("paired_deadline");
@@ -4916,12 +5843,20 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     g_ota_check_in_progress = false; g_dma_reserve_suppressed = false;
     return;
   }
+  ota_heap::sample(ota_heap::BeforeApply);
   g_ota_apply_in_progress = true;
 
   SenseOtaApplier::Result res = g_ota_applier.applyToOtaPartition(
       manifest.url, manifest.sha256, manifest.size,
-      pair_remaining_ms, true, manifest.version);
+      pair_remaining_ms, true, manifest.version
+#if HALO_DURABLE_OTA_POLICY
+      , &sense_policy::begin_admission
+#endif
+      );
   g_ota_apply_in_progress = false;
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  if(res!=SenseOtaApplier::RESULT_SUCCESS)sense_diag_failure(res);
+#endif
   // NOTE: lcd_ota_due was already set above based on whether the inline LCD
   // proxy succeeded (clear) or was skipped/failed (set as next-boot fallback).
   // Do NOT clear it unconditionally here — that would drop the fallback when
@@ -4931,12 +5866,17 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   if (res != SenseOtaApplier::RESULT_SUCCESS) {
     const char* res_str = SenseOtaApplier::getResultString(res);
     LOG_ERROR("[OTA] apply failed: %s", res_str);
+#if HALO_DURABLE_OTA_POLICY
+    sense_policy::classify(res);sense_policy::finish();
+#else
+    self_retry_reserve_and_arm(manifest); // before MQTT restoration/OTA_UNLOCK
+#endif
     // Re-enable MQTT after failed OTA (on success, device reboots)
     mqtt_set_allowed(true);
     mqtt_force_connect();
     OtaIntent::recordOtaResult(res_str);
     ota_set_last_result(res_str);
-    send_ota_uart_message("OTA_UNLOCK");
+    sense_policy::finish(); send_ota_uart_message("OTA_UNLOCK");
     maybe_trigger_lcd_ota_check();
     g_ota_check_in_progress = false;
     g_dma_reserve_suppressed = false;   // OTA over: the camera may bank its block again
@@ -5017,6 +5957,20 @@ static void handle_mqtt_commands() {
 }
 
 void halo_prod_loop() {
+  // Validation is local main-loop work even when user operations own the rest
+  // of this iteration. A Wi-Fi outage cannot invalidate a healthy image.
+  g_health_gate.markUartInitialized(uart_initialized && uart_is_driver_installed(LCD_UART_PORT));
+  if (wifi_is_connected()) g_health_gate.markWifiConnected();
+  else g_health_gate.markWifiDisconnected();
+  g_health_gate.update();
+  service_pending_ota_expectation_after_validation();
+  g_ota_pending_verify_active = g_health_gate.getPendingVerify() && !g_health_gate.getMarkedValid();
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  sense_diag_open_boot();
+#endif
+#if HALO_DURABLE_OTA_POLICY
+  halo_policy_service_boot();
+#endif
   ota_peer_service();
   ota_notify_lcd_activity();
   if (sense_action_inflight()) {
@@ -5174,7 +6128,11 @@ void halo_prod_loop() {
   }
   last_wifi_connected = wifi_connected;
 
-  g_health_gate.update();
+  coord_credit_service_serial_install();
+  if(!g_ota_apply_in_progress){
+    ensure_timezone_pt("loop");
+    coord_credit_retire_configured_timezone();
+  }
   g_ota_pending_verify_active = g_health_gate.getPendingVerify() && !g_health_gate.getMarkedValid();
   if (g_coord_pending[0] && g_coord_completion_target[0] &&
       strcmp(g_coord_completion_target, kFirmwareVersion) == 0 && !get_lcd_ota_due_nvs()) {
@@ -5183,19 +6141,23 @@ void halo_prod_loop() {
     if (running && esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_VALID) {
       char completed_request[sizeof(g_coord_pending)] = {0};
       strlcpy(completed_request, g_coord_pending, sizeof(completed_request));
-      ota_peer_schedule_complete();
-      if (!g_coord_pending[0]) {
+      const CoordCompletion resolution = ota_peer_schedule_complete();
+      if (resolution == CoordCompletion::Credited || resolution == CoordCompletion::ResolvedUncredited) {
         // Optional retained evidence after the done_ids commit. The existing
         // JSON ownership guard may suppress delivery; completion never waits.
         char detail[112];
         snprintf(detail, sizeof(detail), "rid=%.63s fw=%.31s", completed_request, kFirmwareVersion);
-        uart_send_sense_diag_persist("ota", "verified_postboot_complete", "done_ids", 0, detail);
+        uart_send_sense_diag_persist("ota", resolution == CoordCompletion::Credited ?
+                                    "verified_postboot_complete" : "verified_repair_uncredited",
+                                    resolution == CoordCompletion::Credited ? "done_ids" : "resolved", 0, detail);
         g_coord_completion_target[0] = 0;
       }
       if (!g_coord_pending[0] && g_boot_ota_pending) {
         g_ota_check_done = true; g_peer_episode_finished = true;
-        ota_peer_cancel("verified_postboot_complete");
-        boot_ota_finish("verified_postboot_complete");
+        const char* result = resolution == CoordCompletion::Credited ?
+            "verified_postboot_complete" : "verified_repair_uncredited";
+        ota_peer_cancel(result);
+        boot_ota_finish(result);
       }
     }
   }
@@ -5750,37 +6712,51 @@ void ota_configure_timer_wakeup() {
 }
 
 uint32_t ota_get_timer_delta_s() {
-  return g_sleep_timer_delta_s;
+  const uint32_t retry=self_retry_selected_delta();
+  return retry && (!g_sleep_timer_delta_s || retry<g_sleep_timer_delta_s)
+      ? retry : g_sleep_timer_delta_s;
 }
 
 void halo_prod_setup() {
   {
     Preferences p;
     if (p.begin("ota_coord", false)) {
-      uint32_t next_boot = p.getUInt("generation", 0) + 1;
-      if (!next_boot) next_boot = 1;
-      if (p.putUInt("generation", next_boot) == sizeof(next_boot)) g_coord_sense_boot_id = next_boot;
-      strlcpy(g_coord_schedule, p.getString("schedule", "").c_str(), sizeof(g_coord_schedule));
-      strlcpy(g_coord_completed, p.getString("complete", "").c_str(), sizeof(g_coord_completed));
-      ota_peer_load_completed_history(p.getString("done_ids", "").c_str());
-      strlcpy(g_coord_pending, p.getString("pending", "").c_str(), sizeof(g_coord_pending));
-      strlcpy(g_coord_completion_target, p.getString("target", "").c_str(), sizeof(g_coord_completion_target));
+      coord_credit_load(p);
       p.end();
+      ota_storage_init_generation();
+    } else {
+      g_ota_storage_uncertain=true;g_coord_sense_boot_id=0;
     }
   }
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+  halo_sleep_witness_boot();
+#endif
+  sense_idle_network::boot();
   // A reset after the atomic history commit but before key removal must not
   // attach a later manual request to the already completed pending ID.
   if (ota_peer_schedule_completed(g_coord_pending)) g_coord_pending[0] = 0;
-  if (g_boot_ota_pending && strcmp(g_boot_ota_reason, "nightly") == 0 && g_coord_schedule[0]) {
-    if (ota_peer_schedule_completed(g_coord_schedule)) {
+  if(g_boot_ota_pending && !strcmp(g_boot_ota_reason,"nightly") &&
+     g_coord_credit_loaded && g_coord_credit.schedule.bound &&
+     !ota_peer_schedule_completed(g_coord_credit.schedule.id)){
+    g_calendar_timer_origin=g_coord_credit.schedule;
+    coord_credit_reserve_timer();
+  }
+  if (g_boot_ota_pending && strcmp(g_boot_ota_reason, "nightly") == 0 && g_coord_schedule[0] && !g_coord_pending[0]) {
+    if (ota_peer_schedule_completed(g_coord_schedule) && !coord_credit_base().deferred.id[0]) {
       g_ota_check_done = true; g_peer_episode_finished = true;
       boot_ota_finish("schedule_already_completed");
-    } else {
-      strlcpy(g_coord_pending, g_coord_schedule, sizeof(g_coord_pending));
-      Preferences p;
-      if (p.begin("ota_coord", false)) { p.putString("pending", g_coord_pending); p.end(); }
     }
+    // Preserve the authoritative origin before any late arm can replace it.
+    // This is not admission; a pre-VALID boot leaves rollback-readable bytes.
+    coord_credit_reserve_timer();
+    // Configured TZ/fresh clock and due admission remain actual-entry checks.
   }
+  // RTC loss closes only this short retry; durable pending repair is unchanged.
+  g_self_retry_boot=self_retry_bound() && g_self_retry.phase==SelfOtaRetryPhase::ARMED &&
+      strcmp(kFirmwareVersion,g_self_retry.version)!=0;
+  if (self_retry_shape(g_self_retry) && !g_self_retry_boot &&
+      (!self_retry_bound() || !strcmp(kFirmwareVersion,g_self_retry.version)))
+    g_self_retry.phase=SelfOtaRetryPhase::CLOSED;
   if (!g_boot_ota_pending && g_coord_pending[0] &&
       !ota_peer_schedule_completed(g_coord_pending)) {
     boot_ota_queue("coord_recovery");
@@ -5799,6 +6775,10 @@ void halo_prod_setup() {
   // Wire the deep-sleep path to co-schedule the LCD's maintenance wake, so the
   // LCD is awake for the LCD-OTA proxy on the unattended nightly path.
   g_lcd_maint_coschedule_hook = prod_co_schedule_lcd_maint_wake;
+  g_sleep_timer_selected_hook = self_retry_note_selected_timer;
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  sense_diag_open_boot();
+#endif
 
   log_ota_partition_info();
 #if OTA_TEST_BUILD
@@ -5896,7 +6876,7 @@ void halo_prod_setup() {
     g_health_gate.markWifiDisconnected();
   }
 
-  g_health_gate.markUartInitialized();
+  g_health_gate.markUartInitialized(uart_initialized && uart_is_driver_installed(LCD_UART_PORT));
   Truth::setUartSyncEstablished(true);
 
   OtaIntent::init();

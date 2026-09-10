@@ -29,6 +29,9 @@
 #include "mbedtls/sha256.h"
 #include "soc/rtc_cntl_reg.h"
 #include "../halo_ota_demo/firmware/shared/UartOtaProtocol.h"
+#if defined(HALO_OTA_BENCH_CASE)
+#include "../halo_ota_demo/firmware/shared/HaloOtaBenchFaults.h"
+#endif
 
 // ── Constants ────────────────────────────────────────────────────────
 #define LCD_OTA_CHUNK_SIZE        512
@@ -82,7 +85,7 @@ static uint16_t               s_lcd_ota_last_aborted_session = 0;
 // Terminal evidence is already bounded; do not append/truncate it through the
 // generic192-byte context buffer. Preserve the complete record in the same ring.
 static void lcd_ota_store_terminal(const char* board, const char* event, int32_t code,
-                                   const char* detail) {
+                                   const char* detail,const LcdNvsDeadline& deadline=LcdNvsDeadline()) {
     StaticJsonDocument<512> entry;
     entry["board"] = board;
     entry["area"] = "ota";
@@ -92,7 +95,7 @@ static void lcd_ota_store_terminal(const char* board, const char* event, int32_t
     entry["uptime_ms"] = millis();
     String output;
     serializeJson(entry, output);
-    errlog_store(output.c_str());
+    errlog_store(output.c_str(),deadline);
 }
 
 static void lcd_ota_send_abort_ack(uint16_t session_id) {
@@ -124,79 +127,42 @@ static bool lcd_ota_uart_active() {
 //  NVS Helpers
 // ═════════════════════════════════════════════════════════════════════
 
-static void lcd_ota_nvs_save_progress() {
-    Preferences prefs;
-    if (!prefs.begin(LCD_OTA_NVS_NAMESPACE, false)) {
-        Serial.println("[LCD_OTA_UART] NVS save failed: cannot open namespace");
-        return;
+static bool s_lcd_ota_progress_store_failed=false;
+static bool lcd_ota_nvs_save_progress() {
+    if(s_lcd_ota_progress_store_failed)return false;
+    LcdNvsRecords::Progress record={};record.pending=1;
+    record.session=s_lcd_ota_session_id;record.offset=s_lcd_ota_bytes_written;
+    record.image_size=s_lcd_ota_image_size;
+    if(!LcdNvsRecords::hexDigest(s_lcd_ota_expected_sha256,record.sha256))return false;
+    strlcpy(record.version,s_lcd_ota_target_version,sizeof(record.version));LcdNvsRecords::seal(record);
+    const LcdNvsDeadline deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms);
+    if(!lcd_nvs_commit_record(LCD_PROGRESS_KEY,record,deadline)){
+        // Avoid retrying a failed persistence on every subsequent 512-byte
+        // chunk. Transfer remains bounded and still restarts from zero on boot.
+        s_lcd_ota_progress_store_failed=true;
+        Serial.println("[LCD_OTA_UART] progress_saved=0; persistence disabled for this attempt");return false;
     }
-    prefs.putUShort("session_id", s_lcd_ota_session_id);
-    prefs.putUInt("offset", s_lcd_ota_bytes_written);
-    prefs.putString("sha256", s_lcd_ota_expected_sha256);
-    prefs.putString("version", s_lcd_ota_target_version);
-    prefs.putUInt("image_size", s_lcd_ota_image_size);
-
-    // NOTE: sha_ctx blob save removed — caused heap corruption on ESP32-S3
-    // hardware SHA. On resume, OTA restarts from offset 0 (no partial hash resume).
-
-    s_lcd_ota_last_nvs_offset = s_lcd_ota_bytes_written;
-    prefs.end();
-
-    Serial.printf("[LCD_OTA_UART] NVS saved progress: session=%u offset=%u\n",
-                  s_lcd_ota_session_id, s_lcd_ota_bytes_written);
-}
-
-static bool lcd_ota_nvs_load_progress(uint16_t* session_id, uint32_t* offset,
-                                       uint32_t* image_size, char* sha256_out,
-                                       char* version_out) {
-    Preferences prefs;
-    if (!prefs.begin(LCD_OTA_NVS_NAMESPACE, true)) {
-        return false;
-    }
-
-    *session_id = prefs.getUShort("session_id", 0);
-    *offset     = prefs.getUInt("offset", 0);
-    *image_size = prefs.getUInt("image_size", 0);
-
-    String sha = prefs.getString("sha256", "");
-    String ver = prefs.getString("version", "");
-    prefs.end();
-
-    if (*session_id == 0 || *offset == 0) {
-        return false;
-    }
-
-    if (sha256_out) {
-        strncpy(sha256_out, sha.c_str(), 64);
-        sha256_out[64] = '\0';
-    }
-    if (version_out) {
-        strncpy(version_out, ver.c_str(), 31);
-        version_out[31] = '\0';
-    }
-
-    Serial.printf("[LCD_OTA_UART] NVS loaded progress: session=%u offset=%u size=%u ver=%s\n",
-                  *session_id, *offset, *image_size, ver.c_str());
+    s_lcd_ota_last_nvs_offset=s_lcd_ota_bytes_written;
+    Serial.printf("[LCD_OTA_UART] progress_saved=1 session=%u offset=%u\n",
+                  s_lcd_ota_session_id,s_lcd_ota_bytes_written);
     return true;
 }
-
-static bool lcd_ota_nvs_load_sha_ctx(mbedtls_sha256_context* ctx) {
-    Preferences prefs;
-    if (!prefs.begin(LCD_OTA_NVS_NAMESPACE, true)) {
-        return false;
-    }
-    size_t read = prefs.getBytes("sha_ctx", ctx, sizeof(mbedtls_sha256_context));
-    prefs.end();
-    return (read == sizeof(mbedtls_sha256_context));
+static bool lcd_ota_nvs_load_progress(uint16_t* session_id,uint32_t* offset,
+                                     uint32_t* image_size,char* sha256_out,char* version_out) {
+    LcdNvsRecords::Progress record={};
+    if(!session_id || !offset || !image_size || !sha256_out || !version_out ||
+       lcd_nvs_read_record(LCD_PROGRESS_KEY,record)!=LcdNvsRecords::ReadStatus::Present ||
+       !record.pending)return false;
+    *session_id=(uint16_t)record.session;*offset=record.offset;*image_size=record.image_size;
+    for(size_t i=0;i<32;++i)snprintf(sha256_out+i*2,3,"%02x",record.sha256[i]);
+    sha256_out[64]=0;strlcpy(version_out,record.version,32);
+    return true;
 }
-
-static void lcd_ota_nvs_clear() {
-    Preferences prefs;
-    if (prefs.begin(LCD_OTA_NVS_NAMESPACE, false)) {
-        prefs.clear();
-        prefs.end();
-        Serial.println("[LCD_OTA_UART] NVS progress cleared");
-    }
+static bool lcd_ota_nvs_clear(const LcdNvsDeadline& deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms)) {
+    LcdNvsRecords::Progress empty={};LcdNvsRecords::seal(empty);
+    const bool committed=lcd_nvs_commit_record(LCD_PROGRESS_KEY,empty,deadline);
+    Serial.printf("[LCD_OTA_UART] durable_progress_clear_verified=%u\n",committed?1:0);
+    return committed;
 }
 
 
@@ -233,7 +199,7 @@ static void lcd_ota_send_status_json(uint8_t pct) {
 static void ui_task(void *arg);
 
 // Lightweight UI restore after UART OTA (counterpart to the freeze in handle_begin)
-static void lcd_ota_uart_restore_ui() {
+static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms)) {
     // Clear OTA progress overlay
     g_lcd_ota_show_progress = false;
     g_lcd_ota_progress_pct = -1;
@@ -261,7 +227,7 @@ static void lcd_ota_uart_restore_ui() {
 
     // One readback-verified disarm. Its helper publishes the actual stored
     // value; a failed commit must not be hidden by unconditional RTC clearing.
-    lcd_clear_persisted_maintenance_state("ota_complete");
+    lcd_clear_persisted_maintenance_state("ota_complete",deadline);
 
     // Don't try to restore LVGL here — this runs on Core 0 (UART task) and
     // lcd_exit_ota_mode() calls LVGL init which crashes on Core 0.
@@ -277,6 +243,13 @@ static void lcd_ota_uart_restore_ui() {
 static void lcd_ota_handle_abort(JsonObject& doc);
 
 static void lcd_ota_abort_internal(const char* reason) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    lcd_diag_capture_failure(halo_diag::Stage::Failure,5,0,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
+    const LcdNvsDeadline storage_deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms);
+#if defined(HALO_OTA_BENCH_CASE)
+    halo_bench_finish(s_lcd_ota_session_id);
+#endif
     s_lcd_ota_state = LCD_OTA_ABORTING;
     g_lcd_ota_uart_receiving = true;
     // The abort is JSON. Leave COBS mode without releasing sleep ownership.
@@ -293,7 +266,7 @@ static void lcd_ota_abort_internal(const char* reason) {
              (unsigned long)(millis() - s_lcd_ota_last_chunk_ms),
              (unsigned long)(s_lcd_ota_protocol ? s_lcd_ota_protocol->crc_error_count() : 0),
              (unsigned long)(s_lcd_ota_protocol ? s_lcd_ota_protocol->frame_error_count() : 0));
-    lcd_ota_store_terminal("lcd", "OTA_ABORT", (int)s_lcd_ota_bytes_written, terminal);
+    lcd_ota_store_terminal("lcd", "OTA_ABORT", (int)s_lcd_ota_bytes_written, terminal,storage_deadline);
 
     // Send abort notification to Sense
     StaticJsonDocument<256> doc;
@@ -325,7 +298,7 @@ static void lcd_ota_abort_internal(const char* reason) {
     // Preserve NVS for resume on timeout; clear on hard abort
     bool is_timeout = reason && (strcmp(reason, "timeout") == 0);
     if (!is_timeout) {
-        lcd_ota_nvs_clear();
+        lcd_ota_nvs_clear(storage_deadline);
     } else {
         Serial.println("[LCD_OTA_UART] NVS preserved for resume (timeout abort)");
     }
@@ -339,7 +312,7 @@ static void lcd_ota_abort_internal(const char* reason) {
     s_lcd_ota_expected_sha256[0] = '\0';
     s_lcd_ota_target_version[0]  = '\0';
 
-    lcd_ota_uart_restore_ui();
+    lcd_ota_uart_restore_ui(storage_deadline);
     s_lcd_ota_state = LCD_OTA_IDLE;
     g_lcd_ota_uart_receiving = false;
     s_lcd_ota_last_aborted_session = s_lcd_ota_session_id;
@@ -472,7 +445,7 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
     // Share the arm/sleep gate through startup and erase. Once sleep owns it,
     // this request gets no acceptance proof and cannot start an inactive write.
     LcdMaintenanceStorageGuard startup_guard;
-    if (g_lcd_sleep_commit_gate.load()) return;
+    if (g_lcd_sleep_commit_gate.load() || !lcd_nvs_image_valid()) return;
     if (s_lcd_ota_state != LCD_OTA_IDLE) {
         Serial.printf("[LCD_OTA_UART] BEGIN rejected: already in state %d\n",
                       static_cast<int>(s_lcd_ota_state.load()));
@@ -578,6 +551,7 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
     s_lcd_ota_budget_ms = requested_budget && requested_budget < LCD_OTA_ATTEMPT_BUDGET_MS
                              ? requested_budget : LCD_OTA_ATTEMPT_BUDGET_MS;
     s_lcd_ota_control_v2 = (doc["ota_proto"] | 1) == OTA_UART_PROTOCOL_VERSION;
+    s_lcd_ota_progress_store_failed=false;  // reset only for this newly admitted attempt
 
     // Store session info
     s_lcd_ota_session_id = session_id;
@@ -591,6 +565,10 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
         s_lcd_ota_target_version[31] = '\0';
     }
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    lcd_diag_prepare_attempt(version,sha256,image_size,
+        s_lcd_ota_budget_ms>(uint32_t)(millis()-s_lcd_ota_started_ms)?s_lcd_ota_budget_ms-(uint32_t)(millis()-s_lcd_ota_started_ms):0);
+#endif
     // BEGIN's erase/NVS work also owns sleep. The UART task is still inside
     // this handler; binary polling starts only after the acceptance response.
     s_lcd_ota_state = LCD_OTA_RECEIVING;
@@ -619,8 +597,8 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
                               resume_offset);
             } else {
                 // Different session: clear stale progress
-                lcd_ota_nvs_clear();
-                Serial.println("[LCD_OTA_UART] Stale NVS progress cleared");
+                const bool cleared=lcd_ota_nvs_clear(LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms));
+                Serial.printf("[LCD_OTA_UART] stale_progress_clear_verified=%u\n",cleared?1:0);
             }
         }
     }
@@ -646,6 +624,9 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
                                   resuming ? OTA_SIZE_UNKNOWN : image_size,
                                   &s_lcd_ota_handle);
     if (err != ESP_OK) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+        lcd_diag_capture_failure(halo_diag::Stage::SelfBegin,1,err,0,image_size);
+#endif
         Serial.printf("[LCD_OTA_UART] esp_ota_begin failed: 0x%x\n", err);
         StaticJsonDocument<256> resp;
         resp["ver"]      = PROTOCOL_VERSION;
@@ -690,6 +671,9 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
     s_lcd_ota_protocol = new UartOtaProtocol(&senseSerial);
     if (s_lcd_ota_protocol) s_lcd_ota_protocol->quiet = true;
     if (!s_lcd_ota_protocol || !s_lcd_ota_protocol->valid()) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+        lcd_diag_capture_failure(halo_diag::Stage::ProxyBegin,6,0,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
         delete s_lcd_ota_protocol;
         s_lcd_ota_protocol = nullptr;
         Serial.println("[LCD_OTA_UART] FATAL: failed to allocate UartOtaProtocol");
@@ -758,6 +742,9 @@ static void lcd_ota_handle_end(JsonObject& doc) {
     const uint16_t session = doc["session_id"] | (uint16_t)0;
     if (!doc["session_id"].is<uint16_t>() || s_lcd_ota_state != LCD_OTA_RECEIVING ||
         !session || session != s_lcd_ota_session_id) return;
+#if defined(HALO_OTA_BENCH_CASE)
+    halo_bench_finish(session);
+#endif
     if ((!doc["image_size"].isUnbound() && !doc["image_size"].is<uint32_t>()) ||
         s_lcd_ota_bytes_written != s_lcd_ota_image_size ||
         (doc["image_size"] | s_lcd_ota_image_size) != s_lcd_ota_image_size) {
@@ -768,9 +755,10 @@ static void lcd_ota_handle_end(JsonObject& doc) {
         lcd_ota_abort_internal("end_deadline");
         return;
     }
+    const LcdNvsDeadline storage_deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms);
     const char* sender_detail = doc["detail"] | (const char*)nullptr;
     if (sender_detail && strlen(sender_detail) < 224)
-        lcd_ota_store_terminal("sense", "LCD_PROXY_STREAM", 0, sender_detail);
+        lcd_ota_store_terminal("sense", "LCD_PROXY_STREAM", 0, sender_detail,storage_deadline);
     unsigned long t0 = millis();
     Serial.printf("[LCD_OTA_UART] END received: session=%u written=%u expected=%u t=%lu\n",
                   s_lcd_ota_session_id, s_lcd_ota_bytes_written, s_lcd_ota_image_size, t0);
@@ -815,6 +803,9 @@ static void lcd_ota_handle_end(JsonObject& doc) {
         // Finalize OTA
         unsigned long t3 = millis();
         esp_err_t err = esp_ota_end(s_lcd_ota_handle);
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+        if(err!=ESP_OK)lcd_diag_capture_failure(halo_diag::Stage::End,3,err,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
         unsigned long t4 = millis();
         Serial.printf("[LCD_OTA_UART] esp_ota_end took %lums err=0x%x\n", t4 - t3, err);
         s_lcd_ota_handle = 0;
@@ -822,19 +813,34 @@ static void lcd_ota_handle_end(JsonObject& doc) {
 
         if (err != ESP_OK) {
             Serial.printf("[LCD_OTA_UART] esp_ota_end failed: 0x%x\n", err);
-            lcd_errlog_store_with_context("lcd", "ota", "OTA_END_FAIL", (int)err, "esp_ota_end");
+            lcd_errlog_store_with_context("lcd", "ota", "OTA_END_FAIL", (int)err, "esp_ota_end",storage_deadline);
         } else if (!deadline_expired) {
             unsigned long t5 = millis();
             // Last cancellable boundary. A successful boot selection remains
             // committed even if the synchronous SDK call returns after budget.
             deadline_expired = (uint32_t)(t5 - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms;
             if (!deadline_expired) {
-                err = esp_ota_set_boot_partition(s_lcd_ota_partition);
+                const bool progress_cleared=lcd_ota_nvs_clear(storage_deadline);
+                const bool continuation_ready=progress_cleared && lcd_ota_prepare_continuation(
+                    s_lcd_ota_partition,s_lcd_ota_image_size,s_lcd_ota_target_version,storage_deadline);
+                deadline_expired=(uint32_t)(millis()-s_lcd_ota_started_ms)>=s_lcd_ota_budget_ms;
+                if(!continuation_ready || deadline_expired || !storage_deadline.live()) {
+                    Serial.printf("[LCD_OTA_UART] boot_selection_skipped continuation_verified=%u deadline=%u\n",
+                                  continuation_ready?1:0,deadline_expired?1:0);
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+                    lcd_diag_capture_failure(halo_diag::Stage::SelectBoot,9,0,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
+                    err=ESP_FAIL;
+                } else err = esp_ota_set_boot_partition(s_lcd_ota_partition);
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+                if(err!=ESP_OK)lcd_diag_capture_failure(halo_diag::Stage::SelectBoot,4,err,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
                 unsigned long t6 = millis();
                 Serial.printf("[LCD_OTA_UART] esp_ota_set_boot_partition took %lums err=0x%x\n", t6 - t5, err);
                 if (err != ESP_OK) {
                     Serial.printf("[LCD_OTA_UART] esp_ota_set_boot_partition failed: 0x%x\n", err);
-                    lcd_errlog_store_with_context("lcd", "ota", "BOOT_PART_FAIL", (int)err, "set_boot_partition");
+                    lcd_errlog_store_with_context("lcd", "ota", "BOOT_PART_FAIL", (int)err, "selection_or_continuation_prepare",storage_deadline);
+                    lcd_ota_clear_continuation_pending(storage_deadline);
                 } else {
                     ota_ok = true;
                     Serial.printf("[LCD_OTA_UART] Boot partition set to %s total_end_ms=%lu\n",
@@ -843,21 +849,28 @@ static void lcd_ota_handle_end(JsonObject& doc) {
             }
         }
     } else {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+        lcd_diag_capture_failure(deadline_expired?halo_diag::Stage::Failure:halo_diag::Stage::End,deadline_expired?8:7,0,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
         // SHA mismatch — abort OTA
         if (!deadline_expired) {
             Serial.println("[LCD_OTA_UART] SHA256 mismatch — aborting OTA");
-            lcd_errlog_store_with_context("lcd", "ota", "SHA_MISMATCH", 0, "checksum_mismatch");
+            lcd_errlog_store_with_context("lcd", "ota", "SHA_MISMATCH", 0, "checksum_mismatch",storage_deadline);
         }
         if (s_lcd_ota_handle != 0) {
             esp_ota_abort(s_lcd_ota_handle);
             s_lcd_ota_handle = 0;
         }
     }
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    if(deadline_expired&&!ota_ok)lcd_diag_capture_failure(halo_diag::Stage::Failure,8,0,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
     if (deadline_expired && !ota_ok)
-        lcd_ota_store_terminal("lcd", "OTA_END_DEADLINE", 0, "end_deadline_before_commit");
+        lcd_ota_store_terminal("lcd", "OTA_END_DEADLINE", 0, "end_deadline_before_commit",storage_deadline);
 
-    // Clear NVS progress regardless of outcome
-    lcd_ota_nvs_clear();
+    // Success already cleared progress before boot selection, while the running
+    // image was still the selected VALID image. Failure cleanup stays checked.
+    if (!ota_ok) lcd_ota_nvs_clear(storage_deadline);
 
     // Send response
     StaticJsonDocument<384> resp;
@@ -874,6 +887,9 @@ static void lcd_ota_handle_end(JsonObject& doc) {
     String out;
     serializeJson(resp, out);
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    if(sha_match&&ota_ok)g_lcd_diag_attempt_open=false;
+#endif
     if (sha_match && ota_ok) {
         uart_send_json(out.c_str());
         // Keep FINALIZING and the receiving guard set through esp_restart().
@@ -886,13 +902,14 @@ static void lcd_ota_handle_end(JsonObject& doc) {
             test_mode_clear("ota reboot");  // also wipes the RTC budget
         }
         // Clear maintenance NVS so stale state doesn't re-enter headless after reboot.
-        lcd_clear_persisted_maintenance_state("ota_complete");
-        // Arm the OTA continuation flag so the freshly-rebooted LCD re-shows the
-        // "Updating…" hold and keeps the panel LIT while the Sense self-flashes
-        // (a blocking, UART-silent ~tens-of-seconds loop). LCD_OTA_END_ACK was
-        // already sent above. Written to its own namespace so the maintenance
-        // clear above does not wipe it.
-        lcd_ota_set_continuation_pending(true);
+        const bool maintenance_cleared=lcd_clear_persisted_maintenance_state("ota_complete",storage_deadline);
+        Serial.printf("[LCD_OTA_UART] committed_boot maintenance_clear_verified=%u\n",maintenance_cleared?1:0);
+        // The prepared target-bound continuation keeps the freshly rebooted LCD
+        // lit while Sense self-flashes. It is independent of maintenance state.
+        // Boot selection and END_ACK already committed above; a failed ancillary
+        // clear is reported without inventing rollback or undoing that success.
+        // Target-bound continuation was already durably prepared before the
+        // irreversible boot-selection call. Never recreate it after END_ACK.
         delay(200);  // Allow NVS writes to flush
         // Clear the bootloader's deep-sleep-validate cache (STORE6/STORE7).
         REG_WRITE(RTC_CNTL_STORE6_REG, 0);
@@ -907,7 +924,7 @@ static void lcd_ota_handle_end(JsonObject& doc) {
     } else {
         Serial.printf("[LCD_OTA_UART] OTA failed: sha_match=%d ota_ok=%d\n",
                       sha_match ? 1 : 0, ota_ok ? 1 : 0);
-        lcd_ota_uart_restore_ui();
+        lcd_ota_uart_restore_ui(storage_deadline);
 
         // Release sleep only after failed-finalization cleanup is complete.
         s_lcd_ota_partition          = NULL;
@@ -927,6 +944,7 @@ static void lcd_ota_handle_end(JsonObject& doc) {
 
 // ── LCD_OTA_ABORT ────────────────────────────────────────────────────
 static void lcd_ota_handle_abort(JsonObject& doc) {
+    const LcdNvsDeadline storage_deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms);
     const char* reason = doc["reason"] | "sense_abort";
     uint16_t session_id = doc["session_id"] | (uint16_t)0;
     if (!doc["session_id"].is<uint16_t>() || !session_id) return;
@@ -940,9 +958,15 @@ static void lcd_ota_handle_abort(JsonObject& doc) {
                       static_cast<int>(s_lcd_ota_state.load()));
         return;
     }
+#if defined(HALO_OTA_BENCH_CASE)
+    halo_bench_finish(session_id);
+#endif
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    lcd_diag_capture_failure(halo_diag::Stage::Failure,5,0,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
     const char* sender_detail = doc["detail"] | (const char*)nullptr;
     if (sender_detail && strlen(sender_detail) < 224)
-        lcd_ota_store_terminal("sense", "LCD_PROXY_END", 0, sender_detail);
+        lcd_ota_store_terminal("sense", "LCD_PROXY_END", 0, sender_detail,storage_deadline);
     s_lcd_ota_state = LCD_OTA_ABORTING;
     g_lcd_ota_uart_receiving = true;
     g_lcd_ota_binary_mode = false;
@@ -967,7 +991,7 @@ static void lcd_ota_handle_abort(JsonObject& doc) {
     // Preserve NVS on timeout for resume; clear on explicit abort
     bool is_timeout = reason && (strcmp(reason, "timeout") == 0);
     if (!is_timeout) {
-        lcd_ota_nvs_clear();
+        lcd_ota_nvs_clear(storage_deadline);
     } else {
         Serial.println("[LCD_OTA_UART] NVS preserved for resume (timeout)");
     }
@@ -981,7 +1005,7 @@ static void lcd_ota_handle_abort(JsonObject& doc) {
     s_lcd_ota_expected_sha256[0] = '\0';
     s_lcd_ota_target_version[0]  = '\0';
 
-    lcd_ota_uart_restore_ui();
+    lcd_ota_uart_restore_ui(storage_deadline);
     s_lcd_ota_state = LCD_OTA_IDLE;
     g_lcd_ota_uart_receiving = false;
     s_lcd_ota_last_aborted_session = session_id;
@@ -1076,6 +1100,9 @@ static bool lcd_ota_receive_loop() {
             memcmp(chunk_data, s_lcd_ota_last_data, chunk_len) == 0) {
             // Idempotence includes the final CHUNK while waiting for END.
             // A duplicate is not new progress and cannot extend either deadline.
+#if defined(HALO_OTA_BENCH_CASE)
+            if (!halo_bench_drop_ack(s_lcd_ota_session_id, seq, s_lcd_ota_bytes_written, s_lcd_ota_image_size, true))
+#endif
             s_lcd_ota_protocol->send_ack(seq);
             return true;
         }
@@ -1097,7 +1124,19 @@ static bool lcd_ota_receive_loop() {
     }
 
     // Write chunk to OTA partition
+#if defined(HALO_OTA_BENCH_CASE)
+    const bool bench_reset = halo_bench_prepare_reset(s_lcd_ota_session_id, seq, s_lcd_ota_bytes_written,
+        chunk_len, s_lcd_ota_partition, s_lcd_ota_state == LCD_OTA_RECEIVING && s_lcd_ota_handle != 0,
+        g_lcd_coord_notice.active ? g_lcd_coord_notice.schedule : "");
+#endif
     esp_err_t werr = esp_ota_write(s_lcd_ota_handle, chunk_data, chunk_len);
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+    if(werr!=ESP_OK)lcd_diag_capture_failure(halo_diag::Stage::Write,2,werr,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+#endif
+#if defined(HALO_OTA_BENCH_CASE)
+    halo_bench_after_write(bench_reset, werr, s_lcd_ota_partition,
+        s_lcd_ota_state == LCD_OTA_RECEIVING && s_lcd_ota_handle != 0);
+#endif
     if ((uint32_t)(millis() - s_lcd_ota_started_ms) >= s_lcd_ota_budget_ms ||
         (uint32_t)(millis() - s_lcd_ota_last_chunk_ms) >= LCD_OTA_IDLE_TIMEOUT_MS) {
         lcd_ota_abort_internal("deadline_after_write");
@@ -1128,6 +1167,9 @@ static bool lcd_ota_receive_loop() {
     s_lcd_ota_expected_seq = (uint16_t)(seq + 1);  // defined modulo-65536 sequence wrap
 
     // Send ACK
+#if defined(HALO_OTA_BENCH_CASE)
+    if (!halo_bench_drop_ack(s_lcd_ota_session_id, seq, s_lcd_ota_bytes_written, s_lcd_ota_image_size, false))
+#endif
     s_lcd_ota_protocol->send_ack(seq);
 
     // Periodic NVS save
@@ -1165,8 +1207,18 @@ static bool lcd_ota_receive_loop() {
  * On fail: mark invalid and rollback+reboot to previous firmware.
  */
 static void lcd_ota_self_test() {
+    static bool attempted=false, pending_seen=false, rollback_attempted=false;
+    static uint32_t pending_started_ms=0;
+    auto rollback_if_expired=[&]() {
+        if (!pending_seen || rollback_attempted ||
+            (uint32_t)(millis()-pending_started_ms)<30000UL)return;
+        rollback_attempted=true;
+        const esp_err_t err=esp_ota_mark_app_invalid_rollback_and_reboot();
+        Serial.printf("[LCD_OTA_UART] validation_timeout rollback returned=0x%x\n",err);
+    };
     const esp_partition_t* running = esp_ota_get_running_partition();
     if (!running) {
+        rollback_if_expired();
         Serial.println("[LCD_OTA_UART] self_test: cannot determine running partition");
         return;
     }
@@ -1174,27 +1226,77 @@ static void lcd_ota_self_test() {
     esp_ota_img_states_t state;
     esp_err_t err = esp_ota_get_state_partition(running, &state);
     if (err != ESP_OK) {
-        // Not an OTA partition or state not available — nothing to do
+        rollback_if_expired();
+        // State unavailable never establishes VALID.
         Serial.printf("[LCD_OTA_UART] self_test: get_state err=0x%x (ok if factory)\n", err);
         return;
     }
 
-    if (state != ESP_OTA_IMG_PENDING_VERIFY) {
+    if (state == ESP_OTA_IMG_PENDING_VERIFY && !pending_seen) {
+        pending_seen=true;pending_started_ms=millis();g_lcd_validation_pending.store(true);
+    }
+    const bool serial_install=state==ESP_OTA_IMG_UNDEFINED;
+    const LcdNvsDeadline bootstrap_deadline;
+    if (pending_seen && g_lcd_validation_pending.load() && state==ESP_OTA_IMG_VALID) {
+        if(lcd_nvs_image_valid())g_lcd_validation_pending.store(false);
+        else rollback_if_expired();
+        return;
+    }
+    if (state != ESP_OTA_IMG_PENDING_VERIFY && !serial_install) {
+        rollback_if_expired();
         Serial.printf("[LCD_OTA_UART] self_test: partition state=%d (not pending), skipping\n",
                       (int)state);
         return;
     }
+    if (serial_install) {
+#ifdef CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK
+        return;  // this bounded install classification never changes secure-version fuses
+#else
+        const esp_partition_t* selected=esp_ota_get_boot_partition();
+        if (!g_ui_initialized || !g_lvgl_running || !g_lcd_uart_task_created || !uart_tx_queue ||
+            lcd_ota_uart_active() || !selected || selected->address!=running->address ||
+            !lcd_nvs_known_serial_template(running,bootstrap_deadline)) {
+            Serial.println("[LCD_OTA_UART] serial_template_or_UI_readiness_unproven; metadata unchanged");
+            return;
+        }
+#endif
+    }
+    if (rollback_attempted)return;
+    if (!serial_install && (uint32_t)(millis()-pending_started_ms)>=30000UL) {
+        rollback_if_expired();return;
+    }
+    const esp_reset_reason_t reset=esp_reset_reason();
+    const bool local_ready=g_ui_initialized && g_lvgl_running &&
+        g_lcd_uart_task_created && uart_tx_queue &&
+        reset!=ESP_RST_PANIC && reset!=ESP_RST_INT_WDT &&
+        reset!=ESP_RST_TASK_WDT && reset!=ESP_RST_WDT;
 
-    // OTA firmware is SHA256-verified before write. If we booted, it's good.
-    // Mark valid immediately — no self-test. The previous self-test checked
-    // LVGL init which can fail on timing (LVGL runs on Core 1, self-test
-    // runs early in setup on Core 0), causing unnecessary rollback.
+    if (!local_ready || attempted)return;
+    // UART may have run during the full template scan. Mark-valid must still
+    // refer to this running/selected image and the same supported install.
+    const esp_partition_t* current=esp_ota_get_running_partition();
+    const esp_partition_t* selected=esp_ota_get_boot_partition();
+    esp_ota_img_states_t fresh_state;
+    if(!bootstrap_deadline.live() || !current || current->address!=running->address ||
+        !selected || selected->address!=running->address || lcd_ota_uart_active() ||
+        esp_ota_get_state_partition(running,&fresh_state)!=ESP_OK || fresh_state!=state ||
+        (serial_install && (!g_ui_initialized || !g_lvgl_running || !g_lcd_uart_task_created || !uart_tx_queue)))return;
+    attempted=true;
+
+    // Local readiness is now established. Slow UI initialization was deferred
+    // to the existing loop rather than treated as immediate corruption.
+    // Peer, Wi-Fi, time and SD availability do not establish firmware health.
     Serial.printf("[LCD_OTA_UART] Marking OTA partition %s as valid (SHA256 pre-verified)\n",
                   running->label);
     esp_err_t mark_err = esp_ota_mark_app_valid_cancel_rollback();
     if (mark_err != ESP_OK) {
+        g_lcd_nvs_uncertain.store(true);
         Serial.printf("[LCD_OTA_UART] WARN: mark_valid failed: 0x%x\n", mark_err);
+    } else if (lcd_nvs_image_valid()) {
+        g_lcd_validation_pending.store(false);
+      Serial.println("[LCD_OTA_UART] OTA partition confirmed valid — rollback cancelled");
     } else {
-        Serial.println("[LCD_OTA_UART] OTA partition confirmed valid — rollback cancelled");
+        g_lcd_nvs_uncertain.store(true);
+        Serial.println("[LCD_OTA_UART] mark_valid readback unresolved; new durable state disabled");
     }
 }

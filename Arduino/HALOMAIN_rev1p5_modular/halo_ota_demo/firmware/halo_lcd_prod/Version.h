@@ -13,8 +13,8 @@
 // All runtime code should use kFirmwareVersion and kBuildId from BuildInfo.h
 // (which reference these macros). This ensures consistency across compilation units.
 //
-// Generated: Sep 04 2026 19:14:12
-// Git Hash: c783302
+// Generated: Sep 09 2026 17:56:57
+// Source snapshot (precommit, not a Git commit): 4e3fbfcdcb3b7d2e293f9815d8e4ee5f3f9df44f41a3e516f4d06dc2fda32805
 
 #ifndef VERSION_H
 #define VERSION_H
@@ -32,17 +32,17 @@
 #endif
 
 // Firmware version string (semantic versioning: MAJOR.MINOR.PATCH)
-#define FIRMWARE_VERSION "6.4.14"
+#define FIRMWARE_VERSION "6.4.102"
 
 // Build metadata (AUTO-GENERATED - do not override)
-#define BUILD_DATE "Sep 04 2026"
-#define BUILD_TIME "19:14:12"
-#define BUILD_DATE_TIME_STR "Sep 04 2026 19:14:12"
-#define BUILD_GIT_HASH "c783302"
+#define BUILD_DATE "Sep 09 2026"
+#define BUILD_TIME "17:56:57"
+#define BUILD_DATE_TIME_STR "Sep 09 2026 17:56:57"
+#define BUILD_GIT_HASH "precommit-4e3fbfcdcb3b"
 
 // Build ID: unique identifier for this build (version + date + time + git hash)
 // Format: "VERSION-DATE-TIME-GIT" (e.g., "6.4.14-Sep 04 2026-19:14:12-c783302")
-#define BUILD_ID "6.4.14-Sep 04 2026-19:14:12-c783302"
+#define BUILD_ID "6.4.102-Sep 09 2026-17:56:57-precommit-4e3fbfcdcb3b"
 
 // Version comparison helper
 struct Version {
@@ -105,7 +105,7 @@ struct BuildInfo {
 // Note: This macro is still used for compile-time stringification.
 // Runtime code should use kFwEmbedMarker from BuildInfo.h instead.
 #ifndef FW_EMBED_MARKER
-#define FW_EMBED_MARKER "HALO_FW_MARKER:6.4.14|BUILD_ID:6.4.14-Sep 04 2026-19:14:12-c783302|BOARD:lcd"
+#define FW_EMBED_MARKER "HALO_FW_MARKER:6.4.102|BUILD_ID:6.4.102-Sep 09 2026-17:56:57-precommit-4e3fbfcdcb3b|BOARD:lcd"
 #endif
 
 // Force retention in binary (prevent LTO/GC from stripping it)

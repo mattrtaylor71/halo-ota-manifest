@@ -17,6 +17,8 @@
 #ifndef LCD_UART_TASK_H
 #define LCD_UART_TASK_H
 
+#include "lcd_id1_diagnostic.h"
+
 static void uart_task(void *arg) {
   Serial.println("[UART] UART task started");
 
@@ -250,7 +252,9 @@ static void uart_task(void *arg) {
             usb_buf[usb_pos] = '\0';
 
             // --- Plain-text shortcut commands ---
-            if (strcasecmp(usb_buf, "fw") == 0 || strcasecmp(usb_buf, "ver") == 0) {
+            if (strncmp(usb_buf, "id1", 3) == 0 && (usb_buf[3] == ' ' || usb_buf[3] == '\0')) {
+              lcd_id1_request(usb_buf);
+            } else if (strcasecmp(usb_buf, "fw") == 0 || strcasecmp(usb_buf, "ver") == 0) {
               // Canonical machine-readable line — reuses the SAME partition/state
               // logic as LCD_OTA_QUERY_RESP (lcd_build_fw_status_json in
               // lcd_ota_uart.h) so the two reporting paths never diverge.
@@ -353,6 +357,14 @@ static void uart_task(void *arg) {
                   xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
                 }
               }
+#if defined(HALO_UI_REVIEW) && HALO_UI_REVIEW
+            } else if (strcmp(usb_buf, "uilayout") == 0) {
+              if (app_event_queue) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_UI_REVIEW;
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
+#endif
             } else if (strcmp(usb_buf, "liststate") == 0) {
               // One-line list/refresh state dump, printed from the UI task so
               // the harness sees a coherent snapshot.
@@ -425,6 +437,10 @@ static void uart_task(void *arg) {
             } else if (strcmp(usb_buf, "errors") == 0) {
               Serial.println("[USB_CMD] shortcut 'errors' -> dumping error log");
               errlog_dump(Serial);
+#if defined(HALO_OTA_BENCH_CASE)
+            } else if (strcmp(usb_buf, "otabench") == 0) {
+              halo_bench_dump(Serial, g_lcd_ota_uart_receiving.load());
+#endif
             } else if (strcmp(usb_buf, "clearerrors") == 0) {
               errlog_clear();
               Serial.println("[USB_CMD] error log cleared");
@@ -485,55 +501,60 @@ static void uart_task(void *arg) {
                             (unsigned long)deferred_ring_dropped,
                             sense_ready_for_control_tx() ? 1 : 0);
             } else if (strncmp(usb_buf, "spoolfill", 9) == 0) {
-              // Bench: forge N small spool slots (+ sidecars) so the caps can be
-              // exercised without performing N real captures. The cap logic keys
-              // on file COUNT and the sidecar epoch, not on image size, so tiny
-              // files test it faithfully.
-              //
-              // Usage: spoolfill <N> [age_s]
-              //   age_s backdates the sidecar epoch so age eviction can be aimed
-              //   at a specific subset. `spoolfill 0` really does create nothing —
-              //   it used to fall into the `want <= 0` default and forge 45 slots,
-              //   which during a bench run silently doubled the card instead of
-              //   leaving it alone.
-              lcd_sd_init();
-              const char* a = usb_buf + 9;
-              while (*a == ' ') a++;
-              const bool have_arg = (*a >= '0' && *a <= '9');
-              int want = have_arg ? atoi(a) : 45;
-              uint32_t age_s = 0;
-              if (have_arg) {
-                const char* a2 = a;
-                while (*a2 >= '0' && *a2 <= '9') a2++;
-                while (*a2 == ' ') a2++;
-                age_s = (uint32_t)strtoul(a2, NULL, 10);
-              }
-              if (want < 0) want = 0;
-              uint32_t made = 0;
-              for (int k = 0; k < want; k++) {
-                const uint32_t slot = lcd_spool_alloc_seq();
-                char ip[64], mp[64];
-                snprintf(ip, sizeof(ip), LCD_SD_SPOOL_DIR "/%lu.jpg",  (unsigned long)slot);
-                snprintf(mp, sizeof(mp), LCD_SD_SPOOL_DIR "/%lu.json", (unsigned long)slot);
-                FILE* f = fopen(ip, "wb");
-                if (!f) break;
-                static uint8_t junk[256]; fwrite(junk, 1, sizeof(junk), f); fclose(f);
-                FILE* m = fopen(mp, "wb");
-                if (m) {
-                  char meta[192];
-                  const int n = snprintf(meta, sizeof(meta),
-                      "{\"job_id\":%lu,\"len\":256,\"mode\":\"filltest\",\"is_voice\":0,"
-                      "\"expiry\":\"\",\"qty\":1,\"add_list\":0,\"retries\":0,\"epoch\":%lu}",
-                      (unsigned long)slot,
-                      (unsigned long)((g_img_rx_meta_epoch ? g_img_rx_meta_epoch : 1787000000UL) - age_s));
-                  fwrite(meta, 1, (size_t)n, m); fclose(m);
+              SdCardLease sd_lease;
+              if (!sd_lease || !LCD_SD_SPOOL_ENABLED || !lcd_sd_init()) {
+                Serial.println("[SD] command unavailable");
+              } else {
+                // Bench: forge N small spool slots (+ sidecars) so the caps can be
+                // exercised without performing N real captures. The cap logic keys
+                // on file COUNT and the sidecar epoch, not on image size, so tiny
+                // files test it faithfully.
+                //
+                // Usage: spoolfill <N> [age_s]
+                //   age_s backdates the sidecar epoch so age eviction can be aimed
+                //   at a specific subset. `spoolfill 0` really does create nothing —
+                //   it used to fall into the `want <= 0` default and forge 45 slots,
+                //   which during a bench run silently doubled the card instead of
+                //   leaving it alone.
+                lcd_sd_init();
+                const char* a = usb_buf + 9;
+                while (*a == ' ') a++;
+                const bool have_arg = (*a >= '0' && *a <= '9');
+                int want = have_arg ? atoi(a) : 45;
+                uint32_t age_s = 0;
+                if (have_arg) {
+                  const char* a2 = a;
+                  while (*a2 >= '0' && *a2 <= '9') a2++;
+                  while (*a2 == ' ') a2++;
+                  age_s = (uint32_t)strtoul(a2, NULL, 10);
                 }
-                made++;
+                if (want < 0) want = 0;
+                uint32_t made = 0;
+                for (int k = 0; k < want; k++) {
+                  const uint32_t slot = lcd_spool_alloc_seq();
+                  char ip[64], mp[64];
+                  snprintf(ip, sizeof(ip), LCD_SD_SPOOL_DIR "/%lu.jpg",  (unsigned long)slot);
+                  snprintf(mp, sizeof(mp), LCD_SD_SPOOL_DIR "/%lu.json", (unsigned long)slot);
+                  FILE* f = fopen(ip, "wb");
+                  if (!f) break;
+                  static uint8_t junk[256]; fwrite(junk, 1, sizeof(junk), f); fclose(f);
+                  FILE* m = fopen(mp, "wb");
+                  if (m) {
+                    char meta[192];
+                    const int n = snprintf(meta, sizeof(meta),
+                        "{\"job_id\":%lu,\"len\":256,\"mode\":\"filltest\",\"is_voice\":0,"
+                        "\"expiry\":\"\",\"qty\":1,\"add_list\":0,\"retries\":0,\"epoch\":%lu}",
+                        (unsigned long)slot,
+                        (unsigned long)((g_img_rx_meta_epoch ? g_img_rx_meta_epoch : 1787000000UL) - age_s));
+                    fwrite(meta, 1, (size_t)n, m); fclose(m);
+                  }
+                  made++;
+                }
+                uint32_t tot = 0;
+                Serial.printf("[SPOOLFILL] created=%lu now_count=%lu total=%lu\n",
+                              (unsigned long)made, (unsigned long)lcd_sd_spool_count(&tot),
+                              (unsigned long)tot);
               }
-              uint32_t tot = 0;
-              Serial.printf("[SPOOLFILL] created=%lu now_count=%lu total=%lu\n",
-                            (unsigned long)made, (unsigned long)lcd_sd_spool_count(&tot),
-                            (unsigned long)tot);
 #endif  // HALO_SPOOL_TEST (spoolfill)
 #if HALO_FREEZE_TEST
             } else if (strcmp(usb_buf, "freeze") == 0) {
@@ -580,78 +601,88 @@ static void uart_task(void *arg) {
               Serial.printf("[RESET_REASON] %s (%d)\n", n, (int)rr);
 #if HALO_SPOOL_TEST
             } else if (strncmp(usb_buf, "spoolcaps", 9) == 0) {
-              // Bench: run the cap enforcement that normally only fires when a new
-              // image arrives (lcd_img_rx_begin -> lcd_spool_enforce_caps).
-              //
-              // This calls the production function, not a copy of it. Reaching it
-              // through a real transfer needs a capture whose upload fails while
-              // the card is already at 40 slots, which is a lot of setup standing
-              // between the test and the one thing under test — eviction order.
-              //
-              // Usage: spoolcaps [now_epoch]   (default: the last sender epoch)
-              lcd_sd_init();
-              const char* a = usb_buf + 9;
-              while (*a == ' ') a++;
-              const uint32_t now_e = (*a >= '0' && *a <= '9')
-                                     ? (uint32_t)strtoul(a, NULL, 10)
-                                     : g_img_rx_meta_epoch;
-              uint32_t before_tot = 0;
-              const uint32_t before = lcd_sd_spool_count(&before_tot);
-              const uint32_t ev_c0 = g_spool_evicted_count, ev_a0 = g_spool_evicted_age;
-              Serial.printf("[SPOOLCAPS] before=%lu now_epoch=%lu max_slots=%d max_age_s=%lu\n",
-                            (unsigned long)before, (unsigned long)now_e,
-                            (int)LCD_SPOOL_MAX_SLOTS, (unsigned long)LCD_SPOOL_MAX_AGE_S);
-              lcd_spool_enforce_caps(now_e);
-              uint32_t after_tot = 0;
-              const uint32_t after = lcd_sd_spool_count(&after_tot);
-              Serial.printf("[SPOOLCAPS] after=%lu evicted_age=%lu evicted_slot=%lu\n",
-                            (unsigned long)after,
-                            (unsigned long)(g_spool_evicted_age - ev_a0),
-                            (unsigned long)(g_spool_evicted_count - ev_c0));
-            } else if (strcmp(usb_buf, "spoolclear") == 0) {
-              // Delete every spooled image + sidecar. Needed before testing the
-              // automatic drain: the card holds synthetic `spooltest` payloads,
-              // and letting the real drain upload those would create junk
-              // check-ins in the owner's actual kitchen.
-              uint32_t removed = 0;
-              // Mount first: the card mounts lazily, so on a fresh boot opendir()
-              // fails and this reported "spool dir not open" — which reads as "the
-              // card is empty" and silently did nothing while stale images were
-              // still there waiting to be drained and uploaded.
-              lcd_sd_init();
-              // Sweep repeatedly. The victim array holds 32 paths, so a single
-              // pass clears at most 32 files — with 45 slots on the card (2 files
-              // each) one `spoolclear` left 58 behind while reporting "removed 32",
-              // which reads as success. Anything still on the card gets uploaded
-              // by the next drain, so a partial clear is the exact failure this
-              // command exists to prevent.
-              bool sweep_open = true;
-              for (uint32_t pass = 0; pass < 16; pass++) {
-                DIR* cd = opendir(LCD_SD_SPOOL_DIR);
-                if (!cd) { sweep_open = (pass > 0); break; }
-                struct dirent* ce;
-                static char victims[32][64];
-                uint32_t nv = 0;
-                while ((ce = readdir(cd)) != NULL && nv < 32) {
-                  const char* dot = strrchr(ce->d_name, '.');
-                  if (!dot) continue;
-                  if (strcmp(dot, ".jpg") && strcmp(dot, ".json") && strcmp(dot, ".part")) continue;
-                  snprintf(victims[nv], sizeof(victims[0]), LCD_SD_SPOOL_DIR "/%s", ce->d_name);
-                  nv++;
-                }
-                closedir(cd);   // delete AFTER closing: removing entries mid-walk is undefined
-                if (nv == 0) break;
-                for (uint32_t i = 0; i < nv; i++) {
-                  if (remove(victims[i]) == 0) removed++;
-                }
-              }
-              if (!sweep_open) {
-                Serial.println("[SPOOLCLEAR] spool dir not open");
+              SdCardLease sd_lease;
+              if (!sd_lease || !LCD_SD_SPOOL_ENABLED || !lcd_sd_init()) {
+                Serial.println("[SD] command unavailable");
               } else {
-                uint32_t left_tot = 0;
-                Serial.printf("[SPOOLCLEAR] removed %lu file(s), %lu slot(s) left\n",
-                              (unsigned long)removed,
-                              (unsigned long)lcd_sd_spool_count(&left_tot));
+                // Bench: run the cap enforcement that normally only fires when a new
+                // image arrives (lcd_img_rx_begin -> lcd_spool_enforce_caps).
+                //
+                // This calls the production function, not a copy of it. Reaching it
+                // through a real transfer needs a capture whose upload fails while
+                // the card is already at 40 slots, which is a lot of setup standing
+                // between the test and the one thing under test — eviction order.
+                //
+                // Usage: spoolcaps [now_epoch]   (default: the last sender epoch)
+                lcd_sd_init();
+                const char* a = usb_buf + 9;
+                while (*a == ' ') a++;
+                const uint32_t now_e = (*a >= '0' && *a <= '9')
+                                       ? (uint32_t)strtoul(a, NULL, 10)
+                                       : g_img_rx_meta_epoch;
+                uint32_t before_tot = 0;
+                const uint32_t before = lcd_sd_spool_count(&before_tot);
+                const uint32_t ev_c0 = g_spool_evicted_count, ev_a0 = g_spool_evicted_age;
+                Serial.printf("[SPOOLCAPS] before=%lu now_epoch=%lu max_slots=%d max_age_s=%lu\n",
+                              (unsigned long)before, (unsigned long)now_e,
+                              (int)LCD_SPOOL_MAX_SLOTS, (unsigned long)LCD_SPOOL_MAX_AGE_S);
+                lcd_spool_enforce_caps(now_e);
+                uint32_t after_tot = 0;
+                const uint32_t after = lcd_sd_spool_count(&after_tot);
+                Serial.printf("[SPOOLCAPS] after=%lu evicted_age=%lu evicted_slot=%lu\n",
+                              (unsigned long)after,
+                              (unsigned long)(g_spool_evicted_age - ev_a0),
+                              (unsigned long)(g_spool_evicted_count - ev_c0));
+
+              }            } else if (strcmp(usb_buf, "spoolclear") == 0) {
+              SdCardLease sd_lease;
+              if (!sd_lease || !LCD_SD_SPOOL_ENABLED || !lcd_sd_init()) {
+                Serial.println("[SD] command unavailable");
+              } else {
+                // Delete every spooled image + sidecar. Needed before testing the
+                // automatic drain: the card holds synthetic `spooltest` payloads,
+                // and letting the real drain upload those would create junk
+                // check-ins in the owner's actual kitchen.
+                uint32_t removed = 0;
+                // Mount first: the card mounts lazily, so on a fresh boot opendir()
+                // fails and this reported "spool dir not open" — which reads as "the
+                // card is empty" and silently did nothing while stale images were
+                // still there waiting to be drained and uploaded.
+                lcd_sd_init();
+                // Sweep repeatedly. The victim array holds 32 paths, so a single
+                // pass clears at most 32 files — with 45 slots on the card (2 files
+                // each) one `spoolclear` left 58 behind while reporting "removed 32",
+                // which reads as success. Anything still on the card gets uploaded
+                // by the next drain, so a partial clear is the exact failure this
+                // command exists to prevent.
+                bool sweep_open = true;
+                for (uint32_t pass = 0; pass < 16; pass++) {
+                  DIR* cd = opendir(LCD_SD_SPOOL_DIR);
+                  if (!cd) { sweep_open = (pass > 0); break; }
+                  struct dirent* ce;
+                  static char victims[32][64];
+                  uint32_t nv = 0;
+                  while ((ce = readdir(cd)) != NULL && nv < 32) {
+                    const char* dot = strrchr(ce->d_name, '.');
+                    if (!dot) continue;
+                    if (strcmp(dot, ".jpg") && strcmp(dot, ".json") && strcmp(dot, ".part")) continue;
+                    snprintf(victims[nv], sizeof(victims[0]), LCD_SD_SPOOL_DIR "/%s", ce->d_name);
+                    nv++;
+                  }
+                  closedir(cd);   // delete AFTER closing: removing entries mid-walk is undefined
+                  if (nv == 0) break;
+                  for (uint32_t i = 0; i < nv; i++) {
+                    if (remove(victims[i]) == 0) removed++;
+                  }
+                }
+                if (!sweep_open) {
+                  Serial.println("[SPOOLCLEAR] spool dir not open");
+                } else {
+                  uint32_t left_tot = 0;
+                  Serial.printf("[SPOOLCLEAR] removed %lu file(s), %lu slot(s) left\n",
+                                (unsigned long)removed,
+                                (unsigned long)lcd_sd_spool_count(&left_tot));
+                }
               }
 #endif  // HALO_SPOOL_TEST (spoolcaps, spoolclear)
             } else if (strcmp(usb_buf, "linkstats") == 0) {
@@ -659,54 +690,59 @@ static void uart_task(void *arg) {
             } else if (strcmp(usb_buf, "sdtest") == 0) {
               lcd_sd_selftest();
             } else if (strcmp(usb_buf, "spoolverify") == 0) {
-              // Verify the spooltest image landed byte-for-byte. A matching byte
-              // COUNT is what promotes .part -> .jpg, and that is not the same as
-              // matching CONTENT: a framing bug that swaps, drops or repeats
-              // bytes can preserve length exactly. The Sense fills the test image
-              // with (i*31+7)&0xFF, so every byte is checkable.
-              // Spool files are named by LCD slot number, not job_id (job_id
-              // repeats after a Sense reboot), so verify the newest slot.
-              char vpath[64] = {0};
-              {
-                uint32_t newest = 0;
-                DIR* vd = opendir(LCD_SD_SPOOL_DIR);
-                if (vd) {
-                  struct dirent* ve;
-                  while ((ve = readdir(vd)) != NULL) {
-                    const char* dot = strrchr(ve->d_name, '.');
-                    if (!dot || strcmp(dot, ".jpg") != 0) continue;
-                    uint32_t s = (uint32_t)strtoul(ve->d_name, NULL, 10);
-                    if (s > newest) newest = s;
-                  }
-                  closedir(vd);
-                }
-                if (newest) snprintf(vpath, sizeof(vpath), LCD_SD_SPOOL_DIR "/%lu.jpg",
-                                     (unsigned long)newest);
-              }
-              FILE* vf = vpath[0] ? fopen(vpath, "rb") : NULL;
-              if (!vf) {
-                Serial.println("[SPOOLVERIFY] no spooled .jpg - run spooltest on the Sense first");
+              SdCardLease sd_lease;
+              if (!sd_lease || !LCD_SD_SPOOL_ENABLED || !lcd_sd_init()) {
+                Serial.println("[SD] command unavailable");
               } else {
-                Serial.printf("[SPOOLVERIFY] checking %s\n", vpath);
-                static uint8_t vbuf[512];
-                size_t voff = 0, vn;
-                long first_bad = -1;
-                uint32_t bad = 0;
-                while ((vn = fread(vbuf, 1, sizeof(vbuf), vf)) > 0) {
-                  for (size_t i = 0; i < vn; i++) {
-                    if (vbuf[i] != (uint8_t)(((voff + i) * 31 + 7) & 0xFF)) {
-                      if (first_bad < 0) first_bad = (long)(voff + i);
-                      bad++;
+                // Verify the spooltest image landed byte-for-byte. A matching byte
+                // COUNT is what promotes .part -> .jpg, and that is not the same as
+                // matching CONTENT: a framing bug that swaps, drops or repeats
+                // bytes can preserve length exactly. The Sense fills the test image
+                // with (i*31+7)&0xFF, so every byte is checkable.
+                // Spool files are named by LCD slot number, not job_id (job_id
+                // repeats after a Sense reboot), so verify the newest slot.
+                char vpath[64] = {0};
+                {
+                  uint32_t newest = 0;
+                  DIR* vd = opendir(LCD_SD_SPOOL_DIR);
+                  if (vd) {
+                    struct dirent* ve;
+                    while ((ve = readdir(vd)) != NULL) {
+                      const char* dot = strrchr(ve->d_name, '.');
+                      if (!dot || strcmp(dot, ".jpg") != 0) continue;
+                      uint32_t s = (uint32_t)strtoul(ve->d_name, NULL, 10);
+                      if (s > newest) newest = s;
                     }
+                    closedir(vd);
                   }
-                  voff += vn;
+                  if (newest) snprintf(vpath, sizeof(vpath), LCD_SD_SPOOL_DIR "/%lu.jpg",
+                                       (unsigned long)newest);
                 }
-                fclose(vf);
-                Serial.printf("[SPOOLVERIFY] bytes=%u expected=%u mismatches=%lu first_bad=%ld -> %s\n",
-                              (unsigned)voff, (unsigned)(180 * 1024), (unsigned long)bad, first_bad,
-                              (voff == 180 * 1024 && bad == 0) ? "PASS" : "FAIL");
-              }
-            } else if (strcmp(usb_buf, "testmode") == 0) {
+                FILE* vf = vpath[0] ? fopen(vpath, "rb") : NULL;
+                if (!vf) {
+                  Serial.println("[SPOOLVERIFY] no spooled .jpg - run spooltest on the Sense first");
+                } else {
+                  Serial.printf("[SPOOLVERIFY] checking %s\n", vpath);
+                  static uint8_t vbuf[512];
+                  size_t voff = 0, vn;
+                  long first_bad = -1;
+                  uint32_t bad = 0;
+                  while ((vn = fread(vbuf, 1, sizeof(vbuf), vf)) > 0) {
+                    for (size_t i = 0; i < vn; i++) {
+                      if (vbuf[i] != (uint8_t)(((voff + i) * 31 + 7) & 0xFF)) {
+                        if (first_bad < 0) first_bad = (long)(voff + i);
+                        bad++;
+                      }
+                    }
+                    voff += vn;
+                  }
+                  fclose(vf);
+                  Serial.printf("[SPOOLVERIFY] bytes=%u expected=%u mismatches=%lu first_bad=%ld -> %s\n",
+                                (unsigned)voff, (unsigned)(180 * 1024), (unsigned long)bad, first_bad,
+                                (voff == 180 * 1024 && bad == 0) ? "PASS" : "FAIL");
+                }
+
+              }            } else if (strcmp(usb_buf, "testmode") == 0) {
               test_mode_arm(TEST_MODE_BUDGET_MS);
               resetActivityTimer();
               Serial.println("[TEST_MODE] enabled (1 hour of running time, survives reboot, not power-off)");
@@ -902,6 +938,8 @@ static void uart_task(void *arg) {
         }
       }
     }
+
+    lcd_id1_service(); // one local USB opportunity; no wait or activity change
 
     // 4) Diagnostic mode service — keep awake and ping Sense every 2s
     if (diag_mode) {

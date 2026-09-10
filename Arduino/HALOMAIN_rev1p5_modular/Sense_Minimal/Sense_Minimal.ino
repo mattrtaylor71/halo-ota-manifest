@@ -1068,12 +1068,15 @@ static void uart_send_ui_list() {
   doc["type"] = "UI_LIST";
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
-  doc["selected_index"] = g_selected_index;
-
   int dropped = 0;
   int total = 0;
   JsonArray items = doc.createNestedArray("items");
-  if (g_list_mutex != NULL && xSemaphoreTake(g_list_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+  if (g_list_mutex == NULL || xSemaphoreTake(g_list_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    Serial.println("[UI_LIST] skipped reason=list_lock_unavailable");
+    return;  // A missing snapshot must never become a successful empty list.
+  }
+  {
+    doc["selected_index"] = g_selected_index;
     total = g_list_count;
     for (int i = 0; i < g_list_count; i++) {
       JsonObject item = items.createNestedObject();
@@ -1088,12 +1091,18 @@ static void uart_send_ui_list() {
     xSemaphoreGive(g_list_mutex);
   }
   if (dropped > 0 || doc.overflowed()) {
-    Serial.printf("[UI_LIST] truncated dropped=%d overflowed=%d total=%d\n",
+    Serial.printf("[UI_LIST] skipped reason=allocation dropped=%d overflowed=%d total=%d\n",
                   dropped, doc.overflowed() ? 1 : 0, total);
+    return;  // Preserve the LCD's last complete list instead of publishing a prefix.
   }
 
   String output;
-  serializeJson(doc, output);
+  const size_t expected_bytes = measureJson(doc);
+  if (!output.reserve(expected_bytes) || serializeJson(doc, output) != expected_bytes ||
+      output.length() != expected_bytes) {
+    Serial.println("[UI_LIST] skipped reason=serialization");
+    return;
+  }
   uart_send_json(output.c_str());
 }
 
@@ -1252,6 +1261,12 @@ static void uart_send_ui_status_extended(const char* op, const char* phase, cons
 static bool sense_can_sleep_now(const char** reason) {
   if (guardian_force_sleep) {
     return true;
+  }
+  // Ordinary sleep must leave the original bounded SNTP opportunity to the
+  // owner loop. Pre-sleep DNS work would stop it before teardown could resume it.
+  if (sense_ntp_attempt_pending()) {
+    if (reason) *reason = "clock_sync_pending";
+    return false;
   }
   // An SD-spool transfer is in flight — do not sleep through it.
   //
@@ -1688,9 +1703,18 @@ static bool sense_idle_mode_active() {
 
 static void service_boot_wifi_connect(unsigned long now_ms) {
   service_wifi_maintenance(now_ms);
+  // First IP can arrive on the same iteration that inactivity becomes eligible.
+  // Start/resume only the original per-boot attempt before any sleep decision;
+  // begin() retains its first deadline and is inert after completion/quiescence.
+  if (wifi_is_connected()) sense_ntp_begin();
   // Consume actual SNTP replies or expire the bounded attempt on the owner
   // task. Plausible retained time alone must not stop a fresh synchronization.
   sense_ntp_service();
+#if defined(HALO_SENSE_PROD_WRAPPER) && HALO_DURABLE_OTA_POLICY
+  // A newly fresh reply removes the SNTP sleep hold. Queue any existing durable
+  // boot recovery before this loop can sleep; admission still requires fresh UTC.
+  halo_policy_service_boot();
+#endif
 }
 
 // (voice functions removed — see sense_voice.h)
@@ -2177,6 +2201,13 @@ static bool net_ready_for_tls(const char* reason, uint32_t timeout_ms, const cha
 //  uart_send_ui_meal_result deleted 2026-08-21 with the nutrition feature)
 
 // ── UART Message Parsing ───────────────────────────────────────────
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+static bool sense_diag_accept_uart(JsonDocument& doc);
+#endif
+#if defined(HALO_DURABLE_OTA_POLICY) && HALO_DURABLE_OTA_POLICY
+static bool halo_policy_one_shot_command(JsonDocument& doc);
+static bool halo_policy_bench_command(JsonDocument& doc);
+#endif
 static bool parse_input_message(const char* json_str) {
   // Skip empty strings
   if (json_str == NULL || strlen(json_str) == 0) {
@@ -2206,6 +2237,9 @@ static bool parse_input_message(const char* json_str) {
     return false;  // Validation failed, message dropped
   }
   
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  if(sense_diag_accept_uart(doc))return true;
+#endif
   // Update last communication time (any message from LCD resets the timeout)
   last_lcd_communication = millis();
   last_uart_rx_ms = last_lcd_communication;
@@ -3048,6 +3082,12 @@ static bool parse_input_message(const char* json_str) {
       g_list_screen_active = false;
       Serial.println("[LIST_ACTIVE] state=0");
     }
+#if defined(HALO_DURABLE_OTA_POLICY) && HALO_DURABLE_OTA_POLICY
+  } else if (strcmp(type, "OTA_BENCH") == 0) {
+    return halo_policy_bench_command(doc);
+  } else if (strcmp(type, "OTA_ONE_SHOT") == 0) {
+    return halo_policy_one_shot_command(doc);
+#endif
   } else if (strcmp(type, "OTA_CHECK") == 0) {
     // On-demand OTA check.
     //
@@ -3591,12 +3631,13 @@ scan_exit:
         // UI_LIST. One cheap UART line makes the ordering deterministic.
         uart_send_ui_status("IDLE");
         Serial.println("[LIST_REFRESH] awake_proof_sent path=fetch");
-        fetch_shopping_list_from_api();
-        uart_send_ui_list();
-        Serial.printf("[LIST_REFRESH] total_ms=%lu fetch_ms=%lu (request->UI_LIST)\n",
+        // The parser publishes exactly once after a valid backend response.
+        // Failed fetches retain the cache and must not turn boot count=0 into UI_LIST[].
+        bool fetch_ok = fetch_shopping_list_from_api();
+        Serial.printf("[LIST_REFRESH] total_ms=%lu fetch_ms=%lu ok=%d\n",
                       (unsigned long)(millis() - job.created_ts),
-                      (unsigned long)(millis() - deq_ms));
-        list_refresh_mark_complete("done");
+                      (unsigned long)(millis() - deq_ms), fetch_ok ? 1 : 0);
+        list_refresh_mark_complete(fetch_ok ? "done" : "failed");
       }
       
       // Job complete
@@ -4006,6 +4047,9 @@ void loop() {
   {
     static char usb_rx_line[UART_RX_FRAME_MAX + 1];
     static size_t usb_rx_len = 0;
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+    static bool usb_rx_overflow=false;
+#endif
     while (Serial.available() > 0) {
       char c = (char)Serial.read();
       if (c == '\n') {
@@ -4014,14 +4058,32 @@ void loop() {
         if (usb_rx_len > 0 && usb_rx_line[usb_rx_len - 1] == '\r') {
           usb_rx_line[--usb_rx_len] = '\0';
         }
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+        if(usb_rx_overflow)Serial.printf("[OTA_DIAG_AUTH] USB line overflow; discarded\n");
+        else
+#endif
         if (usb_rx_len > 0) {
           if (usb_rx_line[0] == '{') {
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+            Serial.printf("[DEBUG_INJECT] USB JSON bytes=%u\n",unsigned(usb_rx_len));
+            if(!halo_diag_auth_usb_line(usb_rx_line,usb_rx_len)) {
+#if HALO_IDLE_NETWORK_PROBE && HALO_IDLE_NETWORK_RECOVERY && HALO_OTA_BENCH_PROFILE
+              if(!halo_idle_probe_usb_line(usb_rx_line,usb_rx_len))
+#endif
+              parse_input_message(usb_rx_line);
+            }
+#else
             Serial.printf("[DEBUG_INJECT] Processing USB serial command: %.40s...\n", usb_rx_line);
             parse_input_message(usb_rx_line);
+#endif
           } else if (strcmp(usb_rx_line, "errors") == 0) {
             sense_errlog_dump(Serial);
           } else if (strcmp(usb_rx_line, "lcdxfer") == 0) {
             sense_lcd_terminal_dump(Serial);
+#if defined(HALO_OTA_BENCH_CASE)
+          } else if (strcmp(usb_rx_line, "otabench") == 0) {
+            halo_bench_dump(Serial, g_lcd_ota_proxy_owns_uart);
+#endif
           } else if (strcmp(usb_rx_line, "wakelog") == 0) {
             wakelog_dump();
           } else if (strcmp(usb_rx_line, "clearerrors") == 0) {
@@ -4146,9 +4208,13 @@ void loop() {
               const char* a = usb_rx_line + 5;
               while (*a == ' ') a++;
               if (*a) {
-                ProvisioningState::saveTimezone(a);
-                sense_set_timezone(a);
-                Serial.printf("[SETTZ] saved+applied tz=%s (reboot to prove it reloads)\n", a);
+                std::lock_guard<std::recursive_mutex> config_lock(ProvisioningState::timezoneMutex());
+                if (ProvisioningState::saveTimezone(a)) {
+                  sense_set_timezone(a);
+                  Serial.printf("[SETTZ] saved+applied tz=%s\n", a);
+                } else {
+                  Serial.println("[SETTZ] persistence unverified; active timezone unchanged");
+                }
               } else {
                 char cur[64];
                 const bool have = ProvisioningState::loadTimezone(cur, sizeof(cur));
@@ -4192,11 +4258,18 @@ void loop() {
 #endif
           }
         }
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+        usb_rx_overflow=false;
+        {volatile char* wipe=usb_rx_line;for(size_t i=0;i<sizeof(usb_rx_line);++i)wipe[i]=0;}
+#endif
         usb_rx_len = 0;
       } else if (usb_rx_len < UART_RX_FRAME_MAX) {
         usb_rx_line[usb_rx_len++] = c;
       }
-      // else: overflow — silently discard until next newline
+#if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
+      else usb_rx_overflow=true;
+#endif
+      // Retain overflow until LF; a truncated valid prefix is never a command.
     }
   }
 
@@ -4404,6 +4477,15 @@ void loop() {
     }
 #endif
 
+    // Preserve the pending request, message ID and original 60-second timeout.
+    // Returning to loop_end keeps UART, WiFi and SNTP service running; do not
+    // clear/recreate the request or enter pre-sleep DNS while time is pending.
+    if (!guardian_force_sleep && sense_ntp_attempt_pending()) {
+      if (sleep_block_should_log("clock_sync_pending", "coord_request", "clock")) {
+        Serial.println("[SLEEP_BLOCK] reason=clock_sync_pending where=coord_request");
+      }
+      goto loop_end;
+    }
     bool coordinated_request = sleep_coord_requested;
     sleep_ready_reason = coordinated_request ? "coordinated" : "requested";
     sleep_coord_pending_for_ready = coordinated_request;

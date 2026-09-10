@@ -29,6 +29,10 @@ static void ui_handle_ship_toast(const JsonDocument& doc) {
   }
 }
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+#include "lcd_diagnostic_uart.h"
+#endif
+
 // ── UART Message Processing ─────────────────────────────────────────
 // CRITICAL: This function runs from uart_task - NO LVGL calls allowed!
 // Only writes to g_pending buffer and posts events to UI task
@@ -88,6 +92,9 @@ static void uart_process_received_message(const char* json_str) {
     return;  // Validation failed, message dropped
   }
 
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  if(lcd_diag_uart(doc))return;
+#endif
   const char* type = doc["type"] | "";
   uart_rx_valid_msgs_seen++;
   unsigned long prev_rx_ms = last_sense_rx_ms;
@@ -635,6 +642,12 @@ static void uart_process_received_message(const char* json_str) {
           "store_failed", false, start_epoch, duration_sec, grace_before_sec, grace_after_sec, coord_id);
       return;
     }
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+    // Optional proof never changes the established MAINT_WINDOW acceptance.
+    const uint32_t witness_sense_boot = doc["sense_boot_id"].is<uint32_t>()
+        ? doc["sense_boot_id"].as<uint32_t>() : 0;
+    lcd_sleep_witness_accept(requested, witness_sense_boot);
+#endif
     // Clock was sampled before storage; elapsed NVS time must keep advancing.
     // Arm-time delivery race fix (breadcrumb): capture whether now_epoch arrived
     // and the clock became valid when the window was received. value=clock_valid.
@@ -905,6 +918,8 @@ static void uart_process_received_message(const char* json_str) {
   }
   
   if (strcmp(type, "OTA_LOCK") == 0) {
+    // Serialize new ownership with deferred exact-origin cleanup and BEGIN.
+    LcdMaintenanceStorageGuard ownership_guard;
     if ((!doc["coord_id"].isUnbound() && !doc["coord_id"].is<const char*>()) ||
         (!doc["lease_ms"].isUnbound() && !doc["lease_ms"].is<uint32_t>()) ||
         (!doc["sense_boot_id"].isUnbound() && !doc["sense_boot_id"].is<uint32_t>()) ||
@@ -1180,7 +1195,7 @@ static void uart_process_received_message(const char* json_str) {
         sleep_retry_allowed_ms = 0;
         sleep_handshake_fail_count = 0;
       }
-      if (unprovisioned) {
+      if (unprovisioned && !provision_intro_tapped) {
         provision_intro_pending = true;
         provision_intro_tapped = false;
         if (app_event_queue != NULL) {

@@ -23,6 +23,7 @@
 
 #include <Arduino.h>
 #include "esp_sleep.h"
+#include "sense_nvs_capacity.h"
 
 #ifndef WAKELOG_SLOTS
 #define WAKELOG_SLOTS 48          // ~2 days of nightly cycles, or a long soak
@@ -69,8 +70,15 @@ RTC_DATA_ATTR static wakelog_entry_t g_wakelog[WAKELOG_SLOTS];
 RTC_DATA_ATTR static uint16_t g_wakelog_head = 0;    // next slot to write
 RTC_DATA_ATTR static uint16_t g_wakelog_total = 0;   // cycles ever recorded
 RTC_DATA_ATTR static uint32_t g_wakelog_magic = 0;
+RTC_DATA_ATTR static uint64_t g_wakelog_present = 0;
+RTC_DATA_ATTR static bool g_wakelog_persisted_base_known = false;
+static_assert(WAKELOG_SLOTS==48,"reviewed persisted wake-ring geometry");
+static_assert(sizeof(wakelog_entry_t)==28,"reviewed old wake-record length");
+static uint16_t wakelog_retained_count() {
+  uint16_t n=0;for(unsigned i=0;i<WAKELOG_SLOTS;++i)if(g_wakelog_present&(uint64_t(1)<<i))++n;return n;
+}
 
-#define WAKELOG_MAGIC 0x57414B45u   // 'WAKE'
+#define WAKELOG_MAGIC 0x57414B32u   // 'WAK2': presence-aware RTC layout
 
 // Live counters for the current cycle.
 static uint16_t g_cycle_uploads_ok = 0;
@@ -99,49 +107,152 @@ static const char* wakelog_cause_name(uint8_t c) {
 #define WAKELOG_NVS_NS "wakelog"
 
 static void wakelog_nvs_store(const wakelog_entry_t* e, uint16_t slot) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  (void)e;(void)slot;return; // RTC wake history remains live
+#else
+  if(!g_wakelog_persisted_base_known)return; // ambiguous restore cannot reset persisted counters
+  NvsOptionalWrite admission(6);if(!admission)return;
   Preferences p;
   if (!p.begin(WAKELOG_NVS_NS, false)) return;
-  char key[8];
-  snprintf(key, sizeof(key), "e%u", (unsigned)(slot % WAKELOG_SLOTS));
-  p.putBytes(key, e, sizeof(*e));
-  p.putUShort("head", (uint16_t)((slot + 1) % WAKELOG_SLOTS));
-  p.putUShort("total", g_wakelog_total);
+  char key[8];snprintf(key,sizeof(key),"e%u",(unsigned)(slot%WAKELOG_SLOTS));
+  wakelog_entry_t actual{};
+  bool ok=p.putBytes(key,e,sizeof(*e))==sizeof(*e) &&
+      p.getBytesLength(key)==sizeof(actual) && p.getBytes(key,&actual,sizeof(actual))==sizeof(actual) &&
+      !memcmp(e,&actual,sizeof(actual));
+  if(ok)ok=p.putUShort("head",(uint16_t)((slot+1)%WAKELOG_SLOTS))==sizeof(uint16_t);
+  if(ok)ok=p.putUShort("total",g_wakelog_total)==sizeof(uint16_t);
   p.end();
+  if(!ok)Serial.println("[WAKELOG] persistence incomplete; stored positions may be ambiguous");
+#endif
+}
+
+// Caller holds NvsCapacityLease across this check and the essential write.
+// This preserves eight STORED ring positions, not provably newest legacy
+// records: the former implementation did not check blob/head/total writes.
+static bool wakelog_nvs_prepare_essential(size_t new_entries, bool (*budget_open)()) {
+  if(g_nvs_reclaim_uncertain || !budget_open() || !nvs_capacity_image_valid())return false;
+  const uint32_t began=millis();
+  size_t before=0;unsigned eligible=0,deleted=0,retained=0;
+  const bool before_known=nvs_capacity_available(before);
+  auto report=[&](const char*result,bool ok){
+    size_t after=0;const bool after_known=nvs_capacity_available(after);
+    Serial.printf("[OTA_NVS_CAP] result=%s before=%ld after=%ld eligible=%u deleted=%u protected=%u elapsed_ms=%lu\n",
+        result,before_known?(long)before:-1L,after_known?(long)after:-1L,eligible,deleted,retained,(unsigned long)(millis()-began));
+    return ok;
+  };
+  if(!before_known)return report("stats_unavailable",false);
+  if(new_entries>NVS_ESSENTIAL_CUSHION_ENTRIES)return report("size_invalid",false);
+  // Optional writes protect this cushion; essential writes are its consumers.
+  // Do not require restoring the whole cushion before every admitted write.
+  if(g_nvs_essential_space_prepared)return before>=new_entries;
+  if(before>=NVS_ESSENTIAL_CUSHION_ENTRIES){g_nvs_essential_space_prepared=true;return true;}
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
+  return report("retired_optional_profile",false);
+#else
+  if(g_nvs_reclaim_attempted)return false;
+  g_nvs_reclaim_attempted=true; // at most one bounded reclamation pass per boot
+  auto open=[&](){return (uint32_t)(millis()-began)<2000 && budget_open() && nvs_capacity_image_valid();};
+  nvs_handle_t handle;
+  if(!open() || nvs_open(WAKELOG_NVS_NS,NVS_READONLY,&handle)!=ESP_OK)return report("readonly_open",false);
+  auto fail=[&](){nvs_close(handle);return report(g_nvs_reclaim_uncertain?"uncertain":"validation_or_deadline",false);};
+  uint16_t head=0,total=0;
+  if(nvs_get_u16(handle,"head",&head)!=ESP_OK || nvs_get_u16(handle,"total",&total)!=ESP_OK ||
+      head>=WAKELOG_SLOTS || !total)return fail();
+  uint64_t present=0,keep=0;
+  // Validate the complete known-key candidate set before removing anything.
+  // Unknown keys/namespaces are never enumerated or deleted.
+  for(unsigned slot=0;slot<WAKELOG_SLOTS;++slot){
+    if(!open())return fail();
+    char key[8];snprintf(key,sizeof(key),"e%u",slot);
+    size_t size=0;esp_err_t result=nvs_get_blob(handle,key,nullptr,&size);
+    if(result==ESP_ERR_NVS_NOT_FOUND)continue; // prior partial pruning is idempotent
+    if(result!=ESP_OK || size!=sizeof(wakelog_entry_t))return fail();
+    wakelog_entry_t record{};size_t actual=sizeof(record);
+    if(nvs_get_blob(handle,key,&record,&actual)!=ESP_OK || actual!=sizeof(record))return fail();
+    present|=uint64_t(1)<<slot;
+  }
+  for(unsigned offset=1;offset<=WAKELOG_SLOTS && retained<8;++offset){
+    const uint64_t bit=uint64_t(1)<<((head+WAKELOG_SLOTS-offset)%WAKELOG_SLOTS);
+    if(present&bit){keep|=bit;++retained;}
+  }
+  for(unsigned slot=0;slot<WAKELOG_SLOTS;++slot)if((present&(uint64_t(1)<<slot)) && !(keep&(uint64_t(1)<<slot)))++eligible;
+  nvs_close(handle);
+  if(!open() || nvs_open(WAKELOG_NVS_NS,NVS_READWRITE,&handle)!=ESP_OK)return report("write_open",false);
+  uint16_t check_head=0,check_total=0;
+  if(nvs_get_u16(handle,"head",&check_head)!=ESP_OK || nvs_get_u16(handle,"total",&check_total)!=ESP_OK ||
+      check_head!=head || check_total!=total)return fail();
+  // Oldest stored positions first; retain up to eight actual typed records.
+  for(unsigned offset=0;offset<WAKELOG_SLOTS;++offset){
+    unsigned slot=(head+offset)%WAKELOG_SLOTS;uint64_t bit=uint64_t(1)<<slot;
+    if(!(present&bit) || (keep&bit))continue;
+    if(!open())return fail();
+    size_t available=0;if(!nvs_capacity_available(available))return fail();
+    if(available>=NVS_ESSENTIAL_CUSHION_ENTRIES){nvs_close(handle);g_nvs_essential_space_prepared=true;return report("reclaimed",true);}
+    char key[8];snprintf(key,sizeof(key),"e%u",slot);
+    if(nvs_erase_key(handle,key)!=ESP_OK || nvs_commit(handle)!=ESP_OK){
+      g_nvs_reclaim_uncertain=true;return fail();
+    }
+    size_t size=0;
+    if(nvs_get_blob(handle,key,nullptr,&size)!=ESP_ERR_NVS_NOT_FOUND){
+      g_nvs_reclaim_uncertain=true;return fail();
+    }
+    ++deleted;
+    // RTC still has its existing full records; only persisted retention shrank.
+  }
+  nvs_close(handle);
+  size_t after=0;
+  const bool ok=open() && nvs_capacity_available(after) && after>=NVS_ESSENTIAL_CUSHION_ENTRIES;
+  if(ok)g_nvs_essential_space_prepared=true;
+  return report(ok?"reclaimed":"insufficient_or_deadline",ok);
+#endif
 }
 
 // Reload RTC state from NVS after a power cut wiped it.
 static void wakelog_nvs_restore() {
-  Preferences p;
-  if (!p.begin(WAKELOG_NVS_NS, true)) return;
-  const uint16_t total = p.getUShort("total", 0);
-  const uint16_t head  = p.getUShort("head", 0);
-  if (total == 0) { p.end(); return; }
-  for (uint16_t i = 0; i < WAKELOG_SLOTS; i++) {
-    char key[8];
-    snprintf(key, sizeof(key), "e%u", (unsigned)i);
-    if (p.isKey(key)) p.getBytes(key, &g_wakelog[i], sizeof(wakelog_entry_t));
+  nvs_handle_t handle;
+  g_wakelog_persisted_base_known=false;
+  const esp_err_t opened=nvs_open(WAKELOG_NVS_NS,NVS_READONLY,&handle);
+  if(opened==ESP_ERR_NVS_NOT_FOUND){g_wakelog_persisted_base_known=true;g_wakelog_magic=0;return;}
+  if(opened!=ESP_OK)return;
+  uint16_t head=0,total=0;uint64_t present=0;
+  wakelog_entry_t records[WAKELOG_SLOTS]{};
+  const esp_err_t head_result=nvs_get_u16(handle,"head",&head),total_result=nvs_get_u16(handle,"total",&total);
+  const bool no_headers=head_result==ESP_ERR_NVS_NOT_FOUND && total_result==ESP_ERR_NVS_NOT_FOUND;
+  bool ok=no_headers || (head_result==ESP_OK && total_result==ESP_OK && head<WAKELOG_SLOTS && total>0);
+  for(unsigned i=0;ok && i<WAKELOG_SLOTS;++i){
+    char key[8];snprintf(key,sizeof(key),"e%u",i);size_t size=0;
+    esp_err_t result=nvs_get_blob(handle,key,nullptr,&size);
+    if(result==ESP_ERR_NVS_NOT_FOUND)continue;
+    if(result!=ESP_OK || size!=sizeof(records[i])){ok=false;break;}
+    size_t actual=sizeof(records[i]);
+    ok=nvs_get_blob(handle,key,&records[i],&actual)==ESP_OK && actual==sizeof(records[i]);
+    if(ok)present|=uint64_t(1)<<i;
   }
-  p.end();
-  g_wakelog_total = total;
-  g_wakelog_head = head;
-  g_wakelog_magic = WAKELOG_MAGIC;
-  Serial.printf("[WAKELOG] restored %u cycle(s) from NVS after power loss\n",
-                (unsigned)total);
+  nvs_close(handle);if(!ok || (no_headers && present))return;
+  g_wakelog_persisted_base_known=true;
+  if(no_headers){g_wakelog_magic=0;return;} // definitively empty, discard stale RAM base
+  memcpy(g_wakelog,records,sizeof(records));g_wakelog_present=present;
+  g_wakelog_total=total;g_wakelog_head=head;g_wakelog_magic=WAKELOG_MAGIC;
+  Serial.printf("[WAKELOG] restored %u retained cycle(s) total=%u order=stored_positions\n",
+                (unsigned)wakelog_retained_count(),(unsigned)total);
 }
 
 // Open a cycle. Call early in setup().
 static void wakelog_begin_cycle(uint32_t epoch_now, uint8_t reset_reason) {
-  if (g_wakelog_magic != WAKELOG_MAGIC) {   // RTC lost: power cut, or first ever boot
+  if (g_wakelog_magic != WAKELOG_MAGIC || !g_wakelog_persisted_base_known) {   // retry ambiguous restore only on normal boot
     wakelog_nvs_restore();                 // may repopulate from flash
   }
   if (g_wakelog_magic != WAKELOG_MAGIC) {  // genuinely nothing to recover
     memset((void*)g_wakelog, 0, sizeof(g_wakelog));
     g_wakelog_head = 0;
+    g_wakelog_present = 0;
     g_wakelog_total = 0;
     g_wakelog_magic = WAKELOG_MAGIC;
   }
+  if(!g_wakelog_persisted_base_known)Serial.println("[WAKELOG] persisted counter unknown; RAM-only diagnostics this boot");
   wakelog_entry_t* e = &g_wakelog[g_wakelog_head];
   memset(e, 0, sizeof(*e));
+  g_wakelog_present |= uint64_t(1)<<g_wakelog_head;
   e->epoch = epoch_now;
   e->wake_cause = (uint8_t)esp_sleep_get_wakeup_cause();
   e->reset_reason = reset_reason;
@@ -193,7 +304,7 @@ static void wakelog_end_cycle(uint32_t timer_s, bool ext0, uint16_t spool_depth)
 static void wakelog_report_to_lcd() {
   const bool magic_ok = (g_wakelog_magic == WAKELOG_MAGIC);
   const uint16_t n = magic_ok
-                     ? ((g_wakelog_total < WAKELOG_SLOTS) ? g_wakelog_total : WAKELOG_SLOTS)
+                     ? wakelog_retained_count()
                      : 0;
   // ALWAYS send the summary, even when there is nothing to report. The earlier
   // version returned silently on an empty log, which hid the one fact being
@@ -212,8 +323,11 @@ static void wakelog_report_to_lcd() {
   // Newest few only: this shares the link with real traffic, and the interesting
   // entries are always the most recent ones.
   const uint16_t show = (n < 5) ? n : 5;
-  for (uint16_t i = 0; i < show; i++) {
-    const uint16_t idx = (uint16_t)((g_wakelog_head + WAKELOG_SLOTS - show + i) % WAKELOG_SLOTS);
+  uint16_t skip=n-show;
+  for (uint16_t i=0;i<WAKELOG_SLOTS;++i) {
+    const uint16_t idx=(uint16_t)((g_wakelog_head+i)%WAKELOG_SLOTS);
+    if(!(g_wakelog_present&(uint64_t(1)<<idx)))continue;
+    if(skip){--skip;continue;}
     const wakelog_entry_t* e = &g_wakelog[idx];
     char det[128];
     snprintf(det, sizeof(det),
@@ -234,13 +348,14 @@ static void wakelog_dump() {
     Serial.println("[WAKELOG] empty (no cycles recorded since power-up)");
     return;
   }
-  const uint16_t n = (g_wakelog_total < WAKELOG_SLOTS) ? g_wakelog_total : WAKELOG_SLOTS;
+  const uint16_t n = wakelog_retained_count();
   Serial.printf("[WAKELOG] %u cycle(s) recorded (total %u since power-up)\n",
                 (unsigned)n, (unsigned)g_wakelog_total);
   Serial.println("[WAKELOG]  idx  cause    awake_ms  timer_s  ext0  cap  up_ok  up_fail  spool  closed  local_time");
-  for (uint16_t i = 0; i < n; i++) {
-    // Oldest first.
-    const uint16_t idx = (uint16_t)((g_wakelog_head + WAKELOG_SLOTS - n + i) % WAKELOG_SLOTS);
+  for(uint16_t i=0;i<WAKELOG_SLOTS;++i) {
+    // Stored-position order; legacy writes did not prove real chronology.
+    const uint16_t idx=(uint16_t)((g_wakelog_head+i)%WAKELOG_SLOTS);
+    if(!(g_wakelog_present&(uint64_t(1)<<idx)))continue;
     const wakelog_entry_t* e = &g_wakelog[idx];
     char tbuf[24] = "-";
     if (e->epoch) {

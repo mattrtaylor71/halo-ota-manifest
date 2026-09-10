@@ -101,8 +101,14 @@ static void ui_task(void *arg) {
     // iterations and across the active/inactive transition.
     static lv_obj_t* ota_overlay = NULL;
     static lv_obj_t* ota_label = NULL;
+    static lv_obj_t* ota_percent = NULL;
+    static lv_obj_t* ota_progress = NULL;
+    static lv_obj_t* ota_description = NULL;
+    static lv_obj_t* ota_activity = NULL;
+    static lv_obj_t* ota_spinner = NULL;
     static int last_shown_pct = -1;
-    static bool last_was_transfer = false;
+    static int last_ota_phase = -1;
+    static bool ota_saw_transfer = false;
     // True once the "Updating..." overlay has been flushed to the panel at least
     // once since the OTA screen went active. Gates lv_timer_handler() during the
     // LCD's own OTA binary receive (see the guard below). Reset in the teardown
@@ -129,49 +135,112 @@ static void ui_task(void *arg) {
       if (g_backlight_duty == 0) {
         lcd_set_backlight_binary(true, "ota_screen");
       }
-      // OTA overlay — black screen with status text
+      // Dark designer system surface. Only the display byte counter is a
+      // percentage; unknown/preparation and continuation remain indeterminate.
       bool is_transfer = g_lcd_ota_show_progress && g_lcd_ota_progress_pct >= 0;
       bool need_update = false;
+      if (is_transfer)
+        ota_saw_transfer = true;
+      const bool finishing = ota_saw_transfer || g_ota_continuation_hold_start_ms != 0;
+      const int phase = is_transfer ? 1 : (finishing ? 2 : 0);
 
       if (!ota_overlay) {
+        // Covered presentation must not keep animating behind this overlay.
+        // The existing binary first-frame/flush guard below remains unchanged.
+        halo_ui_motion_stop(lv_scr_act());
+        if (provision_ui_spinner) {
+          provision_ui_deferred_view = (int)provision_ui_view;
+          provision_ui_stop_spinner();
+        }
         // Create overlay on first entry
-        ota_overlay = lv_obj_create(lv_scr_act());
+        ota_overlay = lv_obj_create(lv_layer_top());
         lv_obj_remove_style_all(ota_overlay);
         lv_obj_set_size(ota_overlay, LV_HOR_RES, LV_VER_RES);
-        lv_obj_set_style_bg_color(ota_overlay, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(ota_overlay, lv_color_hex(COL_DARK), 0);
         lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
         lv_obj_center(ota_overlay);
-
-        ota_label = lv_label_create(ota_overlay);
-        lv_obj_set_style_text_color(ota_label, lv_color_white(), 0);
-        lv_obj_set_style_text_font(ota_label, &lv_font_montserrat_28, 0);
-        lv_obj_set_style_text_align(ota_label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_center(ota_label);
+        lv_obj_clear_flag(ota_overlay, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t* eyebrow =
+            halo_ui_label(ota_overlay, "SOFTWARE UPDATE", &nunito_12, COL_GOLD, 60, 56, 240);
+        lv_obj_set_style_text_letter_space(eyebrow, 1, 0);
+        ota_label =
+            halo_ui_label(ota_overlay, "Starting update", &nunito_22, COL_WHITE, 40, 196, 280);
+        ota_percent = halo_ui_label(ota_overlay, "0%", &nunito_44, COL_WHITE, 80, 126, 200);
+        ota_description = halo_ui_label(ota_overlay, "Getting things ready...",
+                                        &lv_font_montserrat_14, 0xD1D1D1, 50, 236, 260);
+        lv_obj_set_style_text_line_space(ota_description, 3, 0);
+        halo_ui_label(ota_overlay, "Keep HALO connected.", &lv_font_montserrat_12, 0xA0A0A0, 70,
+                      300, 220);
+        ota_progress = lv_bar_create(ota_overlay);
+        lv_obj_set_pos(ota_progress, 80, 212);
+        lv_obj_set_size(ota_progress, 200, 20);
+        lv_bar_set_range(ota_progress, 0, 100);
+        lv_obj_set_style_bg_color(ota_progress, lv_color_hex(0x3D3D3D), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(ota_progress, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_width(ota_progress, 2, LV_PART_MAIN);
+        lv_obj_set_style_border_color(ota_progress, lv_color_hex(0x696969), LV_PART_MAIN);
+        lv_obj_set_style_radius(ota_progress, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(ota_progress, 3, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(ota_progress, lv_color_hex(COL_GOLD), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(ota_progress, LV_OPA_COVER, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(ota_progress, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+        lv_obj_clear_flag(ota_progress, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        ota_activity = halo_ui_ring(ota_overlay, 138, 92, 84, 7, COL_GOLD);
+        lv_obj_set_style_arc_color(ota_activity, lv_color_hex(0x3D3D3D), LV_PART_MAIN);
+        lv_arc_set_value(ota_activity, 300);
         need_update = true;
       }
 
-      if (is_transfer) {
-        // LCD transfer in progress — show percentage
-        if (g_lcd_ota_progress_pct != last_shown_pct || !last_was_transfer) {
-          last_shown_pct = g_lcd_ota_progress_pct;
-          last_was_transfer = true;
-          char buf[32];
-          snprintf(buf, sizeof(buf), "Updating\n%d%%", last_shown_pct);
-          lv_label_set_text(ota_label, buf);
+      if (phase != last_ota_phase || need_update) {
+        last_ota_phase = phase;
+        lv_label_set_text(ota_label, is_transfer
+                                         ? "Updating the display"
+                                         : (finishing ? "Finishing update" : "Starting update"));
+        lv_obj_set_pos(ota_label, 40, is_transfer ? 84 : 196);
+        lv_label_set_text(ota_description, is_transfer ? "Display transfer only."
+                                                       : (finishing ? "HALO may restart itself."
+                                                                    : "Getting things ready..."));
+        lv_obj_set_pos(ota_description, 50, is_transfer ? 250 : 236);
+        if (is_transfer) {
+          lv_obj_clear_flag(ota_percent, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_clear_flag(ota_progress, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
+        } else {
+          lv_obj_add_flag(ota_percent, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(ota_progress, LV_OBJ_FLAG_HIDDEN);
+        }
+        need_update = true;
+      }
+
+      // Never run an overlay animation during binary receive. A static arc
+      // remains available for the first frame when progress is not yet known.
+      if (is_transfer || g_lcd_ota_binary_mode) {
+        if (ota_spinner) {
+          lv_obj_del(ota_spinner);
+          ota_spinner = NULL;
+        }
+        if (!is_transfer)
+          lv_obj_clear_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_add_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
+        if (!ota_spinner) {
+          ota_spinner = halo_ui_spinner(ota_overlay, 92, COL_GOLD);
+          lv_obj_set_style_arc_color(ota_spinner, lv_color_hex(0x3D3D3D), LV_PART_MAIN);
           need_update = true;
         }
-      } else if (!last_was_transfer || need_update) {
-        // Sense self-OTA in progress (or post-reboot continuation hold) — show
-        // continuous "Updating..." so the pre-transfer, transfer, and post-reboot
-        // phases all read as one uninterrupted update. ASCII dots (not U+2026) to
-        // avoid a tofu glyph in the montserrat font subset.
-        lv_label_set_text(ota_label, "Updating...");
-        last_was_transfer = false;
-        last_shown_pct = -1;
-        need_update = true;
+      }
+      if (is_transfer) {
+        if (g_lcd_ota_progress_pct != last_shown_pct || need_update) {
+          last_shown_pct = g_lcd_ota_progress_pct;
+          char buf[16];
+          snprintf(buf, sizeof(buf), "%d%%", last_shown_pct);
+          lv_label_set_text(ota_percent, buf);
+          lv_bar_set_value(ota_progress, last_shown_pct, LV_ANIM_OFF);
+          need_update = true;
+        }
       }
 
-      if (need_update && ota_overlay) {
+      if (ota_overlay) {
         lv_obj_move_foreground(ota_overlay);
       }
       // During the LCD's own OTA binary receive, esp_ota_write (Core 0) disables
@@ -203,16 +272,39 @@ static void ui_task(void *arg) {
     // call lv_obj_del directly — do NOT re-lock (deadlock) and do NOT unlock
     // (the normal path below releases the lock exactly once).
     if (ota_overlay) {
-      lv_obj_del(ota_overlay);   // also deletes child ota_label
+      if (ota_spinner) {
+        lv_obj_del(ota_spinner); // stops the indeterminate animation explicitly
+        ota_spinner = NULL;
+      }
+      lv_obj_del(ota_overlay); // also deletes all static presentation children
       ota_overlay = NULL;
       ota_label = NULL;
+      ota_percent = NULL;
+      ota_progress = NULL;
+      ota_description = NULL;
+      ota_activity = NULL;
       last_shown_pct = -1;
-      last_was_transfer = false;
+      last_ota_phase = -1;
+      ota_saw_transfer = false;
       s_ota_overlay_pushed = false;  // re-arm the one-shot flush for the next OTA
       Serial.println("[OTA] overlay torn down (screen inactive)");
     }
 
     app_event_t evt;
+    provision_ui_resume_deferred();
+    // A provisioning overlay can also cover Processing without a route change.
+    // Keep its owned spinner stopped while covered and resume only the still-
+    // current Processing screen. Never reset the operation's actual deadline.
+    if (ship_processing_spinner) {
+      const bool processing_visible =
+          ui_screen_state == SCREEN_PROCESSING && lv_scr_act() == ship_processing_screen &&
+          !provision_intro_visible &&
+          !(provision_screen && !lv_obj_has_flag(provision_screen, LV_OBJ_FLAG_HIDDEN));
+      if (!processing_visible)
+        lv_anim_del(ship_processing_spinner, NULL);
+      else if (!lv_anim_get(ship_processing_spinner, halo_ui_spin))
+        halo_ui_spinner_start(ship_processing_spinner);
+    }
     bool processed_anything = false;
     bool deferred_evt_ready = false;
 
@@ -305,6 +397,8 @@ static void ui_task(void *arg) {
     if (provision_return_home_pending) {
       provision_return_home_pending = false;
       Serial.println("[PROVISION] return_home -> show_main_menu");
+      hide_provisioning_screen();
+      hide_provision_intro_screen("return_home");
       show_ship_main_menu();
     }
     if (usb_deltouch_tap_due_ms != 0 && millis() >= usb_deltouch_tap_due_ms) {
@@ -978,6 +1072,7 @@ static void ui_task(void *arg) {
         }
         expiry_screen_visible = false;
         expiry_screen_shown_time = 0;
+        provision_ui_stop_spinner();
         if (provision_screen != NULL) {
           lv_obj_add_flag(provision_screen, LV_OBJ_FLAG_HIDDEN);
         }
@@ -1167,6 +1262,9 @@ static void ui_task(void *arg) {
         } else {
           Serial.println("[USB] refresh/pull ignored (not on shopping list screen)");
         }
+        processed_anything = true;
+      } else if (evt.type == EVT_USB_UI_REVIEW) {
+        lcd_ui_review_dump("usb_uilayout");
         processed_anything = true;
       } else if (evt.type == EVT_USB_LISTSTATE) {
         // USB 'liststate' — one machine-readable line for the e2e harness.

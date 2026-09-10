@@ -335,6 +335,9 @@ static void ensure_awake_for_ui(const char* reason) {
 }
 
 static void abort_sleep_transition(const char* reason, bool user_input = true) {
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
+  lcd_sleep_witness_cancel();
+#endif
   // Pin/teardown callers have real input. The handshake wait can also abort on
   // generic activity (e.g. a firmware-info retry); that must remain dark.
   if (user_input) {
