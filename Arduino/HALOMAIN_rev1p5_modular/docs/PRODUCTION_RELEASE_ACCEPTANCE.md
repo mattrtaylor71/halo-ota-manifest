@@ -1,10 +1,25 @@
 # Production release acceptance
 
-Final production candidate: **6.4.104, built and artifact-verified; hardware acceptance pending**; canary 6.4.102/103 changes only the fixed OTA route. The user authorized preparing, testing, committing and publishing the intended production release. This plan does not mark any new test passed. Shared production endpoints must remain healthy; intentional faults apply only to the designated test pair or its network. Promoting production latest can reach existing devices because the current manifest has no per-device rollout selector.
+Final production candidate: **6.4.108, reserved; build and hardware acceptance pending**. The preserved102/103/104 artifacts are historical candidates;104 is superseded and has not been promoted. The user authorized preparing, testing, committing and publishing the intended production release. This plan does not mark any new test passed. Shared production endpoints must remain healthy; intentional faults apply only to the designated test pair or its network. Promoting production latest can reach existing devices because the current manifest has no per-device rollout selector.
 
 The starting evidence is [three completed scheduled bench installs](</Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/SCHEDULED-BATCH-RESULTS.md>): 98→99, 99→100 and 100→101, taking 318, 303 and 309 seconds to terminal completion, followed by paired SDKVALID/Home and CRC-verified full policy reads. These are not shipping-profile acceptance. Shipping 98 and default-off shipping 99 built; 101 was bench-only. The latest healthy Ordinary POST recorded 8,188 bytes minimum free stack after return, not a worst-case stack guarantee.
 
-## One finite matrix
+## Successor validation after the observed failure
+
+The actual shipping102-to103 calendar case did not complete. Both boards remained102/app0 SDKVALID after the full passive window. The saved LCD transfer ring records16924bytes downloaded and acknowledged, then30seconds without further HTTP data; the nextGET failed before receiving data. Canonical generation6 retained target103 in DEFERRED with reservation0 and2334874ms available. Its retained arm identity proves a five-minute retry was prepared and then rejected. The old adapter rejects any below-target LCD after a begin count increases and requires a live lease, although ordinary OTA_LOCK clears that lease. Initial Wi-Fi/TLS root cause remains unproven. See the archived case receipt in `production-calendar-case-closure001/OPERATOR-CLOSED-RESULT.json` under the investigation directory referenced by the baseline.
+
+| Planned case | Fixed scope | Required result |
+|---|---|---|
+|105 bootstrap|Exact fixed shipping-canary images; archive closed102 failed case; separate declared NVS baseline and nearby normal-calendar timezone; preserve102 fallback and provisioning; final NEW verification directly into paired release on retained descriptors.|Both105 selected/running SDKVALID and Home; actual calendar timer and safe sleep. No separate ROM reopen after NEW proof.|
+|105→106 scheduled failure/recovery|Private isolated LCD integrity fixture with exact declared expected good hash and bounded conditional repair. Shipping limits and controls remain unchanged; no taps, resets or ledger changes during the case.|Actual failed LCD write/cleanup, retained oldVALID image, five-minute retry and eventual paired106 completion/accounting. Missing fault evidence is not a fault-test pass.|
+|106→107 clean scheduled repeat|Archive preceding resolved case; separate new-case baseline and nearby normal calendar, genuine UTC.|Fresh scheduled entry, paired107 completion/SDKVALID/Home and settled accounting.|
+|107→108 exact production manual bridge|Archive107, prepare separate manual baseline with explicit Pacific timezone, stage exact production immutable artifacts/versioned manifests and private bridge before global latest.|One supported manual request, exact108 pair SDKVALID/Home, resolved persisted target, reporting and2a.m. Pacific timers. Only then promote production latest.|
+
+Keep the40-minute observation horizon as a maximum. Strong joined terminal paired-target VALID/RESOLVED proof may close the existing observer through its bounded final-snapshot path earlier. Choose setup timing from the actual bounded preparation/release needs; do not add an arbitrary one-hour wait. New-case fixtures are explicit setup between archived cases, never in-case recovery or debt refunds.
+
+The earlier candidate matrix below is preserved as history. Its102 setup passed,103 scheduled case failed as described above, and104 manual/publication did not run. Supersede its pending steps with the successor sequence above.
+
+## Earlier candidate matrix and standing rules
 
 Bind exact source/build, both image hashes, starting full policy, test pair, stimulus, original deadline and cleanup owner before each case. Reuse existing operators and component checks. A missing witness is incomplete evidence; an observed contrary result is a failed case. Neither becomes a pass through repeated observation. Hardware acquisition refusals remain separate from OTA attempts.
 

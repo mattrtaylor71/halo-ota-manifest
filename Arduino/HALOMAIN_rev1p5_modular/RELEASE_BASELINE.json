@@ -1,10 +1,11 @@
 {
   "schema_version": 1,
-  "status": "built_artifacts_verified_hardware_acceptance_pending",
-  "candidate_version": "6.4.104",
+  "status": "retry_gate_fix_in_progress_before_successor_builds",
+  "candidate_version": "6.4.108",
   "canary_versions": [
-    "6.4.102",
-    "6.4.103"
+    "6.4.105",
+    "6.4.106",
+    "6.4.107"
   ],
   "canary_profile": "shipping policy with only the fixed private OTA route changed",
   "release_commit": null,
@@ -29,10 +30,11 @@
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
     "receipt": null
   },
-  "qualification_scope": "Exact shipping-policy102/103 canary pairs and default-production104 pair are built and independently artifact/resource verified.102 is from6b4b326;103/104 froma54bb86. No on-device shipping case or104 publication has passed yet. Three earlier bench scheduled installs remain separate historical successes. Physical power interruption, hotspot loss and USB-free cases are deferred.",
-  "artifact_source_commit": "a54bb86b5e8e4fc96a4bb8f25ba8d08581489387",
-  "artifact_source_firmware_tree": "9ae109136f893b76c3bc285cc8be56906de315bb",
-  "candidate_artifacts": {
+  "qualification_scope": "Shipping102 setup passed. Normal-calendar102-to103 failed during LCD HTTP transfer and deferred its fast retry; both boards remain102 SDKVALID. Existing102/103/104 artifacts are preserved and104 is superseded without production publication. A narrow retry readiness fix and105/106/107 canary plus108 production validation are pending. Historical bench passes and deferred physical fault cases remain separate.",
+  "artifact_source_commit": null,
+  "artifact_source_firmware_tree": null,
+  "autonomous_calendar_scope": "Planned shipping105-to106 isolated LCD integrity-failure/recovery, then clean scheduled106-to107, followed by exact production108 manual bridge. New-case NVS fixtures apply only between closed archived cases; genuine UTC and shipping limits remain unchanged. Restore explicit Pacific before final acceptance.",
+  "previous_candidate_artifacts": {
     "102": {
       "pair": {
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release102-build001/RELEASE-PAIR.json",
@@ -64,5 +66,7 @@
       }
     }
   },
-  "autonomous_calendar_scope": "Existing timezone-only fixture preserving actual102 canonical policy and genuine UTC; no target-seeding extension. Hardware exhausted-previous-day recovery deferred."
+  "candidate_artifacts": {},
+  "previous_artifact_source_commit": "a54bb86b5e8e4fc96a4bb8f25ba8d08581489387",
+  "previous_artifact_source_firmware_tree": "9ae109136f893b76c3bc285cc8be56906de315bb"
 }

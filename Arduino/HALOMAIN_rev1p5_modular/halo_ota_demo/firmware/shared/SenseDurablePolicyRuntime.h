@@ -11,7 +11,6 @@ namespace sense_policy {
 struct RetryBaseline {
   char fw[32]{},part[16]{};
   uint32_t boot=0,part_size=0;
-  uint8_t lcd_begins=0;
 };
 struct Work {
   bool live=false,finished=false,legacy=false,normal=false;
@@ -99,17 +98,28 @@ static void remember_retry_baseline() {
   strlcpy(b.part,g_lcd_query_running_part,sizeof(b.part));
   b.boot=g_lcd_query_peer_boot_id;b.part_size=g_lcd_ota_query_resp_part_size;
 }
+static bool retry_transport_ready() {
+  return sense_lcd_ota_retry_safe()&&!g_lcd_ota_proxy_owns_uart&&!g_lcd_ota_task_running;
+}
 static bool retry_peer_ready(const LcdOtaQuerySnapshot& p,const durable_ota::Record& r) {
+  if(!retry_transport_ready())return false;
   if(!p.correlated||!p.peer_boot_id||!p.boot_ready||strcmp(p.running_state,"VALID")||
      !p.running_part[0]||!strcmp(p.running_part,"?")||strcmp(p.running_part,p.boot_part))return false;
   if(compareSemver(p.fw,r.target.peer_version)>=0)return true;
   const auto& b=work.retry_baseline;
-  // A begin charge is conservative evidence of possible LCD mutation, even
-  // when its UART/SDK result was lost. After it, only target proof suffices.
-  return b.boot&&r.begins[1]==b.lcd_begins&&p.peer_boot_id==b.boot&&
+  // A failed write may leave the same VALID image running. The caller proves
+  // cleanup before querying; this fresh nonce must still match the exact
+  // invocation-local boot. Plain OTA_LOCK clears the preflight lease, and a
+  // long transfer can outlive it. An exactly unowned peer is safe here; a
+  // different live owner or inconsistent owner/lease tuple is not. Neither
+  // an empty lease nor the query alone proves cleanup. Begin charges remain spent.
+  const bool original_owner=!strcmp(p.coord_owner,g_peer_gate.owner)&&
+    p.coord_lease_ms&&p.coord_lease_ms<=120000;
+  const bool unowned=!p.coord_owner[0]&&!p.coord_lease_ms;
+  return b.boot&&p.peer_boot_id==b.boot&&
     !strcmp(p.fw,b.fw)&&!strcmp(p.running_part,b.part)&&p.part_size==b.part_size&&
     compareSemver(b.fw,r.target.peer_version)<0&&g_peer_gate.entered&&g_peer_gate.locked&&
-    !strcmp(p.coord_owner,g_peer_gate.owner)&&p.coord_lease_ms&&p.coord_lease_ms<=120000;
+    !g_peer_gate.legacy&&g_peer_gate.owner[0]&&(original_owner||unowned);
 }
 static bool image_matches(const esp_partition_t* part,const durable_ota::Target&t,uint32_t started,uint32_t budget) {
   if(!part||!t.bytes||t.bytes>part->size)return false;
@@ -247,7 +257,6 @@ static bool enter(const char* reason,bool retained_legacy) {
   }
   // This reservation was created in this boot, after checked settlement.
   if(bench_manual)boot_reconciled=true;
-  work.retry_baseline.lcd_begins=current()->begins[1];
   work.live=true;work.phase_start=millis();work.phase_budget=current()->reserved_work_ms;
   clamp_pair();return remaining()!=0;
 }
@@ -332,8 +341,7 @@ static void finish() {
   if(r->phase!=durable_ota::Phase::PREFLIGHT&&r->phase!=durable_ota::Phase::APPLY){work.finished=true;return;}
   const uint32_t left=remaining();
   const uint32_t arm_start=millis(); // persistence belongs to the charged five seconds
-  const bool can_arm=left>=5000&&!self_retry_user_busy()&&sense_lcd_ota_retry_safe()&&peer_valid()&&
-      !g_lcd_ota_proxy_owns_uart&&!g_lcd_ota_task_running;
+  const bool can_arm=left>=5000&&!self_retry_user_busy()&&retry_transport_ready()&&peer_valid();
   char request[64]={};
   if(can_arm)snprintf(request,sizeof(request),"retry_%08lx_%08lx_%lu",
       (unsigned long)r->created,(unsigned long)r->campaign[0],(unsigned long)r->attempt_ordinal);
@@ -344,9 +352,11 @@ static void finish() {
   if(!r||r->phase!=durable_ota::Phase::ARM_PENDING){work.finished=true;return;}
   // No renewed pair deadline: the five-second exchange is the charge just
   // reserved above, and still must fit the invocation's original bound.
+  // Check cleanup before starting/polling: a query response itself confirms
+  // JSON mode, so it must never rehabilitate an unconfirmed failed transfer.
   auto control_live=[&](){return uint32_t(millis()-arm_start)<5000&&
     uint32_t(millis()-work.phase_start)<work.phase_budget&&
-    uint32_t(millis()-work.original_start)<work.original_budget&&!self_retry_user_busy()&&
+    uint32_t(millis()-work.original_start)<work.original_budget&&!self_retry_user_busy()&&retry_transport_ready()&&
     sense_time_has_fresh_sync();};
   char challenge[40];snprintf(challenge,sizeof(challenge),"%08lx%08lx",(unsigned long)esp_random(),(unsigned long)esp_random());
   LcdOtaQuerySnapshot peer{};bool ready=false;
