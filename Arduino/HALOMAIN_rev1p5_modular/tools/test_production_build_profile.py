@@ -4,6 +4,8 @@ from pathlib import Path
 import tempfile
 import unittest
 import json
+import shutil
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -25,7 +27,8 @@ class ProductionProfileTests(unittest.TestCase):
                               'HALO_OTA_BENCH_PROFILE=0', 'HALO_OTA_ONE_SHOT=0',
                               'HALO_DIAG_AUTH_PROVISIONING=0'):
                     self.assertIn('-D' + macro, flags)
-                for forbidden in ('OTA_CHANNEL', 'OTA_S3_', 'HALO_TEST_', 'INSECURE_DEBUG=1',
+                self.assertIn('-DOTA_CHANNEL="prod"', flags)
+                for forbidden in ('OTA_CHANNEL_ENABLED', 'OTA_S3_', 'HALO_TEST_', 'INSECURE_DEBUG=1',
                                   'HALO_OTA_BENCH_PROFILE=1', 'HALO_IDLE_NETWORK_PROBE=1'):
                     self.assertNotIn(forbidden, flags)
                 if board == 'sense':
@@ -76,9 +79,31 @@ class ProductionProfileTests(unittest.TestCase):
             plain = build.command(board, SOURCE, '/tmp/halo-profile-check', '/usr/bin/arduino-cli')
             canary = build.command(board, SOURCE, '/tmp/halo-profile-check', '/usr/bin/arduino-cli', True)
             index = plain.index('--build-property') + 1
-            self.assertEqual(canary[index], plain[index] + suffix)
+            report_label = ' -DOTA_CHANNEL="prod"'
+            self.assertTrue(plain[index].endswith(report_label))
+            self.assertEqual(canary[index], plain[index][:-len(report_label)] + suffix)
             canary[index] = plain[index]
             self.assertEqual(canary, plain)
+
+    def test_report_label_does_not_change_actual_default_resolver(self):
+        # Preprocess the actual defaults/resolver, rather than a modeled route.
+        source = (SOURCE / 'halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.ino').read_text()
+        defaults = source[source.index('// OTA configuration defaults'):source.index('#ifndef OTA_SCHED_HTTP_URL')]
+        begin = source.index('void resolveOtaManifestUrl(OtaUrlConfig* config) {')
+        end = source.index('// ----------------------------------------------------------------------------', begin)
+        snippet = (defaults + source[begin:end]).encode()
+        compiler = shutil.which('c++')
+        self.assertIsNotNone(compiler)
+        def preprocess(extra, text):
+            return subprocess.check_output([compiler, '-E', '-P', '-x', 'c++', *extra, '-'], input=text, timeout=15)
+        old = preprocess([], snippet)
+        current = preprocess(['-DOTA_CHANNEL="prod"'], snippet)
+        self.assertEqual(current, old)
+        self.assertIn(b'"default_env"', current)
+        self.assertNotIn(b'"channel_mode"', current)
+        payload = (defaults + 'payload["channel"] = OTA_CHANNEL;\n').encode()
+        self.assertIn(b'payload["channel"] = "dev";', preprocess([], payload))
+        self.assertIn(b'payload["channel"] = "prod";', preprocess(['-DOTA_CHANNEL="prod"'], payload))
 
     def test_pending_signal_after_spawn_retains_compiler_custody(self):
         child = SimpleNamespace(pid=123456789, poll=lambda: 0, returncode=0)

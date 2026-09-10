@@ -42,6 +42,10 @@ def shipping_flags(board, private_canary=False):
         flags += (' -DOTA_CHANNEL_ENABLED -DOTA_CHANNEL="dev"'
                   ' -DOTA_S3_BUCKET="halo-ota-dev" -DOTA_S3_REGION="us-east-1"'
                   ' -DOTA_S3_PREFIX="' + CANARY_PREFIX + '"')
+    else:
+        # Ordinary report metadata must agree with the unchanged default-prod
+        # resolver. CHANNEL_ENABLED remains absent in the production profile.
+        flags += ' -DOTA_CHANNEL="prod"'
     return flags
 
 
@@ -51,7 +55,7 @@ def command(board, source, build, compiler, private_canary=False):
     table = source / Path(sketch).parent / 'partitions.csv'
     assert hashlib.sha256(table.read_bytes()).hexdigest() == PARTITIONS[board], 'Partition layout changed; review the production configuration'
     flags = shipping_flags(board)
-    assert all(token not in flags for token in ('OTA_S3_', 'OTA_CHANNEL', 'RETENTION_FIXTURE', 'RETIRE_SNAPSHOT', 'SPOOL_ENABLED=0', 'SPOOL_DRAIN_WAKE_ENABLED=0'))
+    assert all(token not in flags for token in ('OTA_S3_', 'OTA_CHANNEL_ENABLED', 'RETENTION_FIXTURE', 'RETIRE_SNAPSHOT', 'SPOOL_ENABLED=0', 'SPOOL_DRAIN_WAKE_ENABLED=0'))
     flags = shipping_flags(board, private_canary)
     for relative in ('halo_ota_demo/firmware/shared/MqttSecrets.local.h',
                      'halo_ota_demo/firmware/halo_sense_prod/MqttSecrets.local.h',
