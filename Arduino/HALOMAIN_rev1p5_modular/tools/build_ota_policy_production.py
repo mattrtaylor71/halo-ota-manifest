@@ -96,8 +96,25 @@ def close_owned_group(child):
     return {'group_absent': not present(), 'signals': actions}
 
 
-def run(board, source, out, compiler, private_canary=False):
+def min_free_gib(value):
+    """Keep an explicit, bounded host reserve; the normal admission stays 8 GiB."""
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("Minimum free space must be an integer GiB value")
+    if not 4 <= value <= 1024:
+        raise argparse.ArgumentTypeError("Minimum free space must be between 4 and 1024 GiB")
+    return value
+
+
+def run(board, source, out, compiler, private_canary=False, min_free_gib=8):
     out.mkdir(parents=True, exist_ok=False)
+    space = {'path': str(out), 'minimum_free_gib': min_free_gib,
+             'minimum_free_bytes': min_free_gib * 1024 ** 3,
+             'before_free_bytes': shutil.disk_usage(out).free, 'after_free_bytes': None}
+    space['admitted'] = space['before_free_bytes'] >= space['minimum_free_bytes']
+    save(out / 'disk-space.json', space)
+    assert space['admitted'], 'Free disk space is below the configured host build reserve'
     argv = command(board, source, out / 'compile', compiler, private_canary)
     save(out / 'command.json', {'argv': argv, 'cwd': str(source), 'profile': 'shipping', 'route_profile': 'private-canary' if private_canary else 'production', 'policy': board == 'sense', 'diagnostics': True, 'one_shot': False, 'bench_profile': False, 'private_route_override': private_canary, 'idle_network_recovery': board == 'sense', 'diagnostic_admission': board == 'sense', 'auth_provisioning': False, 'idle_network_probe': False, 'admission_endpoint': ADMISSION_URL if board == 'sense' else None})
     started = time.time()
@@ -124,6 +141,8 @@ def run(board, source, out, compiler, private_canary=False):
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
             save(out / 'result.json', result)
+            space['after_free_bytes'] = shutil.disk_usage(out).free
+            save(out / 'disk-space.json', space)
     assert result['reaped'] and result['group_absent'] and result['exit_code'] == 0 and not error, result
 
 
@@ -133,6 +152,7 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--plan', action='store_true', help='Print the exact commands without compiling')
     parser.add_argument('--private-canary', action='store_true', help='Use the fixed private canary manifest route; all shipping policy and disabled test features remain unchanged')
+    parser.add_argument('--min-free-gib', type=min_free_gib, default=8, help='Host free-space reserve checked before each board (default: 8 GiB; minimum: 4 GiB)')
     args = parser.parse_args()
     source = Path(__file__).resolve().parents[1]
     compiler = shutil.which('arduino-cli')
@@ -142,13 +162,12 @@ def main():
     if args.plan:
         print(json.dumps({b: command(b, source, args.out.resolve() / b / 'compile', compiler, args.private_canary) for b in boards}, indent=2))
         return
-    assert shutil.disk_usage(args.out.resolve().parent).free >= 8 * 1024 ** 3, 'At least8GiB free space is required'
     def interrupted(sig, frame):
         raise InterruptedError('Production build interrupted')
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     for board in boards:
-        run(board, source, args.out.resolve() / board, compiler, args.private_canary)
+        run(board, source, args.out.resolve() / board, compiler, args.private_canary, args.min_free_gib)
 
 
 if __name__ == '__main__':

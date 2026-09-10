@@ -6,6 +6,9 @@ import unittest
 import json
 import shutil
 import subprocess
+import sys
+import contextlib
+import io
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -105,6 +108,45 @@ class ProductionProfileTests(unittest.TestCase):
         self.assertIn(b'payload["channel"] = "dev";', preprocess([], payload))
         self.assertIn(b'payload["channel"] = "prod";', preprocess(['-DOTA_CHANNEL="prod"'], payload))
 
+    def test_disk_reserve_default_and_explicit_cli(self):
+        for extra, expected in (([], 8), (['--min-free-gib', '4'], 4)):
+            with patch.object(sys, 'argv', ['builder', '--out', '/tmp/unused-build', *extra]), \
+                    patch.object(build.shutil, 'which', return_value='/synthetic/arduino-cli'), \
+                    patch.object(build, 'run') as run:
+                build.main()
+                self.assertEqual(len(run.call_args_list), 2)
+                self.assertTrue(all(call.args[-1] == expected for call in run.call_args_list))
+        for value in ('0', '3', '-1', 'nan', '4.5', '1025'):
+            with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()), \
+                    patch.object(sys, 'argv', ['builder', '--out', '/tmp/unused-build', '--min-free-gib', value]), \
+                    patch.object(build, 'run') as run:
+                with self.assertRaises(SystemExit):
+                    build.main()
+                run.assert_not_called()
+
+    def test_disk_reserve_rechecked_between_boards_and_recorded(self):
+        child = SimpleNamespace(pid=123456789, poll=lambda: 0, wait=lambda timeout: 0)
+        with tempfile.TemporaryDirectory() as name:
+            out = Path(name) / 'build'
+            with patch.object(sys, 'argv', ['builder', '--out', str(out), '--min-free-gib', '4']), \
+                    patch.object(build.shutil, 'which', return_value='/synthetic/arduino-cli'), \
+                    patch.object(build.shutil, 'disk_usage', side_effect=[SimpleNamespace(free=n*1024**3) for n in (5, 3, 3)]), \
+                    patch.object(build.subprocess, 'Popen', return_value=child) as popen, \
+                    patch.object(build, 'close_owned_group', return_value={'group_absent': True, 'signals': []}):
+                with self.assertRaisesRegex(AssertionError, 'host build reserve'):
+                    build.main()
+                self.assertEqual(popen.call_count, 1)
+            sense = json.loads((out / 'sense/disk-space.json').read_text())
+            lcd = json.loads((out / 'lcd/disk-space.json').read_text())
+            self.assertEqual(sense['minimum_free_bytes'], 4*1024**3)
+            self.assertEqual(sense['before_free_bytes'], 5*1024**3)
+            self.assertEqual(sense['after_free_bytes'], 3*1024**3)
+            self.assertTrue(sense['admitted'])
+            self.assertFalse(lcd['admitted'])
+            self.assertEqual(lcd['before_free_bytes'], 3*1024**3)
+            self.assertIsNone(lcd['after_free_bytes'])
+            self.assertFalse((out / 'lcd/started.json').exists())
+
     def test_pending_signal_after_spawn_retains_compiler_custody(self):
         child = SimpleNamespace(pid=123456789, poll=lambda: 0, returncode=0)
         def mask(how, signals):
@@ -113,7 +155,8 @@ class ProductionProfileTests(unittest.TestCase):
             return set()
         with tempfile.TemporaryDirectory() as name:
             out = Path(name) / 'build'
-            with patch.object(build.signal, 'pthread_sigmask', side_effect=mask), \
+            with patch.object(build.shutil, 'disk_usage', return_value=SimpleNamespace(free=9*1024**3)), \
+                    patch.object(build.signal, 'pthread_sigmask', side_effect=mask), \
                     patch.object(build.subprocess, 'Popen', return_value=child), \
                     patch.object(build, 'close_owned_group', return_value={'group_absent': True, 'signals': []}) as close:
                 with self.assertRaises(AssertionError):
