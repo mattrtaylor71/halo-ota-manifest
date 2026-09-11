@@ -1,10 +1,10 @@
 # Firmware changelog
 
-## 6.4.121 — shopping deletion fix, validation pending
+## 6.4.121 — local device shopping deletion fix, September 11, 2026
 
 Read the API's `itemUUID` field (with the older alias retained), send the shared UUID on removal and require a positive `affectedRows` count before reporting success. The LCD keeps the row until the backend confirms deletion, then removes and animates the matching row; failures show a retry message. The Delete dialog pins the displayed item ID, and requests use the existing Sense awake-proof queue. OTA and network configuration are unchanged.
 
-The native regression executes the production parser and delete path with mocked HTTP/UART: 234 checks pass on the fix; the 120 source fails 60 checks. Focused LCD queue, identity and rollback controls also pass. Canonical build, device installation and authoritative backend deletion verification remain pending.
+The native regression executes the production parser and delete path with mocked HTTP/UART: 234 checks pass on the fix; the 120 source fails 60 checks. Delayed LCD deletion and existing shopping-idle regressions pass. Both canonical builds/artifact checks passed from source `cbf5332`. Installed 121/app0 by USB with 120/app1 preserved and no installer NVS/quota/bootloader writes. One Delete touch-handler action removed Olives: backend `affectedRows: 1`, all six other records unchanged. Fresh refresh and a subsequent wake show six correct labels; both boards exact 121/SDK VALID and naturally asleep. Two harness limitations (completion-animation timing and a truncated USB prefix) remain recorded; the final read-only wake capture passed. Public OTA remains 119; RELEASE_BASELINE.json binds the receipts.
 
 ## 6.4.120 — local device UI update, September 11, 2026
 

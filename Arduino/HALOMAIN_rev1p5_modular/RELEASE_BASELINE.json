@@ -686,20 +686,20 @@
   "production_publication_closure": null,
   "qualified_baseline_version": "6.4.117",
   "development_baseline": {
-    "version": "6.4.120",
-    "artifact_source_commit": "3633698e812315c249bf305600247d97e053c673",
-    "build_id": "6.4.120-20260911T182228Z-3633698e8123",
+    "version": "6.4.121",
+    "artifact_source_commit": "cbf53325362b1ae8dff5abfc226e73ffaa92cf82",
+    "build_id": "6.4.121-20260911T185507Z-cbf53325362b",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation120/RELEASE-PAIR.json",
-      "sha256": "4373bdcfa5161e9632fae33bf5f9c6deb07fa0ace6f61e656e1d9e6b656eecd6"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation121/RELEASE-PAIR.json",
+      "sha256": "1b43964f72b523e80259db1fd3423dfeb7091b8608f4d7e7f3bb98a9ef73baa7"
     },
-    "device_acceptance": "Installed paired120 by USB. Exact SDK VALID identity, live list entry, scroll round trip, Home and logged paired sleep passed. Cosmetic dialog reviewed in source; no backend delete performed.",
+    "device_acceptance": "One actual Delete touch-handler invocation removed Olives using its shared UUID. Backend affectedRows1; every other record unchanged. Fresh device refresh and subsequent wake show the exact six remaining labels. Both boards exact121/app0/SDK VALID and natural paired sleep.",
     "post_install_validation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation120/DEVICE-VALIDATION.json",
-      "sha256": "6887c1f8d07a548a4e82d4c72c505d717b4287a8086cbdc56a0600d2601b79ad"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation121/DEVICE-VALIDATION.json",
+      "sha256": "1231825e84c5c81dec22a9758848b5c71e50bfda5e5cc7dc1bccc19fcf77ccec"
     },
-    "publication_status": "Local device build only; public production latest remains6.4.119.",
-    "instruction": "Continue future firmware work from120 source3633698 and subsequent commits, retaining the119 fixes and these two shopping UI changes. Do not overwrite published119 artifacts."
+    "publication_status": "Local device build only; public production pointers were not changed from119.",
+    "instruction": "Continue future firmware work from 121 source cbf5332 and subsequent commits, retaining the 119 OTA fixes, 120 UI changes and 121 confirmed deletion flow. Do not overwrite prior artifacts."
   },
   "published_manual_test_releases": [
     {
@@ -785,6 +785,36 @@
         "sha256": "6887c1f8d07a548a4e82d4c72c505d717b4287a8086cbdc56a0600d2601b79ad"
       },
       "fallback": "6.4.119 app0; verified intact on both boards"
+    },
+    {
+      "version": "6.4.121",
+      "status": "INSTALLED_SHOPPING_DELETE_AND_WAKE_PASSED_NOT_PUBLISHED",
+      "source_commit": "cbf53325362b1ae8dff5abfc226e73ffaa92cf82",
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation121/RELEASE-PAIR.json",
+        "sha256": "1b43964f72b523e80259db1fd3423dfeb7091b8608f4d7e7f3bb98a9ef73baa7"
+      },
+      "device_validation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation121/DEVICE-VALIDATION.json",
+        "sha256": "1231825e84c5c81dec22a9758848b5c71e50bfda5e5cc7dc1bccc19fcf77ccec"
+      },
+      "fallback": "Exact120 retained in app1 on both boards; installer verified current-bank preservation."
     }
-  ]
+  ],
+  "previous_development_baseline_120": {
+    "version": "6.4.120",
+    "artifact_source_commit": "3633698e812315c249bf305600247d97e053c673",
+    "build_id": "6.4.120-20260911T182228Z-3633698e8123",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation120/RELEASE-PAIR.json",
+      "sha256": "4373bdcfa5161e9632fae33bf5f9c6deb07fa0ace6f61e656e1d9e6b656eecd6"
+    },
+    "device_acceptance": "Installed paired120 by USB. Exact SDK VALID identity, live list entry, scroll round trip, Home and logged paired sleep passed. Cosmetic dialog reviewed in source; no backend delete performed.",
+    "post_install_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation120/DEVICE-VALIDATION.json",
+      "sha256": "6887c1f8d07a548a4e82d4c72c505d717b4287a8086cbdc56a0600d2601b79ad"
+    },
+    "publication_status": "Local device build only; public production latest remains6.4.119.",
+    "instruction": "Continue future firmware work from120 source3633698 and subsequent commits, retaining the119 fixes and these two shopping UI changes. Do not overwrite published119 artifacts."
+  }
 }
