@@ -166,6 +166,9 @@ static void link_ack_service() {
       // Core 0 and LVGL must only be touched from the UI task.
       if (!strcmp(g_link_ack[i].type, "INPUT_OTA_CHECK")) {
         lcd_manual_ota_finish("request_failed");
+      } else if (!strcmp(g_link_ack[i].type, "INPUT_DELETE")) {
+        StaticJsonDocument<256> failed;
+        if (!deserializeJson(failed, g_link_ack[i].payload)) post_list_delete_result(failed["id"] | "", false);
       } else if (app_event_queue != NULL) {
         app_event_t evt = {EVT_LINK_SEND_FAILED, {0}};
         xQueueSend(app_event_queue, &evt, 0);

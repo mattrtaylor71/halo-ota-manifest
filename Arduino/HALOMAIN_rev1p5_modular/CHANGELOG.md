@@ -1,5 +1,11 @@
 # Firmware changelog
 
+## 6.4.121 — shopping deletion fix, validation pending
+
+Read the API's `itemUUID` field (with the older alias retained), send the shared UUID on removal and require a positive `affectedRows` count before reporting success. The LCD keeps the row until the backend confirms deletion, then removes and animates the matching row; failures show a retry message. The Delete dialog pins the displayed item ID, and requests use the existing Sense awake-proof queue. OTA and network configuration are unchanged.
+
+The native regression executes the production parser and delete path with mocked HTTP/UART: 234 checks pass on the fix; the 120 source fails 60 checks. Focused LCD queue, identity and rollback controls also pass. Canonical build, device installation and authoritative backend deletion verification remain pending.
+
 ## 6.4.120 — local device UI update, September 11, 2026
 
 Removed shopping-list selection arrows and green borders while retaining dial scrolling and direct item taps. Simplified Delete confirmation: removed the explanatory sentence, used a regular small Delete heading and a larger red item name; button geometry and deletion logic are unchanged.

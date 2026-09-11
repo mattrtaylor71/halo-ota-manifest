@@ -977,6 +977,9 @@ static lv_obj_t* shopping_list_item_headers[50] = {NULL};
 static int shopping_list_rendered_count = 0;
 static lv_obj_t* shopping_list_overlay = NULL;  // Delete/Back overlay
 static bool shopping_list_overlay_visible = false;
+static char shopping_list_overlay_item_id[64] = {0};
+static char shopping_list_pending_delete_id[64] = {0};
+static unsigned long shopping_list_pending_delete_ms = 0;
 // Overlay hitbox sources — the touch handler derives its hit areas from these
 // rendered objects (lv_obj_get_coords + slop) instead of magic coordinates,
 // so layout tweaks can never desync the hitboxes from the pixels.
@@ -1366,6 +1369,9 @@ static void shopping_list_show_overlay() {
   if (!shopping_list_screen || shopping_list_overlay_visible || g_active.count == 0 ||
       shopping_list_scroll_idx < 0 || shopping_list_scroll_idx >= g_active.count)
     return;
+  strncpy(shopping_list_overlay_item_id, g_active.item_ids[shopping_list_scroll_idx],
+          sizeof(shopping_list_overlay_item_id) - 1);
+  shopping_list_overlay_item_id[sizeof(shopping_list_overlay_item_id) - 1] = '\0';
   shopping_list_overlay_visible = true;
   shopping_list_overlay = lv_obj_create(shopping_list_screen);
   lv_obj_remove_style_all(shopping_list_overlay);
@@ -1403,72 +1409,101 @@ static void shopping_list_dismiss_overlay() {
   shopping_list_overlay_delete_btn = NULL;
   shopping_list_overlay_back_btn = NULL;
   shopping_list_overlay_visible = false;
+  shopping_list_overlay_item_id[0] = '\0';
   Serial.println("[SHOP_LIST] overlay dismissed");
 }
 
-// Delete the item at the given index from the active shopping list.
-// Mirrors the DELETE-touch path: track the deleted id, send INPUT_DELETE to
-// Sense, remove locally under the state mutex, and fix up the scroll index.
-// Does NOT dismiss any overlay or re-render — callers handle that. Returns the
-// deleted item id (empty string on failure / out-of-range).
-static const char* shopping_list_delete_index(int idx) {
-  static char deleted_id[64];
-  deleted_id[0] = '\0';
-  if (idx < 0 || idx >= g_active.count) return deleted_id;
-
-  Serial.printf("[SHOP_LIST] DELETE index %d: %s (id=%s)\n",
-                idx, g_active.items[idx], g_active.item_ids[idx]);
-
-  // Track deleted item ID for filtering
-  const char* del_id = g_active.item_ids[idx];
-  strncpy(deleted_id, del_id, sizeof(deleted_id) - 1);
-  deleted_id[sizeof(deleted_id) - 1] = '\0';
-  if (del_id[0] != '\0' && deleted_item_count < MAX_DELETED_ITEMS) {
-    strncpy(deleted_item_ids[deleted_item_count], del_id, 63);
-    deleted_item_ids[deleted_item_count][63] = '\0';
-    deleted_item_count++;
+// Queue one displayed item; retain it in RAM and NVS until the backend confirms.
+static const char* shopping_list_delete_index(int idx, const char* expected_id = NULL) {
+  static char requested_id[64];
+  requested_id[0] = '\0';
+  if (shopping_list_pending_delete_id[0]) {
+    shopping_list_toast_show("Deleting...");
+    return requested_id;
   }
-
-  // Send INPUT_DELETE to Sense
+  if (!app_state_mutex || xSemaphoreTake(app_state_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    shopping_list_toast_show("Couldn't delete. Try again");
+    return requested_id;
+  }
   tx_msg_t tx_msg = {};
-  strncpy(tx_msg.type, "INPUT_DELETE", sizeof(tx_msg.type) - 1);
-  strncpy(tx_msg.id, del_id, sizeof(tx_msg.id) - 1);
-  tx_msg.has_id = true;
-  if (uart_tx_queue != NULL) {
-    uart_tx_enqueue(&tx_msg, "ship_screens");
-    Serial.printf("[SHOP_LIST] Sent INPUT_DELETE for ID: %s\n", del_id);
-  }
-
-  // Remove from g_active locally
-  if (app_state_mutex != NULL && xSemaphoreTake(app_state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-    for (int j = idx; j < g_active.count - 1; j++) {
-      strncpy(g_active.items[j], g_active.items[j+1], 63);
-      g_active.items[j][63] = '\0';
-      strncpy(g_active.item_ids[j], g_active.item_ids[j+1], 63);
-      g_active.item_ids[j][63] = '\0';
-      strncpy(g_active.stores[j], g_active.stores[j+1], 47);
-      g_active.stores[j][47] = '\0';
-    }
-    if (g_active.count > 0) {
-      g_active.items[g_active.count - 1][0] = '\0';
-      g_active.item_ids[g_active.count - 1][0] = '\0';
-      g_active.stores[g_active.count - 1][0] = '\0';
-      g_active.count--;
-    }
-    // Persist the deletion immediately — LCD deep sleep is a full reset, so an
-    // unsaved delete would resurrect the item from the NVS cache on next boot.
-    save_list_to_storage(&g_active);
+  if (idx < 0 || idx >= g_active.count || !g_active.item_ids[idx][0] ||
+      strlen(g_active.item_ids[idx]) >= sizeof(tx_msg.id) ||
+      (expected_id && strcmp(expected_id, g_active.item_ids[idx]) != 0) ||
+      deleted_item_count >= MAX_DELETED_ITEMS) {
     xSemaphoreGive(app_state_mutex);
+    shopping_list_toast_show("Couldn't delete. Try again");
+    return requested_id;
   }
-
-  // Adjust scroll index
-  if (shopping_list_scroll_idx >= g_active.count && g_active.count > 0) {
-    shopping_list_scroll_idx = g_active.count - 1;
-  } else if (g_active.count == 0) {
-    shopping_list_scroll_idx = 0;
+  strncpy(tx_msg.type, "INPUT_DELETE", sizeof(tx_msg.type) - 1);
+  strncpy(tx_msg.id, g_active.item_ids[idx], sizeof(tx_msg.id) - 1);
+  tx_msg.has_id = true;
+  if (!uart_tx_enqueue(&tx_msg, "ship_screens")) {
+    xSemaphoreGive(app_state_mutex);
+    shopping_list_toast_show("Couldn't delete. Try again");
+    return requested_id;
   }
+  strncpy(requested_id, tx_msg.id, sizeof(requested_id) - 1);
+  strcpy(shopping_list_pending_delete_id, requested_id);
+  shopping_list_pending_delete_ms = millis();
+  xSemaphoreGive(app_state_mutex);
+  Serial.printf("[SHOP_LIST] Sent INPUT_DELETE for ID: %s; awaiting result\n", requested_id);
+  shopping_list_toast_show("Deleting...");
+  return requested_id;
+}
 
-  return deleted_id;
+static void shopping_list_delete_failure_toast() {
+  if (ui_screen_state == SCREEN_SHOPPING_LIST) shopping_list_toast_show("Couldn't delete. Try again");
+  else show_auto_hiding_status_message("Couldn't delete. Try again", 2500);
+}
+
+// UI-task deadline: a lost backend result never hides the row or blocks a later action.
+static void shopping_list_expire_pending_delete() {
+  if (shopping_list_pending_delete_id[0] &&
+      (unsigned long)(millis() - shopping_list_pending_delete_ms) >= 60000UL) {
+    Serial.printf("[SHOP_LIST] delete result timeout id=%s\n", shopping_list_pending_delete_id);
+    shopping_list_pending_delete_id[0] = '\0';
+    shopping_list_delete_failure_toast();
+  }
+}
+
+// UI task only. Return the removed index for animation; unmatched/late results
+// and all failures leave the list and persistent cache unchanged.
+static int shopping_list_apply_delete_result(const char* id, bool ok) {
+  shopping_list_expire_pending_delete();
+  if (!id || !id[0] || strcmp(id, shopping_list_pending_delete_id) != 0) return -1;
+  shopping_list_pending_delete_id[0] = '\0';
+  if (!ok) {
+    shopping_list_delete_failure_toast();
+    return -1;
+  }
+  if (!app_state_mutex || xSemaphoreTake(app_state_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    shopping_list_delete_failure_toast();
+    return -1;
+  }
+  int idx = -1;
+  for (int i = 0; i < g_active.count; ++i) {
+    if (strcmp(g_active.item_ids[i], id) == 0) { idx = i; break; }
+  }
+  if (idx >= 0) {
+    if (deleted_item_count < MAX_DELETED_ITEMS) {
+      strncpy(deleted_item_ids[deleted_item_count], id, 63);
+      deleted_item_ids[deleted_item_count++][63] = '\0';
+    }
+    for (int j = idx; j < g_active.count - 1; ++j) {
+      memcpy(g_active.items[j], g_active.items[j+1], sizeof(g_active.items[j]));
+      memcpy(g_active.item_ids[j], g_active.item_ids[j+1], sizeof(g_active.item_ids[j]));
+      memcpy(g_active.stores[j], g_active.stores[j+1], sizeof(g_active.stores[j]));
+    }
+    --g_active.count;
+    g_active.items[g_active.count][0] = '\0';
+    g_active.item_ids[g_active.count][0] = '\0';
+    g_active.stores[g_active.count][0] = '\0';
+    save_list_to_storage(&g_active);
+  }
+  xSemaphoreGive(app_state_mutex);
+  if (shopping_list_scroll_idx >= g_active.count) shopping_list_scroll_idx = g_active.count ? g_active.count - 1 : 0;
+  Serial.printf("[SHOP_LIST] confirmed delete id=%s removed_index=%d\n", id, idx);
+  return idx;
 }
 
 // Kick the list-refresh state machine exactly like the pull-to-refresh gesture
@@ -1650,12 +1685,18 @@ static bool shopping_list_handle_touch(int x, int y) {
       lv_obj_get_coords(shopping_list_overlay_delete_btn, &a);
       if (x >= a.x1 && x <= a.x2 && y >= a.y1 && y <= a.y2) {
         Serial.printf("[SHOPPING_LIST] overlay tap (%d,%d) -> delete\n", x, y);
-        int del_idx = shopping_list_scroll_idx;
-        shopping_list_delete_index(del_idx);
+        int del_idx = -1;
+        for (int i = 0; i < g_active.count; ++i) {
+          if (shopping_list_overlay_item_id[0] &&
+              strcmp(g_active.item_ids[i], shopping_list_overlay_item_id) == 0) {
+            del_idx = i;
+            break;
+          }
+        }
+        shopping_list_delete_index(del_idx, shopping_list_overlay_item_id);
 
-        // Dismiss overlay, animate the card out, rebuild when it lands
+        // Keep the row until a matching positive backend result arrives.
         shopping_list_dismiss_overlay();
-        shopping_list_animate_card_removal(del_idx);
         return true;
       }
     }

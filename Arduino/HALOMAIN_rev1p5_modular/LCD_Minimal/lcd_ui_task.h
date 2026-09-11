@@ -408,6 +408,7 @@ static void ui_task(void *arg) {
     }
 
 #if SHIP_MENU_UI
+    shopping_list_expire_pending_delete();
     if (app_event_queue != NULL) {
       while (xQueueReceive(app_event_queue, &evt, 0) == pdTRUE) {
         if (evt.type == EVT_SHIP_UI_STATUS) {
@@ -912,6 +913,12 @@ static void ui_task(void *arg) {
         ui_show_result(true, "Couldn't reach sensor", "");
         ui_lvgl_tick();
         processed_anything = true;
+      } else if (evt.type == EVT_LIST_DELETE_RESULT) {
+        int removed = shopping_list_apply_delete_result(evt.data.list_delete_result.id,
+                                                       evt.data.list_delete_result.ok);
+        if (removed >= 0 && ui_screen_state == SCREEN_SHOPPING_LIST) shopping_list_animate_card_removal(removed);
+        resetActivityTimer();
+        processed_anything = true;
       } else if (evt.type == EVT_LIST_REPLACED) {
         // List was replaced (from UART task) - stop glowing, then swap pending → active and render
         stop_glowing_animation();
@@ -1315,8 +1322,14 @@ static void ui_task(void *arg) {
           unsigned long age = millis() - lcd_last_ui_list_complete_ms;
           dedupe_age_ms = (age > 99999UL) ? 99999L : (long)age;
         }
+        StaticJsonDocument<128> selected_id_doc;
+        selected_id_doc["id"] = (shopping_list_scroll_idx >= 0 && shopping_list_scroll_idx < g_active.count)
+                                    ? g_active.item_ids[shopping_list_scroll_idx] : "";
+        char selected_id_json[6 * sizeof(g_active.item_ids[0]) + 3];
+        serializeJson(selected_id_doc["id"], selected_id_json, sizeof(selected_id_json));
         Serial.printf("[LISTSTATE] {\"screen\":%d,\"refresh_state\":%d,\"pill\":%d,\"count\":%d,"
                       "\"cache_age_s\":%d,\"auto_retry\":%d,\"selected\":%d,"
+                      "\"selected_id\":%s,"
                       "\"latch\":%d,\"armed\":%d,\"scroll_y\":%d,\"pill_hiding\":%d,"
                       "\"dedupe_age_ms\":%ld}\n",
                       (int)ui_screen_state,
@@ -1326,6 +1339,7 @@ static void ui_task(void *arg) {
                       list_cache_age_s(),
                       (int)s_list_auto_retry_count,
                       shopping_list_scroll_idx,
+                      selected_id_json,
                       shopping_list_touch_pull_consumed ? 1 : 0,
                       shopping_list_touch_pull_armed ? 1 : 0,
                       shopping_list_scroll ? (int)lv_obj_get_scroll_y(shopping_list_scroll) : 0,
@@ -1341,7 +1355,6 @@ static void ui_task(void *arg) {
           Serial.printf("[USB] del %d -> out of range (count=%d)\n", idx, g_active.count);
         } else {
           const char* del_id = shopping_list_delete_index(idx);
-          shopping_list_animate_card_removal(idx);  // slide/fade/collapse, then rebuild
           ui_lvgl_tick();
           resetActivityTimer();
           Serial.printf("[USB] del %d -> %s\n", idx, del_id[0] ? del_id : "(no id)");

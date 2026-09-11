@@ -1195,6 +1195,30 @@ static void uart_process_received_message(const char* json_str) {
     return;
   }
 
+  if (strcmp(type, "LIST_DELETE_RESULT") == 0) {
+    const char* id = doc["id"] | "";
+    if (!id[0] || strlen(id) >= sizeof(deleted_item_ids[0]) || !doc["ok"].is<bool>()) return;
+    const bool ok = doc["ok"].as<bool>();
+    Serial.printf("[LIST_DELETE_RESULT] id=%s ok=%d reason=%s\n", id, ok ? 1 : 0,
+                  doc["reason"] | "");
+    if (!ok) {
+      // Process before the next UART UI_LIST, which filters under this mutex.
+      if (app_state_mutex && xSemaphoreTake(app_state_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        int kept = 0;
+        for (int i = 0; i < deleted_item_count; ++i) {
+          if (strcmp(deleted_item_ids[i], id) == 0) continue;
+          if (kept != i) memcpy(deleted_item_ids[kept], deleted_item_ids[i], sizeof(deleted_item_ids[0]));
+          ++kept;
+        }
+        while (deleted_item_count > kept) deleted_item_ids[--deleted_item_count][0] = '\0';
+        lcd_last_ui_list_complete_ms = 0; // Admit the immediate failure reconciliation.
+        xSemaphoreGive(app_state_mutex);
+      }
+    }
+    post_list_delete_result(id, ok);
+    return;
+  }
+
   if (strcmp(type, "UI_LIST") == 0) {
     unsigned long now_ms = millis();
     // Dedup must NOT fire while the refresh SM is expecting a list. The Sense's

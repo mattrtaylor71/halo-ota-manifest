@@ -386,6 +386,7 @@ static bool tx_msg_requires_awake_proof(const tx_msg_t* tx_msg) {
     return true;
   }
   return strcmp(tx_msg->type, "INPUT_OTA_CHECK") == 0 ||
+         strcmp(tx_msg->type, "INPUT_DELETE") == 0 ||
          strcmp(tx_msg->type, "INPUT_FW_INFO") == 0 ||
          strcmp(tx_msg->type, "INPUT_SENSE_FW") == 0;
 }

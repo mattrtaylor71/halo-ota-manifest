@@ -1954,6 +1954,7 @@ typedef enum {
                         // screen with an honest error
   EVT_SHIP_UI_STATUS,   // From UART: Ship menu UI_STATUS -> update overlay/result
   EVT_SHIP_UI_TOAST,
+  EVT_LIST_DELETE_RESULT, // Apply a correlated backend delete result on the UI task.
   EVT_SHIP_VOICE_JSON,
   // USB test-command injection (port 101). Posted by the Core-0 USB reader so the
   // real screen/list actions run on the UI task (Core 1) — never LVGL from Core 0.
@@ -1976,6 +1977,7 @@ typedef struct app_event_t {
     int usb_index;   // For EVT_USB_DELETE (0-based visible-item index)
     char glow_reason[32];  // For EVT_START_GLOWING
     char ship_toast[64];
+    struct { char id[64]; bool ok; } list_delete_result;
     struct {
       char ssid[33];
       char password[65];
@@ -1997,6 +1999,15 @@ typedef struct app_event_t {
 } app_event_t;
 
 static QueueHandle_t app_event_queue = NULL;
+
+static void post_list_delete_result(const char* id, bool ok) {
+  if (!app_event_queue || !id || !id[0] || strlen(id) >= 64) return;
+  app_event_t evt = {};
+  evt.type = EVT_LIST_DELETE_RESULT;
+  strncpy(evt.data.list_delete_result.id, id, sizeof(evt.data.list_delete_result.id) - 1);
+  evt.data.list_delete_result.ok = ok;
+  xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(50));
+}
 
 // Must precede lcd_uart.h: the send helpers there register every user-intent
 // message with the ack tracker. Placed after app_event_queue/app_event_t so a
@@ -3745,6 +3756,7 @@ static void deferred_awake_tx_service() {
                   last_sense_rx_ms > 0 ? (millis() - last_sense_rx_ms) : 0xFFFFFFFFUL,
                   (unsigned)deferred_ring_count);
     if (!strcmp(e->msg.type, "INPUT_OTA_CHECK")) lcd_manual_ota_finish("peer_unavailable");
+    if (!strcmp(e->msg.type, "INPUT_DELETE")) post_list_delete_result(e->msg.id, false);
     deferred_ring_pop_oldest();
   }
   if (!deferred_awake_tx_pending()) {

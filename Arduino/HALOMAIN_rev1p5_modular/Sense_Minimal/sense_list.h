@@ -27,6 +27,42 @@
 static void uart_send_ui_list();
 static void list_refresh_mark_complete(const char* reason);
 
+// The public list response uses itemUUID; older responses used the SQL alias.
+static const char* shopping_list_item_uuid(JsonObject item) {
+  const char* uuid = item["itemUUID"] | "";
+  return uuid[0] ? uuid : (item["household_item_uuid"] | "");
+}
+
+// HTTP 200 also covers a no-op remove. Only a confirmed row change is success.
+static bool shopping_list_delete_response_ok(const String& response) {
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, response)) return false;
+  return doc["affectedRows"].is<uint32_t>() &&
+         doc["affectedRows"].as<uint32_t>() > 0;
+}
+
+static void shopping_list_send_delete_result(const char* id, bool ok, const char* reason) {
+  StaticJsonDocument<256> doc;
+  doc["ver"] = PROTOCOL_VERSION;
+  doc["type"] = "LIST_DELETE_RESULT";
+  doc["msg_id"] = get_next_msg_id();
+  doc["ts"] = millis();
+  doc["id"] = id;
+  doc["ok"] = ok;
+  doc["reason"] = reason;
+  String output;
+  serializeJson(doc, output);
+  uart_send_json(output.c_str());
+}
+
+static void shopping_list_delete_failed(const char* id, const char* reason) {
+  // Report the failed request before reconciling with the retained list.
+  shopping_list_send_delete_result(id, false, reason);
+  // An empty RAM cache after wake is not an authoritative empty backend list.
+  if (g_list_count > 0) uart_send_ui_list();
+  uart_send_ui_status("IDLE");
+}
+
 // ── List refresh failure ───────────────────────────────────────────
 
 static void list_refresh_fail(const char* reason) {
@@ -110,12 +146,12 @@ static bool parse_and_update_shopping_list(const String& json_response) {
 
     // Extract item ID
     const char* item_id_str = NULL;
+    char id_buf[32] = {0};
     if (item.containsKey("id")) {
       if (item["id"].is<const char*>()) {
         item_id_str = item["id"].as<const char*>();
       } else if (item["id"].is<int>()) {
         int item_id_int = item["id"].as<int>();
-        char id_buf[32];
         snprintf(id_buf, sizeof(id_buf), "%d", item_id_int);
         item_id_str = id_buf;
       }
@@ -130,9 +166,8 @@ static bool parse_and_update_shopping_list(const String& json_response) {
       g_shopping_list[actual_count].id[0] = '\0';
     }
 
-    // Extract household_item_uuid — the key the backend deletes by (same as
-    // the iOS app's swipe-delete). Fallback empty if the field is missing.
-    const char* huuid_str = item["household_item_uuid"] | "";
+    // Retain the shared UUID returned by the API for household-wide deletion.
+    const char* huuid_str = shopping_list_item_uuid(item);
     if (huuid_str != NULL && strlen(huuid_str) > 0) {
       size_t huuid_len = strlen(huuid_str);
       if (huuid_len >= sizeof(g_shopping_list[actual_count].huuid)) {
@@ -209,11 +244,15 @@ static void remove_item_from_ram_list_locked(int list_index) {
   }
 }
 
-static void delete_item_from_api(const char* item_id) {
-  if (item_id == NULL || strlen(item_id) == 0) {
+static void delete_item_from_api(const char* requested_item_id) {
+  if (requested_item_id == NULL || strlen(requested_item_id) == 0 ||
+      strlen(requested_item_id) >= 64) {
     Serial.println("✗ Cannot delete item: invalid ID!");
     return;
   }
+  // Keep this request's identity stable while the HTTP operation is running.
+  char item_id[64];
+  strncpy(item_id, requested_item_id, sizeof(item_id));
 
   Serial.printf("\n=== Deleting Item ID: %s ===\n", item_id);
 
@@ -232,23 +271,22 @@ static void delete_item_from_api(const char* item_id) {
     xSemaphoreGive(g_list_mutex);
   }
 
-  // Build JSON request body for remove operation. Mirrors the iOS app:
-  // {"operation":"remove","ownerId":...,"device":...,"itemUUID":<huuid>}.
-  // Legacy {"id":...} body only if we have no huuid for this item.
+  // A row id is not a shared UUID. Never send the legacy fallback to a backend
+  // that uses strict household UUID matching; report a retryable failure.
+  if (item_huuid[0] == '\0') {
+    Serial.printf("[DELETE] fail reason=missing_uuid id=%s\n", item_id);
+    shopping_list_delete_failed(item_id, "missing_uuid");
+    return;
+  }
+
+  // Match the phone's shared-UUID remove operation.
   char owner_id[64] = {0};
   load_owner_id_or_default(owner_id, sizeof(owner_id));
-  bool have_huuid = (item_huuid[0] != '\0');
   String request_body = "{";
   request_body += "\"operation\":\"remove\",";
   request_body += "\"ownerId\":\"" + String(owner_id) + "\",";
   request_body += "\"device\":\"" + String(TREPO_DEVICE_ID) + "\",";
-  if (have_huuid) {
-    request_body += "\"itemUUID\":\"" + String(item_huuid) + "\"";
-  } else {
-    Serial.printf("[DELETE] warn no household_item_uuid for id=%s — using legacy id body\n",
-                  item_id);
-    request_body += "\"id\":\"" + String(item_id) + "\"";
-  }
+  request_body += "\"itemUUID\":\"" + String(item_huuid) + "\"";
   request_body += "}";
 
   // Free the camera's 16 KB internal-DMA reserve for the duration of this TLS
@@ -305,11 +343,10 @@ static void delete_item_from_api(const char* item_id) {
   http.end();
   client.stop();
 
-  if (httpResponseCode == 200) {
-    Serial.printf("[DELETE] ok itemUUID=%s id=%s\n",
-                  have_huuid ? item_huuid : "(none)", item_id);
+  if (httpResponseCode == 200 && shopping_list_delete_response_ok(response_json)) {
+    Serial.printf("[DELETE] ok itemUUID=%s id=%s\n", item_huuid, item_id);
     // Remove from the RAM cache too so a cached serve can't resurrect the
-    // deleted item. No UI_LIST push — the LCD already removed it locally.
+    // deleted item. The correlated result tells the LCD to remove its row.
     if (g_list_mutex != NULL && xSemaphoreTake(g_list_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
       int found_index = -1;
       for (int i = 0; i < g_list_count; i++) {
@@ -325,15 +362,12 @@ static void delete_item_from_api(const char* item_id) {
       }
       xSemaphoreGive(g_list_mutex);
     }
+    shopping_list_send_delete_result(item_id, true, "removed");
     uart_send_ui_status("Item deleted");
   } else {
-    Serial.printf("[DELETE] fail code=%d id=%s\n", httpResponseCode, item_id);
-    // RAM list left unchanged. Re-send the list so the LCD's optimistic
-    // removal reconverges with reality. Note: the LCD's deleted_item_ids RAM
-    // filter may still hide the item this boot — acceptable; logged here.
-    Serial.println("[DELETE] resending UI_LIST to reconverge LCD (may be filtered by LCD deleted_item_ids this boot)");
-    uart_send_ui_list();
-    uart_send_ui_status("IDLE");
+    const char* reason = httpResponseCode == 200 ? "not_confirmed" : "http";
+    Serial.printf("[DELETE] fail code=%d reason=%s id=%s\n", httpResponseCode, reason, item_id);
+    shopping_list_delete_failed(item_id, reason);
   }
 }
 

@@ -96,6 +96,10 @@ static void uart_task(void *arg) {
     if (!binary_xfer_active) {
       while (uart_tx_queue != NULL && xQueueReceive(uart_tx_queue, &tx_msg, 0) == pdTRUE) {
         if (tx_msg_requires_awake_proof(&tx_msg) && !sense_ready_for_control_tx()) {
+          if (deferred_ring_count == DEFERRED_AWAKE_RING_SLOTS &&
+              !strcmp(deferred_ring_oldest()->msg.type, "INPUT_DELETE")) {
+            post_list_delete_result(deferred_ring_oldest()->msg.id, false);
+          }
           const bool evicted = deferred_ring_push(&tx_msg);
           deferred_awake_tx_last_ping_ms = 0;
           Serial.printf("[UART] deferred_until_awake type=%s awake=%d synced=%d recent=%d "

@@ -4403,8 +4403,8 @@ void loop() {
       Serial.println("[LOOP] Wi-Fi not connected, connecting...");
       if (!wifi_connect()) {
         Serial.println("[LOOP] Wi-Fi connection failed!");
-        Serial.println("[DELETE] wifi_failed -> UI idle");
-        uart_send_ui_status("IDLE");
+        Serial.println("[DELETE] wifi_failed -> retain item and report failure");
+        shopping_list_delete_failed(delete_item_id, "wifi");
         // Don't return - continue processing UART
       }
     }
