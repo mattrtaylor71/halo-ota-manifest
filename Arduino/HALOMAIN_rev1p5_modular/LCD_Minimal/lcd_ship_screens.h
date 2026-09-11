@@ -1418,7 +1418,6 @@ static const char* shopping_list_delete_index(int idx, const char* expected_id =
   static char requested_id[64];
   requested_id[0] = '\0';
   if (shopping_list_pending_delete_id[0]) {
-    shopping_list_toast_show("Deleting...");
     return requested_id;
   }
   if (!app_state_mutex || xSemaphoreTake(app_state_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
@@ -1447,7 +1446,6 @@ static const char* shopping_list_delete_index(int idx, const char* expected_id =
   shopping_list_pending_delete_ms = millis();
   xSemaphoreGive(app_state_mutex);
   Serial.printf("[SHOP_LIST] Sent INPUT_DELETE for ID: %s; awaiting result\n", requested_id);
-  shopping_list_toast_show("Deleting...");
   return requested_id;
 }
 

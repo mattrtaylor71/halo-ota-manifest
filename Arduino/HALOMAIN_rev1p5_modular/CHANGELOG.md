@@ -1,5 +1,9 @@
 # Firmware changelog
 
+## Unreleased — shopping feedback polish
+
+Removed the transient "Deleting..." toast. Items still wait for backend confirmation before removal; duplicate-request protection, failure feedback and timeout handling remain intact. Existing LCD and Sense deletion regressions pass. This source change is not installed; the device remains on the verified 121 pair while the border scroll cue is prototyped for visual review.
+
 ## 6.4.121 — local device shopping deletion fix, September 11, 2026
 
 Read the API's `itemUUID` field (with the older alias retained), send the shared UUID on removal and require a positive `affectedRows` count before reporting success. The LCD keeps the row until the backend confirms deletion, then removes and animates the matching row; failures show a retry message. The Delete dialog pins the displayed item ID, and requests use the existing Sense awake-proof queue. OTA and network configuration are unchanged.
