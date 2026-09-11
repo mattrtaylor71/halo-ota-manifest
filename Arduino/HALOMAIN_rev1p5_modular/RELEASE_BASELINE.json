@@ -686,23 +686,20 @@
   "production_publication_closure": null,
   "qualified_baseline_version": "6.4.117",
   "development_baseline": {
-    "version": "6.4.119",
-    "artifact_source_commit": "09f1d525fd82dc54eacbe4fe348054102462774a",
-    "build_id": "6.4.119-20260911T162403Z-09f1d525fd82",
+    "version": "6.4.120",
+    "artifact_source_commit": "3633698e812315c249bf305600247d97e053c673",
+    "build_id": "6.4.120-20260911T182228Z-3633698e8123",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/RELEASE-PAIR.json",
-      "sha256": "c0cc8dae233aa25e91f3a8e571d5f93b7e91857f2cca2de023238258d9cca87a"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation120/RELEASE-PAIR.json",
+      "sha256": "4373bdcfa5161e9632fae33bf5f9c6deb07fa0ace6f61e656e1d9e6b656eecd6"
     },
-    "publication": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/PUBLISHED.json",
-      "sha256": "1fcd31e6fb782e0c25382e66208a97c1ff916dbc84223a076a5c7cd45f06273c"
-    },
-    "device_acceptance": "PASS for one paired manual118-to119 OTA and focused USB UI checks: exact paired119 SDK VALID, three live fetches, scrolling, natural Home and logged deep sleep. Historical117 full release records remain separate.",
-    "instruction": "Continue future firmware work from this119 source and subsequent commits; do not revert to117 as the normal development base.",
+    "device_acceptance": "Installed paired120 by USB. Exact SDK VALID identity, live list entry, scroll round trip, Home and logged paired sleep passed. Cosmetic dialog reviewed in source; no backend delete performed.",
     "post_install_validation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/POST-INSTALL-119.json",
-      "sha256": "7a3dd1dd8ab553e2848ae3254de2b43cf4dca6967ba5ecfd476d958e2a39f7c6"
-    }
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation120/DEVICE-VALIDATION.json",
+      "sha256": "6887c1f8d07a548a4e82d4c72c505d717b4287a8086cbdc56a0600d2601b79ad"
+    },
+    "publication_status": "Local device build only; public production latest remains6.4.119.",
+    "instruction": "Continue future firmware work from120 source3633698 and subsequent commits, retaining the119 fixes and these two shopping UI changes. Do not overwrite published119 artifacts."
   },
   "published_manual_test_releases": [
     {
@@ -753,6 +750,41 @@
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/POST-INSTALL-119.json",
         "sha256": "7a3dd1dd8ab553e2848ae3254de2b43cf4dca6967ba5ecfd476d958e2a39f7c6"
       }
+    }
+  ],
+  "previous_development_baseline_119": {
+    "version": "6.4.119",
+    "artifact_source_commit": "09f1d525fd82dc54eacbe4fe348054102462774a",
+    "build_id": "6.4.119-20260911T162403Z-09f1d525fd82",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/RELEASE-PAIR.json",
+      "sha256": "c0cc8dae233aa25e91f3a8e571d5f93b7e91857f2cca2de023238258d9cca87a"
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/PUBLISHED.json",
+      "sha256": "1fcd31e6fb782e0c25382e66208a97c1ff916dbc84223a076a5c7cd45f06273c"
+    },
+    "device_acceptance": "PASS for one paired manual118-to119 OTA and focused USB UI checks: exact paired119 SDK VALID, three live fetches, scrolling, natural Home and logged deep sleep. Historical117 full release records remain separate.",
+    "instruction": "Continue future firmware work from this119 source and subsequent commits; do not revert to117 as the normal development base.",
+    "post_install_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/POST-INSTALL-119.json",
+      "sha256": "7a3dd1dd8ab553e2848ae3254de2b43cf4dca6967ba5ecfd476d958e2a39f7c6"
+    }
+  },
+  "local_device_builds": [
+    {
+      "version": "6.4.120",
+      "status": "INSTALLED_FOCUSED_SMOKE_PASSED_NOT_PUBLISHED",
+      "source_commit": "3633698e812315c249bf305600247d97e053c673",
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation120/RELEASE-PAIR.json",
+        "sha256": "4373bdcfa5161e9632fae33bf5f9c6deb07fa0ace6f61e656e1d9e6b656eecd6"
+      },
+      "device_validation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation120/DEVICE-VALIDATION.json",
+        "sha256": "6887c1f8d07a548a4e82d4c72c505d717b4287a8086cbdc56a0600d2601b79ad"
+      },
+      "fallback": "6.4.119 app0; verified intact on both boards"
     }
   ]
 }

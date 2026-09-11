@@ -1,5 +1,11 @@
 # Firmware changelog
 
+## 6.4.120 — local device UI update, September 11, 2026
+
+Removed shopping-list selection arrows and green borders while retaining dial scrolling and direct item taps. Simplified Delete confirmation: removed the explanatory sentence, used a regular small Delete heading and a larger red item name; button geometry and deletion logic are unchanged.
+
+Canonical paired builds and artifact checks passed. Installed on the unit by USB with119 retained in app0 and no NVS, quota or bootloader writes. Fresh exact120 SDK VALID identity, seven-item list fetch, scrolling0→4→0/y0→123→0 and paired natural sleep passed. Dialog layout was reviewed in source; no backend delete or new dialog screenshot was performed. Public OTA remains119. Source3633698 and receipts are recorded in `RELEASE_BASELINE.json`.
+
 ## 6.4.119 — published September 11, 2026 for manual OTA installation
 
 Published the exact canonical pair from source `09f1d525fd82dc54eacbe4fe348054102462774a`, build `6.4.119-20260911T162403Z-09f1d525fd82`. Background coordinator preflight no longer takes over the display; unlock and lease expiry return Home only when OTA owned the presentation. Shopping entry, refresh completion and activity receive a fresh idle interval, and loading does not consume it. Includes the118 startup shopping Wi-Fi wait, boot-scoped action telemetry and pinned SDK DNS cache-lock correction.
