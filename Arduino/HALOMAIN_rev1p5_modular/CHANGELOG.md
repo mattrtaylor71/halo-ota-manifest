@@ -1,8 +1,10 @@
 # Firmware changelog
 
-## Unreleased — shopping feedback polish
+## Unreleased — shopping and voice feedback polish
 
-Removed the transient "Deleting..." toast. Items still wait for backend confirmation before removal; duplicate-request protection, failure feedback and timeout handling remain intact. Existing LCD and Sense deletion regressions pass. This source change is not installed; the device remains on the verified 121 pair while the border scroll cue is prototyped for visual review.
+Removed the transient "Deleting..." toast. Items still wait for backend confirmation before removal; duplicate-request protection, failure feedback and timeout handling remain intact. Added the approved curved "TURN TO SCROLL" hint on the shopping list's right rim, clear of the bottom buttons. It hides when content fits, during visible refresh feedback, and under the Delete dialog. The pre-rendered alpha mask needs no rotated labels or full-screen buffer.
+
+The voice hold screen now uses a wordless, decorative teal waveform above the user's finger, with the white microphone card kept at its Home position. Only small bar heights change, at up to 20 frames per second during an active hold. The existing 500ms activation, 10-second limit, Sense audio/UART handling, and release response remain intact. These source changes are awaiting canonical 122 builds and local installation; the device remains on the verified 121 pair. Public OTA remains 119.
 
 ## 6.4.121 — local device shopping deletion fix, September 11, 2026
 

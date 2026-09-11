@@ -83,25 +83,9 @@ static void ship_anim_set_border_opa(void* obj, int32_t v) {
 }
 
 static void ship_update_ai_listening_countdown() {
-  if (!ship_ai_listening_ring) {
-    return;
-  }
-
-  uint16_t ring_value = 1000;
-  if (long_press_sent && ship_ai_touch_active && ship_ai_listening_countdown_start_ms > 0) {
-    unsigned long elapsed_ms = millis() - ship_ai_listening_countdown_start_ms;
-    if (elapsed_ms >= SHIP_AI_LISTENING_COUNTDOWN_MS) {
-      ring_value = 0;
-    } else {
-      uint32_t remaining_ms = SHIP_AI_LISTENING_COUNTDOWN_MS - elapsed_ms;
-      ring_value = (uint16_t)((remaining_ms * 1000UL) / SHIP_AI_LISTENING_COUNTDOWN_MS);
-    }
-  }
-
-  lv_arc_set_value((lv_obj_t*)ship_ai_listening_ring, ring_value);
-  if (ship_ai_listening_hint)
-    lv_label_set_text(ship_ai_listening_hint,
-                      long_press_sent ? "Release to send" : "Keep holding to speak");
+  // Existing hold timestamps still own the 500ms activation and 10s limit.
+  // Presentation is wordless; never dispatch voice operations from animation.
+  ship_sync_ai_listening_animation();
 }
 
 static void ship_start_logged_success_animation() {

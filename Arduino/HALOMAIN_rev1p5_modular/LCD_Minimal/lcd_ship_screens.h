@@ -74,35 +74,159 @@ static void ship_main_menu_set_ai_hold_active(bool active) {
                             LV_PART_MAIN);
 }
 
-// Expanding "sound pulse" ripple: v = 0..1000 -> grow outward + fade, looped.
-static void ship_listen_pulse_cb(void* obj, int32_t v) {
-  lv_obj_t* o = (lv_obj_t*)obj;
-  int sz = 120 + (int)((v * 104L) / 1000);   // emerge at the disc edge, expand to ~224 px
-  lv_obj_set_size(o, sz, sz);
-  lv_obj_set_style_radius(o, sz / 2, LV_PART_MAIN);
-  lv_obj_align(o, LV_ALIGN_CENTER, 0, -8);
-  lv_obj_set_style_border_opa(o, (lv_opa_t)((LV_OPA_50 * (1000 - v)) / 1000), LV_PART_MAIN);
+static void ship_main_menu_add_plus(lv_obj_t* btn, lv_color_t color);
+static void ship_main_menu_add_minus(lv_obj_t* btn, lv_color_t color);
+static void ship_main_menu_add_dots(lv_obj_t* btn, lv_color_t color);
+
+static const uint8_t SHIP_VOICE_WAVE_BAR_COUNT = 13;
+static lv_obj_t* ship_voice_wave_bars[SHIP_VOICE_WAVE_BAR_COUNT] = {NULL};
+static lv_obj_t* ship_voice_contact_ring = NULL;
+static bool ship_voice_wave_animating = false;
+static unsigned long ship_voice_wave_last_frame_ms = 0;
+
+// Decorative motion stays above the finger. Only ordinary rounded bars change
+// size; there is no audio transport, draw layer, per-frame allocation or timer.
+static void ship_voice_wave_draw(int32_t phase) {
+  static const uint8_t peak_height[SHIP_VOICE_WAVE_BAR_COUNT] = {
+      16, 23, 29, 35, 40, 44, 46, 44, 40, 35, 29, 23, 16};
+  for (uint8_t i = 0; i < SHIP_VOICE_WAVE_BAR_COUNT; ++i) {
+    lv_obj_t* bar = ship_voice_wave_bars[i];
+    if (!bar)
+      continue;
+    uint32_t level = 450;
+    if (phase >= 0) {
+      // LVGL's fixed-point lookup avoids trigonometric floating-point work.
+      int angle = (phase * 2 + i * 39) % 360;
+      level = ((int32_t)lv_trigo_sin(angle) + 32767L) * 1000L / 65534L;
+    }
+    int height = 7 + ((peak_height[i] - 7) * level) / 1000;
+    lv_obj_set_height(bar, height);
+    lv_obj_set_y(bar, 70 - height / 2);
+  }
 }
 
-// Gentle "breathing" zoom for the teal mic disc (256 = 100%).
-static void ship_listen_zoom_cb(void* obj, int32_t v) {
-  (void)obj;
-  (void)v; // Retained signature; no transform_zoom layers.
+static bool ship_voice_wave_hold_active() {
+  return ui_screen_state == SCREEN_AI_LISTENING && ship_ai_touch_active &&
+         long_press_sent && ship_ai_listening_countdown_start_ms > 0 &&
+         millis() - ship_ai_listening_countdown_start_ms < SHIP_AI_LISTENING_COUNTDOWN_MS;
+}
+
+static void ship_voice_wave_anim_cb(void* obj, int32_t phase) {
+  if (obj != ship_ai_listening_screen || !ship_voice_wave_hold_active())
+    return;
+  unsigned long now = millis();
+  if (now - ship_voice_wave_last_frame_ms < 50)
+    return;
+  ship_voice_wave_last_frame_ms = now;
+  ship_voice_wave_draw(phase);
+}
+
+static void ship_voice_wave_stop() {
+  if (ship_ai_listening_screen)
+    lv_anim_del(ship_ai_listening_screen, ship_voice_wave_anim_cb);
+  ship_voice_wave_animating = false;
+  ship_voice_wave_last_frame_ms = 0;
+}
+
+static void ship_voice_wave_screen_event(lv_event_t* event) {
+  if (lv_event_get_code(event) == LV_EVENT_SCREEN_UNLOAD_START)
+    ship_voice_wave_stop();
+}
+
+static void ship_sync_ai_listening_animation() {
+  bool active = ship_voice_wave_hold_active();
+  if (ship_voice_contact_ring) {
+    if (active)
+      lv_obj_clear_flag(ship_voice_contact_ring, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(ship_voice_contact_ring, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (!active) {
+    if (ship_voice_wave_animating) {
+      ship_voice_wave_stop();
+      ship_voice_wave_draw(-1);
+    }
+    return;
+  }
+  if (ship_voice_wave_animating)
+    return;
+  ship_voice_wave_animating = true;
+  ship_voice_wave_last_frame_ms = 0;
+  lv_anim_t animation;
+  lv_anim_init(&animation);
+  lv_anim_set_var(&animation, ship_ai_listening_screen);
+  lv_anim_set_values(&animation, 0, 360);
+  lv_anim_set_time(&animation, 2400);
+  lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_set_exec_cb(&animation, ship_voice_wave_anim_cb);
+  lv_anim_start(&animation);
+}
+
+static lv_color_t ship_voice_muted_color(uint32_t color) {
+  return lv_color_mix(lv_color_hex(color), lv_color_hex(COL_CREAM), 71);
+}
+
+static lv_obj_t* ship_voice_muted_card(int x, int y) {
+  lv_obj_t* card = lv_obj_create(ship_ai_listening_screen);
+  ship_main_menu_style_button(card, false);
+  lv_obj_set_pos(card, x, y);
+  // Preblend the dormant Home cards instead of fading their containers.
+  lv_obj_set_style_bg_color(card, ship_voice_muted_color(COL_WHITE), 0);
+  lv_obj_set_style_border_color(card, ship_voice_muted_color(COL_DARK), 0);
+  lv_obj_set_style_shadow_color(card, ship_voice_muted_color(COL_DARK), 0);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+  return card;
 }
 
 static void ship_init_ai_listening_screen() {
   if (ship_ai_listening_screen)
     return;
   ship_ai_listening_screen = halo_ui_page();
-  ship_ai_listening_title =
-      halo_ui_label(ship_ai_listening_screen, "Listening", &nunito_28, COL_DARK, 45, 36, 270);
-  ship_ai_listening_hint = halo_ui_label(ship_ai_listening_screen, "Keep holding to speak",
-                                         &lv_font_montserrat_16, COL_GREEN, 45, 74, 270);
-  ship_ai_listening_ring = halo_ui_ring(ship_ai_listening_screen, 98, 108, 164, 8, COL_GOLD);
-  ship_ai_listening_mic_disc =
-      halo_ui_card(ship_ai_listening_screen, 122, 132, 116, 116, COL_TEAL, 58);
+  lv_obj_add_event_cb(ship_ai_listening_screen, ship_voice_wave_screen_event,
+                      LV_EVENT_SCREEN_UNLOAD_START, NULL);
+  ship_ai_listening_title = NULL;
+  ship_ai_listening_hint = NULL;
+  ship_ai_listening_ring = NULL;
+
+  lv_obj_t* left = ship_voice_muted_card(SHIP_MAIN_MENU_LEFT_BTN_X, SHIP_MAIN_MENU_LEFT_BTN_Y);
+  ship_main_menu_add_plus(left, ship_voice_muted_color(COL_GREEN));
+  lv_obj_t* right = ship_voice_muted_card(SHIP_MAIN_MENU_RIGHT_BTN_X, SHIP_MAIN_MENU_RIGHT_BTN_Y);
+  ship_main_menu_add_minus(right, ship_voice_muted_color(COL_RED));
+  lv_obj_t* bottom = ship_voice_muted_card(SHIP_MAIN_MENU_BOTTOM_BTN_X, SHIP_MAIN_MENU_BOTTOM_BTN_Y);
+  ship_main_menu_add_dots(bottom, ship_voice_muted_color(SHIP_HOME_SYMBOL_GOLD));
+
+  ship_voice_contact_ring = lv_obj_create(ship_ai_listening_screen);
+  lv_obj_remove_style_all(ship_voice_contact_ring);
+  lv_obj_set_pos(ship_voice_contact_ring, 123, 123);
+  lv_obj_set_size(ship_voice_contact_ring, 114, 114);
+  lv_obj_set_style_radius(ship_voice_contact_ring, 33, 0);
+  lv_obj_set_style_border_width(ship_voice_contact_ring, 2, 0);
+  lv_obj_set_style_border_color(ship_voice_contact_ring, lv_color_hex(COL_TEAL), 0);
+  lv_obj_set_style_border_opa(ship_voice_contact_ring, LV_OPA_60, 0);
+  lv_obj_clear_flag(ship_voice_contact_ring, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(ship_voice_contact_ring, LV_OBJ_FLAG_HIDDEN);
+
+  // The held target stays exactly where the user's finger pressed on Home.
+  ship_ai_listening_mic_disc = lv_obj_create(ship_ai_listening_screen);
+  ship_main_menu_style_button(ship_ai_listening_mic_disc, false);
+  lv_obj_set_pos(ship_ai_listening_mic_disc, SHIP_MAIN_MENU_CENTER_BTN_X,
+                 SHIP_MAIN_MENU_CENTER_BTN_Y);
+  lv_obj_clear_flag(ship_ai_listening_mic_disc, LV_OBJ_FLAG_CLICKABLE);
   ship_ai_listening_mic_head =
-      halo_ui_icon(ship_ai_listening_mic_disc, HALO_ICON_MIC, 29, 28, 52, COL_WHITE);
+      halo_ui_icon(ship_ai_listening_mic_disc, HALO_ICON_MIC, 0, 0, 54, SHIP_HOME_SYMBOL_GOLD);
+  lv_obj_center(ship_ai_listening_mic_head);
+  for (uint8_t i = 0; i < SHIP_VOICE_WAVE_BAR_COUNT; ++i) {
+    lv_obj_t* bar = lv_obj_create(ship_ai_listening_screen);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_pos(bar, 98 + i * 13, 66);
+    lv_obj_set_size(bar, 7, 8);
+    lv_obj_set_style_radius(bar, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(COL_TEAL), 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    ship_voice_wave_bars[i] = bar;
+  }
+  ship_voice_wave_draw(-1);
   // Compatibility handles are not separate animated objects.
   ship_ai_listening_mic_stem = NULL;
   ship_ai_listening_mic_base = NULL;
@@ -111,10 +235,9 @@ static void ship_init_ai_listening_screen() {
 }
 
 static void ship_start_ai_listening_animation() {
-  // The real elapsed-time gold ring owns progress. Static vector mic avoids
-  // a transformed container and its temporary draw layer.
-  if (ship_ai_listening_mic_disc)
-    lv_anim_del(ship_ai_listening_mic_disc, NULL);
+  ship_voice_wave_stop();
+  ship_voice_wave_draw(-1);
+  ship_sync_ai_listening_animation();
 }
 
 static void ship_show_ai_listening_screen() {
@@ -998,7 +1121,40 @@ static lv_obj_t* shopping_list_back_btn_obj = NULL;  // Bottom back button
 //   complete    — segment closes into a full 360° ring, then fades out
 //   failed      — full ring flashes twice in the error red + transient
 //                 "Couldn't refresh" toast (errors are the only text)
+#include "lcd_shopping_scroll_asset.h"
 static lv_obj_t* shopping_list_refresh_ring = NULL;
+static lv_obj_t* shopping_list_scroll_cue = NULL;
+
+// One small flash-backed alpha mask avoids rotating labels or allocating a
+// full-screen layer. Keep it clear of the active refresh ring and Delete dialog.
+static void shopping_list_scroll_cue_sync() {
+  if (!shopping_list_scroll_cue || !shopping_list_scroll) return;
+  const bool overflowing = g_active.count > 0 &&
+      (lv_obj_get_scroll_top(shopping_list_scroll) > 0 ||
+       lv_obj_get_scroll_bottom(shopping_list_scroll) > 0);
+  const bool ring_visible = shopping_list_refresh_ring &&
+      !lv_obj_has_flag(shopping_list_refresh_ring, LV_OBJ_FLAG_HIDDEN);
+  if (overflowing && !ring_visible && !shopping_list_overlay_visible)
+    lv_obj_clear_flag(shopping_list_scroll_cue, LV_OBJ_FLAG_HIDDEN);
+  else
+    lv_obj_add_flag(shopping_list_scroll_cue, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void shopping_list_scroll_cue_deleted(lv_event_t* event) {
+  if (lv_event_get_target(event) == shopping_list_scroll_cue)
+    shopping_list_scroll_cue = NULL;
+}
+
+static void shopping_list_build_scroll_cue(lv_obj_t* parent) {
+  shopping_list_scroll_cue = lv_img_create(parent);
+  lv_img_set_src(shopping_list_scroll_cue, &shopping_scroll_cue_img);
+  lv_obj_set_pos(shopping_list_scroll_cue, SHOPPING_SCROLL_CUE_X, SHOPPING_SCROLL_CUE_Y);
+  lv_obj_set_style_img_recolor(shopping_list_scroll_cue, lv_color_hex(COL_TEAL), 0);
+  lv_obj_set_style_img_recolor_opa(shopping_list_scroll_cue, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(shopping_list_scroll_cue, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(shopping_list_scroll_cue, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(shopping_list_scroll_cue, shopping_list_scroll_cue_deleted, LV_EVENT_DELETE, NULL);
+}
 // How many refresh timeouts with NO successful refresh ever before the list
 // stops looping the skeleton and states plainly that the Sense is unreachable.
 #define LIST_HONEST_FAIL_TIMEOUTS 2
@@ -1067,6 +1223,7 @@ static void shopping_list_animate_card_removal(int idx);
 // The refresh ring and error toast call lv_obj_move_foreground on themselves
 // while animating — without this they'd stack over a visible overlay.
 static void shopping_list_keep_overlay_on_top() {
+  shopping_list_scroll_cue_sync();
   if (shopping_list_overlay_visible && shopping_list_overlay) {
     lv_obj_move_foreground(shopping_list_overlay);
   }
@@ -1108,6 +1265,7 @@ static void shopping_list_ring_hide_anim_ready(lv_anim_t* a) {
   lv_obj_set_style_opa((lv_obj_t*)a->var, LV_OPA_COVER, 0);
   shopping_list_ring_hiding = false;
   shopping_list_ring_autohide = false;
+  shopping_list_scroll_cue_sync();
 }
 
 // Kill every ring animation and restore a sane base state (full opacity).
@@ -1291,6 +1449,7 @@ static void shopping_list_ring_hide() {
 // transition happens on the UART task, so the UI task polls for it here).
 // Same state source / function name as the old pill — only the body changed.
 static void shopping_list_refresh_indicator_sync(bool force) {
+  shopping_list_scroll_cue_sync();
   if (!shopping_list_refresh_ring) return;
   int st = (int)refresh_state;
   if (!force && st == shopping_list_refresh_ui_state) return;
@@ -1316,6 +1475,7 @@ static void shopping_list_refresh_indicator_sync(bool force) {
   } else {
     shopping_list_ring_hide();
   }
+  shopping_list_scroll_cue_sync();
 }
 
 // Build the border ring + error toast (called from show_shopping_list_screen_impl;
@@ -1373,6 +1533,7 @@ static void shopping_list_show_overlay() {
           sizeof(shopping_list_overlay_item_id) - 1);
   shopping_list_overlay_item_id[sizeof(shopping_list_overlay_item_id) - 1] = '\0';
   shopping_list_overlay_visible = true;
+  shopping_list_scroll_cue_sync();
   shopping_list_overlay = lv_obj_create(shopping_list_screen);
   lv_obj_remove_style_all(shopping_list_overlay);
   lv_obj_set_size(shopping_list_overlay, 360, 360);
@@ -1410,6 +1571,7 @@ static void shopping_list_dismiss_overlay() {
   shopping_list_overlay_back_btn = NULL;
   shopping_list_overlay_visible = false;
   shopping_list_overlay_item_id[0] = '\0';
+  shopping_list_scroll_cue_sync();
   Serial.println("[SHOP_LIST] overlay dismissed");
 }
 
@@ -2249,6 +2411,8 @@ static void show_shopping_list_screen_impl() {
   shopping_list_back_btn_obj = halo_ui_back(shopping_list_screen, 97, 277);
   shopping_list_refresh_btn =
       halo_ui_button(shopping_list_screen, 153, 276, 110, 45, "REFRESH", COL_WHITE, COL_DARK);
+
+  shopping_list_build_scroll_cue(shopping_list_screen);
 
   // ── Border refresh ring + error toast (last children — top layer) ──
   shopping_list_build_refresh_ring(shopping_list_screen);

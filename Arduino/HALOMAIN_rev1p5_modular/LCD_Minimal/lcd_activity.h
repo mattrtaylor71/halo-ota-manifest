@@ -356,6 +356,11 @@ static void ui_reset_lvgl_objects() {
   ship_ai_listening_pulse[0] = NULL;
   ship_ai_listening_pulse[1] = NULL;
   ship_ai_listening_pulse[2] = NULL;
+  for (uint8_t i = 0; i < SHIP_VOICE_WAVE_BAR_COUNT; ++i)
+    ship_voice_wave_bars[i] = NULL;
+  ship_voice_contact_ring = NULL;
+  ship_voice_wave_animating = false;
+  ship_voice_wave_last_frame_ms = 0;
   ship_voice_json_screen = NULL;
   ship_voice_json_card = NULL;
   ship_voice_json_title = NULL;
