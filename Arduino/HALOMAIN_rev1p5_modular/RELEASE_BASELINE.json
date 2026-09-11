@@ -1,61 +1,10 @@
 {
   "schema_version": 1,
-  "status": "released",
-  "candidate_version": "6.4.114",
-  "canary_versions": [
-    "6.4.113"
-  ],
-  "canary_profile": "shipping policy with only the fixed private OTA route changed",
-  "release_commit": "7c9f7c72e5d2b30fc3dc4a5e7fbb780d6e31d0c1",
-  "release_tree": "a61b2b9a87a0821b8469f3864e6cd222b2155959",
-  "release_tag": "halo-v6.4.114",
-  "release_artifact_manifest": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-build001/RELEASE-PAIR.json",
-    "sha256": "2158220d9bf3a74b78755af195ffc31faa67403a366efde284cfcdcad13beef4"
-  },
-  "shipping_acceptance_receipt": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-final-disposition001/ROOT-ACCEPTANCE.json",
-    "sha256": "eb28fba092f9371f005679bf9ed091057a0b7dc6da6f11998b4a3598dc86ef3b"
-  },
-  "production_publication_receipt": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/114-global-promote/result.json",
-    "sha256": "d7ed3c610ec83dad234bd042340518dc3d66328bd62926d751ae339ee8d11744"
-  },
-  "previous_production_manifest_archive": {
-    "sense": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-publication001/sense-previous-latest.json",
-      "sha256": "78d476d7d0a61f1eb1c22b32302a74120c8666501dccee85b4f98df6d167f462"
-    },
-    "lcd": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-publication001/lcd-previous-latest.json",
-      "sha256": "d523554249ce6d2966093323d57fadcd883ab5806c77fec67f71c614fe9e79b2"
-    }
-  },
   "factory_and_rollback_instructions": "docs/PRODUCTION_FACTORY_RECOVERY.md",
-  "source_basis": {
-    "name": "M8 bounded report, stack and watchdog integration",
-    "checkpoint_sha256": "a74915125f46d8765de2027d698a5ca8cee901e3eadfa1b16a2d3c14765c4b54",
-    "integration_receipt": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-source-integration001/MATERIALIZATION.json"
-  },
   "canonical_builder": "tools/build_ota_policy_production.py",
   "acceptance_plan": "docs/PRODUCTION_RELEASE_ACCEPTANCE.md",
   "workflow": "docs/RELEASE_BASELINE.md",
   "changelog": "CHANGELOG.md",
-  "default_checkout_adoption": {
-    "status": "PASS_EXACT_RELEASE_ADOPTED_UNRELATED_STATE_PRESERVED",
-    "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
-    "branch": "codex/halo-production-v6.4.114",
-    "release_commit": "7c9f7c72e5d2b30fc3dc4a5e7fbb780d6e31d0c1",
-    "receipt": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-original-adoption-run-release114-001/RESULT.json",
-      "sha256": "53ac90d85ec3b84b78249e8558c5cb134a00905f78f02059bec1dc85d1cfbd45"
-    },
-    "followup": "The subsequent documentation-only binding commit is fast-forwarded normally into this same checkout; its final commit and verification are recorded in production114-final-disposition001/ROOT-FINAL-RELEASE.json. The release tag stays on the accepted release commit."
-  },
-  "qualification_scope": "Manual and normal-calendar scheduled installation of the same exact 114 production pair passed. Final paired SDK health, Pacific timers and natural sleep verified. Manual accounting resolved before verification; scheduled accounting settled on the verification wake. Extended fault and soak tests were deferred.",
-  "artifact_source_commit": "1224f28ab2d1307d54cf71956b30da2bbccead3d",
-  "artifact_source_firmware_tree": "83c178bde2020c4e2fff800caf9e33be33a4ef97",
-  "autonomous_calendar_scope": "Separate 113-to-114 manual and normal-calendar cases installed the same production artifacts without in-case credit refunds. Scheduled target versions were reported before verification; final native accounting resolved on the verification wake. The opening scheduled transition was unobserved. Final 2 a.m. Pacific service and paired natural sleep passed.",
   "previous_candidate_artifacts": {
     "102": {
       "pair": {
@@ -146,9 +95,7 @@
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release112-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
         "sha256": "869cd1c6c2a98f635627704c9e680be6cba66032669c85fbfe77db7b5bf8ef2a"
       }
-    }
-  },
-  "candidate_artifacts": {
+    },
     "113": {
       "pair": {
         "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release113-build001/RELEASE-PAIR.json",
@@ -337,23 +284,54 @@
         "sha256": "ef02c3ab1334be0254e49ee5966ec1bc05550f9d00a27bb7fe0178b590a38634"
       },
       "scope": "Exact114 on both boards reported before verification with nightly_20260910 origin. Final SDK VALID/Home and durable RESOLVED phase8/gen6/reserved0 verified; one network/apply and one begin per board, remaining13ms. Accounting settled on the verification wake. Opening wake transition and pre-query LCD natural sleep were unobserved; no manual OTA command or firmware write occurred during the scheduled case."
+    },
+    "116_controlled_install": {
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/install116-003/result.json",
+        "sha256": "b0bffd4569490bcd168073f7aabe8d9d8d9f847cf667470c49fe53e8e6955cb2"
+      },
+      "scope": "Verified candidate/fallback ranges; NVS, bootloader and current bank writes0; subsequent116 SDK health in actual UI capture."
+    },
+    "116_ui_navigation": {
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/ui116-003/result.json",
+        "sha256": "069b7f03e6faf2d99fc81e5ae78bdfd90593bb3f9cb8da05e5026204fa0c09b7"
+      },
+      "scope": "Physical7-item list selected0/scroll0 ->selected6/scroll235 ->selected0/scroll0; real backend refresh completed"
+    },
+    "117_manual_install": {
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/manual117-001/result.json",
+        "sha256": "ad21777dbcb22c7b1a3587005e3cc77bbc1ecd725e1523ad4439ffb7124f8b57"
+      },
+      "acceptance": {
+        "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/ACCEPTANCE.json",
+        "sha256": "946beda6d7735443e72ba8bbe23d83142b7987a4934e568efbbfdb55994c96ef"
+      },
+      "scope": "ExactlyoneSettings-action request, stable sampled update overlay; both full hashes match; both117/app0VALID; terminalunlock thenHome/OTAflags0; both loggeddeep sleep and30sUSBabsence",
+      "elapsed_seconds": 365.778215542,
+      "allowance_modifications": 0
+    },
+    "117_manual_same_version_response": {
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/final117-001/result.json",
+        "sha256": "1d4a7b7d9ab7866ec955846e59333ead167d04bc864942c1085427f419f49732"
+      },
+      "acceptance": {
+        "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/ACCEPTANCE.json",
+        "sha256": "946beda6d7735443e72ba8bbe23d83142b7987a4934e568efbbfdb55994c96ef"
+      },
+      "status": "PASS",
+      "terminal_result": "policy_daily_limit",
+      "result_title_from_source": "Daily update limit",
+      "result_detail_from_source": "Please try again tomorrow.",
+      "terminal_hold_ms": 8000,
+      "scope": "One Settings-action request. Fresh exact117 SDK VALID on both boards; LCD build fingerprint nonce checked. Overlay sampled on through8.444s and off8.944s after request, followed by Home/OTA flags0 and paired natural sleep/15s quiet. No new screenshot or finger-hit claim."
     }
   },
   "previous_recovery_package_108": {
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release108-recovery-package002/MANIFEST.json",
     "sha256": "3e4e7da8768ec49e779d7010e36feca7a0e047b53cd8a5fe9abab08f0adef727"
-  },
-  "recovery_package": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-recovery-package001/MANIFEST.json",
-    "sha256": "c5a24fecd0a056e67c2d0453bed7ea9c02c508eb3147288095fba55490168265"
-  },
-  "recovery_package_independent_peer": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-build001/DOCS-PACKAGE001-PEER.json",
-    "sha256": "30e031f9c249a0abb0063a8fa0912eb9af0807eb8417320bc531d388ca85c607"
-  },
-  "portable_release_archive": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/HALO-6.4.114-production.zip",
-    "sha256": "08056f5621b8e42e29d42206266357559c4bc90faee14b46ca511d9cf4aeb9ab"
   },
   "next_focused_fix": "docs/OTA_RETRY_NEXT_FIX.md (historical diagnosis and implemented readiness correction)",
   "test_automation_status": "PAUSED",
@@ -374,35 +352,6 @@
   "previous_112_portable_release_archive": {
     "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/HALO-6.4.112-production.zip",
     "sha256": "b0c616265e8626fefb753b51e632776144b40dd69db823d1fd4f1163a66f3701"
-  },
-  "continuation_scope": {
-    "status": "complete",
-    "requirements": [
-      "focused observed-failure native regression",
-      "exact113 private and114 production canonical builds",
-      "manual113 to114 installation",
-      "new separate calendar113 to114 installation",
-      "Pacific service restoration",
-      "exact production promotion",
-      "release commit/tag",
-      "safe default-checkout adoption"
-    ],
-    "extended_fault_matrix": "not added"
-  },
-  "focused_successor_regression": {
-    "status": "PASS",
-    "test": "tools/test_retry_wake_ready.py",
-    "command": "python3 -B tools/test_retry_wake_ready.py",
-    "old_source_result": "FAIL at observed due\u221212s: not_due, origin0, pending0, cancels1",
-    "new_source_result": "PASS: boundedwait, noearly reservation, exactdue one charge, originaldeadlines/accounting and caller guards",
-    "scope": "Native real-source extracted wrapper and real codec; no hardware acceptance claim"
-  },
-  "current_deadline": {
-    "user_instruction": "Cut corners if needed; production ready in less than1hour",
-    "requested_local": "2026-09-10 15:57 America/Los_Angeles",
-    "target_local": "2026-09-10 16:57 America/Los_Angeles (one hour after latest instruction)",
-    "scope": "Freeze runtime. Manual and scheduled install, pairedSDKhealth/accounting, Pacific, publication and tag/adoption only. No extendedsoak or added framework.",
-    "internal_target_local": "2026-09-10 16:52 America/Los_Angeles"
   },
   "previous_112_release_scope_decision": {
     "requested_by_user": "Make shippable; do not be a perfectionist; ship in one hour",
@@ -442,79 +391,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "service_restoration": {
-    "status": "PASS",
-    "timezone": "PST8PDT,M3.2.0,M11.1.0",
-    "result": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/result.json",
-      "sha256": "a0cb1876ffab529f6f054ca0135f2451f71cabfbf0b820cafc1ec0a26f245d6b"
-    },
-    "closure": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/overall-reap.json",
-      "sha256": "7ec7f22a593f3875e87983598719c759a60698f2d7770c7d8ab9a90bb646cdc7"
-    },
-    "timer_observation": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/ACTUAL-PACIFIC-TIMER-OBSERVATION.json",
-      "sha256": "e6dc1b40888f8a17972bcc756a5715751d025ebb7e67b91d0586f8f84bb4de20"
-    },
-    "next_sense_timer_epoch": 1789117200,
-    "next_lcd_timer_epoch": 1789117185,
-    "next_local_wake": "2026-09-11 02:00 America/Los_Angeles",
-    "scope": "Only timezone changed; exact canonical/provisioning preserved. Both114 SDK VALID/idle and paired natural sleep verified."
-  },
-  "release_scope_decision": {
-    "requested_by_user": "Production ready within one hour; cut corners as needed",
-    "recorded_local_date": "2026-09-10",
-    "target_local_deadline": "16:57 America/Los_Angeles",
-    "required": [
-      "manual installation of exact 114 production pair",
-      "normal-calendar scheduled installation of the same pair",
-      "paired health and settled accounting",
-      "Pacific restoration",
-      "production publication",
-      "local commit/tag and safe original-checkout adoption"
-    ],
-    "deferred": [
-      "extended repeated soak",
-      "deliberate integrity fault",
-      "controlled network interruption",
-      "physical power cut",
-      "USB-free operation",
-      "observed later-day recovery"
-    ],
-    "deadline_met": false,
-    "disposition": "Accepted and published114 under the reduced user-directed scope.",
-    "internal_target_local_deadline": "16:52 America/Los_Angeles",
-    "production_publication_within_hour": true,
-    "production_publication_epoch": 1789084574.2147589,
-    "deadline_scope": "Production published inside one hour; complete Git/documentation handoff finished afterward. Final closure timestamp is in ROOT-FINAL-RELEASE.json."
-  },
-  "production_publication_closure": {
-    "parent_result": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/result.json",
-      "sha256": "a65d5ac6081fc9e7810e460431c88bebacd2fd273bca2903cea0db14b51132e7"
-    },
-    "parent_reap": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/overall-reap.json",
-      "sha256": "2e884e07dd2d96d8999b37332d2b9678b49716abe1a638963b8b5433d37908b1"
-    },
-    "phase_reap": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/114-global-promote/overall-reap.json",
-      "sha256": "2f16a37b556fd701ee8c458e45c7fb7605ff68b82d90a74fe86ae72f98d4a480"
-    }
-  },
-  "temporary_awake_closure": {
-    "closure": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/ota-recovery-plan-2026-09-08/production-release-awake-018/closure.json",
-      "sha256": "44d0701b744a8e6c69fbcfdd46ec11e74bb0ec79dd535166c048d7ef7d27d54b"
-    },
-    "reap": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/ota-recovery-plan-2026-09-08/production-release-awake-018/NORMAL-REAP.json",
-      "sha256": "60c5b9df295ab52b258d5d07080a65310dceb018a3eda39c30d45419154dce09"
-    },
-    "scope": "Finite assertion expired normally. No renewal; global power preferences unchanged."
-  },
-  "current_production_latest_version": "6.4.115",
+  "current_production_latest_version": "6.4.117",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -543,5 +420,264 @@
       "manual_eligibility_note": "Last observed114 ledger was RESOLVED with13ms; shipping manual discovery cannot refill a later UTCday. If retained unchanged, immediate manual OTA is blocked until eligible normal maintenance or explicit separate lab-state preparation. No allowance reset or device wake occurred for this publication.",
       "published_epoch": 1789086042.673225
     }
-  ]
+  ],
+  "previous_114_release": {
+    "status": "released",
+    "candidate_version": "6.4.114",
+    "canary_versions": [
+      "6.4.113"
+    ],
+    "canary_profile": "shipping policy with only the fixed private OTA route changed",
+    "release_commit": "7c9f7c72e5d2b30fc3dc4a5e7fbb780d6e31d0c1",
+    "release_tree": "a61b2b9a87a0821b8469f3864e6cd222b2155959",
+    "release_tag": "halo-v6.4.114",
+    "release_artifact_manifest": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-build001/RELEASE-PAIR.json",
+      "sha256": "2158220d9bf3a74b78755af195ffc31faa67403a366efde284cfcdcad13beef4"
+    },
+    "shipping_acceptance_receipt": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-final-disposition001/ROOT-ACCEPTANCE.json",
+      "sha256": "eb28fba092f9371f005679bf9ed091057a0b7dc6da6f11998b4a3598dc86ef3b"
+    },
+    "production_publication_receipt": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/114-global-promote/result.json",
+      "sha256": "d7ed3c610ec83dad234bd042340518dc3d66328bd62926d751ae339ee8d11744"
+    },
+    "previous_production_manifest_archive": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-publication001/sense-previous-latest.json",
+        "sha256": "78d476d7d0a61f1eb1c22b32302a74120c8666501dccee85b4f98df6d167f462"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-publication001/lcd-previous-latest.json",
+        "sha256": "d523554249ce6d2966093323d57fadcd883ab5806c77fec67f71c614fe9e79b2"
+      }
+    },
+    "source_basis": {
+      "name": "M8 bounded report, stack and watchdog integration",
+      "checkpoint_sha256": "a74915125f46d8765de2027d698a5ca8cee901e3eadfa1b16a2d3c14765c4b54",
+      "integration_receipt": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-source-integration001/MATERIALIZATION.json"
+    },
+    "default_checkout_adoption": {
+      "status": "PASS_EXACT_RELEASE_ADOPTED_UNRELATED_STATE_PRESERVED",
+      "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
+      "branch": "codex/halo-production-v6.4.114",
+      "release_commit": "7c9f7c72e5d2b30fc3dc4a5e7fbb780d6e31d0c1",
+      "receipt": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-original-adoption-run-release114-001/RESULT.json",
+        "sha256": "53ac90d85ec3b84b78249e8558c5cb134a00905f78f02059bec1dc85d1cfbd45"
+      },
+      "followup": "The subsequent documentation-only binding commit is fast-forwarded normally into this same checkout; its final commit and verification are recorded in production114-final-disposition001/ROOT-FINAL-RELEASE.json. The release tag stays on the accepted release commit."
+    },
+    "qualification_scope": "Manual and normal-calendar scheduled installation of the same exact 114 production pair passed. Final paired SDK health, Pacific timers and natural sleep verified. Manual accounting resolved before verification; scheduled accounting settled on the verification wake. Extended fault and soak tests were deferred.",
+    "artifact_source_commit": "1224f28ab2d1307d54cf71956b30da2bbccead3d",
+    "artifact_source_firmware_tree": "83c178bde2020c4e2fff800caf9e33be33a4ef97",
+    "autonomous_calendar_scope": "Separate 113-to-114 manual and normal-calendar cases installed the same production artifacts without in-case credit refunds. Scheduled target versions were reported before verification; final native accounting resolved on the verification wake. The opening scheduled transition was unobserved. Final 2 a.m. Pacific service and paired natural sleep passed.",
+    "candidate_artifacts": {
+      "113": {
+        "pair": {
+          "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release113-build001/RELEASE-PAIR.json",
+          "sha256": "daedfca2661d80b7f61d3f0b9519ff8c6561dd37a4c4babd1d0d5cb2848e5f5a"
+        },
+        "independent_peer": {
+          "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release113-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
+          "sha256": "35b4870fb6b22b134fd9d89eeb093a3da68bfd4a7d7daa078e617f9f4826ca95"
+        }
+      },
+      "114": {
+        "pair": {
+          "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-build001/RELEASE-PAIR.json",
+          "sha256": "2158220d9bf3a74b78755af195ffc31faa67403a366efde284cfcdcad13beef4"
+        },
+        "independent_peer": {
+          "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-build001/DOCS-INDEPENDENT-PAIR-PEER.json",
+          "sha256": "21f4a453665673f3e95f458f22788e42d518bf9dfd354d5b0bbe747b547adb69"
+        }
+      }
+    },
+    "recovery_package": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-recovery-package001/MANIFEST.json",
+      "sha256": "c5a24fecd0a056e67c2d0453bed7ea9c02c508eb3147288095fba55490168265"
+    },
+    "recovery_package_independent_peer": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release114-build001/DOCS-PACKAGE001-PEER.json",
+      "sha256": "30e031f9c249a0abb0063a8fa0912eb9af0807eb8417320bc531d388ca85c607"
+    },
+    "portable_release_archive": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/HALO-6.4.114-production.zip",
+      "sha256": "08056f5621b8e42e29d42206266357559c4bc90faee14b46ca511d9cf4aeb9ab"
+    },
+    "continuation_scope": {
+      "status": "complete",
+      "requirements": [
+        "focused observed-failure native regression",
+        "exact113 private and114 production canonical builds",
+        "manual113 to114 installation",
+        "new separate calendar113 to114 installation",
+        "Pacific service restoration",
+        "exact production promotion",
+        "release commit/tag",
+        "safe default-checkout adoption"
+      ],
+      "extended_fault_matrix": "not added"
+    },
+    "focused_successor_regression": {
+      "status": "PASS",
+      "test": "tools/test_retry_wake_ready.py",
+      "command": "python3 -B tools/test_retry_wake_ready.py",
+      "old_source_result": "FAIL at observed due\u221212s: not_due, origin0, pending0, cancels1",
+      "new_source_result": "PASS: boundedwait, noearly reservation, exactdue one charge, originaldeadlines/accounting and caller guards",
+      "scope": "Native real-source extracted wrapper and real codec; no hardware acceptance claim"
+    },
+    "current_deadline": {
+      "user_instruction": "Cut corners if needed; production ready in less than1hour",
+      "requested_local": "2026-09-10 15:57 America/Los_Angeles",
+      "target_local": "2026-09-10 16:57 America/Los_Angeles (one hour after latest instruction)",
+      "scope": "Freeze runtime. Manual and scheduled install, pairedSDKhealth/accounting, Pacific, publication and tag/adoption only. No extendedsoak or added framework.",
+      "internal_target_local": "2026-09-10 16:52 America/Los_Angeles"
+    },
+    "service_restoration": {
+      "status": "PASS",
+      "timezone": "PST8PDT,M3.2.0,M11.1.0",
+      "result": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/result.json",
+        "sha256": "a0cb1876ffab529f6f054ca0135f2451f71cabfbf0b820cafc1ec0a26f245d6b"
+      },
+      "closure": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/overall-reap.json",
+        "sha256": "7ec7f22a593f3875e87983598719c759a60698f2d7770c7d8ab9a90bb646cdc7"
+      },
+      "timer_observation": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-Pacific-restore-run001/ACTUAL-PACIFIC-TIMER-OBSERVATION.json",
+        "sha256": "e6dc1b40888f8a17972bcc756a5715751d025ebb7e67b91d0586f8f84bb4de20"
+      },
+      "next_sense_timer_epoch": 1789117200,
+      "next_lcd_timer_epoch": 1789117185,
+      "next_local_wake": "2026-09-11 02:00 America/Los_Angeles",
+      "scope": "Only timezone changed; exact canonical/provisioning preserved. Both114 SDK VALID/idle and paired natural sleep verified."
+    },
+    "release_scope_decision": {
+      "requested_by_user": "Production ready within one hour; cut corners as needed",
+      "recorded_local_date": "2026-09-10",
+      "target_local_deadline": "16:57 America/Los_Angeles",
+      "required": [
+        "manual installation of exact 114 production pair",
+        "normal-calendar scheduled installation of the same pair",
+        "paired health and settled accounting",
+        "Pacific restoration",
+        "production publication",
+        "local commit/tag and safe original-checkout adoption"
+      ],
+      "deferred": [
+        "extended repeated soak",
+        "deliberate integrity fault",
+        "controlled network interruption",
+        "physical power cut",
+        "USB-free operation",
+        "observed later-day recovery"
+      ],
+      "deadline_met": false,
+      "disposition": "Accepted and published114 under the reduced user-directed scope.",
+      "internal_target_local_deadline": "16:52 America/Los_Angeles",
+      "production_publication_within_hour": true,
+      "production_publication_epoch": 1789084574.2147589,
+      "deadline_scope": "Production published inside one hour; complete Git/documentation handoff finished afterward. Final closure timestamp is in ROOT-FINAL-RELEASE.json."
+    },
+    "production_publication_closure": {
+      "parent_result": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/result.json",
+        "sha256": "a65d5ac6081fc9e7810e460431c88bebacd2fd273bca2903cea0db14b51132e7"
+      },
+      "parent_reap": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/overall-reap.json",
+        "sha256": "2e884e07dd2d96d8999b37332d2b9678b49716abe1a638963b8b5433d37908b1"
+      },
+      "phase_reap": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production114-global-promotion-run001/114-global-promote/overall-reap.json",
+        "sha256": "2f16a37b556fd701ee8c458e45c7fb7605ff68b82d90a74fe86ae72f98d4a480"
+      }
+    },
+    "temporary_awake_closure": {
+      "closure": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/ota-recovery-plan-2026-09-08/production-release-awake-018/closure.json",
+        "sha256": "44d0701b744a8e6c69fbcfdd46ec11e74bb0ec79dd535166c048d7ef7d27d54b"
+      },
+      "reap": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/ota-recovery-plan-2026-09-08/production-release-awake-018/NORMAL-REAP.json",
+        "sha256": "60c5b9df295ab52b258d5d07080a65310dceb018a3eda39c30d45419154dce09"
+      },
+      "scope": "Finite assertion expired normally. No renewal; global power preferences unchanged."
+    }
+  },
+  "status": "qualified_and_published_release_handoff_pending",
+  "candidate_version": "6.4.117",
+  "canary_versions": [],
+  "canary_profile": null,
+  "controlled_baseline_version": "6.4.116",
+  "release_commit": null,
+  "release_tree": null,
+  "release_tag": null,
+  "artifact_source_commit": "1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f",
+  "artifact_source_firmware_tree": "53ddadf8623f8ab0d15363f9b675233f8d762409",
+  "release_artifact_manifest": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release117-build001/RELEASE-PAIR.json",
+    "sha256": "4893b04d4e3e86480312b9dfd63b667df171fead26c6b07a598b69263b44dd25"
+  },
+  "shipping_acceptance_receipt": {
+    "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/ACCEPTANCE.json",
+    "sha256": "946beda6d7735443e72ba8bbe23d83142b7987a4934e568efbbfdb55994c96ef"
+  },
+  "production_publication_receipt": {
+    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-promote001/result.json",
+    "sha256": "653feb0ce3d675ad215bb187351966ba9cface6eeef9b6b45438f63098d5a317"
+  },
+  "previous_production_manifest_archive": {
+    "sense": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-publication001/sense-previous-latest.json",
+      "sha256": "163dd1c5acf03f1c487e6dec2b1f476e61fe84f30782e9e76c190c06452ecea4"
+    },
+    "lcd": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-publication001/lcd-previous-latest.json",
+      "sha256": "359c0503698e016cafee44ae051fc3ec977024f7e2dc3abd168ff3cc9ae16e49"
+    }
+  },
+  "source_basis": {
+    "name": "Focused UI and acknowledged manual OTA fixes over the114 production runtime",
+    "artifact_source_commit": "1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f",
+    "native_regression": "tools/test_manual_ota.py"
+  },
+  "qualification_scope": "Scoped five-fix validation: device-backed 116 list navigation; one 116-to-117 Settings-action manual OTA through the existing USB command; exact paired 117 hashes/SDK VALID, Home, cleared terminal flags, logged deep sleep and 30 seconds paired USB absence. One subsequent same-version request produced policy_daily_limit with a stable eight-second result, then Home and paired natural sleep/15 seconds quiet. No new scheduled, fault, soak, power-cut or USB-free qualification.",
+  "autonomous_calendar_scope": "Not repeated for117. Prior114 scheduled acceptance remains in previous_114_release and versioned acceptance_results.",
+  "default_checkout_adoption": {
+    "status": "PENDING_ROOT_RELEASE_COMMIT_AND_ADOPTION",
+    "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
+    "branch": null,
+    "release_commit": null,
+    "receipt": null
+  },
+  "candidate_artifacts": {
+    "116": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release116-build001/RELEASE-PAIR.json",
+        "sha256": "357ff0df17deb38bcba49218152276d131ceb6a1aa9858a1e4fca950a3e33721"
+      }
+    },
+    "117": {
+      "pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release117-build001/RELEASE-PAIR.json",
+        "sha256": "4893b04d4e3e86480312b9dfd63b667df171fead26c6b07a598b69263b44dd25"
+      }
+    }
+  },
+  "recovery_package": null,
+  "recovery_package_independent_peer": null,
+  "portable_release_archive": null,
+  "release_scope_decision": {
+    "status": "PASS_REPORTED_FIVE_FIXES_MAIN_VALIDATION",
+    "scope": "Only five reported defects. USBconnected Garage Member test. No new scheduled, fault, soak, physical powercut or USB-free qualification. USBopen resets distinguished from sleep evidence. Manual action exercised via same UI-task Settings handler through existing USB command; physical fingerhit target and new physical screenshot not claimed.",
+    "followup_response_check": "PASS: one same-version request, Daily update limit result from tested source, stable sampled overlay through8.444s/off8.944s, Home/OTA flags0 and paired natural sleep/15s quiet.",
+    "new_factory_package": false,
+    "release_handoff": "Pending actual root commit/tag/adoption bindings"
+  },
+  "production_publication_closure": null
 }

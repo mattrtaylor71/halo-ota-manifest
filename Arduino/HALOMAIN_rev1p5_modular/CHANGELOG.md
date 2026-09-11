@@ -1,8 +1,10 @@
 # Firmware changelog
 
-## Targeted UI and manual OTA fixes — September 10, 2026
+## 6.4.117 — scoped UI/manual OTA fixes, September 10, 2026
 
-Remove the mic bitmap background using the existing vector symbol; use an ASCII separator in Settings; center shopping labels and reveal the selected row while turning the knob. Manual Software update now uses one acknowledged user request, keeps a stable checking/result screen, and clears refused requests without repeated wakeups. A deliberate manual request after a RESOLVED campaign can replenish a later UTC day; failed-campaign debt and same-day limits remain intact. The USB `ota` shortcut now exercises the same Settings action. Focused native policy/action tests and actual LVGL geometry checks passed; on-device validation follows in116/117 production builds.
+Built 116/117 from committed source `1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f`. Replace the microphone bitmap background with the existing vector icon and the unsupported Settings separator with ASCII; center shopping labels and reveal the selected row while turning the knob. Manual Software update uses one acknowledged request, a stable checking/result screen, and no sleep/identity/timer re-dispatch. Explicit manual discovery can replenish a later UTC day only after RESOLVED work; failed debt and same-day bounds remain intact. USB `ota` exercises the same Settings action.
+
+Canonical 116/117 builds and focused native/action/LVGL checks passed. The real 116 seven-item list scrolled 0→6/235→0. One Settings-action manual request installed exact 117 on both boards; saved full hashes, SDK VALID, Home, cleared OTA flags and natural sleep passed. Production 117 pointers were promoted and verified. The final same-version request correctly produced `policy_daily_limit`, held the result for eight seconds, returned Home without re-dispatch, and naturally slept. Fresh paired 117 SDK VALID/build evidence passed. Actual release commit/tag/adoption bindings remain pending. No new scheduled or extended-soak qualification is claimed.
 
 ## 6.4.115 — published September 10, 2026 for manual OTA testing
 

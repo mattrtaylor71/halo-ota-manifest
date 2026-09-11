@@ -1,4 +1,6 @@
-# Production 6.4.114 factory and recovery package
+# Historical production6.4.114 factory and recovery package
+
+**Historical package:**117 is now the active fixed baseline; see [RELEASE_BASELINE.json](../RELEASE_BASELINE.json) for its exact paired artifacts. This guide and merged factory package remain114-specific. No117 factory package or factory-station qualification was created for the scoped UI/manual OTA fix.
 
 This document describes the exact shipping artifacts built from commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, with build ID `6.4.114-20260910T225056Z-1224f28ab2d1`. The firmware uses the normal production OTA endpoints and reports channel `prod`; bench, one-shot, probe and fault controls are disabled. Artifact qualification has passed. Device acceptance and production promotion are separate receipts in `RELEASE_BASELINE.json`; this document does not claim those actions have happened.
 

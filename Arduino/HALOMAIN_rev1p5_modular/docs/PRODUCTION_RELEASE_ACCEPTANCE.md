@@ -1,4 +1,24 @@
-# Production OTA acceptance — released 6.4.114
+# Production 117 acceptance — scoped five-fix validation
+
+The actual acceptance receipt is `halo-ui-fixes-2026-09-10/ACCEPTANCE.json`, pinned in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Compiled source is `1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f`; 116/117 are canonical production pairs with identical runtime outside generated version headers. Production 117 publication passed. The short same-version response follow-up also passed; final Git/tag/adoption bindings remain pending.
+
+| Check | Actual scope/result |
+|---|---|
+| Icons/Settings | Existing vector microphone replaces the bitmap background; ASCII separator removes the unsupported glyph. Installed source verified; no new physical pixel photograph claimed. |
+| Shopping layout/navigation | Actual LVGL/Nunito geometry within 1 px; on-device real seven-item list selected 0/scroll 0→selected 6/scroll 235→selected 0/scroll 0. |
+| Native manual/retry behavior | Real policy/codec, one-request action, ACK replay/deduplication, readable refusal/timeout, and existing retry/wake regressions passed. |
+| Controlled 116 installation | Candidate/protected ranges verified; NVS, bootloader and current-bank writes 0; paired 116 SDK VALID observed afterward. |
+| Manual 116→117 | Exactly one request through the LCD Settings action using existing USB `ota`; stable sampled update overlay; both full image hashes match 117; both app0 SDK VALID; terminal unlock, Home/OTA flags 0, logged deep sleep and 30 seconds paired USB absence. Capture elapsed 365.78 seconds. |
+| Same-version response | One further Settings-action request correctly returned `policy_daily_limit`. Tested source title: “Daily update limit”; detail: “Please try again tomorrow.” Overlay sampled on through 8.444 seconds and off by 8.944 seconds after request, matching an eight-second terminal hold. Fresh paired 117 SDK VALID and LCD nonce/build proof passed; Home/OTA flags 0, coordinated sleep and 15 seconds paired USB absence followed. |
+| Limits | USB-connected test. No new scheduled, fault, soak, physical power-cut or USB-free qualification. No physical finger-hit or new screenshot claim. Capture status alone was not promoted to success: The acceptance record combines the actual raw evidence. |
+
+Two local deployment starts stopped safely: a host `BytesIO.name` format error before flash transfer (attempted-write intent retained), then an absent port while asleep. Descriptors/locks closed; the third invocation completed. These are installer conditions, not failed firmware OTA results. Provisioning and retained campaign allowance were not reset.
+
+The 114 evidence below is historical and retains its original scope. Its scheduled/Pacific/package qualification is not relabeled as 117 testing.
+
+---
+
+# Historical production OTA acceptance — 6.4.114
 
 **Accepted and published on September 10, 2026.** Manual and normal-calendar installations reached the same exact production 114 pair. Both boards finished SDK VALID and idle, with Pacific scheduling and paired natural sleep restored. Production latest advanced to 114 at **16:56 PDT**.
 
