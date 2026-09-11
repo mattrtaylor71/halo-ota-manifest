@@ -222,13 +222,13 @@ static void ui_task(void *arg) {
             manual_result == 3 ? "The automatic retry stays scheduled." :
             manual_result == 4 ? "Please try again when connected." : "Returning to the menu.";
         lv_label_set_text(ota_label, manual_result ? result_title : is_transfer
-                                         ? "Updating the display"
+                                         ? "Something new is coming"
                                          : (finishing ? "Finishing update" : "Checking for updates"));
         lv_obj_set_pos(ota_label, 40, is_transfer ? 84 : 196);
-        lv_label_set_text(ota_description, manual_result ? result_detail : is_transfer ? "Display transfer only."
+        lv_label_set_text(ota_description, manual_result ? result_detail : is_transfer ? ""
                                                        : (finishing ? "" : "Getting things ready..."));
         lv_obj_set_pos(ota_description, 50, is_transfer ? 250 : 236);
-        if (finishing && !manual_result && !is_transfer)
+        if (!manual_result && (is_transfer || finishing))
           lv_obj_add_flag(ota_description, LV_OBJ_FLAG_HIDDEN);
         else
           lv_obj_clear_flag(ota_description, LV_OBJ_FLAG_HIDDEN);

@@ -1,5 +1,9 @@
 # Firmware changelog
 
+## Unreleased — Software Update wording
+
+Change the display-transfer heading to "Something new is coming" and remove the "Display transfer only." description. "Keep HALO connected." remains removed. Progress, checking/result details and OTA behavior are unchanged. These edits require a new version above the already published immutable 6.4.124.
+
 ## 6.4.124 — published September 11, 2026 for manual OTA testing
 
 Remove the "Keep HALO connected." footer and the "HALO may restart itself." finishing description. Software Update titles, progress, checking text and result/error details remain intact.
