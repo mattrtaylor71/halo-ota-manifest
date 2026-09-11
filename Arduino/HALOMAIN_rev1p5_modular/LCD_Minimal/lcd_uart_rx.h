@@ -930,7 +930,8 @@ static void uart_process_received_message(const char* json_str) {
       g_lcd_maintenance_boot_grace_until_ms = 0;
       ota_stay_awake_until_ms = g_lcd_coord_lease_until_ms.load();
       g_ota_lock_window_until_ms = ota_stay_awake_until_ms;
-      g_ota_screen_active = true;
+      // Peer preflight owns a bounded lease, not the user's screen. Manual
+      // requests and actual transfers acquire their presentation separately.
       }
       lcd_timer_receiver_wait_release("ota_lock");
       return;
@@ -979,6 +980,7 @@ static void uart_process_received_message(const char* json_str) {
     const char* coord = doc["coord_id"] | "";
     if (!doc["coord_id"].isUnbound() && (!coord[0] || strlen(coord) >= sizeof(g_lcd_coord_owner))) return;
     if (coord[0] && g_lcd_coord_owner[0] && strcmp(coord, g_lcd_coord_owner) != 0) return;
+    const bool had_ota_screen = g_ota_screen_active;
     g_lcd_coord_lease_until_ms.store(0);
     ota_locked = false;
     ota_check_pending = false;
@@ -1037,7 +1039,7 @@ static void uart_process_received_message(const char* json_str) {
       else g_ota_screen_active = true; // intermediate handoff is still one check
     } else {
       lcd_manual_ota_override_clear("ota_unlock");
-      provision_return_home_pending = true;
+      if (had_ota_screen) provision_return_home_pending = true;
     }
     Serial.println("[OTA] unlock received - all OTA flags cleared");
     return;

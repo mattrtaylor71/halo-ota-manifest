@@ -2240,6 +2240,7 @@ static void show_shopping_list_screen_impl() {
   shopping_list_refresh_indicator_sync(true);
 
   ui_screen_state = SCREEN_SHOPPING_LIST;
+  resetActivityTimer();  // Give every entry a fresh viewing interval.
   ui_busy = false;
   lv_scr_load(shopping_list_screen);
   Serial.println("[MENU] screen=SHOPPING_LIST");

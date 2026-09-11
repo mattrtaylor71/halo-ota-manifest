@@ -3087,8 +3087,9 @@ static bool sleep_blocked_for_ota() {
       sense_ota_active = false; sense_ota_apply_required = false;
       g_lcd_maintenance_active = false; g_lcd_maintenance_deadline_ms = 0;
       g_ota_mode_active = false;
+      // A silent coordinator lease never owned the user's current screen.
+      if (g_ota_screen_active) provision_return_home_pending = true;
       g_ota_continuation_hold_start_ms = 0; g_ota_screen_active = false;
-      provision_return_home_pending = true;
       // The finite hold is abandoned; retain the next arm, not this old origin.
       g_lcd_coord_notice_clear.store(true);
     }
@@ -5829,6 +5830,13 @@ void loop() {
       goto loop_continue;
     }
     bool eligible = home_age_ms >= HOME_SLEEP_DELAY_MS;
+    // Loading time must not consume the list's viewing interval. Its existing
+    // bounded refresh timeout clears these flags if the response never arrives.
+    if (ui_screen_state == SCREEN_SHOPPING_LIST &&
+        (waiting_for_list_response || lcd_refresh_inflight || refresh_request_pending ||
+         refresh_state == REFRESH_WAKE_PENDING || refresh_state == REFRESH_INFLIGHT)) {
+      eligible = false;
+    }
     // List idle -> return Home before sleeping, so the device sleeps on Home and
     // wakes on Home (rather than re-showing the list). Fires once per idle period:
     // when the UI task switches to SCREEN_HOME, subsequent iterations see HOME and

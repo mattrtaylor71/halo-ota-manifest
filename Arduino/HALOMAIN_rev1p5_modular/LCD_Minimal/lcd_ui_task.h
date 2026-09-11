@@ -1058,6 +1058,7 @@ static void ui_task(void *arg) {
           // Refresh RESOLVED (list landed). Re-arm the pull latch covering BOTH
           // branches below — the unchanged-list branch skips the populate (and
           // thus its built-in latch reset), so do it here unconditionally.
+          resetActivityTimer();  // Start the idle interval when the list is ready.
           shopping_list_reset_pull_latch();
           uint32_t new_sig = shopping_list_content_sig(&g_active);
           if (new_sig == shopping_list_rendered_sig) {

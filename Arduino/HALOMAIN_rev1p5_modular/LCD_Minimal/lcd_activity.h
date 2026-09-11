@@ -174,7 +174,7 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
 
 static void resetActivityTimer() {
   last_user_activity_ms = millis();
-  if (ui_screen_state == SCREEN_HOME) {
+  if (ui_screen_state == SCREEN_HOME || ui_screen_state == SCREEN_SHOPPING_LIST) {
     home_shown_ms = last_user_activity_ms;
   }
   last_sleep_skip_log_ms = 0;
