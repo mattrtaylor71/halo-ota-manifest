@@ -1,5 +1,9 @@
 # Firmware changelog
 
+## 6.4.115 — published September 10, 2026 for manual OTA testing
+
+Version-only rebuild of the released 6.4.114 runtime from committed production baseline `79ee6ee8695738dc90513da3cc797007edc07d11`. Only generated version/build metadata differs in executable source; production flags, partition layouts, static RAM and RTC usage are unchanged. Both canonical builds and uploaded binary/manifest checks passed; both production latest pointers now serve 6.4.115. The user will perform the manual installation, which has not yet been qualified for these new bytes. No device firmware, scheduling or retained allowance was changed by publication. See `published_manual_test_bumps` in `RELEASE_BASELINE.json` for exact receipts and the saved test-allowance limitation.
+
 ## 6.4.114 — released September 10, 2026
 
 A retry could wake within its15-second lead interval while the separate LCD timer-origin notice was still unavailable. The existing fresh clock and peer handshake were ready, but policy cancelled the entire opportunity before its due time. The correction lets a valid persisted shipping ARMED record wait inside that lead interval with a current correlated peer. It preserves the actual missing-origin diagnostic, original deadlines and all target/accounting gates. It returns false before due, so this wait grants no early transfer or reservation.

@@ -1,5 +1,7 @@
 # Production baseline — released 6.4.114
 
+**Latest published version: 6.4.115**, a version-only rebuild for the user’s manual OTA test (September 10, 2026, 17:20 PDT). Its runtime matches 6.4.114; 6.4.114 remains the last device-qualified pair. Exact115 build/publication records are under `published_manual_test_bumps` in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Publication did not reset the unit’s saved test allowance.
+
 **Production 6.4.114 is live as of September 10, 2026, 16:56 PDT.** The same exact production pair passed manual and normal-calendar installation. Both boards finished SDK VALID and idle, with settled accounting, Pacific 02:00 scheduling and paired natural sleep restored.
 
 The artifact source is commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, firmware tree `83c178bde2020c4e2fff800caf9e33be33a4ef97`. [RELEASE_BASELINE.json](../RELEASE_BASELINE.json) records the exact binaries, build proofs, package, acceptance, publication and release/tag/adoption bindings. Documentation and handoff commits do not change the identity of already compiled artifacts.

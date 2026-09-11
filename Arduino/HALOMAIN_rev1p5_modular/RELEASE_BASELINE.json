@@ -513,5 +513,35 @@
       "sha256": "60c5b9df295ab52b258d5d07080a65310dceb018a3eda39c30d45419154dce09"
     },
     "scope": "Finite assertion expired normally. No renewal; global power preferences unchanged."
-  }
+  },
+  "current_production_latest_version": "6.4.115",
+  "published_manual_test_bumps": [
+    {
+      "version": "6.4.115",
+      "status": "PUBLISHED_VERSION_ONLY_BUMP_AWAITING_USER_MANUAL_TEST",
+      "artifact_source_commit": "79ee6ee8695738dc90513da3cc797007edc07d11",
+      "runtime_baseline_version": "6.4.114",
+      "runtime_changed": false,
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release115-build001/RELEASE-PAIR.json",
+        "sha256": "7d3a7e6a4d2344efc686422ae7263502b8fcc4e2b74dc866b2a9d8e612297788"
+      },
+      "publication_plan": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production115-publication001/release.json",
+        "sha256": "0f0840202143417b58d27d835054f0ea7863c967fc1698a8b561f30150948ba9"
+      },
+      "staging": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production115-stage001/result.json",
+        "sha256": "b63f32d0fad78a2ae2459a30af459dcbfa782320626429fcbb65702cca802486"
+      },
+      "publication": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production115-promote001/result.json",
+        "sha256": "acf775de90bab1b7ffc90a60e7057293f051efd096ce9871a0afca50fc714e17"
+      },
+      "hardware_actions": 0,
+      "acceptance": "Both canonical production builds and artifact/served-byte checks passed. Installation of115 remains for user manual test; prior114 device acceptance is not relabeled as115 acceptance.",
+      "manual_eligibility_note": "Last observed114 ledger was RESOLVED with13ms; shipping manual discovery cannot refill a later UTCday. If retained unchanged, immediate manual OTA is blocked until eligible normal maintenance or explicit separate lab-state preparation. No allowance reset or device wake occurred for this publication.",
+      "published_epoch": 1789086042.673225
+    }
+  ]
 }
