@@ -609,14 +609,14 @@
       "scope": "Finite assertion expired normally. No renewal; global power preferences unchanged."
     }
   },
-  "status": "qualified_and_published_release_handoff_pending",
+  "status": "released",
   "candidate_version": "6.4.117",
   "canary_versions": [],
   "canary_profile": null,
   "controlled_baseline_version": "6.4.116",
-  "release_commit": null,
-  "release_tree": null,
-  "release_tag": null,
+  "release_commit": "9ec80b63a029b39709c19811890054e210739dcc",
+  "release_tree": "94e1c52ac66c1eec3b6911f65e21765edfffa251",
+  "release_tag": "halo-v6.4.117",
   "artifact_source_commit": "1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f",
   "artifact_source_firmware_tree": "53ddadf8623f8ab0d15363f9b675233f8d762409",
   "release_artifact_manifest": {
@@ -649,11 +649,15 @@
   "qualification_scope": "Scoped five-fix validation: device-backed 116 list navigation; one 116-to-117 Settings-action manual OTA through the existing USB command; exact paired 117 hashes/SDK VALID, Home, cleared terminal flags, logged deep sleep and 30 seconds paired USB absence. One subsequent same-version request produced policy_daily_limit with a stable eight-second result, then Home and paired natural sleep/15 seconds quiet. No new scheduled, fault, soak, power-cut or USB-free qualification.",
   "autonomous_calendar_scope": "Not repeated for117. Prior114 scheduled acceptance remains in previous_114_release and versioned acceptance_results.",
   "default_checkout_adoption": {
-    "status": "PENDING_ROOT_RELEASE_COMMIT_AND_ADOPTION",
+    "status": "PASS_RELEASE_ADOPTED_UNRELATED_STATE_PRESERVED",
     "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
-    "branch": null,
-    "release_commit": null,
-    "receipt": null
+    "branch": "codex/halo-production-v6.4.114",
+    "release_commit": "9ec80b63a029b39709c19811890054e210739dcc",
+    "receipt": {
+      "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/original-adoption117.json",
+      "sha256": "07d062cd777c409ff0201b643e06ebdfde901c70c8eced268786b9cb183541b1"
+    },
+    "followup": "The subsequent documentation-only binding commit is fast-forwarded into this same checkout and recorded in halo-ui-fixes-2026-09-10/FINAL-RELEASE.json. Unrelated tracked changes are preserved."
   },
   "candidate_artifacts": {
     "116": {

@@ -1,6 +1,6 @@
 # Production 117 acceptance — scoped five-fix validation
 
-The actual acceptance receipt is `halo-ui-fixes-2026-09-10/ACCEPTANCE.json`, pinned in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Compiled source is `1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f`; 116/117 are canonical production pairs with identical runtime outside generated version headers. Production 117 publication passed. The short same-version response follow-up also passed; final Git/tag/adoption bindings remain pending.
+The actual acceptance receipt is `halo-ui-fixes-2026-09-10/ACCEPTANCE.json`, pinned in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Compiled source is `1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f`; 116/117 are canonical production pairs with identical runtime outside generated version headers. Production 117 publication passed. The short same-version response follow-up also passed. Release tag `halo-v6.4.117`, commit and completed checkout-adoption bindings are recorded in `RELEASE_BASELINE.json`.
 
 | Check | Actual scope/result |
 |---|---|
