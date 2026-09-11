@@ -1,8 +1,10 @@
 # Firmware changelog
 
-## Unreleased — Software Update wording
+## 6.4.125 — published September 11, 2026 for manual OTA testing
 
-Change the display-transfer heading to "Something new is coming" and remove the "Display transfer only." description. "Keep HALO connected." remains removed. Progress, checking/result details and OTA behavior are unchanged. These edits require a new version above the already published immutable 6.4.124.
+Change the transfer heading to "Something new is coming" and remove "Display transfer only." "Keep HALO connected." remains removed. Progress, checking/result details and OTA behavior are unchanged. Only LCD_Minimal/lcd_ui_task.h changes in runtime source. Version 124 was already published, so these new bytes use 125.
+
+Both canonical production builds and artifact checks passed from source `91fb4716005653ce43ac484b0e2c3e28d1a455e9`, build `6.4.125-20260911T225448Z-91fb47160056`. The new heading measures 270 px in the existing 280 px label using the actual font and kerning. Compiled LCD checks confirm the new title and absence of all three old phrases. Paired production manifests and full firmware downloads were verified after publication. No device installation or allowance reset was performed; physical appearance and 125 OTA acceptance remain pending.
 
 ## 6.4.124 — published September 11, 2026 for manual OTA testing
 
