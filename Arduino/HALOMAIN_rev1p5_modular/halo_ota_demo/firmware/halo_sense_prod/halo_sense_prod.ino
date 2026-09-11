@@ -1487,6 +1487,9 @@ static bool ota_report_build_payload(String& out,
     LOG_WARN("[OTA_REPORT] serialize failed");
     return false;
   }
+  // Optional cumulative shopping metrics. Reuse the verified boot generation
+  // and existing report; lack of room/identity is absence, never fabricated zero.
+  sense_action_summary::append(out, g_coord_sense_boot_id, sense_post::PAYLOAD_MAX);
   return true;
 }
 

@@ -21,6 +21,8 @@
 #ifndef SENSE_LIST_H
 #define SENSE_LIST_H
 
+#include "sense_action_summary.h"
+
 // Forward declarations for .ino functions called by list API code
 static void uart_send_ui_list();
 static void list_refresh_mark_complete(const char* reason);
@@ -28,6 +30,7 @@ static void list_refresh_mark_complete(const char* reason);
 // ── List refresh failure ───────────────────────────────────────────
 
 static void list_refresh_fail(const char* reason) {
+  sense_action_summary::note_failure(reason);
   Serial.printf("[LIST_REFRESH] fail reason=%s\n", reason ? reason : "unknown");
   // Do not publish the RAM cache as a successful refresh. In particular, a
   // fresh boot's zero count is not evidence that the backend list is empty.
@@ -368,23 +371,56 @@ static bool list_tls_heap_ok(const char* why) {
   return false;
 }
 
-static bool fetch_shopping_list_from_api() {
-  if (WiFi.status() != WL_CONNECTED) {
-    // Bounded, no-hard-reset connect attempt. ensure_wifi_connected() does NOT
-    // escalate to wifi_hard_reset_and_reconnect() (only ensure_wifi_ready()
-    // does), so this caps the wait at LIST_FETCH_WIFI_BUDGET_MS.
-    Serial.printf("[LIST_FETCH] wifi not connected; bounded connect budget_ms=%lu\n",
-                  (unsigned long)LIST_FETCH_WIFI_BUDGET_MS);
-    unsigned long wifi_start_ms = millis();
-    if (!ensure_wifi_connected("list_fetch", LIST_FETCH_WIFI_BUDGET_MS) ||
-        WiFi.status() != WL_CONNECTED) {
-      Serial.println("✗ Cannot fetch list: WiFi not connected (bounded budget exhausted)!");
+static bool list_ensure_wifi_ready() {
+  if (WiFi.status() == WL_CONNECTED) return true;
+  const uint32_t started_ms = millis();
+#ifdef HALO_SENSE_PROD_WRAPPER
+  if (halo_provisioning_active()) {
+    list_refresh_fail("wifi_provisioning_active");
+    return false;
+  }
+#endif
+  // Join a startup connection without another begin. If none is active, use
+  // the existing ownership/cooldown guard once, without a second wait budget.
+  if (!wifi_connect_inflight) ensure_wifi_connected("list_fetch", 0);
+  bool pending_logged = false;
+  for (;;) {
+#ifdef HALO_SENSE_PROD_WRAPPER
+    if (halo_provisioning_active()) {
+      list_refresh_fail("wifi_provisioning_active");
+      return false;
+    }
+#endif
+    const uint32_t elapsed_ms = (uint32_t)(millis() - started_ms);
+    if (elapsed_ms <= LIST_FETCH_WIFI_BUDGET_MS &&
+        WiFi.status() == WL_CONNECTED) {
+      Serial.printf("[NET_DIAG] list_wifi_connect_ms=%lu\n",
+                    (unsigned long)elapsed_ms);
+      return true;
+    }
+    if (elapsed_ms >= LIST_FETCH_WIFI_BUDGET_MS) {
+      list_refresh_fail("wifi_connect_timeout");
+      return false;
+    }
+    if (!wifi_connect_inflight) {
       list_refresh_fail("wifi_not_connected");
       return false;
     }
-    Serial.printf("[NET_DIAG] list_wifi_connect_ms=%lu\n",
-                  (unsigned long)(millis() - wifi_start_ms));
+    if (!pending_logged) {
+      Serial.printf("[LIST_FETCH] wifi_connect_pending budget_ms=%lu\n",
+                    (unsigned long)LIST_FETCH_WIFI_BUDGET_MS);
+      pending_logged = true;
+    }
+    // Observe only: the Wi-Fi owner retains timeout/cleanup responsibility.
+    // In particular, do not call wifi_guard_poll(), which can reset or scan.
+    const uint32_t remaining_ms = LIST_FETCH_WIFI_BUDGET_MS - elapsed_ms;
+    delay(remaining_ms < 50 ? remaining_ms : 50);
   }
+}
+
+static bool fetch_shopping_list_from_api() {
+  sense_action_summary::ListAttempt action_attempt;
+  if (!list_ensure_wifi_ready()) return false;
 
   Serial.println("\n=== Fetching Shopping List from Trepo API ===");
 
@@ -535,6 +571,7 @@ static bool fetch_shopping_list_from_api() {
           if (!parse_ok) {
             list_refresh_fail("json_parse");
           }
+          action_attempt.complete(parse_ok);
           return parse_ok;
         } else {
           Serial.println("⚠ Response doesn't look like JSON");
