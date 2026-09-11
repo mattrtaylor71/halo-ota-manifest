@@ -2,7 +2,9 @@
 
 **119 is the current production OTA version.** Both live manifests and their linked firmware hashes were verified after publication. The exact artifact source is `09f1d525fd82dc54eacbe4fe348054102462774a`, build `6.4.119-20260911T162403Z-09f1d525fd82`. Continue future fixes from this source and subsequent commits, preserving the118 DNS/startup/telemetry fixes and119 UI timing fixes.
 
-Both canonical builds and focused host regressions passed. Publication was explicitly requested for user manual installation;119 installation and on-device UI validation are pending. Publication does not reset the device's OTA allowance or retained recovery state. The `development_baseline` and `published_manual_test_releases` entries in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json) record119. Existing117 release, tag and acceptance fields remain the last completed device qualification; they are not119 acceptance.
+Both canonical builds and focused host regressions passed. One manual118→119 OTA now passed on the bench unit: both images matched their published hashes, booted119 and reached SDK VALID. A subsequent single-open capture directly verified the LCD build fingerprint/CRC and fresh Sense identity; three shopping fetches, scrolling, visible list intervals, natural Home and logged sleep on both boards passed. Existing keepalives extended shopping idle time; isolated timer regression remains host-tested.
+
+The user’s initial request hit the retained daily allowance from a completed117 test. That RESOLVED ledger was archived and only allowlisted test bookkeeping initialized before the successful119 request. Production policy was unchanged; this is not natural quota renewal or recovery from failed-campaign debt. The `development_baseline` and `published_manual_test_releases` entries in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json) bind the119 receipts and preserved preliminary capture limitations. Existing117 release/tag fields remain historical full release records. No new119 scheduled, power-cut, USB-free or electrical cold-boot qualification is claimed.
 
 ## Last device-qualified release — 6.4.117
 

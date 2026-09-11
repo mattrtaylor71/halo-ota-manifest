@@ -697,13 +697,17 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/PUBLISHED.json",
       "sha256": "1fcd31e6fb782e0c25382e66208a97c1ff916dbc84223a076a5c7cd45f06273c"
     },
-    "device_acceptance": "Pending; qualified117 records retained separately",
-    "instruction": "Continue future firmware work from this119 source and subsequent commits; do not revert to117 as the normal development base."
+    "device_acceptance": "PASS for one paired manual118-to119 OTA and focused USB UI checks: exact paired119 SDK VALID, three live fetches, scrolling, natural Home and logged deep sleep. Historical117 full release records remain separate.",
+    "instruction": "Continue future firmware work from this119 source and subsequent commits; do not revert to117 as the normal development base.",
+    "post_install_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/POST-INSTALL-119.json",
+      "sha256": "7a3dd1dd8ab553e2848ae3254de2b43cf4dca6967ba5ecfd476d958e2a39f7c6"
+    }
   },
   "published_manual_test_releases": [
     {
       "version": "6.4.119",
-      "status": "PUBLISHED_AWAITING_USER_MANUAL_INSTALLATION",
+      "status": "PUBLISHED_MANUAL_OTA_AND_FOCUSED_UI_VERIFIED",
       "artifact_source_commit": "09f1d525fd82dc54eacbe4fe348054102462774a",
       "runtime_changed": true,
       "release_pair": {
@@ -741,9 +745,14 @@
         }
       },
       "device_actions": 0,
-      "device_acceptance": "119 is not yet installed or validated on the unit.118 shopping/network tests and117 OTA acceptance are historical evidence, not119 acceptance.",
-      "manual_eligibility": "Publication does not change or reset the device OTA allowance or retained recovery state.",
-      "published_epoch": 1789148806.6283069
+      "device_acceptance": "PASS for one paired manual118-to119 OTA and focused USB UI checks: exact paired119 SDK VALID, three live fetches, scrolling, natural Home and logged deep sleep. Historical117 full release records remain separate.",
+      "manual_eligibility": "Publication does not refill the daily allowance. For this bench test, the completed117 RESOLVED record with17ms remaining was archived and allowlisted bookkeeping cleared. One manual119 update then completed; production policy unchanged and new119 accounting preserved.",
+      "published_epoch": 1789148806.6283069,
+      "device_actions_scope": "The existing device_actions count describes publication only; later device testing is recorded separately below.",
+      "post_publication_validation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/POST-INSTALL-119.json",
+        "sha256": "7a3dd1dd8ab553e2848ae3254de2b43cf4dca6967ba5ecfd476d958e2a39f7c6"
+      }
     }
   ]
 }
