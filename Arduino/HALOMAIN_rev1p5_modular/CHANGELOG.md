@@ -1,10 +1,12 @@
 # Firmware changelog
 
-## Unreleased — shopping and voice feedback polish
+## 6.4.122 — local shopping and voice feedback polish, September 11, 2026
 
 Removed the transient "Deleting..." toast. Items still wait for backend confirmation before removal; duplicate-request protection, failure feedback and timeout handling remain intact. Added the approved curved "TURN TO SCROLL" hint on the shopping list's right rim, clear of the bottom buttons. It hides when content fits, during visible refresh feedback, and under the Delete dialog. The pre-rendered alpha mask needs no rotated labels or full-screen buffer.
 
-The voice hold screen now uses a wordless, decorative teal waveform above the user's finger, with the white microphone card kept at its Home position. Only small bar heights change, at up to 20 frames per second during an active hold. The existing 500ms activation, 10-second limit, Sense audio/UART handling, and release response remain intact. These source changes are awaiting canonical 122 builds and local installation; the device remains on the verified 121 pair. Public OTA remains 119.
+The voice hold screen now uses a wordless, decorative teal waveform above the user's finger, with the white microphone card kept at its Home position. Only small bar heights change, at up to 20 frames per second during an active hold. The existing 500ms activation, 10-second limit, Sense audio/UART handling, and release response remain intact.
+
+Canonical paired builds and artifact checks passed from source `d2362a7`. Installed 122/app1 by USB with exact 121/app0 preserved and no installer NVS, quota, bootloader or fallback-bank writes. A normal actuator wake confirmed both 122/SDK VALID. Three fresh HTTP 200 six-item fetches, viewport scrolling 0→67→0, visible right-rim cue, zero sampled display flush faults, Home and natural paired sleep passed. Initial Wi-Fi timeout and cache-cooldown harness limitations remain recorded; the passing final capture changed only host refresh spacing. Voice host/source checks were reported passing; physical waveform appearance and audio upload were not exercised. `RELEASE_BASELINE.json` binds actual receipts. Public OTA remains 119.
 
 ## 6.4.121 — local device shopping deletion fix, September 11, 2026
 

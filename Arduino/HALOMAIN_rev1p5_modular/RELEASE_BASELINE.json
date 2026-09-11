@@ -686,20 +686,20 @@
   "production_publication_closure": null,
   "qualified_baseline_version": "6.4.117",
   "development_baseline": {
-    "version": "6.4.121",
-    "artifact_source_commit": "cbf53325362b1ae8dff5abfc226e73ffaa92cf82",
-    "build_id": "6.4.121-20260911T185507Z-cbf53325362b",
+    "version": "6.4.122",
+    "artifact_source_commit": "d2362a7e150d8ce584f5174a5590efa2734579b0",
+    "build_id": "6.4.122-20260911T193910Z-d2362a7e150d",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation121/RELEASE-PAIR.json",
-      "sha256": "1b43964f72b523e80259db1fd3423dfeb7091b8608f4d7e7f3bb98a9ef73baa7"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation122/RELEASE-PAIR.json",
+      "sha256": "dbcdddc189afa3151b7ad37b08d6316689ebaf1e0de85f369f0d255d81873328"
     },
-    "device_acceptance": "One actual Delete touch-handler invocation removed Olives using its shared UUID. Backend affectedRows1; every other record unchanged. Fresh device refresh and subsequent wake show the exact six remaining labels. Both boards exact121/app0/SDK VALID and natural paired sleep.",
+    "device_acceptance": "Installed paired122/app1/SDK VALID. A normal actuator wake preceded three fresh HTTP200six-item list fetches, viewport scrolling0\u219267\u21920, visible right-rim cue clear of buttons, zero sampled display flush faults, Home and natural paired deep sleep. No shopping deletion or audio upload was performed.",
     "post_install_validation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation121/DEVICE-VALIDATION.json",
-      "sha256": "1231825e84c5c81dec22a9758848b5c71e50bfda5e5cc7dc1bccc19fcf77ccec"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation122/DEVICE-VALIDATION.json",
+      "sha256": "340514ee553234f8caa6eb0226e2b11eecb61c8f32fafa163966224ebebf1b5b"
     },
     "publication_status": "Local device build only; public production pointers were not changed from119.",
-    "instruction": "Continue future firmware work from 121 source cbf5332 and subsequent commits, retaining the 119 OTA fixes, 120 UI changes and 121 confirmed deletion flow. Do not overwrite prior artifacts."
+    "instruction": "Continue future firmware work from122 source d2362a7 and subsequent commits, retaining119 OTA fixes,120 UI changes and121 confirmed deletion flow. Preserve exact121 fallback artifacts and earlier acceptance."
   },
   "published_manual_test_releases": [
     {
@@ -799,6 +799,20 @@
         "sha256": "1231825e84c5c81dec22a9758848b5c71e50bfda5e5cc7dc1bccc19fcf77ccec"
       },
       "fallback": "Exact120 retained in app1 on both boards; installer verified current-bank preservation."
+    },
+    {
+      "version": "6.4.122",
+      "status": "INSTALLED_SHOPPING_UI_AND_NORMAL_WAKE_PASSED_NOT_PUBLISHED",
+      "source_commit": "d2362a7e150d8ce584f5174a5590efa2734579b0",
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation122/RELEASE-PAIR.json",
+        "sha256": "dbcdddc189afa3151b7ad37b08d6316689ebaf1e0de85f369f0d255d81873328"
+      },
+      "device_validation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation122/DEVICE-VALIDATION.json",
+        "sha256": "340514ee553234f8caa6eb0226e2b11eecb61c8f32fafa163966224ebebf1b5b"
+      },
+      "fallback": "Exact121 retained in app0 on both boards; installer verified full current-bank preservation."
     }
   ],
   "previous_development_baseline_120": {
@@ -816,5 +830,21 @@
     },
     "publication_status": "Local device build only; public production latest remains6.4.119.",
     "instruction": "Continue future firmware work from120 source3633698 and subsequent commits, retaining the119 fixes and these two shopping UI changes. Do not overwrite published119 artifacts."
+  },
+  "previous_development_baseline_121": {
+    "version": "6.4.121",
+    "artifact_source_commit": "cbf53325362b1ae8dff5abfc226e73ffaa92cf82",
+    "build_id": "6.4.121-20260911T185507Z-cbf53325362b",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation121/RELEASE-PAIR.json",
+      "sha256": "1b43964f72b523e80259db1fd3423dfeb7091b8608f4d7e7f3bb98a9ef73baa7"
+    },
+    "device_acceptance": "One actual Delete touch-handler invocation removed Olives using its shared UUID. Backend affectedRows1; every other record unchanged. Fresh device refresh and subsequent wake show the exact six remaining labels. Both boards exact121/app0/SDK VALID and natural paired sleep.",
+    "post_install_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation121/DEVICE-VALIDATION.json",
+      "sha256": "1231825e84c5c81dec22a9758848b5c71e50bfda5e5cc7dc1bccc19fcf77ccec"
+    },
+    "publication_status": "Local device build only; public production pointers were not changed from119.",
+    "instruction": "Continue future firmware work from 121 source cbf5332 and subsequent commits, retaining the 119 OTA fixes, 120 UI changes and 121 confirmed deletion flow. Do not overwrite prior artifacts."
   }
 }
