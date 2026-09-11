@@ -798,8 +798,12 @@
       },
       "device_actions": 0,
       "device_acceptance": "Pending user manual OTA; no 123 installation or runtime acceptance claimed.",
-      "manual_eligibility": "Publication does not reset daily allowance or existing campaign accounting; no device state was changed.",
-      "published_epoch": 1789162674.611889
+      "manual_eligibility": "The first request hit the same-day completed119 ledger (12ms remaining). Archived and initialized only allowlisted bench bookkeeping after native RESOLVED/no-active-debt checks. Current122 and fallback121, selectors, provisioning and timezone verified unchanged; both122 SDK VALID afterward. Production quota logic unchanged. User manual123 OTA remains pending; this is not natural quota renewal or an in-case refund.",
+      "published_epoch": 1789162674.611889,
+      "manual_test_case_preparation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/MANUAL123-CASE-READY.json",
+        "sha256": "2e6befe67478aa382a2c1fb1ae34fb958da360b144664a9b7fb00514116f1305"
+      }
     }
   ],
   "previous_development_baseline_119": {
