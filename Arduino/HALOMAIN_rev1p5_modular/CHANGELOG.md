@@ -1,5 +1,11 @@
 # Firmware changelog
 
+## 6.4.123 — published September 11, 2026 for manual OTA testing
+
+Version-only rebuild of the current 122 runtime from committed source `eb767ea73cf6fdde7886b2f05ca892d08e6cfc57`, build `6.4.123-20260911T213344Z-eb767ea73cf6`. Retains the latest shopping-list deletion, right-rim scroll hint, wordless voice waveform and OTA fixes. Only the three generated version/build headers differ in executable source; production flags, partitions, image sizes, static RAM and RTC usage are unchanged from 122.
+
+Both canonical production builds and artifact checks passed. Immutable paired resources were staged and verified, then both production latest manifests were promoted to 123. Fresh full downloads matched both binary hashes, sizes and embedded identities. No device was flashed, awakened or asked to update, and no quota/accounting state was changed. The last verified installed build remains 122; the user's manual 122→123 OTA test is pending. `RELEASE_BASELINE.json` binds exact publication and source-equivalence receipts. Future development starts from 123 source and subsequent commits.
+
 ## 6.4.122 — local shopping and voice feedback polish, September 11, 2026
 
 Removed the transient "Deleting..." toast. Items still wait for backend confirmation before removal; duplicate-request protection, failure feedback and timeout handling remain intact. Added the approved curved "TURN TO SCROLL" hint on the shopping list's right rim, clear of the bottom buttons. It hides when content fits, during visible refresh feedback, and under the Delete dialog. The pre-rendered alpha mask needs no rotated labels or full-screen buffer.
