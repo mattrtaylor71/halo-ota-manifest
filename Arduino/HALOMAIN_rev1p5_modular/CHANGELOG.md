@@ -1,12 +1,12 @@
 # Firmware changelog
 
-## Unreleased — Software Update copy and voice acknowledgement motion
+## 6.4.124 — published September 11, 2026 for manual OTA testing
 
 Remove the "Keep HALO connected." footer and the "HALO may restart itself." finishing description. Software Update titles, progress, checking text and result/error details remain intact.
 
-Give only the "On it!" voice acknowledgement a 260ms checkmark pop instead of 500ms, with a smaller 70→89→84px size range. The check stays above its stroke-width threshold, centers once, and skips unchanged size/position/opacity updates. Logged rewards retain their existing animation; the two-second acknowledgement deadline, UART messages, capture and upload behavior are unchanged. Focused host checks passed the animation geometry, repeated-frame updates, restart and unchanged logged timing. Device visual validation is pending.
+Give only the "On it!" voice acknowledgement a 260ms checkmark pop instead of 500ms, with a smaller 70→89→84px size range. Logged rewards retain their existing animation; the two-second acknowledgement dwell, UART messages, capture and upload behavior remain unchanged. Focused host checks were reported passing for animation geometry, repeated-frame updates, restart and unchanged logged timing. Device visual validation remains pending.
 
-Canonical LCD 124 build and artifact checks passed from source `2b40fc6`, with both removed strings absent from the compiled image. Binary size increased by 400 bytes; static RAM is unchanged. This is an unpublished, uninstalled LCD candidate. A matching Sense build and paired release have not been prepared.
+Both canonical production builds and separate artifact checks passed from source `2b40fc651b15ef652ab5561a703e550826839518`, build `6.4.124-20260911T221452Z-2b40fc651b15`. Sense runtime and resources are unchanged from 123 apart from generated version metadata. Exactly three LCD headers changed; the LCD binary increased by 400 bytes with no static RAM or RTC increase. The two removed sentences are absent from the compiled LCD image. Both immutable paired resources and production latest manifests were published and verified by full public downloads. The earlier LCD-only candidate receipt remains archived as historical evidence. Manual OTA and device acceptance are pending; no 123 installation success is inferred.
 
 ## 6.4.123 — published September 11, 2026 for manual OTA testing
 

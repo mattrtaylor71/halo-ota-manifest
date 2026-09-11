@@ -391,7 +391,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.123",
+  "current_production_latest_version": "6.4.124",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -686,24 +686,24 @@
   "production_publication_closure": null,
   "qualified_baseline_version": "6.4.117",
   "development_baseline": {
-    "version": "6.4.123",
-    "artifact_source_commit": "eb767ea73cf6fdde7886b2f05ca892d08e6cfc57",
-    "build_id": "6.4.123-20260911T213344Z-eb767ea73cf6",
+    "version": "6.4.124",
+    "artifact_source_commit": "2b40fc651b15ef652ab5561a703e550826839518",
+    "build_id": "6.4.124-20260911T221452Z-2b40fc651b15",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/RELEASE-PAIR.json",
-      "sha256": "353fc04d0fc258b1a6a0abfe3c919d667f77fd8d63fb1bcc5616c76d102ab89b"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/RELEASE-PAIR.json",
+      "sha256": "3e6f2fd8980af94a849250ed8aa744950218c56ac1327957a0f1df1ff5d271ed"
     },
-    "source_equivalence_to_122": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/SOURCE-EQUIVALENCE.json",
-      "sha256": "63edfca274b87bff24403d27b59fa6895c568a9b9ffe213bed780cbb68af08ed"
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/SOURCE-SCOPE.json",
+      "sha256": "8a69cbbea931a6252a77cc569b08337d433511119c730d7880259e328d15184d"
     },
     "verified_publication": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/publish123/PUBLISHED.json",
-      "sha256": "66df3e535cc01a385be52c8d386e9750850a7abad9f34d52e54faeec2e00e1e3"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/PUBLISHED.json",
+      "sha256": "6749da1b5fb4497ec9ec88366bf75c22cb4d4baca8705c056b7fa2e3b6d6b141"
     },
-    "device_acceptance": "123 installation and manual OTA are pending the user test. The last verified installed version is 122; its scoped runtime acceptance is preserved separately in previous_development_baseline_122.",
-    "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.123.",
-    "instruction": "Continue future firmware work from 123 artifact source eb767ea73cf6fdde7886b2f05ca892d08e6cfc57 and subsequent commits. Runtime is unchanged from 122; retain all current UI, deletion and OTA fixes. Preserve the 122 and earlier artifact and acceptance records."
+    "device_acceptance": "124 installation, manual OTA and device visual acceptance are pending. No 123 installation success is established; the last verified installed build remains 122.",
+    "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.124.",
+    "instruction": "Continue from 124 artifact source 2b40fc651b15ef652ab5561a703e550826839518 and subsequent commits. Retain the scoped update-copy and voice-motion changes and all earlier UI, deletion and OTA fixes. Preserve historical acceptance and test-case receipts separately."
   },
   "published_manual_test_releases": [
     {
@@ -804,6 +804,74 @@
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/MANUAL123-CASE-READY.json",
         "sha256": "2e6befe67478aa382a2c1fb1ae34fb958da360b144664a9b7fb00514116f1305"
       }
+    },
+    {
+      "version": "6.4.124",
+      "status": "PUBLISHED_PENDING_USER_MANUAL_OTA_AND_VISUAL_REVIEW",
+      "artifact_source_commit": "2b40fc651b15ef652ab5561a703e550826839518",
+      "build_id": "6.4.124-20260911T221452Z-2b40fc651b15",
+      "runtime_changed": true,
+      "runtime_comparison_version": "6.4.123",
+      "source_scope": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/SOURCE-SCOPE.json",
+        "sha256": "8a69cbbea931a6252a77cc569b08337d433511119c730d7880259e328d15184d"
+      },
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/RELEASE-PAIR.json",
+        "sha256": "3e6f2fd8980af94a849250ed8aa744950218c56ac1327957a0f1df1ff5d271ed"
+      },
+      "publication_plan": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/release/release.json",
+        "sha256": "33fc862fb777ca54c678fdc1e8cdca59b114358a215320d0e27a51184062771c"
+      },
+      "staging": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/stage/result.json",
+        "sha256": "6d1836df6c4155447c4f643548299944d64117e7777db5140393dec96d18f810"
+      },
+      "publication": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/promote/result.json",
+        "sha256": "209ceb3753d50aa4961128282b1c4dacdc71034f25b322b0f25541742c04e72d"
+      },
+      "verified_publication": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/PUBLISHED.json",
+        "sha256": "6749da1b5fb4497ec9ec88366bf75c22cb4d4baca8705c056b7fa2e3b6d6b141"
+      },
+      "readback": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/after/READBACK.json",
+        "sha256": "1170f968c16e9a15bf29298eb2973b1385bbfebd99383712b5b5255fe42c219e"
+      },
+      "previous_latest": {
+        "sense": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/release/sense-previous-latest.json",
+          "sha256": "9e45b681d8f0e0a9e424dc43252b6df53fe6c887dbb50aa7324a4f8e3fd85347"
+        },
+        "lcd": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/release/lcd-previous-latest.json",
+          "sha256": "e698d1391b10ded32a2c7eda6b358d858e4841ff70bdbd3c50875356fa5edb47"
+        }
+      },
+      "historical_lcd_candidate": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/LOCAL-CANDIDATE.json",
+        "sha256": "58523830876dde6f3f2245a9f1eec9d63a51eca302befa09cc4adc7c7037461b"
+      },
+      "resource_delta_vs123": {
+        "sense": {
+          "size": 0,
+          "static_ram_bytes": 0,
+          "rtc_slow_bytes": 0,
+          "linked_program_bytes": 0
+        },
+        "lcd": {
+          "size": 400,
+          "static_ram_bytes": 0,
+          "rtc_slow_bytes": 0,
+          "linked_program_bytes": 396
+        }
+      },
+      "device_actions": 0,
+      "device_actions_scope": "Publication only; no installation or device validation performed for 124.",
+      "device_acceptance": "124 installation, manual OTA and device visual acceptance are pending. No 123 installation success is established; the last verified installed build remains 122.",
+      "published_epoch": 1789165945.078277
     }
   ],
   "previous_development_baseline_119": {
@@ -917,7 +985,27 @@
     "publication_status": "Local device build only; public production pointers were not changed from119.",
     "instruction": "Continue future firmware work from122 source d2362a7 and subsequent commits, retaining119 OTA fixes,120 UI changes and121 confirmed deletion flow. Preserve exact121 fallback artifacts and earlier acceptance."
   },
-  "pending_ui_candidate_124": {
+  "previous_development_baseline_123": {
+    "version": "6.4.123",
+    "artifact_source_commit": "eb767ea73cf6fdde7886b2f05ca892d08e6cfc57",
+    "build_id": "6.4.123-20260911T213344Z-eb767ea73cf6",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/RELEASE-PAIR.json",
+      "sha256": "353fc04d0fc258b1a6a0abfe3c919d667f77fd8d63fb1bcc5616c76d102ab89b"
+    },
+    "source_equivalence_to_122": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/SOURCE-EQUIVALENCE.json",
+      "sha256": "63edfca274b87bff24403d27b59fa6895c568a9b9ffe213bed780cbb68af08ed"
+    },
+    "verified_publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/publish123/PUBLISHED.json",
+      "sha256": "66df3e535cc01a385be52c8d386e9750850a7abad9f34d52e54faeec2e00e1e3"
+    },
+    "device_acceptance": "123 installation and manual OTA are pending the user test. The last verified installed version is 122; its scoped runtime acceptance is preserved separately in previous_development_baseline_122.",
+    "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.123.",
+    "instruction": "Continue future firmware work from 123 artifact source eb767ea73cf6fdde7886b2f05ca892d08e6cfc57 and subsequent commits. Runtime is unchanged from 122; retain all current UI, deletion and OTA fixes. Preserve the 122 and earlier artifact and acceptance records."
+  },
+  "previous_ui_candidate_124": {
     "status": "LCD_BUILD_VERIFIED_UNPUBLISHED_UNINSTALLED",
     "version": "6.4.124",
     "source_commit": "2b40fc651b15ef652ab5561a703e550826839518",
