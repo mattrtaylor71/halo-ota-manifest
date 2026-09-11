@@ -6,6 +6,8 @@ Remove the "Keep HALO connected." footer and the "HALO may restart itself." fini
 
 Give only the "On it!" voice acknowledgement a 260ms checkmark pop instead of 500ms, with a smaller 70→89→84px size range. The check stays above its stroke-width threshold, centers once, and skips unchanged size/position/opacity updates. Logged rewards retain their existing animation; the two-second acknowledgement deadline, UART messages, capture and upload behavior are unchanged. Focused host checks passed the animation geometry, repeated-frame updates, restart and unchanged logged timing. Device visual validation is pending.
 
+Canonical LCD 124 build and artifact checks passed from source `2b40fc6`, with both removed strings absent from the compiled image. Binary size increased by 400 bytes; static RAM is unchanged. This is an unpublished, uninstalled LCD candidate. A matching Sense build and paired release have not been prepared.
+
 ## 6.4.123 — published September 11, 2026 for manual OTA testing
 
 Version-only rebuild of the current 122 runtime from committed source `eb767ea73cf6fdde7886b2f05ca892d08e6cfc57`, build `6.4.123-20260911T213344Z-eb767ea73cf6`. Retains the latest shopping-list deletion, right-rim scroll hint, wordless voice waveform and OTA fixes. Only the three generated version/build headers differ in executable source; production flags, partitions, image sizes, static RAM and RTC usage are unchanged from 122.

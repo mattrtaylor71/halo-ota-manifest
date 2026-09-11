@@ -916,5 +916,16 @@
     },
     "publication_status": "Local device build only; public production pointers were not changed from119.",
     "instruction": "Continue future firmware work from122 source d2362a7 and subsequent commits, retaining119 OTA fixes,120 UI changes and121 confirmed deletion flow. Preserve exact121 fallback artifacts and earlier acceptance."
+  },
+  "pending_ui_candidate_124": {
+    "status": "LCD_BUILD_VERIFIED_UNPUBLISHED_UNINSTALLED",
+    "version": "6.4.124",
+    "source_commit": "2b40fc651b15ef652ab5561a703e550826839518",
+    "build_id": "6.4.124-20260911T221452Z-2b40fc651b15",
+    "candidate": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/LOCAL-CANDIDATE.json",
+      "sha256": "58523830876dde6f3f2245a9f1eec9d63a51eca302befa09cc4adc7c7037461b"
+    },
+    "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   }
 }
