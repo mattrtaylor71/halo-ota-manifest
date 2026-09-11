@@ -1,10 +1,12 @@
 # Firmware changelog
 
-## 6.4.126 — check-in and discard UI candidate
+## 6.4.126 — published for manual OTA testing
 
-Replace the check-in expiration choices with the approved quantity picker and one large green Confirm button. Small chevrons bracket the number, and dial changes settle in 140 ms. Confirm uses the existing selected-quantity submission with an empty expiration date; the old Add Date touch route is removed. Preserve the existing 30-second default submission.
+Replace check-in expiration choices with the approved white quantity picker and one large green Confirm button. Small chevrons bracket the number, and dial changes settle in 140 ms. Confirm sends the selected quantity with an empty expiration date through the existing protocol; the old Add Date touch route is removed. The original 30-second default submission remains unchanged.
 
-Remove the discard subtitle and enlarge Add to List and Not Now to side-by-side 126 × 144 pixel buttons. Reset the shared screen's geometry, visibility and quantity motion on each mode change. Production build, focused functional validation and publication are pending; retain 125 as the published baseline until their receipts are recorded.
+Remove the discard subtitle and enlarge Add to List and Not Now into side-by-side 126 × 144 px buttons. Shared-screen transitions reset geometry, visibility and quantity motion; LVGL recovery clears the choice screen and its new pointers.
+
+Both canonical production builds and artifact checks passed from source `67a61d68319144822088b8d493d8932a99883a0a`, build `6.4.126-20260911T233117Z-67a61d683191`. Seven focused native scan-choice groups and six OTA-presentation groups passed. Actual generated font/kerning checks verified nine label cases and quantity-animation bounds. Only four LCD runtime headers changed; Sense/shared runtime and OTA behavior remain unchanged. Paired public manifests and full firmware downloads match the sealed release. One calibrated actuator tap completed, but neither USB board appeared. No board firmware installation or allowance reset was performed; 126 physical appearance and OTA acceptance remain pending.
 
 ## 6.4.125 — published September 11, 2026 for manual OTA testing
 

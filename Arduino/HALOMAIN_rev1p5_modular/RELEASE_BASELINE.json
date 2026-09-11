@@ -391,7 +391,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.125",
+  "current_production_latest_version": "6.4.126",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -686,24 +686,32 @@
   "production_publication_closure": null,
   "qualified_baseline_version": "6.4.117",
   "development_baseline": {
-    "version": "6.4.125",
-    "artifact_source_commit": "91fb4716005653ce43ac484b0e2c3e28d1a455e9",
-    "build_id": "6.4.125-20260911T225448Z-91fb47160056",
+    "version": "6.4.126",
+    "artifact_source_commit": "67a61d68319144822088b8d493d8932a99883a0a",
+    "build_id": "6.4.126-20260911T233117Z-67a61d683191",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation125/RELEASE-PAIR.json",
-      "sha256": "71dd6f8035e14a981117ef25f59e28d1cbb628d2215e27ba0ce1f1809b0e64f3"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/RELEASE-PAIR.json",
+      "sha256": "e4263663162f2d8d0ef19c5f032fcd74756be077acf7626b6c7e8d6fd4ce9c98"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation125/SOURCE-SCOPE.json",
-      "sha256": "6c0bb1fedd45c1dc87607a54e65014c4136674e28216f767f60f1e049e085ac6"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/SOURCE-SCOPE.json",
+      "sha256": "9a9cc460f0842219921979ae957113e151a69f3dae0b85f86613d472ce3e0c9d"
     },
     "verified_publication": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation125/publish125/PUBLISHED.json",
-      "sha256": "3772c2162314ce8242ce051acfd9fc94daf4fb50b51b3356cf93d37cf75dc673"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/publish126/PUBLISHED.json",
+      "sha256": "57f13fe33c2df0850f62cca181c6466d2daa8686a429a100755ee603155851d6"
     },
-    "device_acceptance": "125 installation and visual acceptance are pending. Last verified installed health remains 123. Publication does not reset or verify the current device allowance.",
-    "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.125.",
-    "instruction": "Continue from 125 artifact source 91fb4716005653ce43ac484b0e2c3e28d1a455e9 and subsequent commits. Retain all prior UI, deletion and OTA fixes. Preserve the published 124 artifacts and historical acceptance records."
+    "host_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/HOST-VALIDATION.json",
+      "sha256": "fa24005dba90c59881b60a295d3d4ae21c777e6fe1bfb9fecd8ba0789c318333"
+    },
+    "layout_check": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/LAYOUT-CHECK.json",
+      "sha256": "7abe054cf017d90a7a508932e3baed79ad15f17d62e1b22ad935bf171bfedb14"
+    },
+    "device_acceptance": "126 installation, physical UI review, and manual OTA acceptance remain pending. A calibrated actuator tap completed, but neither USB board appeared for a health check. Last verified installed health remains 123. No board firmware write or allowance reset was performed; publication does not establish current manual eligibility.",
+    "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.126.",
+    "instruction": "Continue from 126 artifact source 67a61d68319144822088b8d493d8932a99883a0a and subsequent commits. Retain all prior UI, deletion and OTA fixes. Preserve published 125 artifacts and historical acceptance records."
   },
   "published_manual_test_releases": [
     {
@@ -937,6 +945,73 @@
       "device_acceptance": "125 installation and visual acceptance are pending. Last verified installed health remains 123. Publication does not reset or verify the current device allowance.",
       "published_epoch": 1789167743.011282,
       "version_allocation": "Requested additional 124 copy changes were allocated 125 because 124 was already immutable and published."
+    },
+    {
+      "version": "6.4.126",
+      "status": "PUBLISHED_PENDING_USER_MANUAL_OTA_AND_VISUAL_REVIEW",
+      "artifact_source_commit": "67a61d68319144822088b8d493d8932a99883a0a",
+      "build_id": "6.4.126-20260911T233117Z-67a61d683191",
+      "runtime_changed": true,
+      "runtime_comparison_version": "6.4.125",
+      "source_scope": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/SOURCE-SCOPE.json",
+        "sha256": "9a9cc460f0842219921979ae957113e151a69f3dae0b85f86613d472ce3e0c9d"
+      },
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/RELEASE-PAIR.json",
+        "sha256": "e4263663162f2d8d0ef19c5f032fcd74756be077acf7626b6c7e8d6fd4ce9c98"
+      },
+      "verified_publication": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/publish126/PUBLISHED.json",
+        "sha256": "57f13fe33c2df0850f62cca181c6466d2daa8686a429a100755ee603155851d6"
+      },
+      "publication_plan": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/publish126/release/release.json",
+        "sha256": "2a8556d0529cb46d6d3450b4aa32393db7849d552f5ece12b09a5899e8fb833c"
+      },
+      "publication": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/publish126/promote/result.json",
+        "sha256": "bb5143eda0b3491d8674781fa728bdd490abfd1ddaed83bef802aab71664a1cb"
+      },
+      "readback": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/publish126/after/READBACK.json",
+        "sha256": "f3036cac7534a7a9caaad0682e77772e194d638924096305e303ed683dd5d3fa"
+      },
+      "resource_delta_vs125": {
+        "sense": {
+          "size": 0,
+          "static_ram_bytes": 0,
+          "rtc_slow_bytes": 0,
+          "linked_program_bytes": 0
+        },
+        "lcd": {
+          "size": 3152,
+          "static_ram_bytes": 16,
+          "rtc_slow_bytes": 0,
+          "linked_program_bytes": 3148
+        }
+      },
+      "host_validation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/HOST-VALIDATION.json",
+        "sha256": "fa24005dba90c59881b60a295d3d4ae21c777e6fe1bfb9fecd8ba0789c318333"
+      },
+      "layout_check": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/LAYOUT-CHECK.json",
+        "sha256": "7abe054cf017d90a7a508932e3baed79ad15f17d62e1b22ad935bf171bfedb14"
+      },
+      "actuator_wake_attempt": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/actuator-wake001/RESULT.json",
+        "sha256": "832f324295d8d9b9fa040278e5e78f2c90d5010ddf24ca59b3cae24175443c95"
+      },
+      "post_wake_usb_inventory": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/actuator-wake001/inventory-after.json",
+        "sha256": "2c6fb1b13f4852604422b05de3bfa519f79b9b53e2cb5712961e22f0c6a1ab72"
+      },
+      "physical_acceptance_verified": false,
+      "board_firmware_writes": 0,
+      "allowance_resets": 0,
+      "device_acceptance": "126 installation, physical UI review, and manual OTA acceptance remain pending. A calibrated actuator tap completed, but neither USB board appeared for a health check. Last verified installed health remains 123. No board firmware write or allowance reset was performed; publication does not establish current manual eligibility.",
+      "published_epoch": 1789169905.195297
     }
   ],
   "previous_development_baseline_119": {
@@ -1112,5 +1187,25 @@
     "device_acceptance": "124 installation, manual OTA and visual acceptance remain pending. The latest verified installed build is123, documented by post-manual hardware readback and closed post-clear SDK VALID/idle capture.",
     "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.124.",
     "instruction": "Continue from 124 artifact source 2b40fc651b15ef652ab5561a703e550826839518 and subsequent commits. Retain the scoped update-copy and voice-motion changes and all earlier UI, deletion and OTA fixes. Preserve historical acceptance and test-case receipts separately."
+  },
+  "previous_development_baseline_125": {
+    "version": "6.4.125",
+    "artifact_source_commit": "91fb4716005653ce43ac484b0e2c3e28d1a455e9",
+    "build_id": "6.4.125-20260911T225448Z-91fb47160056",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation125/RELEASE-PAIR.json",
+      "sha256": "71dd6f8035e14a981117ef25f59e28d1cbb628d2215e27ba0ce1f1809b0e64f3"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation125/SOURCE-SCOPE.json",
+      "sha256": "6c0bb1fedd45c1dc87607a54e65014c4136674e28216f767f60f1e049e085ac6"
+    },
+    "verified_publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation125/publish125/PUBLISHED.json",
+      "sha256": "3772c2162314ce8242ce051acfd9fc94daf4fb50b51b3356cf93d37cf75dc673"
+    },
+    "device_acceptance": "125 installation and visual acceptance are pending. Last verified installed health remains 123. Publication does not reset or verify the current device allowance.",
+    "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.125.",
+    "instruction": "Continue from 125 artifact source 91fb4716005653ce43ac484b0e2c3e28d1a455e9 and subsequent commits. Retain all prior UI, deletion and OTA fixes. Preserve the published 124 artifacts and historical acceptance records."
   }
 }
