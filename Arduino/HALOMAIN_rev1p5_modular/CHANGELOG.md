@@ -1,5 +1,11 @@
 # Firmware changelog
 
+## 6.4.119 — published September 11, 2026 for manual OTA installation
+
+Published the exact canonical pair from source `09f1d525fd82dc54eacbe4fe348054102462774a`, build `6.4.119-20260911T162403Z-09f1d525fd82`. Background coordinator preflight no longer takes over the display; unlock and lease expiry return Home only when OTA owned the presentation. Shopping entry, refresh completion and activity receive a fresh idle interval, and loading does not consume it. Includes the118 startup shopping Wi-Fi wait, boot-scoped action telemetry and pinned SDK DNS cache-lock correction.
+
+Both production builds, artifact checks, focused host regressions and live publication/hash verification passed. The user explicitly requested publication for manual OTA. No119 installation or physical UI acceptance has yet been observed; no device OTA allowance was changed.117 manifests and recovery artifacts remain preserved. Continue development from119 source;117 remains the last completed device-qualified release. Exact publication receipts are in `RELEASE_BASELINE.json`.
+
 ## 6.4.117 — scoped UI/manual OTA fixes, September 10, 2026
 
 Built 116/117 from committed source `1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f`. Replace the microphone bitmap background with the existing vector icon and the unsupported Settings separator with ASCII; center shopping labels and reveal the selected row while turning the knob. Manual Software update uses one acknowledged request, a stable checking/result screen, and no sleep/identity/timer re-dispatch. Explicit manual discovery can replenish a later UTC day only after RESOLVED work; failed debt and same-day bounds remain intact. USB `ota` exercises the same Settings action.

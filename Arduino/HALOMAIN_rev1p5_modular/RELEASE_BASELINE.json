@@ -391,7 +391,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.117",
+  "current_production_latest_version": "6.4.119",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -683,5 +683,67 @@
     "new_factory_package": false,
     "release_handoff": "Pending actual root commit/tag/adoption bindings"
   },
-  "production_publication_closure": null
+  "production_publication_closure": null,
+  "qualified_baseline_version": "6.4.117",
+  "development_baseline": {
+    "version": "6.4.119",
+    "artifact_source_commit": "09f1d525fd82dc54eacbe4fe348054102462774a",
+    "build_id": "6.4.119-20260911T162403Z-09f1d525fd82",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/RELEASE-PAIR.json",
+      "sha256": "c0cc8dae233aa25e91f3a8e571d5f93b7e91857f2cca2de023238258d9cca87a"
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/PUBLISHED.json",
+      "sha256": "1fcd31e6fb782e0c25382e66208a97c1ff916dbc84223a076a5c7cd45f06273c"
+    },
+    "device_acceptance": "Pending; qualified117 records retained separately",
+    "instruction": "Continue future firmware work from this119 source and subsequent commits; do not revert to117 as the normal development base."
+  },
+  "published_manual_test_releases": [
+    {
+      "version": "6.4.119",
+      "status": "PUBLISHED_AWAITING_USER_MANUAL_INSTALLATION",
+      "artifact_source_commit": "09f1d525fd82dc54eacbe4fe348054102462774a",
+      "runtime_changed": true,
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/RELEASE-PAIR.json",
+        "sha256": "c0cc8dae233aa25e91f3a8e571d5f93b7e91857f2cca2de023238258d9cca87a"
+      },
+      "publication_plan": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/release/release.json",
+        "sha256": "3801e0bb3397b5f64965abb55cbd98b031d5b423407b817cd90951173df6aa45"
+      },
+      "staging": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/stage/result.json",
+        "sha256": "cc1f33a8951b1873640749636c8c198c3908cb802de432717bde9b96b9fe107d"
+      },
+      "publication": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/promote/result.json",
+        "sha256": "a54eb05ea521bd30d7f2816371dc79d99aac09291ae6c323b66481132be00dd5"
+      },
+      "verified_publication": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/PUBLISHED.json",
+        "sha256": "1fcd31e6fb782e0c25382e66208a97c1ff916dbc84223a076a5c7cd45f06273c"
+      },
+      "host_tests": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/HOST-RESULT.json",
+        "sha256": "f60c0926e10250ae1f1b0a5fa25fb12cd59174919aed215d4ab7a8fe6a548664"
+      },
+      "previous_latest": {
+        "sense": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/release/sense-previous-latest.json",
+          "sha256": "e4bf3d45d838ab27d9ba03d3dc3fe878e6133e690373a1f9b3faec6bbf2d632b"
+        },
+        "lcd": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation119/publish119/release/lcd-previous-latest.json",
+          "sha256": "216af8b4bcde6296001423033256fa96e70863346326db6f9145098139f6455f"
+        }
+      },
+      "device_actions": 0,
+      "device_acceptance": "119 is not yet installed or validated on the unit.118 shopping/network tests and117 OTA acceptance are historical evidence, not119 acceptance.",
+      "manual_eligibility": "Publication does not change or reset the device OTA allowance or retained recovery state.",
+      "published_epoch": 1789148806.6283069
+    }
+  ]
 }
