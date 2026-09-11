@@ -1377,13 +1377,13 @@ static void shopping_list_show_overlay() {
   shopping_list_overlay_card = halo_ui_card(shopping_list_overlay, 52, 84, 256, 196, COL_WHITE, 20);
   lv_obj_set_style_shadow_ofs_x(shopping_list_overlay_card, 5, 0);
   lv_obj_set_style_shadow_ofs_y(shopping_list_overlay_card, 5, 0);
+  halo_ui_label(shopping_list_overlay, "Delete", &lv_font_montserrat_14,
+                COL_TEXT2, 65, 104, 230);
   char title[100];
-  snprintf(title, sizeof(title), "Delete %s?", g_active.items[shopping_list_scroll_idx]);
-  lv_obj_t* name = halo_ui_label(shopping_list_overlay, title, &nunito_18, COL_DARK, 65, 104, 230);
-  lv_obj_set_height(name, 48);
+  snprintf(title, sizeof(title), "%s?", g_active.items[shopping_list_scroll_idx]);
+  lv_obj_t* name = halo_ui_label(shopping_list_overlay, title, &nunito_22, COL_RED, 65, 130, 230);
+  lv_obj_set_height(name, 52);
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-  halo_ui_label(shopping_list_overlay, "Remove it from your shopping list.", &lv_font_montserrat_12,
-                COL_TEXT2, 66, 158, 228);
   shopping_list_overlay_delete_btn =
       halo_ui_button(shopping_list_overlay, 76, 190, 208, 48, "DELETE", COL_RED, COL_WHITE);
   shopping_list_overlay_back_btn = halo_ui_button(shopping_list_overlay, 130, 242, 100, 34,
@@ -1590,7 +1590,7 @@ static void shopping_list_scroll_event_cb(lv_event_t* e) {
 
 // Handle a touch on the shopping list screen. Returns true if handled.
 // x, y are screen coordinates (0-359).
-static void shopping_list_style_card(lv_obj_t* card, int idx, bool selected);
+static void shopping_list_style_card(lv_obj_t* card, int idx);
 static bool shopping_list_handle_touch(int x, int y) {
   if (ui_screen_state != SCREEN_SHOPPING_LIST) return false;
 
@@ -1697,8 +1697,8 @@ static bool shopping_list_handle_touch(int x, int y) {
       if (x >= a.x1 && x <= a.x2 && y >= a.y1 && y <= a.y2) {
         int old = shopping_list_scroll_idx;
         shopping_list_scroll_idx = i;
-        shopping_list_style_card(shopping_list_items[old], old, false);
-        shopping_list_style_card(row, i, true);
+        shopping_list_style_card(shopping_list_items[old], old);
+        shopping_list_style_card(row, i);
         shopping_list_show_overlay();
         break;
       }
@@ -1707,23 +1707,22 @@ static bool shopping_list_handle_touch(int x, int y) {
   return true;
 }
 
-// Restyle a single list card as selected/unselected — O(1), no rebuild.
-// Selected = white bg + hero-green left accent bar + arrow; unselected = tan.
-static void shopping_list_style_card(lv_obj_t* card, int idx, bool selected) {
+// All tappable rows share one appearance; the dial index only guides scrolling.
+static void shopping_list_style_card(lv_obj_t* card, int idx) {
   if (!card)
     return;
   trepo_card(card, COL_WHITE, 18);
   lv_obj_set_style_shadow_ofs_x(card, 3, 0);
   lv_obj_set_style_shadow_ofs_y(card, 3, 0);
-  lv_obj_set_style_border_width(card, selected ? 3 : 2, 0);
+  lv_obj_set_style_border_width(card, 2, 0);
   lv_obj_set_style_border_side(card, LV_BORDER_SIDE_FULL, 0);
-  lv_obj_set_style_border_color(card, lv_color_hex(selected ? COL_GREEN : COL_DARK), 0);
+  lv_obj_set_style_border_color(card, lv_color_hex(COL_DARK), 0);
   lv_obj_t* label = lv_obj_get_child(card, 0);
   if (label && idx >= 0 && idx < g_active.count) {
     lv_label_set_text(label, g_active.items[idx]);
     lv_obj_set_style_text_font(label, &nunito_18, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(COL_DARK), 0);
-    // Equal gutters keep the text centered while leaving the chevron room.
+    // Equal gutters keep item names centered within their pills.
     lv_obj_set_size(label, SHOPPING_LIST_CARD_W - 48, LV_SIZE_CONTENT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label);
@@ -1754,10 +1753,10 @@ static void shopping_list_reveal_selection(int idx, lv_anim_enable_t anim) {
 static void shopping_list_update_selection(int old_idx, int new_idx) {
   if (!shopping_list_scroll) return;
   if (old_idx >= 0 && old_idx < shopping_list_rendered_count && shopping_list_items[old_idx]) {
-    shopping_list_style_card(shopping_list_items[old_idx], old_idx, false);
+    shopping_list_style_card(shopping_list_items[old_idx], old_idx);
   }
   if (new_idx >= 0 && new_idx < shopping_list_rendered_count && shopping_list_items[new_idx]) {
-    shopping_list_style_card(shopping_list_items[new_idx], new_idx, true);
+    shopping_list_style_card(shopping_list_items[new_idx], new_idx);
     shopping_list_reveal_selection(new_idx, LV_ANIM_ON);
   }
 }
@@ -2066,8 +2065,7 @@ static void shopping_list_screen_populate() {
     lv_obj_t* label = lv_label_create(card);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 
-    lv_obj_add_event_cb(card, halo_ui_list_chevron_draw, LV_EVENT_DRAW_MAIN, NULL);
-    shopping_list_style_card(card, i, i == shopping_list_scroll_idx);
+    shopping_list_style_card(card, i);
 
     shopping_list_items[i] = card;
     shopping_list_rendered_count++;

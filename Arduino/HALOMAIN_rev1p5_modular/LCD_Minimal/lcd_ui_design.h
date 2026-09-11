@@ -272,22 +272,3 @@ static lv_obj_t* halo_ui_spinner(lv_obj_t* parent, int y, uint32_t color = COL_T
   halo_ui_spinner_start(o);
   return o;
 }
-
-// Draw the selected-row chevron without an extra object for every cached item.
-static void halo_ui_list_chevron_draw(lv_event_t* e) {
-  lv_obj_t* o = lv_event_get_target(e);
-  if (lv_obj_get_style_border_width(o, 0) != 3)
-    return;
-  lv_area_t a;
-  lv_obj_get_coords(o, &a);
-  lv_coord_t x = a.x2 - 17, y = (a.y1 + a.y2) / 2;
-  lv_draw_line_dsc_t d;
-  lv_draw_line_dsc_init(&d);
-  d.color = lv_color_hex(COL_GREEN);
-  d.width = 2;
-  d.round_start = d.round_end = 1;
-  lv_point_t p = {(lv_coord_t)(x - 4), (lv_coord_t)(y - 5)}, q = {(lv_coord_t)(x + 1), y},
-             r = {(lv_coord_t)(x - 4), (lv_coord_t)(y + 5)};
-  lv_draw_line(lv_event_get_draw_ctx(e), &d, &p, &q);
-  lv_draw_line(lv_event_get_draw_ctx(e), &d, &q, &r);
-}
