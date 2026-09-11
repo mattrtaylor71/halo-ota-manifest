@@ -701,7 +701,7 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/publish124/PUBLISHED.json",
       "sha256": "6749da1b5fb4497ec9ec88366bf75c22cb4d4baca8705c056b7fa2e3b6d6b141"
     },
-    "device_acceptance": "124 installation, manual OTA and device visual acceptance are pending. No 123 installation success is established; the last verified installed build remains 122.",
+    "device_acceptance": "124 installation, manual OTA and visual acceptance remain pending. The latest verified installed build is123, documented by post-manual hardware readback and closed post-clear SDK VALID/idle capture.",
     "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.124.",
     "instruction": "Continue from 124 artifact source 2b40fc651b15ef652ab5561a703e550826839518 and subsequent commits. Retain the scoped update-copy and voice-motion changes and all earlier UI, deletion and OTA fixes. Preserve historical acceptance and test-case receipts separately."
   },
@@ -757,7 +757,7 @@
     },
     {
       "version": "6.4.123",
-      "status": "PUBLISHED_PENDING_USER_MANUAL_OTA",
+      "status": "PUBLISHED_INSTALLED_IDENTITY_VERIFIED",
       "artifact_source_commit": "eb767ea73cf6fdde7886b2f05ca892d08e6cfc57",
       "build_id": "6.4.123-20260911T213344Z-eb767ea73cf6",
       "runtime_changed": false,
@@ -797,12 +797,18 @@
         }
       },
       "device_actions": 0,
-      "device_acceptance": "Pending user manual OTA; no 123 installation or runtime acceptance claimed.",
+      "device_acceptance": "Exact installed 123/app0/SDK VALID on both boards, with full current 123 and fallback 122 bank hashes verified and fresh closed post-clear LCD idle/CRC. This records post-manual installed health; transfer timing and a new 124 installation are not claimed.",
       "manual_eligibility": "The first request hit the same-day completed119 ledger (12ms remaining). Archived and initialized only allowlisted bench bookkeeping after native RESOLVED/no-active-debt checks. Current122 and fallback121, selectors, provisioning and timezone verified unchanged; both122 SDK VALID afterward. Production quota logic unchanged. User manual123 OTA remains pending; this is not natural quota renewal or an in-case refund.",
       "published_epoch": 1789162674.611889,
       "manual_test_case_preparation": {
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/MANUAL123-CASE-READY.json",
         "sha256": "2e6befe67478aa382a2c1fb1ae34fb958da360b144664a9b7fb00514116f1305"
+      },
+      "previous_device_acceptance_before_post_manual_health": "Pending user manual OTA; no 123 installation or runtime acceptance claimed.",
+      "previous_status_before_post_manual_health": "PUBLISHED_PENDING_USER_MANUAL_OTA",
+      "post_manual_health": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/MANUAL124-CASE-READY.json",
+        "sha256": "494f975fe1051ff0e86942ca4ba9c2205bde5e4c5c1f25046bfebfa7dfbd62cd"
       }
     },
     {
@@ -870,8 +876,13 @@
       },
       "device_actions": 0,
       "device_actions_scope": "Publication only; no installation or device validation performed for 124.",
-      "device_acceptance": "124 installation, manual OTA and device visual acceptance are pending. No 123 installation success is established; the last verified installed build remains 122.",
-      "published_epoch": 1789165945.078277
+      "device_acceptance": "124 installation, manual OTA and visual acceptance remain pending. The latest verified installed build is123, documented by post-manual hardware readback and closed post-clear SDK VALID/idle capture.",
+      "published_epoch": 1789165945.078277,
+      "manual_test_case_preparation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/MANUAL124-CASE-READY.json",
+        "sha256": "494f975fe1051ff0e86942ca4ba9c2205bde5e4c5c1f25046bfebfa7dfbd62cd"
+      },
+      "manual_eligibility": "The completed 123 RESOLVED ledger had 13 ms left. Its native record was archived and only Sense ota_coord/retry_v1 bitmap entries retired in one NVS sector. Both firmware banks, selectors, provisioning, calendar state and all LCD NVS were preserved. This is a separately archived bench case; production allowance policy is unchanged and no in-campaign refund is claimed."
     }
   ],
   "previous_development_baseline_119": {
@@ -1015,5 +1026,17 @@
       "sha256": "58523830876dde6f3f2245a9f1eec9d63a51eca302befa09cc4adc7c7037461b"
     },
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
+  },
+  "last_verified_device_health": {
+    "version": "6.4.123",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/RELEASE-PAIR.json",
+      "sha256": "353fc04d0fc258b1a6a0abfe3c919d667f77fd8d63fb1bcc5616c76d102ab89b"
+    },
+    "receipt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/MANUAL124-CASE-READY.json",
+      "sha256": "494f975fe1051ff0e86942ca4ba9c2205bde5e4c5c1f25046bfebfa7dfbd62cd"
+    },
+    "scope": "Exact installed 123/app0/SDK VALID on both boards, with full current 123 and fallback 122 bank hashes verified and fresh closed post-clear LCD idle/CRC. This records post-manual installed health; transfer timing and a new 124 installation are not claimed."
   }
 }
