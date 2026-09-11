@@ -1115,8 +1115,10 @@
     "halomain_assets/ui_img_Frame_443_png.c",
     "tools/build_ota_policy_production.py",
     "tools/prepare_production_release.py",
+    "tools/production_network_dns_patch.py",
     "tools/production_required_files.json",
     "tools/test_prepare_production_release.py",
-    "tools/test_production_build_profile.py"
+    "tools/test_production_build_profile.py",
+    "tools/test_production_network_dns_patch.py"
   ]
 }

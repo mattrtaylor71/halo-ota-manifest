@@ -41,3 +41,14 @@ Compilation does not establish battery continuity, unattended shipping-limit mai
 The qualified shipping profile retains the fixed HTTPS diagnostic admission endpoint already used by the M8 shipping build. This optional exporter is separate from the firmware download route and requires an existing scoped runtime credential; without one it is disabled. No key enters the build, and local credential provisioning remains off. Owner claim does not install the B1 key. Fresh units therefore skip this optional admission export before HTTP. Ordinary reporting, retained Diagnostic/H4 export, and OTA policy/download do not depend on that key.
 
 The tracked MQTT-disabled configuration supplies the existing public CA with empty client certificate/key. The canonical builder rejects `MqttSecrets.local.h` and `MqttSecrets.local.cpp` overrides before compiling. This packages the tested configuration reproducibly without enabling MQTT or committing credentials. Compile jobs are capped at two.
+
+The qualified Arduino ESP32 3.3.8 Network library also requires the tracked DNS-cache lock correction. On first IP acquisition, its `NetworkManager::hostByName` calls raw `dns_clear_cache` without the TCPIP core lock; clearing an outstanding DNS entry can remove a UDP PCB and panic. The correction adds the lock only around cache clearing, leaving blocking `lwip_getaddrinfo` outside it. No firmware network retry, timing, DNS policy or assertion setting changes.
+
+Apply the exact reviewed SDK correction once, using a new evidence directory:
+
+```sh
+python3 -B tools/production_network_dns_patch.py --apply --sdk-source "$(arduino-cli config get directories.data)/packages/esp32/hardware/esp32/3.3.8/libraries/Network/src/NetworkManager.cpp" --out /absolute/path/to/new-sdk-patch-receipt
+python3 -B tools/test_production_network_dns_patch.py
+```
+
+The helper accepts only the pinned upstream file or its exact corrected bytes, preserves the prior file in the receipt directory, and records both hashes. It changes the installed SDK explicitly; canonical compilation does not silently patch it. The builder refuses unpatched or unknown bytes, saves `sdk-dns-patch.json` plus a source copy, and verifies the actual `NetworkManager.cpp` translation unit/object after compilation in `sdk-dns-compiled.json`. Include these receipts with each build's provenance. Do not upgrade or locally edit that SDK during a build. The native regression extracts the real pinned function: the upstream code reproduces the unlocked cache-clear failure; corrected code locks cleanup while IPv4/IPv6 lookups, literal addresses and failure paths preserve their existing behavior. This is host evidence; the startup shopping path still needs device validation.

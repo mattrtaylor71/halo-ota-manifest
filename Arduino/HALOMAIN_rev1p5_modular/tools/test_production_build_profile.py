@@ -131,6 +131,8 @@ class ProductionProfileTests(unittest.TestCase):
             with patch.object(sys, 'argv', ['builder', '--out', str(out), '--min-free-gib', '4']), \
                     patch.object(build.shutil, 'which', return_value='/synthetic/arduino-cli'), \
                     patch.object(build.shutil, 'disk_usage', side_effect=[SimpleNamespace(free=n*1024**3) for n in (5, 3, 3)]), \
+                    patch.object(build.sdk_patch, 'prepare', return_value={}), \
+                    patch.object(build.sdk_patch, 'verify_compiled'), \
                     patch.object(build.subprocess, 'Popen', return_value=child) as popen, \
                     patch.object(build, 'close_owned_group', return_value={'group_absent': True, 'signals': []}):
                 with self.assertRaisesRegex(AssertionError, 'host build reserve'):
@@ -156,6 +158,7 @@ class ProductionProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as name:
             out = Path(name) / 'build'
             with patch.object(build.shutil, 'disk_usage', return_value=SimpleNamespace(free=9*1024**3)), \
+                    patch.object(build.sdk_patch, 'prepare', return_value={}), \
                     patch.object(build.signal, 'pthread_sigmask', side_effect=mask), \
                     patch.object(build.subprocess, 'Popen', return_value=child), \
                     patch.object(build, 'close_owned_group', return_value={'group_absent': True, 'signals': []}) as close:

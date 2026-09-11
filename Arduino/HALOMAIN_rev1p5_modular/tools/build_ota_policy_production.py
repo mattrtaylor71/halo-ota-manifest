@@ -2,6 +2,7 @@
 """Build the production OTA path with declared shipping limits and fixed board settings."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,10 @@ import shutil
 import signal
 import subprocess
 import time
+
+_patch_spec = importlib.util.spec_from_file_location('production_dns_patch', Path(__file__).with_name('production_network_dns_patch.py'))
+sdk_patch = importlib.util.module_from_spec(_patch_spec)
+_patch_spec.loader.exec_module(sdk_patch)
 
 BASE_FLAGS = '-DARDUINO_HOST_OS="{runtime.os}" -DARDUINO_FQBN="{build.fqbn}" -DESP32=ESP32 -DCORE_DEBUG_LEVEL={build.code_debug} {build.loop_core} {build.event_core} {build.defines} {build.extra_flags.{build.mcu}} {build.zigbee_mode}'
 FQBNS = {
@@ -116,6 +121,7 @@ def run(board, source, out, compiler, private_canary=False, min_free_gib=8):
     save(out / 'disk-space.json', space)
     assert space['admitted'], 'Free disk space is below the configured host build reserve'
     argv = command(board, source, out / 'compile', compiler, private_canary)
+    sdk_provenance = sdk_patch.prepare(compiler, out)
     save(out / 'command.json', {'argv': argv, 'cwd': str(source), 'profile': 'shipping', 'route_profile': 'private-canary' if private_canary else 'production', 'policy': board == 'sense', 'diagnostics': True, 'one_shot': False, 'bench_profile': False, 'private_route_override': private_canary, 'idle_network_recovery': board == 'sense', 'diagnostic_admission': board == 'sense', 'auth_provisioning': False, 'idle_network_probe': False, 'admission_endpoint': ADMISSION_URL if board == 'sense' else None})
     started = time.time()
     child = None
@@ -144,6 +150,7 @@ def run(board, source, out, compiler, private_canary=False, min_free_gib=8):
             space['after_free_bytes'] = shutil.disk_usage(out).free
             save(out / 'disk-space.json', space)
     assert result['reaped'] and result['group_absent'] and result['exit_code'] == 0 and not error, result
+    sdk_patch.verify_compiled(sdk_provenance, out / 'compile')
 
 
 def main():
