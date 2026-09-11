@@ -246,7 +246,8 @@ static bool enter(const char* reason,bool retained_legacy) {
       const bool bench_discovery=durable_ota::bench_active(*r)&&r->phase==durable_ota::Phase::DISCOVERY;
       if(bench_discovery&&(!g_coord_credit_loaded||!g_coord_credit_mutations||retained_legacy||
           unresolved_legacy()||!peer_valid()||halo_primary_user_work_busy()))return false;
-      admitted=durable_ota::reserve_discovery(*r,c,false,false,candidate,origin,campaign)==durable_ota::Admission::ALLOWED;
+      admitted=durable_ota::reserve_discovery(*r,c,retained_legacy,false,candidate,origin,campaign,
+          halo_ota_manual_override_active())==durable_ota::Admission::ALLOWED;
     }
     else if(r->one_shot.phase==durable_ota::OneShotPhase::ARMED)
       admitted=durable_ota::one_shot_reserve(*r,c,g_coord_sense_boot_id,true,false,candidate)==durable_ota::Admission::ALLOWED;

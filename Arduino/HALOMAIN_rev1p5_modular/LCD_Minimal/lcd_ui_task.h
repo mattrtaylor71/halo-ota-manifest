@@ -54,6 +54,28 @@ static void ui_task(void *arg) {
       continue;
     }
 
+    // USB 'ota' and the physical Settings button use exactly the same action,
+    // including its latch and awake-proof delivery, on the LVGL owner task.
+    if (g_manual_ota_ui_requested) {
+      g_manual_ota_ui_requested = false;
+      ship_menu_send_manual_ota("usb_settings_action");
+    }
+    if (g_manual_ota_ui_active && !g_manual_ota_result && !ota_locked &&
+        !g_lcd_ota_uart_receiving && g_manual_ota_ui_deadline_ms &&
+        (int32_t)(millis() - g_manual_ota_ui_deadline_ms) >= 0) {
+      lcd_manual_ota_finish("request_failed");
+    }
+    if (g_manual_ota_ui_active && g_manual_ota_result && !ota_locked &&
+        !g_lcd_ota_uart_receiving &&
+        (int32_t)(millis() - g_manual_ota_result_until_ms) >= 0) {
+      g_manual_ota_ui_active = false;
+      g_manual_ota_result = 0;
+      g_manual_ota_result_until_ms = 0;
+      g_ota_screen_active = false;
+      ota_stay_awake_until_ms = 0;
+      provision_return_home_pending = true;
+    }
+
     // ── Cold-boot repaint (one-shot) ──────────────────────────────────────
     // On a cold boot the device came up on a BLACK screen and stayed there.
     // Cause: setup() calls show_ship_main_menu() (lcd_activity.h ~519) before
@@ -142,7 +164,8 @@ static void ui_task(void *arg) {
       if (is_transfer)
         ota_saw_transfer = true;
       const bool finishing = ota_saw_transfer || g_ota_continuation_hold_start_ms != 0;
-      const int phase = is_transfer ? 1 : (finishing ? 2 : 0);
+      const uint8_t manual_result = g_manual_ota_ui_active ? g_manual_ota_result.load() : 0;
+      const int phase = manual_result ? 2 + manual_result : (is_transfer ? 1 : (finishing ? 2 : 0));
 
       if (!ota_overlay) {
         // Covered presentation must not keep animating behind this overlay.
@@ -193,11 +216,18 @@ static void ui_task(void *arg) {
 
       if (phase != last_ota_phase || need_update) {
         last_ota_phase = phase;
-        lv_label_set_text(ota_label, is_transfer
+        const char* result_title = manual_result == 1 ? "Already up to date" :
+            manual_result == 2 ? "Daily update limit" : manual_result == 3 ? "Update postponed" :
+            manual_result == 4 ? "Update not completed" : "Update finished";
+        const char* result_detail = manual_result == 1 ? "HALO has the latest software." :
+            manual_result == 2 ? "Please try again tomorrow." :
+            manual_result == 3 ? "The automatic retry stays scheduled." :
+            manual_result == 4 ? "Please try again when connected." : "Returning to the menu.";
+        lv_label_set_text(ota_label, manual_result ? result_title : is_transfer
                                          ? "Updating the display"
-                                         : (finishing ? "Finishing update" : "Starting update"));
+                                         : (finishing ? "Finishing update" : "Checking for updates"));
         lv_obj_set_pos(ota_label, 40, is_transfer ? 84 : 196);
-        lv_label_set_text(ota_description, is_transfer ? "Display transfer only."
+        lv_label_set_text(ota_description, manual_result ? result_detail : is_transfer ? "Display transfer only."
                                                        : (finishing ? "HALO may restart itself."
                                                                     : "Getting things ready..."));
         lv_obj_set_pos(ota_description, 50, is_transfer ? 250 : 236);
@@ -214,13 +244,15 @@ static void ui_task(void *arg) {
 
       // Never run an overlay animation during binary receive. A static arc
       // remains available for the first frame when progress is not yet known.
-      if (is_transfer || g_lcd_ota_binary_mode) {
+      if (manual_result || is_transfer || g_lcd_ota_binary_mode) {
         if (ota_spinner) {
           lv_obj_del(ota_spinner);
           ota_spinner = NULL;
         }
-        if (!is_transfer)
+        if (!is_transfer && !manual_result)
           lv_obj_clear_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
+        if (manual_result)
+          lv_obj_add_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
       } else {
         lv_obj_add_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
         if (!ota_spinner) {

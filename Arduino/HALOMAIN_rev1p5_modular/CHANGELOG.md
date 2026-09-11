@@ -1,5 +1,9 @@
 # Firmware changelog
 
+## Targeted UI and manual OTA fixes — September 10, 2026
+
+Remove the mic bitmap background using the existing vector symbol; use an ASCII separator in Settings; center shopping labels and reveal the selected row while turning the knob. Manual Software update now uses one acknowledged user request, keeps a stable checking/result screen, and clears refused requests without repeated wakeups. A deliberate manual request after a RESOLVED campaign can replenish a later UTC day; failed-campaign debt and same-day limits remain intact. The USB `ota` shortcut now exercises the same Settings action. Focused native policy/action tests and actual LVGL geometry checks passed; on-device validation follows in116/117 production builds.
+
 ## 6.4.115 — published September 10, 2026 for manual OTA testing
 
 Version-only rebuild of the released 6.4.114 runtime from committed production baseline `79ee6ee8695738dc90513da3cc797007edc07d11`. Only generated version/build metadata differs in executable source; production flags, partition layouts, static RAM and RTC usage are unchanged. Both canonical builds and uploaded binary/manifest checks passed; both production latest pointers now serve 6.4.115. The user will perform the manual installation, which has not yet been qualified for these new bytes. No device firmware, scheduling or retained allowance was changed by publication. See `published_manual_test_bumps` in `RELEASE_BASELINE.json` for exact receipts and the saved test-allowance limitation.

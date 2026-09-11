@@ -774,10 +774,9 @@ static void ship_main_menu_add_mic_icon(lv_obj_t* btn) {
   if (!btn) {
     return;
   }
-  lv_obj_t* icon = lv_img_create(btn);
-  lv_img_set_src(icon, &mic_icon_img);
-  lv_obj_set_style_img_recolor(icon, lv_color_hex(SHIP_HOME_SYMBOL_GOLD), LV_PART_MAIN);
-  lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, LV_PART_MAIN);
+  // Use the same clean vector as the listening screen. The bitmap's faint
+  // nonzero background alpha otherwise leaves a rectangle on the white card.
+  lv_obj_t* icon = halo_ui_icon(btn, HALO_ICON_MIC, 0, 0, 54, SHIP_HOME_SYMBOL_GOLD);
   lv_obj_center(icon);
 }
 
@@ -905,7 +904,7 @@ static void show_ship_main_menu_impl() {
     lv_label_set_text(ship_main_menu_ai_label, "AI");
     lv_obj_center(ship_main_menu_ai_label);
     lv_obj_add_flag(ship_main_menu_ai_label, LV_OBJ_FLAG_HIDDEN);
-    ship_main_menu_add_mic_icon(ship_main_menu_ai_button);         // original mic shape, amber on white
+    ship_main_menu_add_mic_icon(ship_main_menu_ai_button);         // amber mic on white
     ship_main_menu_set_ai_hold_active(false);
   }
   ui_log_asset("show_main_menu", "SHIP_MAIN_MENU", "custom_main_menu");
@@ -1724,10 +1723,29 @@ static void shopping_list_style_card(lv_obj_t* card, int idx, bool selected) {
     lv_label_set_text(label, g_active.items[idx]);
     lv_obj_set_style_text_font(label, &nunito_18, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(COL_DARK), 0);
-    lv_obj_set_size(label, 200, LV_SIZE_CONTENT);
-    lv_obj_set_pos(label, 12, 13);
+    // Equal gutters keep the text centered while leaving the chevron room.
+    lv_obj_set_size(label, SHOPPING_LIST_CARD_W - 48, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(label);
   }
   lv_obj_invalidate(card);
+}
+
+// scroll_to_view refuses a non-SCROLLABLE parent in LVGL 8. Keep touch scrolling
+// disabled, but move the viewport explicitly for knob selection and rebuilds.
+static void shopping_list_reveal_selection(int idx, lv_anim_enable_t anim) {
+  if (!shopping_list_scroll || idx < 0 || idx >= shopping_list_rendered_count ||
+      !shopping_list_items[idx]) return;
+  lv_obj_update_layout(shopping_list_scroll);
+  lv_area_t row, top, view;
+  lv_obj_get_coords(shopping_list_items[idx], &row);
+  lv_obj_get_coords(shopping_list_item_headers[idx] ? shopping_list_item_headers[idx]
+                                                   : shopping_list_items[idx], &top);
+  lv_obj_get_content_coords(shopping_list_scroll, &view);
+  lv_coord_t y = lv_obj_get_scroll_y(shopping_list_scroll);
+  if (top.y1 < view.y1) y -= view.y1 - top.y1;
+  else if (row.y2 > view.y2) y += row.y2 - view.y2;
+  lv_obj_scroll_to_y(shopping_list_scroll, y, anim);
 }
 
 // Lightweight scroll path: restyle just the two affected cards and keep the
@@ -1740,12 +1758,7 @@ static void shopping_list_update_selection(int old_idx, int new_idx) {
   }
   if (new_idx >= 0 && new_idx < shopping_list_rendered_count && shopping_list_items[new_idx]) {
     shopping_list_style_card(shopping_list_items[new_idx], new_idx, true);
-    // If the selected item is first-in-group it has a header directly above it;
-    // scroll to the header so it isn't pushed off the top by aligning the card.
-    lv_obj_t* target = (new_idx >= 0 && new_idx < 50 && shopping_list_item_headers[new_idx])
-                         ? shopping_list_item_headers[new_idx]
-                         : shopping_list_items[new_idx];
-    if (target) lv_obj_scroll_to_view(target, LV_ANIM_ON);
+    shopping_list_reveal_selection(new_idx, LV_ANIM_ON);
   }
 }
 
@@ -1913,7 +1926,7 @@ static void shopping_list_screen_populate() {
   shopping_list_touch_pull_armed = false;
   // Belt-and-braces: if the rebuild lands mid-pull the container's scroll_y
   // can still be negative with no snap-back coming — force it to rest BEFORE
-  // rows are re-added (the scroll_to_view selection logic below then starts
+  // rows are re-added (the selection reveal logic below then starts
   // from a clean origin).
   lv_obj_scroll_to_y(shopping_list_scroll, 0, LV_ANIM_OFF);
   shopping_list_rendered_count = 0;
@@ -2051,9 +2064,7 @@ static void shopping_list_screen_populate() {
     // Label first (style_card rewrites its text/font/color) — single line,
     // vertically centered, ellipsized
     lv_obj_t* label = lv_label_create(card);
-    lv_obj_set_width(label, SHOPPING_LIST_CARD_W - 32);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
 
     lv_obj_add_event_cb(card, halo_ui_list_chevron_draw, LV_EVENT_DRAW_MAIN, NULL);
     shopping_list_style_card(card, i, i == shopping_list_scroll_idx);
@@ -2062,16 +2073,8 @@ static void shopping_list_screen_populate() {
     shopping_list_rendered_count++;
   }
 
-  // Scroll selected item into view. If it's first-in-group, target its header
-  // (above the card) so a rebuild that rests on a group's first item reveals
-  // the header instead of clipping it off the top.
-  if (shopping_list_scroll_idx < shopping_list_rendered_count && shopping_list_items[shopping_list_scroll_idx]) {
-    int si = shopping_list_scroll_idx;
-    lv_obj_t* init_target = (si >= 0 && si < 50 && shopping_list_item_headers[si])
-                              ? shopping_list_item_headers[si]
-                              : shopping_list_items[si];
-    if (init_target) lv_obj_scroll_to_view(init_target, LV_ANIM_OFF);
-  }
+  // Reveal the selected card together with its store header, when present.
+  shopping_list_reveal_selection(shopping_list_scroll_idx, LV_ANIM_OFF);
 
   // Remember what's rendered so a revalidate with identical content can skip
   // the rebuild (and its reveal/flicker) entirely.
@@ -2185,9 +2188,8 @@ static void show_shopping_list_screen_impl() {
   lv_obj_set_flex_align(shopping_list_scroll, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_scrollbar_mode(shopping_list_scroll, LV_SCROLLBAR_MODE_OFF);  // a straight scrollbar fights the round bezel
   lv_obj_set_scroll_dir(shopping_list_scroll, LV_DIR_VER);
-  // KNOB-ONLY SCROLLING. Clearing SCROLLABLE stops LVGL's indev from scrolling
-  // this container by finger; it does NOT affect programmatic scrolling, so the
-  // knob path (shopping_list_scroll_idx -> lv_obj_scroll_to_view) is untouched.
+  // KNOB-ONLY SCROLLING. Explicit scroll_to_y in reveal_selection works with
+  // this flag cleared; LVGL's scroll_to_view does not.
   // Rationale: on a 360px round panel a swipe and a tap are hard to tell apart,
   // and a misread swipe fired the item overlay. The knob is unambiguous.
   // Refresh is NOT lost with the touch pull — the knob keeps its own gesture

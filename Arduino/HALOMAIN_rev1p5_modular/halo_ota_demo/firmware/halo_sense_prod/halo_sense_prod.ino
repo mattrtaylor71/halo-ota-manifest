@@ -2035,12 +2035,15 @@ bool halo_prod_should_delay_sleep() {
 
 static void send_ota_uart_message(const char* type, bool terminal = false) {
   if (!type || !type[0] || !sense_lcd_ota_retry_safe()) return;
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<192> doc;
   doc["ver"] = PROTOCOL_VERSION;
   doc["type"] = type;
   // Legacy/intermediate unlocks retain their continuation hold. Only a proven
   // final outcome releases it; older LCD firmware safely ignores this field.
-  if (terminal && strcmp(type, "OTA_UNLOCK") == 0) doc["terminal"] = true;
+  if (terminal && strcmp(type, "OTA_UNLOCK") == 0) {
+    doc["terminal"] = true;
+    doc["result"] = g_last_ota_result;
+  }
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   String output;
@@ -3281,7 +3284,7 @@ static void ota_peer_send_lock(bool release) {
   doc["msg_id"] = get_next_msg_id();
   doc["ts"] = millis();
   doc["coord_id"] = g_peer_gate.owner;
-  if (release) doc["terminal"] = true;
+  if (release) { doc["terminal"] = true; doc["result"] = g_last_ota_result; }
   else {
     const int32_t remaining = (int32_t)(g_peer_gate.deadline_ms - millis());
     if (remaining <= 0) return;
@@ -5288,8 +5291,19 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   g_lcd_work_peer_boot = g_peer_gate.peer_boot;
 #if HALO_DURABLE_OTA_POLICY
   if(!sense_policy::enter(reason,retained_legacy)) {
-    ota_set_last_result(sense_policy::current()&&sense_policy::current()->phase==durable_ota::Phase::RESOLVED?
-                        "policy_target_valid":"policy_deferred");g_ota_check_done=true;return;
+    const bool manual = halo_ota_manual_override_active();
+    const bool resolved = sense_policy::current() &&
+        sense_policy::current()->phase == durable_ota::Phase::RESOLVED;
+    ota_set_last_result(resolved ? (manual ? "policy_daily_limit" : "policy_target_valid")
+                                : "policy_deferred");
+    // Refusal consumes this user request, not its campaign credit. A retained
+    // force/check latch must not silently recreate it during pre-sleep.
+    if (manual) {
+      g_ota_check_requested = false;
+      OtaIntent::clearForceAndCheck();
+      manual_ota_override_clear("policy_refused");
+    }
+    g_ota_check_done=true;return;
   }
 #endif
   sense_policy::WorkCleanup policy_cleanup;

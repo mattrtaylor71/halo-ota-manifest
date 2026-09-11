@@ -1347,6 +1347,12 @@ static const unsigned long LCD_OTA_CHECK_STAY_AWAKE_MS = 600000;  // 10 min
 static const unsigned long LCD_OTA_LOCK_STAY_AWAKE_MS = 180000;   // 3 min
 static const unsigned long LCD_OTA_USER_ACTIVE_GRACE_MS = 120000; // 2 min
 static volatile bool g_manual_ota_override = false;
+static volatile bool g_manual_ota_ui_requested = false;
+static volatile bool g_manual_ota_ui_active = false;
+// 0 checking, 1 current, 2 daily limit, 3 deferred, 4 failed, 5 finished.
+static std::atomic<uint8_t> g_manual_ota_result{0};
+static unsigned long g_manual_ota_result_until_ms = 0;
+static unsigned long g_manual_ota_ui_deadline_ms = 0;
 static unsigned long g_manual_ota_override_until_ms = 0;
 static const unsigned long MANUAL_OTA_OVERRIDE_TTL_MS = 5UL * 60UL * 1000UL;
 
@@ -1895,6 +1901,24 @@ static bool provision_intro_tapped = false;
 static bool provision_qr_cached = false;
 static bool provision_user_requested = false;
 static bool provision_return_home_pending = false;
+
+// UART/loop callers publish only state; the UI task owns all LVGL work.
+static void lcd_manual_ota_finish(const char* result) {
+  if (!g_manual_ota_ui_active || g_manual_ota_result.load()) return;
+  lcd_manual_ota_override_clear("result");
+  const char* r = result ? result : "";
+  const uint8_t result_code = !strcmp(r, "up_to_date") ? 1 :
+      !strcmp(r, "policy_daily_limit") ? 2 :
+      (!strcmp(r, "policy_deferred") || strstr(r, "defer")) ? 3 :
+      !strcmp(r, "apply_success") ? 5 : 4;
+  g_manual_ota_result_until_ms = millis() + 8000;
+  ota_stay_awake_until_ms = g_manual_ota_result_until_ms;
+  g_ota_screen_active = true;
+  provision_return_home_pending = false;
+  g_manual_ota_result.store(result_code); // publish after its deadline/UI state
+}
+
+
 static char provision_qr_ssid[33] = {0};
 static char provision_qr_password[65] = {0};
 static char provision_qr_url[64] = {0};
@@ -3719,6 +3743,7 @@ static void deferred_awake_tx_service() {
                   link_synced ? 1 : 0,
                   last_sense_rx_ms > 0 ? (millis() - last_sense_rx_ms) : 0xFFFFFFFFUL,
                   (unsigned)deferred_ring_count);
+    if (!strcmp(e->msg.type, "INPUT_OTA_CHECK")) lcd_manual_ota_finish("peer_unavailable");
     deferred_ring_pop_oldest();
   }
   if (!deferred_awake_tx_pending()) {
@@ -4477,34 +4502,8 @@ void loop() {
     (void)sleep_blocked_for_ota();
   }
 
-  // Periodic resend of INPUT_OTA_CHECK while a manual OTA request is latched but
-  // the OTA has not yet started. The single send from ship_menu_send_manual_ota()
-  // can be dropped on the Sense during its wake/boot LCD_OTA_QUERY window; the
-  // event-driven resends (SLEEP_READY/FW_INFO) depend on receiving those messages
-  // back, so they can miss. This timer guarantees delivery. Stops immediately once
-  // OTA starts (ota_locked) so it never spams during the actual OTA transfer, and
-  // stops when the override TTL expires (lcd_manual_ota_override_active() == false).
-  {
-    static unsigned long last_resend_ms = 0;
-    if (lcd_manual_ota_override_active() && !ota_locked) {
-      unsigned long now_ms = millis();
-      if (now_ms - last_resend_ms >= 1500) {
-        last_resend_ms = now_ms;
-        StaticJsonDocument<160> resendDoc;
-        resendDoc["ver"] = PROTOCOL_VERSION;
-        resendDoc["type"] = "INPUT_OTA_CHECK";
-        resendDoc["msg_id"] = get_next_msg_id();
-        resendDoc["ts"] = now_ms;
-        resendDoc["reason"] = "timer_resend";
-        String resendOut;
-        serializeJson(resendDoc, resendOut);
-        senseSerial.println(resendOut);
-        Serial.println("[OTA_MANUAL] resend INPUT_OTA_CHECK reason=timer");
-      }
-    } else {
-      last_resend_ms = 0;
-    }
-  }
+  // Manual OTA uses the same bounded awake-proof/ACK queue as other user
+  // actions. Do not mint new requests on a timer or after the Sense sleeps.
 
   // UART TX/RX is now handled by uart_task - nothing to do here
   

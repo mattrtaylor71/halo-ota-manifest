@@ -222,7 +222,7 @@ static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadlin
     g_manual_ota_override = false;
     g_manual_ota_override_until_ms = 0;
 
-    g_ota_screen_active = false;
+    if (!g_manual_ota_ui_active) g_ota_screen_active = false;
     g_lcd_maintenance_headless = false;
 
     // One readback-verified disarm. Its helper publishes the actual stored
@@ -233,7 +233,7 @@ static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadlin
     // lcd_exit_ota_mode() calls LVGL init which crashes on Core 0.
     // For successful OTA, esp_restart() is called immediately after this function.
     // For failed OTA, just clear flags and let the device sleep/wake naturally.
-    provision_return_home_pending = true;
+    if (!g_manual_ota_ui_active) provision_return_home_pending = true;
     resetActivityTimer();
     lcd_ota_arm_recovery_grace();
     Serial.println("[LCD_OTA_UART] OTA flags cleared");

@@ -78,6 +78,7 @@ static bool link_ack_should_track(const char* type) {
          strcmp(type, "INPUT_LONG_PRESS_START") == 0 || // voice hold
          strcmp(type, "INPUT_LONG_PRESS_END") == 0 ||
          strcmp(type, "INPUT_RETRY") == 0 ||
+         strcmp(type, "INPUT_OTA_CHECK") == 0 ||
          strcmp(type, "INPUT_RESET_WIFI") == 0 ||
          strcmp(type, "INPUT_FW_INFO") == 0 ||
          strcmp(type, "INPUT_SENSE_FW") == 0;
@@ -163,7 +164,9 @@ static void link_ack_service() {
                                     g_link_ack[i].type);
       // Tell the UI so the screen resolves. NOT a direct UI call: this runs on
       // Core 0 and LVGL must only be touched from the UI task.
-      if (app_event_queue != NULL) {
+      if (!strcmp(g_link_ack[i].type, "INPUT_OTA_CHECK")) {
+        lcd_manual_ota_finish("request_failed");
+      } else if (app_event_queue != NULL) {
         app_event_t evt = {EVT_LINK_SEND_FAILED, {0}};
         xQueueSend(app_event_queue, &evt, 0);
       }

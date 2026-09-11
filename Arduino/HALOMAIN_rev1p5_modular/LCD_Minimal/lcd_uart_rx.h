@@ -458,26 +458,8 @@ static void uart_process_received_message(const char* json_str) {
     sense_status_sync_requested = false;
     wake_retry_until_ms = 0;
 
-    // If LCD has a pending manual OTA request that Sense missed (race condition:
-    // LCD sent INPUT_OTA_CHECK after Sense already started its sleep sequence),
-    // re-wake Sense so it can process the request on the next boot cycle.
-    if (g_manual_ota_override && millis() < ota_stay_awake_until_ms && !ota_locked) {
-      Serial.println("[OTA_MANUAL] sense slept before seeing INPUT_OTA_CHECK — re-waking");
-      delay(500);  // let Sense fully enter deep sleep before pulling wake pin
-      request_sense_wake("manual_ota_retry");
-      // Resend INPUT_OTA_CHECK so it's in UART buffer when Sense boots
-      StaticJsonDocument<128> retryDoc;
-      retryDoc["ver"] = PROTOCOL_VERSION;
-      retryDoc["type"] = "INPUT_OTA_CHECK";
-      retryDoc["msg_id"] = get_next_msg_id();
-      retryDoc["ts"] = millis();
-      retryDoc["reason"] = "manual_retry";
-      String retryOut;
-      serializeJson(retryDoc, retryOut);
-      senseSerial.println(retryOut);
-      Serial.printf("[OTA_MANUAL] resent INPUT_OTA_CHECK msg_id=%d\n",
-                    (int)retryDoc["msg_id"]);
-    }
+    // Pending user OTA delivery is owned by the existing awake-proof queue.
+    // SLEEP_READY must never manufacture a second request/wake episode.
 
     return;
   }
@@ -543,20 +525,8 @@ static void uart_process_received_message(const char* json_str) {
                   doc["sense_boot_part"] | "?",
                   doc["sense_wake_cause"] | -1,
                   doc["sense_reset_reason"] | -1);
-    // Re-send INPUT_OTA_CHECK if LCD manual override is still active
-    // (original send was lost because Sense was in deep sleep)
-    if (lcd_manual_ota_override_active()) {
-      StaticJsonDocument<160> doc2;
-      doc2["ver"] = PROTOCOL_VERSION;
-      doc2["type"] = "INPUT_OTA_CHECK";
-      doc2["msg_id"] = get_next_msg_id();
-      doc2["ts"] = millis();
-      doc2["reason"] = "resend_on_wake";
-      String output;
-      serializeJson(doc2, output);
-      senseSerial.println(output);
-      Serial.println("[OTA_MANUAL] resend INPUT_OTA_CHECK reason=sense_woke");
-    }
+    // FW_INFO is identity evidence, not permission to re-dispatch manual OTA.
+
     return;
   }
 
@@ -1024,12 +994,12 @@ static void uart_process_received_message(const char* json_str) {
       // the generic dual-OTA hold and any short failed-attempt retry lease.
       g_lcd_ota_recovery_grace = false;
       g_ota_continuation_hold_start_ms = 0;
-      ota_stay_awake_until_ms = 0;
+      if (!g_manual_ota_ui_active) ota_stay_awake_until_ms = 0;
       g_ota_lock_window_until_ms = 0;
       Serial.println("[OTA] terminal unlock - all stay-awake holds cleared");
     } else if (g_lcd_ota_recovery_grace) {
       g_lcd_ota_recovery_grace = false;
-      ota_stay_awake_until_ms = 0;
+      if (!g_manual_ota_ui_active) ota_stay_awake_until_ms = 0;
       g_ota_lock_window_until_ms = 0;
       Serial.println("[OTA] unlock - failed-update recovery grace cleared");
     } else if (g_ota_continuation_hold_start_ms > 0) {
@@ -1038,15 +1008,15 @@ static void uart_process_received_message(const char* json_str) {
       // resumes normal idle behavior once Home is shown — otherwise the 180s
       // continuation window (which CHANGE 1a keys stay-lit off) would pin the
       // panel lit on Home for up to 3 min after the update finished.
-      ota_stay_awake_until_ms = 0;
+      if (!g_manual_ota_ui_active) ota_stay_awake_until_ms = 0;
       Serial.println("[OTA] unlock - continuation hold done, clearing stay_awake");
     } else if (millis() < ota_stay_awake_until_ms) {
       Serial.printf("[OTA] unlock - keep ota_stay_awake remaining %lums (dual-OTA)\n",
                     (unsigned long)(ota_stay_awake_until_ms - millis()));
     } else {
-      ota_stay_awake_until_ms = 0;
+      if (!g_manual_ota_ui_active) ota_stay_awake_until_ms = 0;
     }
-    g_ota_screen_active = false;
+    if (!g_manual_ota_ui_active) g_ota_screen_active = false;
     g_lcd_maintenance_active = false;
     g_lcd_maintenance_deadline_ms = 0;
     g_ota_mode_active = false;
@@ -1060,19 +1030,15 @@ static void uart_process_received_message(const char* json_str) {
     // find the sensor" the user would otherwise see without opening Settings).
     // ota_unlock_received_ms is set just above, so request_fw_info picks up the
     // extended post-OTA retry timeout. Safe on Core 0: this only writes UART.
-    ship_menu_request_fw_info();
-    // Clear the manual-OTA override so the INPUT_OTA_CHECK resend loop in loop()
-    // stops. Without this, an already-up-to-date manual OTA leaves the override
-    // set; the resend condition (override_active() && !ota_locked) keeps firing,
-    // re-locking/unlocking the Sense and looping the "Software Update" screen
-    // (black-flash) until the 5-min override TTL. OTA_UNLOCK is the single
-    // termination point for all Sense "nothing to do" exits (up_to_date,
-    // downgrade blocked, rollout skip, apply blocked) — they all go through
-    // release_waiting_lcd_ota -> OTA_UNLOCK. Safe/idempotent: early-returns if
-    // the override is not set.
-    lcd_manual_ota_override_clear("ota_unlock");
-    provision_return_home_pending = true;   // UI task (Core 1) tears down the OTA UI and shows HOME, so sleep/wake doesn't redraw "Software Update"
-    Serial.println("[OTA] return_home_pending=1 (ota_unlock)");
+    // Do not wake a sleeping Sense merely to refresh the footer after a
+    // refused/no-update check. The next Settings visit queries it normally.
+    if (g_manual_ota_ui_active) {
+      if (doc["terminal"] | false) lcd_manual_ota_finish(doc["result"] | "");
+      else g_ota_screen_active = true; // intermediate handoff is still one check
+    } else {
+      lcd_manual_ota_override_clear("ota_unlock");
+      provision_return_home_pending = true;
+    }
     Serial.println("[OTA] unlock received - all OTA flags cleared");
     return;
   } else if (strcmp(type, "OTA_CHECK") == 0) {

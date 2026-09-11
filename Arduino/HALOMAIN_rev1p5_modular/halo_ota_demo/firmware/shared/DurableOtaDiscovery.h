@@ -37,7 +37,7 @@ inline bool start_legacy_discovery(const char* retained_origin,
 // target. Pending/quarantined/armed/active target identity remains untouched.
 inline Admission reserve_discovery(const Record& old,Clock c,bool legacy_debt,
                                    bool busy,Record& out,const char* new_origin=nullptr,
-                                   const uint8_t* new_campaign=nullptr) {
+                                   const uint8_t* new_campaign=nullptr,bool explicit_manual=false) {
   const bool bench=bench_active(old);
   if(!shape(old)||(bench&&old.phase!=Phase::DISCOVERY))return Admission::IDENTITY;
   if(!clock_valid(old,c))return Admission::CLOCK;
@@ -57,7 +57,9 @@ inline Admission reserve_discovery(const Record& old,Clock c,bool legacy_debt,
     memcpy(out.campaign,new_campaign,16);
   }
   if(!bench&&c.epoch/86400UL>old.budget_day) {
-    if(!c.normal_maintenance)return Admission::NOT_DUE;
+    // A deliberate request may open the new day only after completed work.
+    // Failed, deferred and read-only campaigns keep their original schedule/debt.
+    if(!c.normal_maintenance && !(explicit_manual&&old.phase==Phase::RESOLVED))return Admission::NOT_DUE;
     out.budget_day=c.epoch/86400UL;out.budget_granted=c.epoch;
     out.network_windows=out.day_attempts=out.begins[0]=out.begins[1]=0;
     out.attempt_begins[0]=out.attempt_begins[1]=0;out.work_remaining_ms=kDailyWorkMs;

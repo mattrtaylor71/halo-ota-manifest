@@ -211,38 +211,22 @@ static void ship_menu_send_retry(const char* label) {
 }
 
 static void ship_menu_send_manual_ota(const char* reason) {
-  request_sense_wake("manual_ota");
+  if (g_manual_ota_ui_active || ota_locked || g_ota_screen_active ||
+      g_lcd_ota_uart_receiving || provisioning_input_locked()) return;
+  g_manual_ota_ui_active = true;
+  g_manual_ota_result = 0;
+  g_manual_ota_result_until_ms = 0;
+  g_ota_screen_active = true;
+  provision_return_home_pending = false;
   lcd_manual_ota_override_set("manual_button");
-  if (ship_menu_settings_status != NULL) {
-    lv_label_set_text(ship_menu_settings_status, "Starting OTA...");
-    lv_obj_clear_flag(ship_menu_settings_status, LV_OBJ_FLAG_HIDDEN);
-    ship_menu_settings_status_hide_at_ms = millis() + 3000;
-    lv_timer_handler();
-  }
-  StaticJsonDocument<160> doc;
-  doc["ver"] = PROTOCOL_VERSION;
-  doc["type"] = "INPUT_OTA_CHECK";
-  doc["msg_id"] = get_next_msg_id();
-  doc["ts"] = millis();
-  if (reason && reason[0]) {
-    doc["reason"] = reason;
-  }
-  String output;
-  serializeJson(doc, output);
-  senseSerial.println(output);
-  Serial.printf("[OTA_MANUAL] tx INPUT_OTA_CHECK reason=%s\n", reason ? reason : "manual");
-  unsigned long until = millis() + LCD_OTA_CHECK_STAY_AWAKE_MS;
-  if (until > ota_stay_awake_until_ms) {
-    ota_stay_awake_until_ms = until;
-  }
+  g_manual_ota_ui_deadline_ms = g_manual_ota_override_until_ms;
+  request_sense_wake("manual_ota");
+  ota_stay_awake_until_ms = g_manual_ota_override_until_ms;
+  tx_msg_t msg = {};
+  strlcpy(msg.type, "INPUT_OTA_CHECK", sizeof(msg.type));
+  if (!uart_tx_enqueue(&msg, "manual_ota")) lcd_manual_ota_finish("request_failed");
   resetActivityTimer();
-  if (status_screen != NULL && status_label != NULL) {
-    status_screen_use_text("Starting OTA\nUpdate...");
-    lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
-    status_screen_shown_time = millis();
-    set_status_reset_visible(false);
-    lv_timer_handler();
-  }
+  Serial.printf("[OTA_MANUAL] queued single user request reason=%s\n", reason ? reason : "manual");
 }
 
 static void ship_menu_update_versions_label() {
@@ -254,7 +238,7 @@ static void ship_menu_update_versions_label() {
   char buf[64];
   // Compact single-line version string for the bottom of the round settings
   // screen (kept narrow so it stays within the 360x360 circle).
-  snprintf(buf, sizeof(buf), "LCD %s \xE2\x80\xA2 Sense %s", lcd_fw, sense_fw);
+  snprintf(buf, sizeof(buf), "LCD %s | Sense %s", lcd_fw, sense_fw);
   lv_label_set_text(ship_menu_settings_versions, buf);
 }
 

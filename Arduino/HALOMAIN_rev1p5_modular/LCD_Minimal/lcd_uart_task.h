@@ -279,8 +279,9 @@ static void uart_task(void *arg) {
                 Serial.println("[USB_CMD] maintenance window clear failed");
               }
             } else if (strcmp(usb_buf, "ota") == 0) {
-              Serial.println("[USB_CMD] shortcut 'ota' -> INPUT_OTA_CHECK");
-              uart_send_input_message("INPUT_OTA_CHECK");
+              // Run the exact Settings action on the LVGL owner task.
+              g_manual_ota_ui_requested = true;
+              Serial.println("[USB_CMD] ota -> Settings software-update action");
             } else if (strncmp(usb_buf, "sfwd ", 5) == 0) {
               // Generic Sense forwarder: 'sfwd <raw json>' relays the rest of the
               // line verbatim to the Sense over the inter-board UART. Lets the

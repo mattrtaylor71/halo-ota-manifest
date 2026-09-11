@@ -2572,7 +2572,8 @@ static bool parse_input_message(const char* json_str) {
   } else if (strcmp(type, "INPUT_OTA_CHECK") == 0) {
     const char* reason = doc["reason"] | "manual";
     Serial.printf("[UART] INPUT_OTA_CHECK received reason=%s\n", reason);
-    uart_send_ui_status("Starting OTA...");
+    // LCD owns this action's persistent update overlay. A generic transient
+    // UI_STATUS would remain queued behind it and replay after the result.
 #ifdef HALO_SENSE_PROD_WRAPPER
     halo_prod_request_manual_ota(reason);
 #else
