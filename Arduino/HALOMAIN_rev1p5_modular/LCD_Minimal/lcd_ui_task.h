@@ -192,8 +192,6 @@ static void ui_task(void *arg) {
         ota_description = halo_ui_label(ota_overlay, "Getting things ready...",
                                         &lv_font_montserrat_14, 0xD1D1D1, 50, 236, 260);
         lv_obj_set_style_text_line_space(ota_description, 3, 0);
-        halo_ui_label(ota_overlay, "Keep HALO connected.", &lv_font_montserrat_12, 0xA0A0A0, 70,
-                      300, 220);
         ota_progress = lv_bar_create(ota_overlay);
         lv_obj_set_pos(ota_progress, 80, 212);
         lv_obj_set_size(ota_progress, 200, 20);
@@ -228,9 +226,12 @@ static void ui_task(void *arg) {
                                          : (finishing ? "Finishing update" : "Checking for updates"));
         lv_obj_set_pos(ota_label, 40, is_transfer ? 84 : 196);
         lv_label_set_text(ota_description, manual_result ? result_detail : is_transfer ? "Display transfer only."
-                                                       : (finishing ? "HALO may restart itself."
-                                                                    : "Getting things ready..."));
+                                                       : (finishing ? "" : "Getting things ready..."));
         lv_obj_set_pos(ota_description, 50, is_transfer ? 250 : 236);
+        if (finishing && !manual_result && !is_transfer)
+          lv_obj_add_flag(ota_description, LV_OBJ_FLAG_HIDDEN);
+        else
+          lv_obj_clear_flag(ota_description, LV_OBJ_FLAG_HIDDEN);
         if (is_transfer) {
           lv_obj_clear_flag(ota_percent, LV_OBJ_FLAG_HIDDEN);
           lv_obj_clear_flag(ota_progress, LV_OBJ_FLAG_HIDDEN);

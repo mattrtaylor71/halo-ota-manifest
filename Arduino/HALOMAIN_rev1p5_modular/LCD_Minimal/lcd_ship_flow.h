@@ -93,7 +93,7 @@ static void ship_start_logged_success_animation() {
 }
 
 static void ship_start_voice_ack_animation() {
-  halo_ui_reward_start(ship_voice_ack_icon);
+  halo_ui_voice_ack_start(ship_voice_ack_icon);
 }
 
 static void ship_update_hold_still_countdown() {
