@@ -123,35 +123,58 @@ static void ship_configure_scan_choice_screen(void) {
   if (!ship_expiry_choice_screen)
     return;
   bool discard = ship_choice_mode_is_discard();
+  // The shared label becomes the discard question; no quantity motion may carry
+  // over into that mode, even when changing screens mid-animation.
+  lv_anim_del(expiry_choice_quantity_label, NULL);
+  lv_obj_set_style_text_opa(expiry_choice_quantity_label, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(ship_expiry_choice_skip_btn, LV_OBJ_FLAG_HIDDEN);
   lv_label_set_text(lv_obj_get_child(ship_choice_badge, 0), discard ? "DISCARD" : "ADD FOOD");
   if (discard) {
     lv_obj_add_flag(ship_expiry_choice_qty_prefix, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ship_choice_quantity_card, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ship_choice_quantity_up, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ship_choice_quantity_down, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ship_expiry_choice_prompt, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_font(expiry_choice_quantity_label, &nunito_24, 0);
     lv_obj_set_style_text_color(expiry_choice_quantity_label, lv_color_hex(COL_DARK), 0);
-    lv_obj_set_pos(expiry_choice_quantity_label, 40, 110);
+    lv_obj_set_pos(expiry_choice_quantity_label, 40, 65);
     lv_obj_set_width(expiry_choice_quantity_label, 280);
     lv_label_set_text(expiry_choice_quantity_label, "Add it to your\nshopping list?");
-    lv_obj_set_pos(ship_expiry_choice_prompt, 40, 186);
-    lv_label_set_text(ship_expiry_choice_prompt, "For the next grocery run.");
-    lv_obj_add_flag(ship_choice_question, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(ship_expiry_choice_skip_label, "NOT NOW");
     lv_label_set_text(ship_expiry_choice_add_label, "ADD TO LIST");
-    lv_obj_set_y(ship_expiry_choice_skip_btn, 238);
-    lv_obj_set_y(ship_expiry_choice_add_btn, 238);
+    lv_obj_set_pos(ship_expiry_choice_skip_btn, 186, 150);
+    lv_obj_set_size(ship_expiry_choice_skip_btn, 126, 144);
+    lv_obj_set_style_radius(ship_expiry_choice_skip_btn, 20, 0);
+    lv_obj_set_style_bg_color(ship_expiry_choice_skip_btn, lv_color_hex(COL_WHITE), 0);
+    lv_obj_set_style_text_color(ship_expiry_choice_skip_label, lv_color_hex(COL_DARK), 0);
+    lv_obj_set_style_text_font(ship_expiry_choice_skip_label, &nunito_16, 0);
+    lv_obj_set_width(ship_expiry_choice_skip_label, 118);
+    lv_obj_center(ship_expiry_choice_skip_label);
+    lv_obj_clear_flag(ship_expiry_choice_add_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(ship_expiry_choice_add_btn, 48, 150);
+    lv_obj_set_size(ship_expiry_choice_add_btn, 126, 144);
+    lv_obj_set_style_radius(ship_expiry_choice_add_btn, 20, 0);
+    lv_obj_center(ship_expiry_choice_add_label);
   } else {
     lv_obj_clear_flag(ship_expiry_choice_qty_prefix, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_text_font(expiry_choice_quantity_label, &nunito_60, 0);
+    lv_obj_clear_flag(ship_choice_quantity_card, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ship_choice_quantity_up, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ship_choice_quantity_down, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ship_expiry_choice_prompt, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_color(expiry_choice_quantity_label, lv_color_hex(COL_GREEN), 0);
-    lv_obj_set_pos(expiry_choice_quantity_label, 60, 92);
-    lv_obj_set_width(expiry_choice_quantity_label, 240);
+    lv_obj_set_x(expiry_choice_quantity_label, 124);
+    lv_obj_set_width(expiry_choice_quantity_label, 112);
     expiry_choice_update_quantity_label();
-    lv_obj_set_pos(ship_expiry_choice_prompt, 40, 160);
-    lv_label_set_text(ship_expiry_choice_prompt, "Turn the dial to adjust");
-    lv_obj_clear_flag(ship_choice_question, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(ship_expiry_choice_skip_label, "NO DATE");
-    lv_label_set_text(ship_expiry_choice_add_label, "ADD DATE");
-    lv_obj_set_y(ship_expiry_choice_skip_btn, 232);
-    lv_obj_set_y(ship_expiry_choice_add_btn, 232);
+    lv_label_set_text(ship_expiry_choice_skip_label, "CONFIRM");
+    lv_obj_set_pos(ship_expiry_choice_skip_btn, 52, 228);
+    lv_obj_set_size(ship_expiry_choice_skip_btn, 256, 74);
+    lv_obj_set_style_radius(ship_expiry_choice_skip_btn, 16, 0);
+    lv_obj_set_style_bg_color(ship_expiry_choice_skip_btn, lv_color_hex(COL_GREEN), 0);
+    lv_obj_set_style_text_color(ship_expiry_choice_skip_label, lv_color_hex(COL_WHITE), 0);
+    lv_obj_set_style_text_font(ship_expiry_choice_skip_label, &nunito_22, 0);
+    lv_obj_set_width(ship_expiry_choice_skip_label, 248);
+    lv_obj_center(ship_expiry_choice_skip_label);
+    lv_obj_add_flag(ship_expiry_choice_add_btn, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
@@ -408,7 +431,17 @@ static void expiry_choice_update_quantity_label() {
   }
   char qty_text[12];
   snprintf(qty_text, sizeof(qty_text), "%d", expiry_choice_quantity);
+  const lv_font_t* font = expiry_choice_quantity < 100 ? &nunito_60
+                          : expiry_choice_quantity < 1000 ? &nunito_44
+                          : expiry_choice_quantity < 100000 ? &nunito_32 : &nunito_16;
+  ship_choice_quantity_base_y = 144 - font->line_height / 2;
+  lv_anim_del(expiry_choice_quantity_label, NULL);
+  lv_obj_set_style_text_font(expiry_choice_quantity_label, font, 0);
+  lv_obj_set_style_text_opa(expiry_choice_quantity_label, LV_OPA_COVER, 0);
+  lv_obj_set_y(expiry_choice_quantity_label, ship_choice_quantity_base_y);
   lv_label_set_text(expiry_choice_quantity_label, qty_text);
+  if (ship_choice_quantity_up)
+    lv_obj_set_style_text_opa(ship_choice_quantity_up, expiry_choice_quantity == 1 ? LV_OPA_30 : LV_OPA_COVER, 0);
 }
 
 static void expiry_choice_adjust_quantity(int delta) {
@@ -422,6 +455,17 @@ static void expiry_choice_adjust_quantity(int delta) {
   expiry_choice_quantity = next;
   Serial.printf("[EXPIRY_CHOICE] quantity=%d\n", expiry_choice_quantity);
   expiry_choice_update_quantity_label();
+  // Animate only the numeral; touch targets and the original deadline stay put.
+  if (expiry_choice_quantity_label) {
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, expiry_choice_quantity_label);
+    lv_anim_set_values(&a, ship_choice_quantity_base_y + (delta > 0 ? 7 : -7), ship_choice_quantity_base_y);
+    lv_anim_set_time(&a, 140);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&a, ship_anim_set_y);
+    lv_anim_start(&a);
+  }
 }
 
 static bool expiry_choice_handle_touch(uint16_t check_x, uint16_t check_y) {
@@ -434,13 +478,14 @@ static bool expiry_choice_handle_touch(uint16_t check_x, uint16_t check_y) {
   }
   bool skip_pressed = false;
   bool add_pressed = false;
-  if (ship_expiry_choice_skip_btn != NULL) {
+  if (ship_expiry_choice_skip_btn != NULL && !lv_obj_has_flag(ship_expiry_choice_skip_btn, LV_OBJ_FLAG_HIDDEN)) {
     lv_area_t skip_area;
     lv_obj_get_coords(ship_expiry_choice_skip_btn, &skip_area);
     skip_pressed = (check_x >= skip_area.x1 && check_x <= skip_area.x2 &&
                     check_y >= skip_area.y1 && check_y <= skip_area.y2);
   }
-  if (ship_expiry_choice_add_btn != NULL) {
+  if (ship_choice_mode_is_discard() && ship_expiry_choice_add_btn != NULL &&
+      !lv_obj_has_flag(ship_expiry_choice_add_btn, LV_OBJ_FLAG_HIDDEN)) {
     lv_area_t add_area;
     lv_obj_get_coords(ship_expiry_choice_add_btn, &add_area);
     add_pressed = (check_x >= add_area.x1 && check_x <= add_area.x2 &&
@@ -482,19 +527,16 @@ static bool expiry_choice_handle_touch(uint16_t check_x, uint16_t check_y) {
 
     String output;
     serializeJson(doc, output);
-    request_sense_wake("expiry_choice_left");
+    request_sense_wake("quantity_confirm");
     uart_send_json(output.c_str());
-    Serial.printf("[EXPIRY_CHOICE] Sent empty expiration date to Sense (left tap) quantity=%d\n",
+    Serial.printf("[EXPIRY_CHOICE] Confirmed quantity=%d without expiration\n",
                   expiry_choice_quantity);
 
     expiry_submitted = true;
     ship_expiry_choice_shown_time = 0;
     g_ship_ui_finalized = true;
     g_ship_ui_finalized_job_id = g_ship_ui_job_id;
-    UI_SHOW(SCREEN_SHIP_LOGGED, "expiry_choice_skip");
-  } else if (add_pressed) {
-    // Carry this opportunity's original deadline into the date picker.
-    ship_show_expiry_screen();
+    UI_SHOW(SCREEN_SHIP_LOGGED, "quantity_confirm");
   } else {
     Serial.println("[EXPIRY_CHOICE] tap ignored (outside buttons)");
   }

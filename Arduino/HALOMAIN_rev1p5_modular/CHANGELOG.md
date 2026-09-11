@@ -1,5 +1,11 @@
 # Firmware changelog
 
+## 6.4.126 — check-in and discard UI candidate
+
+Replace the check-in expiration choices with the approved quantity picker and one large green Confirm button. Small chevrons bracket the number, and dial changes settle in 140 ms. Confirm uses the existing selected-quantity submission with an empty expiration date; the old Add Date touch route is removed. Preserve the existing 30-second default submission.
+
+Remove the discard subtitle and enlarge Add to List and Not Now to side-by-side 126 × 144 pixel buttons. Reset the shared screen's geometry, visibility and quantity motion on each mode change. Production build, focused functional validation and publication are pending; retain 125 as the published baseline until their receipts are recorded.
+
 ## 6.4.125 — published September 11, 2026 for manual OTA testing
 
 Change the transfer heading to "Something new is coming" and remove "Display transfer only." "Keep HALO connected." remains removed. Progress, checking/result details and OTA behavior are unchanged. Only LCD_Minimal/lcd_ui_task.h changes in runtime source. Version 124 was already published, so these new bytes use 125.

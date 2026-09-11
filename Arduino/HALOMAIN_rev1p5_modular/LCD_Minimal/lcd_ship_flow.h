@@ -15,7 +15,10 @@
 
 static lv_obj_t* ship_hold_badge = NULL;
 static lv_obj_t* ship_choice_badge = NULL;
-static lv_obj_t* ship_choice_question = NULL;
+static lv_obj_t* ship_choice_quantity_card = NULL;
+static lv_obj_t* ship_choice_quantity_up = NULL;
+static lv_obj_t* ship_choice_quantity_down = NULL;
+static int ship_choice_quantity_base_y = 122;
 static bool ship_choice_returning_from_date = false;
 
 static void expiry_update_timeout_ring() {
@@ -189,18 +192,22 @@ static void ship_init_expiry_choice() {
   ship_choice_badge = halo_ui_badge(ship_expiry_choice_screen, "ADD FOOD", 22, 110);
   ship_expiry_choice_qty_prefix =
       halo_ui_label(ship_expiry_choice_screen, "QUANTITY", &nunito_12, COL_MUTED, 70, 64, 220);
+  ship_choice_quantity_card = halo_ui_card(ship_expiry_choice_screen, 112, 84, 136, 118, COL_WHITE, 28);
+  ship_choice_quantity_up =
+      halo_ui_icon(ship_expiry_choice_screen, HALO_ICON_CHEVRON_UP, 172, 91, 16, COL_TEAL);
+  ship_choice_quantity_down =
+      halo_ui_icon(ship_expiry_choice_screen, HALO_ICON_CHEVRON_DOWN, 172, 179, 16, COL_TEAL);
   expiry_choice_quantity_label =
-      halo_ui_label(ship_expiry_choice_screen, "1", &nunito_60, COL_GREEN, 60, 92, 240);
-  ship_expiry_choice_prompt = halo_ui_label(ship_expiry_choice_screen, "Turn the dial to adjust",
-                                            &lv_font_montserrat_14, COL_TEXT2, 40, 160, 280);
-  ship_choice_question = halo_ui_label(ship_expiry_choice_screen, "Add an expiry date?", &nunito_18,
-                                       COL_DARK, 40, 192, 280);
+      halo_ui_label(ship_expiry_choice_screen, "1", &nunito_60, COL_GREEN, 124, 122, 112);
+  ship_expiry_choice_prompt = halo_ui_label(ship_expiry_choice_screen, "Turn to change",
+                                            &lv_font_montserrat_12, COL_TEAL, 70, 210, 220);
   ship_expiry_choice_skip_btn =
-      halo_ui_button(ship_expiry_choice_screen, 54, 232, 118, 54, "NO DATE", COL_WHITE, COL_DARK);
+      halo_ui_button(ship_expiry_choice_screen, 52, 228, 256, 74, "CONFIRM");
   ship_expiry_choice_skip_label = lv_obj_get_child(ship_expiry_choice_skip_btn, 0);
   ship_expiry_choice_add_btn =
-      halo_ui_button(ship_expiry_choice_screen, 188, 232, 118, 54, "ADD DATE");
+      halo_ui_button(ship_expiry_choice_screen, 48, 150, 126, 144, "ADD TO LIST");
   ship_expiry_choice_add_label = lv_obj_get_child(ship_expiry_choice_add_btn, 0);
+  lv_obj_add_flag(ship_expiry_choice_add_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void ship_init_processing() {

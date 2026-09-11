@@ -101,7 +101,9 @@ enum HaloUiIcon {
   HALO_ICON_CHECK,
   HALO_ICON_CHEVRON,
   HALO_ICON_WARNING,
-  HALO_ICON_REFRESH
+  HALO_ICON_REFRESH,
+  HALO_ICON_CHEVRON_UP,
+  HALO_ICON_CHEVRON_DOWN
 };
 
 static void halo_ui_icon_draw(lv_event_t* e) {
@@ -182,6 +184,14 @@ static void halo_ui_icon_draw(lv_event_t* e) {
   case HALO_ICON_CHEVRON:
     seg(9, 5, 16, 12);
     seg(16, 12, 9, 19);
+    break;
+  case HALO_ICON_CHEVRON_UP:
+    seg(6, 15, 12, 9);
+    seg(12, 9, 18, 15);
+    break;
+  case HALO_ICON_CHEVRON_DOWN:
+    seg(6, 9, 12, 15);
+    seg(12, 15, 18, 9);
     break;
   case HALO_ICON_MIC:
     box(9, 2, 6, 12, 3);

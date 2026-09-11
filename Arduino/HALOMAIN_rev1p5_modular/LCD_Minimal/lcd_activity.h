@@ -420,6 +420,7 @@ static void ui_reset_lvgl_objects() {
   debug_btn_back_label = NULL;
   expiry_choice_quantity_label = NULL;
   ship_expiry_choice_qty_prefix = NULL;
+  ship_expiry_choice_screen = NULL;
   ship_expiry_choice_prompt = NULL;
   ship_expiry_choice_timeout_ring = NULL;
   ship_expiry_choice_add_caption = NULL;
@@ -488,7 +489,9 @@ static void ui_reset_lvgl_objects() {
   provision_ui_qr_failed = false;
   ship_hold_badge = NULL;
   ship_choice_badge = NULL;
-  ship_choice_question = NULL;
+  ship_choice_quantity_card = NULL;
+  ship_choice_quantity_up = NULL;
+  ship_choice_quantity_down = NULL;
   ship_choice_returning_from_date = false;
   ship_voice_badge = NULL;
   shopping_list_count_label = NULL;
