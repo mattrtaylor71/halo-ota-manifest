@@ -391,7 +391,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.126",
+  "current_production_latest_version": "6.4.129",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -706,9 +706,9 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation128/DEVICE-VALIDATION.json",
       "sha256": "6935d8777ad5db9335e4850299c378e93f76f15b843969b858c55684522826a4"
     },
-    "publication_status": "Local installed build only. Both production latest manifests remain126; no127/128 firmware published.",
+    "publication_status": "128 remains the installed local development baseline and was not itself published. The runtime-equivalent version-only129 pair is now the production latest; its scheduled transfer failed.",
     "device_acceptance": "Exact128/app0 SDK VALID on both boards. Six real HTTP200 eight-item refreshes applied on LCD, two viewport scroll cycles, two manual policy exits and paired natural sleep. Actual zero-address startup clock failure recovered once in3751ms; cloud corroborated boot1639 fresh clock and3/3 successful fetches. Daily limit prevented manifest comparison; no new OTA transfer/scheduled/cold-power/USB-free qualification.",
-    "instruction": "Continue from128 artifact source7025f07cc9efd3b9128c23df6d7eb67586e287d0 and subsequent records in this checkout. Preserve owner-read, UART frame, DNS retry and prior UI/OTA fixes.126 remains public, not the current local development source."
+    "instruction": "Continue from128 artifact source7025f07cc9efd3b9128c23df6d7eb67586e287d0 and subsequent records in this checkout. Preserve owner-read, UART frame, DNS retry and prior UI/OTA fixes. Published129 uses the same runtime from committed sourcebbcf3deb854de72db929da53fa078f1c732acb28; publication does not qualify its failed scheduled transfer."
   },
   "published_manual_test_releases": [
     {
@@ -1195,7 +1195,12 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation128/DEVICE-VALIDATION.json",
       "sha256": "6935d8777ad5db9335e4850299c378e93f76f15b843969b858c55684522826a4"
     },
-    "scope": "Exact128/app0 SDKVALID on both boards after fresh USB-triggered boot,3/3 real list refreshes/scroll, recovered manual clock retry, actualpolicy_daily_limit, Home8.32s and paired sleep.127/app1 preserved. This is scoped functional acceptance, not a new firmware OTA transfer."
+    "scope": "Exact128/app0 SDKVALID on both boards after fresh USB-triggered boot,3/3 real list refreshes/scroll, recovered manual clock retry, actualpolicy_daily_limit, Home8.32s and paired sleep.127/app1 preserved. This is scoped functional acceptance, not a new firmware OTA transfer.",
+    "post_scheduled129_identity": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled-ota-20260912-129/restore-identity001/result.json",
+      "sha256": "8da26834745c1fe4bdfbfe23bdeeb04e9898bf16e8d85bfaf691eeb5237f4f38"
+    },
+    "post_scheduled129_scope": "Both boards remain exact128/app0 SDK VALID with LCD OTA/binary flags clear after the failed scheduled transfer. This later identity check does not convert the failed OTA into a pass."
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -1263,7 +1268,8 @@
     },
     "based_on_version": "6.4.126",
     "scope": "Local owner-access handles, empty-owner guard, atomic JSON message delivery, one bounded manual DNS/SNTP retry and truthful terminal ordering. No quota, debt, target, daily schedule or UI redesign changes.",
-    "published": false
+    "published": false,
+    "scheduled_ota_acceptance": "The subsequent128-to129 scheduled case woke and admitted successfully but failed at LCD chunk acknowledgement; no quick retry followed phaseDEFERRED. Full paired OTA remains unqualified."
   },
   "previous_last_verified_device_health_126": {
     "version": "6.4.126",
@@ -1324,5 +1330,83 @@
       "sha256": "06965205ba2ee9af820d36e8bc3bf250db26d3373d5ca90e6777337cbc0cc827"
     },
     "scope": "Both127/app1 SDK VALID before/after manual clock failure; automatic Home8.125s and paired sleep. Four HTTP200 lists, three applied by LCD. Missing startup UI_LIST and skipped no-address retry remain open; not full functional acceptance."
+  },
+  "published_scheduled_test_release_129": {
+    "version": "6.4.129",
+    "status": "PUBLISHED_SCHEDULED_TRANSFER_FAILED",
+    "artifact_source_commit": "bbcf3deb854de72db929da53fa078f1c732acb28",
+    "build_id": "6.4.129-20260912T215437Z-bbcf3deb854d",
+    "runtime_changed": false,
+    "runtime_comparison_version": "6.4.128",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation129/RELEASE-PAIR.json",
+      "sha256": "304a1fb45bcd2a5b7119a22b60eda976e5527cf2adf1c90c00326546dc68e3db"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation129/SOURCE-SCOPE.json",
+      "sha256": "a5a4f2f81063d2565a5ceb115db5fa96fca4a02ad82773d9981aaf779bfbf270"
+    },
+    "verified_publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation129/PUBLISHED.json",
+      "sha256": "02eec3f9f68929d09adde4ab48ebd099802cf08cccd8d8f61d14a1663093b4ce"
+    },
+    "published_epoch": 1789250488.234896,
+    "publication_scope": "Both canonical shipping builds/artifact checks and fresh public manifest/full-binary readbacks passed. Only generated version/build headers differ from128; resource footprints unchanged.",
+    "installed_version": "6.4.128",
+    "full_ota_qualified": false
+  },
+  "scheduled_ota_case_129": {
+    "status": "FAIL_SCHEDULED_LCD_PROXY_AND_NO_FAST_RETRY",
+    "case_due_epoch": 1789251720,
+    "calendar_origin": "nightly_20260913",
+    "campaign": "acb82cabb813c96da3a75dc06de35c6a",
+    "arm": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled-ota-20260912-129/ARMED.json",
+      "sha256": "afb9337fb61deebb1513b3490cf539e56826790ad24f433fe09d5bd5f2c4bbab"
+    },
+    "autonomous_result": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled-ota-20260912-129/AUTONOMOUS-RESULT.json",
+      "sha256": "d4ad3109103c1a94e706c69b9a51a2fac1eb52364016f038df45d6ee62f806ab"
+    },
+    "wake_and_admission_succeeded": true,
+    "paired_transfer_succeeded": false,
+    "failure": "LCD UART sequence646 lacked a matching ACK after five sends;330248 downloaded bytes,329736 acknowledged bytes,512-byte pending chunk. TLS socket still held4521 ciphertext bytes; no socket error observed.",
+    "terminal_evidence": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled-ota-20260912-129/terminal-analysis001/RESULT.json",
+      "sha256": "7cda04f1bddf38f5654f990381e87d187b4a814c9e728759c5d1d53cdef8a0f6"
+    },
+    "policy_after_failure": "DEFERRED phase6/generation5; one LCD begin and zero Sense begins. Stored retry_due was not enough to produce a quick paired retry; no retry wake observed through the closed autonomous window.",
+    "post_failure_pair_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled-ota-20260912-129/restore-identity001/result.json",
+      "sha256": "8da26834745c1fe4bdfbfe23bdeeb04e9898bf16e8d85bfaf691eeb5237f4f38"
+    },
+    "unknown": "Why the LCD stopped acknowledging remains unresolved; no memory, USB, receiver reset or framing root cause is asserted.",
+    "schedule_cleanup": {
+      "status": "PASS_NEXT_PACIFIC_WAKE_TIMERS_RESTORED_WITH_UNCREDITED_BRIDGE",
+      "normal_pacific_timezone_restored": true,
+      "next_paired_wake_restored": true,
+      "receipt": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled-ota-20260912-129/RESTORATION.json",
+        "sha256": "8d20b5789ad47186cb95fe4204b3354ce1933f5eca4f110a37ca166437b26eb9"
+      },
+      "scope": "Actual Sense wake timer targets September13 02:00 PDT; LCD SDK timer targets01:59:45 PDT and both enter deep sleep. One-night uncredited absolute bridge avoids the temporary timezone calendar-ID collision without clearing failed129 debt, credit or history. Normal future calendar rebind is not yet observed. Retained not_before1789338120 means no OTA is promised at the first restored2am wake."
+    },
+    "backend_diagnostic_compatibility": {
+      "commit": "e0c20c912a009c458f555994ce78a11149b0e147",
+      "deployed": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/backend/diagnostic-receipt129/DEPLOYED.json",
+        "sha256": "255ef7aad93e7a9d192e159bdfd2fb3160c394517ff4eb72433eaebe55f16d8e"
+      },
+      "live_device_ACK": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled-ota-20260912-129/diagnostic-compatibility-live001/RESULT.json",
+        "sha256": "2e5374a50a03baf2e8497fb457fc427c4aac5f398eb6a5518b0911fd2c5251df"
+      },
+      "scope": "Omitted the optional24-character analytics_latest_updated field from validated diagnostic receipts to fit the unchanged23-character firmware parser.17 tests and actualD3/H4 parser checks passed; real historical116 journals then uploaded handoffs, and current128 boot1649 reported LCD handoffACK committed. This repairs observability, not display transfer."
+    },
+    "fallback_scope": "Exact127/app1 preservation belongs to the earlier128 installation. The failed129 transfer wrote the inactive LCD bank; no post-failure intact127 LCD fallback is claimed.",
+    "final_case_result": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled-ota-20260912-129/RESULT.json",
+      "sha256": "3d20894b2c186b8d211793cd8e9735d01d2c2a9dc467ce88547e32d2c7804e43"
+    }
   }
 }
