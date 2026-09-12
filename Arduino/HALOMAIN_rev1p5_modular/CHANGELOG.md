@@ -1,8 +1,8 @@
 # Firmware changelog
 
-## 6.4.128 — follow-up functional candidate
+## 6.4.128 — installed; focused functional fixes verified
 
-Retry manual clock synchronization when the initial window obtained no server address, using a separate static DNS generation and the same bounded recovery budget. Serialize Sense JSON messages across producers so a shopping-list reply cannot merge into a concurrent startup diagnostic. Build and device validation are pending.
+Retry manual clock synchronization when the initial window obtained no server address, using a separate static DNS generation and the same bounded recovery budget. Serialize Sense JSON messages across producers so a shopping-list reply cannot merge into a concurrent startup diagnostic. Both canonical production builds and artifact checks passed from source `7025f07cc9efd3b9128c23df6d7eb67586e287d0`. Installed128/app0, preserving127/app1 and provisioning/accounting. Six real HTTP200 refreshes reached the LCD, scrolling0→67→0 passed twice, and both manual checks exited to Home then paired sleep. A fresh boot reproduced the zero-address clock failure; the new retry synchronized in3751ms and cloud telemetry confirmed fresh clock and3/3 successful fetches. The truthful clock result is now allowed in deployed analytics, committed separately as `e283150a2ef1c389cf30e5a80f9925776c662691`. Daily allowance still blocked manifest comparison, so this is not a no-update or firmware-transfer qualification. Initial missing-USB-log capture and earlier127 failures are preserved. Public OTA remains126; no128 publication.
 
 ## 6.4.127 — local functional bug-fix candidate
 
