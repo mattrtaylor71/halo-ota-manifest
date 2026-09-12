@@ -35,8 +35,8 @@ def definition(text, signature):
     return text[start:end]
 
 
-def time_harness():
-    source = (ROOT / 'Sense_Minimal/sense_time.h').read_text()
+def time_harness(source=None, recovery_only=False):
+    source = source or (ROOT / 'Sense_Minimal/sense_time.h').read_text()
     state = source[source.index('static const uint32_t SENSE_NTP_ATTEMPT_MS'):
                    source.index('// ── Time cache functions')]
     signatures = [
@@ -75,6 +75,14 @@ static const char*g_tz_current="PST8PDT,M3.2.0,M11.1.0";
 static std::vector<std::string> selected_servers;
 static void(*sync_callback)(timeval*)=nullptr;
 struct ip_addr_t{uint32_t addr=0;};
+struct DnsRequest{
+ const char*name;void(*callback)(const char*,const ip_addr_t*,void*);void*arg;
+};
+static std::vector<DnsRequest>dns_calls;
+static void dns_reply(unsigned index,uint32_t value){
+ const auto call=dns_calls.at(index);ip_addr_t address{};address.addr=value;
+ call.callback(call.name,&address,call.arg);
+}
 using err_t=int;
 #define IP_IS_V4(p) true
 #define ip_2_ip4(p) (p)
@@ -90,8 +98,9 @@ using err_t=int;
 #define UNLOCK_TCPIP_CORE() (--core_depth)
 static uint32_t halo_policy_ntp_budget(uint32_t){return policy_budget;}
 static err_t dns_gethostbyname_addrtype(const char* name,ip_addr_t*ip,
- void(*)(const char*,const ip_addr_t*,void*),void*,int){
+ void(*callback)(const char*,const ip_addr_t*,void*),void*arg,int){
  assert(core_depth==1);++dns_requests;
+ dns_calls.push_back({name,callback,arg});
  if(!dns_available)return ERR_INPROGRESS;
  ip->addr=!strcmp(name,"pool.ntp.org")?1:!strcmp(name,"time.nist.gov")?2:3;
  return ERR_OK;
@@ -117,12 +126,16 @@ static struct{template<class...A>void printf(const char*,A...){}void println(con
     cases = r'''
 static void reset(uint32_t budget=15000){
  now_ms=1000;policy_budget=budget;dns_requests=starts=stops=cache_writes=core_depth=0;
- dns_available=true;selected_servers.clear();sync_callback=nullptr;
+ dns_available=true;selected_servers.clear();dns_calls.clear();sync_callback=nullptr;
  g_ntp_attempt_budget_ms=15000;g_ntp_attempt_started=g_ntp_attempt_finished=false;
  g_ntp_running=g_ntp_sleep_quiesced=false;g_ntp_attempt_start_ms=0;g_ntp_dns_users=0;
  g_ntp_accept_until_ms=0;g_ntp_received_epoch=0;g_ntp_fresh_this_boot=false;
  g_ntp_manual_retry_requested=false;g_ntp_manual_retry_used=false;g_ntp_resolve_until_ms=0;
  for(auto&s:g_ntp_servers){s.requested=false;s.ipv4=0;s.done=false;}
+#if HAS_MANUAL_DNS_GENERATION
+ g_ntp_manual_resolve_until_ms=0;
+ for(auto&s:g_ntp_manual_servers){s.requested=false;s.ipv4=0;s.done=false;}
+#endif
 }
 static void expire(){now_ms=g_ntp_attempt_start_ms+g_ntp_attempt_budget_ms;sense_ntp_service();}
 int main(){
@@ -130,7 +143,7 @@ int main(){
  reset();sense_ntp_begin();assert(starts==1&&dns_requests==3&&sense_ntp_attempt_pending());
  expire();sense_ntp_begin();assert(g_ntp_attempt_finished&&starts==1&&!sense_time_has_fresh_sync());
  // Manual requested while pending: original budget/DNS deadline unchanged;
- // expiry automatically opens one bounded numeric-only alternate-server retry.
+ // expiry opens one bounded alternate-server retry and reuses cached addresses.
  reset();sense_ntp_begin();const auto dns_deadline=g_ntp_resolve_until_ms.load();
  now_ms+=5000;sense_ntp_request_manual_retry();sense_ntp_begin();
  assert(g_ntp_attempt_budget_ms==15000&&g_ntp_resolve_until_ms==dns_deadline&&starts==1);
@@ -143,6 +156,7 @@ int main(){
  assert(g_ntp_servers[1].ipv4==2); // no reopened DNS callback generation
  now_ms+=2000;sync_callback(&tv);sense_ntp_service();
  assert(sense_time_has_fresh_sync()&&cache_writes==1&&g_ntp_accept_until_ms==0);
+ assert(g_ntp_resolve_until_ms==0&&g_ntp_manual_resolve_until_ms==0);
  // Manual requested AFTER the ordinary boot window has already expired.
  reset();sense_ntp_begin();expire();now_ms+=20000;sense_ntp_request_manual_retry();sense_ntp_begin();
  assert(starts==2&&g_ntp_manual_retry_used&&g_ntp_attempt_budget_ms==40000);
@@ -163,13 +177,57 @@ int main(){
  halo_sntp_dns_acquire();sync_callback(&tv);assert(g_ntp_received_epoch==0);
  now_ms+=500;halo_sntp_dns_release();sense_ntp_begin();
  assert(g_ntp_accept_until_ms==fixed_start+40000&&dns_requests==3);
- // No cached numeric address: don't create a new hostname/DNS generation.
+ // Actual127 failure: boot DNS yielded no addresses. The explicit action now
+ // gets three distinct static callback contexts and can recover on fresh DNS.
+ reset();dns_available=false;sense_ntp_begin();assert(starts==0&&dns_requests==3);
+ expire();dns_available=true;sense_ntp_request_manual_retry();sense_ntp_begin();
+ assert(starts==1&&dns_requests==6&&g_ntp_manual_retry_used&&sense_ntp_attempt_pending());
+ for(unsigned i=0;i<3;++i){
+   assert(dns_calls[i].arg==&g_ntp_servers[i]);
+   assert(dns_calls[i+3].arg==&g_ntp_manual_servers[i]);
+   dns_reply(i,99); // stale original reply inside new window cannot cross generations
+   assert(g_ntp_servers[i].ipv4==0&&g_ntp_manual_servers[i].ipv4==i+1);
+ }
+ assert(selected_servers[0]=="10.0.0.2");sync_callback(&tv);sense_ntp_service();
+ assert(sense_time_has_fresh_sync()&&cache_writes==1);
+ // No original queries were issued because another DNS scope held the whole
+ // first window. Release then resolves via the manual generation exactly once.
+ reset();halo_sntp_dns_acquire();sense_ntp_begin();expire();
+ sense_ntp_request_manual_retry();sense_ntp_begin();assert(dns_requests==0&&g_ntp_manual_retry_used);
+ halo_sntp_dns_release();sense_ntp_begin();assert(starts==1&&dns_requests==3);
+ for(unsigned i=0;i<3;++i)assert(dns_calls[i].arg==&g_ntp_manual_servers[i]);
+ // A partial original cache is reused; only missing addresses are resolved.
+ reset();dns_available=false;sense_ntp_begin();dns_reply(0,1);sense_ntp_begin();
+ expire();dns_available=true;sense_ntp_request_manual_retry();sense_ntp_begin();
+ assert(starts==2&&dns_requests==5&&g_ntp_manual_servers[0].ipv4==1);
+ assert(dns_calls[3].arg==&g_ntp_manual_servers[1]&&dns_calls[4].arg==&g_ntp_manual_servers[2]);
+ // Async manual DNS is admitted only within its own15s, while SNTP retains
+ // the existing40s window. Neither a late original nor late manual reply helps.
  reset();dns_available=false;sense_ntp_begin();expire();sense_ntp_request_manual_retry();sense_ntp_begin();
- assert(starts==0&&dns_requests==3&&!g_ntp_manual_retry_used&&g_ntp_attempt_finished);
+ assert(starts==0&&dns_requests==6&&sense_ntp_attempt_pending());
+ const auto manual_start=g_ntp_attempt_start_ms;
+ now_ms=manual_start+14999;dns_reply(3,11);sense_ntp_begin();
+ assert(starts==1&&g_ntp_manual_servers[0].ipv4==11&&g_ntp_accept_until_ms==manual_start+40000);
+ now_ms=manual_start+15000;dns_reply(4,22);dns_reply(1,99);sense_ntp_begin();
+ assert(g_ntp_manual_servers[1].ipv4==0&&g_ntp_servers[1].ipv4==0&&dns_requests==6);
+ expire();dns_reply(5,33);sense_ntp_on_manual_sync(&tv);
+ for(unsigned i=0;i<4;++i){sense_ntp_request_manual_retry();sense_ntp_begin();}
+ assert(dns_requests==6&&starts==1&&g_ntp_received_epoch==0&&g_ntp_attempt_finished);
+ // Delaying a guard release past the new DNS deadline never extends it or
+ // dispatches new queries; the manual action still terminates by40s.
+ reset();halo_sntp_dns_acquire();sense_ntp_begin();expire();
+ sense_ntp_request_manual_retry();sense_ntp_begin();const auto held_start=g_ntp_attempt_start_ms;
+ now_ms=held_start+15000;halo_sntp_dns_release();sense_ntp_begin();
+ assert(dns_requests==0&&starts==0&&g_ntp_attempt_start_ms==held_start);
+ expire();sense_ntp_begin();assert(!sense_ntp_attempt_pending()&&dns_requests==0);
  // Sleep quiescence wins, including after a manual request was registered.
  reset();sense_ntp_begin();sense_ntp_request_manual_retry();sense_ntp_quiesce_for_sleep();
  expire();sense_ntp_begin();sense_ntp_on_sync(&tv);sense_ntp_on_manual_sync(&tv);
  assert(starts==1&&g_ntp_received_epoch==0&&!sense_time_has_fresh_sync());
+ reset();dns_available=false;sense_ntp_begin();expire();sense_ntp_request_manual_retry();sense_ntp_begin();
+ sense_ntp_quiesce_for_sleep();dns_reply(3,99);sense_ntp_on_manual_sync(&tv);sense_ntp_begin();
+ assert(starts==0&&g_ntp_received_epoch==0&&g_ntp_manual_servers[0].ipv4==0);
+ assert(g_ntp_manual_resolve_until_ms==0&&g_ntp_resolve_until_ms==0);
  // A timely reply is preserved if normal-loop service arrives after deadline.
  reset();sense_ntp_begin();now_ms+=14000;sense_ntp_on_sync(&tv);now_ms+=2000;sense_ntp_service();
  sense_ntp_request_manual_retry();sense_ntp_begin();assert(sense_time_has_fresh_sync()&&starts==1);
@@ -178,9 +236,19 @@ int main(){
  now_ms+=14999;assert(sense_ntp_attempt_pending());now_ms+=1;sense_ntp_service();sense_ntp_begin();
  assert(g_ntp_manual_retry_used&&sense_ntp_attempt_pending());
  now_ms+=40000;sense_ntp_service();assert(!sense_ntp_attempt_pending()&&g_ntp_attempt_finished);
- puts("PASS manual clock: ordinary/durable windows, during/after timeout, cached alternate server, one retry, callback generations, DNS guards, sleep, late service and wrap");
+ puts("PASS manual clock: missing/never-issued/partial/async DNS, isolated generations, finite DNS/SNTP windows, one retry, guards, sleep, durable budget, late service and wrap");
 }
 '''
+    if recovery_only:
+        cases = cases[:cases.index('int main(){')] + r'''
+int main(){
+ reset();dns_available=false;sense_ntp_begin();expire();dns_available=true;
+ sense_ntp_request_manual_retry();sense_ntp_begin();
+ assert(starts==1&&dns_requests==6&&g_ntp_manual_retry_used&&sense_ntp_attempt_pending());
+ puts("PASS actual no-address boot DNS recovery");
+}
+'''
+    prefix += '\n#define HAS_MANUAL_DNS_GENERATION ' + str(int('g_ntp_manual_servers' in state)) + '\n'
     return '\n'.join([prefix, state, *[definition(source, s) for s in signatures], cases])
 
 

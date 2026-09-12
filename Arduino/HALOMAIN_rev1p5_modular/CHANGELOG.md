@@ -1,12 +1,16 @@
 # Firmware changelog
 
+## 6.4.128 — follow-up functional candidate
+
+Retry manual clock synchronization when the initial window obtained no server address, using a separate static DNS generation and the same bounded recovery budget. Serialize Sense JSON messages across producers so a shopping-list reply cannot merge into a concurrent startup diagnostic. Build and device validation are pending.
+
 ## 6.4.127 — local functional bug-fix candidate
 
 Give each provisioning accessor its own Preferences handle so concurrent reads cannot falsely report an absent owner. Reject empty-owner shopping fetch/delete requests before HTTP.
 
 Give explicit manual OTA one bounded extra40-second clock-sync opportunity after the ordinary15-second window, using previously resolved numeric servers and preserving DNS/late-callback guards. Save the accurate clock-failure result before releasing the LCD; do not promise a newly scheduled retry after exhaustion. Daily allowance, durable debt, firmware routes and2am schedule are unchanged.
 
-Canonical build and on-device validation are pending. Public production remains126; its September12 automated pass found these defects and did not establish full functional acceptance.
+Canonical builds and artifact checks passed from source `3fb0f1019040cfabcbb1dc370cdb8c3f8186ea63`. Installed127/app1 and preserved126/app0, provisioning and accounting. Both SDK VALID, four HTTP200 fetches, three LCD list applications, scrolling, truthful clock-failure terminal, automatic Home8.125s and paired sleep were observed. One startup UI_LIST was lost despite HTTP200, consistent with the unchanged split-write JSON sender; a later manual request lacked any resolved time server and therefore did not start the numeric-only retry. Both gaps are retained as failed acceptance, to be addressed in128. Public production remains126.
 
 ## 6.4.126 — published for manual OTA testing
 

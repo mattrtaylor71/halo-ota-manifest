@@ -86,6 +86,37 @@ static unsigned long uart_rx_dropped_since_frame = 0;
 static size_t uart_rx_oversize_drop = 0;
 static bool uart_initialized = false;
 
+// JSON frames have two writes (payload and newline). HardwareSerial locks each
+// write separately, so a worker can otherwise append its payload to a diagnostic
+// frame before its newline; the LCD then silently parses only the first object.
+// Initialize once in initUarts(), before any worker task starts. Static storage
+// avoids adding an allocation to the memory-sensitive upload/OTA paths.
+static StaticSemaphore_t uart_json_tx_mutex_storage;
+static SemaphoreHandle_t uart_json_tx_mutex = NULL;
+static constexpr uint32_t UART_JSON_TX_LOCK_WAIT_MS = 2000;
+
+static void uart_json_tx_init() {
+  if (uart_json_tx_mutex == NULL) {
+    uart_json_tx_mutex = xSemaphoreCreateMutexStatic(&uart_json_tx_mutex_storage);
+  }
+}
+
+class UartJsonTxLock {
+ public:
+  UartJsonTxLock() : held_(uart_json_tx_mutex != NULL &&
+      xSemaphoreTake(uart_json_tx_mutex, pdMS_TO_TICKS(UART_JSON_TX_LOCK_WAIT_MS)) == pdTRUE) {}
+  ~UartJsonTxLock() { release(); }
+  bool held() const { return held_; }
+  void release() {
+    if (held_) {
+      xSemaphoreGive(uart_json_tx_mutex);
+      held_ = false;
+    }
+  }
+ private:
+  bool held_;
+};
+
 // ── TX/RX type tracking ──────────────────────────────────────────────
 
 static void uart_note_tx_type(const char* json_str) {
@@ -127,6 +158,7 @@ static void initUarts() {
     Serial.println("[UART_INIT] skipped already_initialized=1");
     return;
   }
+  uart_json_tx_init();
   sense_lcd_mode_restore();
   Serial.begin(115200);
   // Keep USB console backpressure bounded when a cable remains attached but
@@ -396,6 +428,16 @@ static bool validate_protocol_message(JsonDocument& doc) {
 // ── Core TX ──────────────────────────────────────────────────────────
 
 static void uart_send_json(const char* json_str, bool explicit_mode_probe = false) {
+  if (!json_str) return;
+  const size_t len = strlen(json_str);
+  // Task context only; there are no callbacks or recursive sends in this scope.
+  // A 12KB list occupies ~1.07s at 115200 baud. Bound contention at 2s, and keep
+  // slow USB diagnostics outside the lock. Recheck ownership AFTER waiting.
+  UartJsonTxLock tx_lock;
+  if (!tx_lock.held()) {
+    Serial.println("[UART_TX] json_skipped reason=tx_lock_unavailable");
+    return;
+  }
   // Block JSON TX while LCD OTA proxy owns the UART for binary COBS framing
   if (g_lcd_ota_proxy_owns_uart) {
     return;
@@ -425,13 +467,13 @@ static void uart_send_json(const char* json_str, bool explicit_mode_probe = fals
   if (g_img_spool_tx_active) {
     return;
   }
-  size_t len = strlen(json_str);
   last_uart_tx_ms = millis();
   uart_tx_count++;
   uart_note_tx_type(json_str);
   lcdSerial.print(json_str);
   lcdSerial.print("\n");
   lcdSerial.flush();
+  tx_lock.release();
 #if HALO_DEBUG_SENSITIVE
   Serial.printf("[PROTO] TX: len=%d, %s\n", (int)len, json_str);
 #else

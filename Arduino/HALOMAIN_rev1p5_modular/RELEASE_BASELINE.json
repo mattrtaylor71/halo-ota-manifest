@@ -1075,6 +1075,20 @@
         "sha256": "340514ee553234f8caa6eb0226e2b11eecb61c8f32fafa163966224ebebf1b5b"
       },
       "fallback": "Exact121 retained in app0 on both boards; installer verified full current-bank preservation."
+    },
+    {
+      "version": "6.4.127",
+      "status": "INSTALLED_VALID_FUNCTIONAL_GAPS_RETAINED_NOT_PUBLISHED",
+      "source_commit": "3fb0f1019040cfabcbb1dc370cdb8c3f8186ea63",
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation127/RELEASE-PAIR.json",
+        "sha256": "e92ef405555b969fb73eade30e44078424f8b6c77183efa2c5d917fa374421a3"
+      },
+      "device_validation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation127/DEVICE-VALIDATION.json",
+        "sha256": "06965205ba2ee9af820d36e8bc3bf250db26d3373d5ca90e6777337cbc0cc827"
+      },
+      "fallback": "Exact126 app0 retained on both boards; installer NVS/accounting untouched."
     }
   ],
   "previous_development_baseline_120": {
@@ -1157,20 +1171,20 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.126",
+    "version": "6.4.127",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/RELEASE-PAIR.json",
-      "sha256": "e4263663162f2d8d0ef19c5f032fcd74756be077acf7626b6c7e8d6fd4ce9c98"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation127/RELEASE-PAIR.json",
+      "sha256": "e92ef405555b969fb73eade30e44078424f8b6c77183efa2c5d917fa374421a3"
     },
     "receipt": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/telemetry-device-test-20260912/full-functional001/manual002/result.json",
-      "sha256": "d4767ffd1a837dd5da79d0f8d9c4fd05f1abf4cdaca96c68a49780c41dd18e72"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation127/functional001/result.json",
+      "sha256": "ff144782cb8156ca58d0d2c15782b18c13e77a555b6897e336c6fb10c0b563c5"
     },
     "functional_test": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/telemetry-device-test-20260912/full-functional001/RESULT.json",
-      "sha256": "ab81857b687f2cdddf7e5645fbb7a1a49ce529e70a754ba6136a4ffa7f65fc4c"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation127/DEVICE-VALIDATION.json",
+      "sha256": "06965205ba2ee9af820d36e8bc3bf250db26d3373d5ca90e6777337cbc0cc827"
     },
-    "scope": "Exact126/app0 SDK VALID on both boards, before and after two manual checks; seven actuator wakes,11/12 successful list fetches, actual viewport scroll, exact disposable deletion and natural paired sleep. Empty-owner and manual clock-failure bugs found; not full functional acceptance."
+    "scope": "Both127/app1 SDK VALID before/after manual clock failure; automatic Home8.125s and paired sleep. Four HTTP200 lists, three applied by LCD. Missing startup UI_LIST and skipped no-address retry remain open; not full functional acceptance."
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -1225,10 +1239,26 @@
     "scope": "Exact installed 123/app0/SDK VALID on both boards, with full current 123 and fallback 122 bank hashes verified and fresh closed post-clear LCD idle/CRC. This records post-manual installed health; transfer timing and a new 124 installation are not claimed."
   },
   "working_candidate": {
-    "version": "6.4.127",
-    "status": "SOURCE_FIXES_PENDING_CANONICAL_BUILD_AND_DEVICE_TEST",
-    "based_on_version": "6.4.126",
-    "scope": "Per-accessor provisioning handles and empty-owner list guard; one bounded numeric-only manual SNTP retry and truthful terminal result ordering. No quota, target/debt, nightly schedule or UI redesign changes.",
+    "version": "6.4.128",
+    "status": "SOURCE_FIXES_PENDING_BUILD_AND_DEVICE_TEST",
+    "based_on_version": "6.4.127",
+    "scope": "Preserve127 owner and truthful-terminal fixes; include one separately owned bounded manual DNS retry generation and serialize concurrent Sense JSON frames. No quota, debt, target, daily schedule or UI redesign changes.",
     "published": false
+  },
+  "previous_last_verified_device_health_126": {
+    "version": "6.4.126",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/RELEASE-PAIR.json",
+      "sha256": "e4263663162f2d8d0ef19c5f032fcd74756be077acf7626b6c7e8d6fd4ce9c98"
+    },
+    "receipt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/telemetry-device-test-20260912/full-functional001/manual002/result.json",
+      "sha256": "d4767ffd1a837dd5da79d0f8d9c4fd05f1abf4cdaca96c68a49780c41dd18e72"
+    },
+    "functional_test": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/telemetry-device-test-20260912/full-functional001/RESULT.json",
+      "sha256": "ab81857b687f2cdddf7e5645fbb7a1a49ce529e70a754ba6136a4ffa7f65fc4c"
+    },
+    "scope": "Exact126/app0 SDK VALID on both boards, before and after two manual checks; seven actuator wakes,11/12 successful list fetches, actual viewport scroll, exact disposable deletion and natural paired sleep. Empty-owner and manual clock-failure bugs found; not full functional acceptance."
   }
 }

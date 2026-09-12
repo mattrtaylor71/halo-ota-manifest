@@ -2819,7 +2819,7 @@ static void ensure_timezone_pt(const char* reason) {
 // schedule calls have valid time on the first attempt rather than failing http=-1
 // while time is still invalid right after connect. The kickoff is idempotent
 // and non-blocking. Suspended network work resumes its fixed deadline.
-// A live manual action may grant one separate cached-numeric retry after the
+// A live manual action may grant one separate bounded retry with static DNS slots after the
 // ordinary attempt; its original hostname/DNS generation never re-arms.
 void halo_prod_kick_time_sync(const char* reason) {
   ensure_timezone_pt(reason ? reason : "kick_time_sync");
@@ -5163,7 +5163,7 @@ static bool ota_clock_ready_before_work() {
   if (sense_time_has_fresh_sync()) return true;
   // The ordinary deadline can expire between kick's service/begin and the
   // pending observation. Give the now-closed attempt its already requested
-  // numeric retry before issuing a terminal result. No DNS generation reopens.
+  // manual retry before issuing a terminal result. No DNS generation reopens.
   sense_ntp_begin();
   if (sense_ntp_attempt_pending()) return false;
   sense_ntp_service();  // also drain an immediate retry reply before deciding

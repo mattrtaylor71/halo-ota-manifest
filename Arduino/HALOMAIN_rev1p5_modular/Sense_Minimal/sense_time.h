@@ -56,20 +56,26 @@ static unsigned g_ntp_dns_users = 0;
 static std::atomic<uint32_t> g_ntp_accept_until_ms{0};
 static std::atomic<uint32_t> g_ntp_received_epoch{0};
 static std::atomic<bool> g_ntp_fresh_this_boot{false};
-// An explicit manual action may use one extra numeric-only opportunity after
-// the ordinary 15s boot window. DNS ownership/deadlines are never reopened.
+// An explicit manual action may use one extra opportunity after the ordinary
+// 15s boot window. Its DNS slots are separate; no generation is ever reopened.
 static const uint32_t SENSE_NTP_MANUAL_RETRY_MS = 40000;
 static bool g_ntp_manual_retry_requested = false;  // g_time_mutex
 static std::atomic<bool> g_ntp_manual_retry_used{false};
 static std::atomic<uint32_t> g_ntp_resolve_until_ms{0};
+static std::atomic<uint32_t> g_ntp_manual_resolve_until_ms{0};
 struct SenseNtpServer {
   const char* hostname;
+  const bool manual_generation = false;
   bool requested = false;  // owner context, protected by g_time_mutex
   std::atomic<uint32_t> ipv4{0};
   std::atomic<bool> done{false};
 };
 static SenseNtpServer g_ntp_servers[3] = {
     {"pool.ntp.org"}, {"time.nist.gov"}, {"time.google.com"}};
+// Never reuse/reset the original DNS callback arguments after a timeout.
+// These static slots belong only to the one permitted manual recovery window.
+static SenseNtpServer g_ntp_manual_servers[3] = {
+    {"pool.ntp.org", true}, {"time.nist.gov", true}, {"time.google.com", true}};
 // SNTP retains these pointers. Never pass a temporary String/caller buffer.
 static char g_ntp_numeric_servers[3][16] = {};
 static_assert(CONFIG_LWIP_SNTP_MAX_SERVERS == 3, "Update all SNTP numeric server slots when SDK server count changes");
@@ -169,12 +175,14 @@ static void sense_ntp_on_manual_sync(struct timeval* tv) {
 // IDF's raw sntp_stop does NOT cancel an outstanding sntp_dns_found callback.
 // Own the hostname lookups instead: this callback is safe even if Arduino's
 // foreground dns_clear_cache invokes it outside the TCPIP task. Static slot
-// lifetime, record-only writes and a single per-boot deadline make late results
-// harmless. The SNTP client itself is only ever given numeric IPv4 strings.
+// lifetime, record-only writes and a deadline per immutable generation make
+// late results harmless. SNTP itself is only given numeric IPv4 strings.
 static void sense_ntp_on_dns(const char*, const ip_addr_t* address, void* arg) {
   SenseNtpServer* server = static_cast<SenseNtpServer*>(arg);
-  const uint32_t deadline = g_ntp_resolve_until_ms.load();
   if (!server) return;
+  if (server->manual_generation != g_ntp_manual_retry_used.load()) return;
+  const uint32_t deadline = server->manual_generation
+      ? g_ntp_manual_resolve_until_ms.load() : g_ntp_resolve_until_ms.load();
   if (deadline != 0 && (int32_t)((uint32_t)millis() - deadline) < 0 &&
       address && IP_IS_V4(address)) {
     server->ipv4.store(ip4_addr_get_u32(ip_2_ip4(address)));
@@ -204,7 +212,7 @@ static bool sense_time_has_fresh_sync() {
 }
 
 // Called only for a live explicit manual request after peer readiness. It does
-// not reset the existing attempt, extend DNS, or create a persistent OTA retry.
+// not reset the existing attempt, extend its DNS, or create a persistent retry.
 static void sense_ntp_request_manual_retry() {
   std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
   if (!g_ntp_sleep_quiesced && !g_ntp_fresh_this_boot.load() &&
@@ -212,27 +220,31 @@ static void sense_ntp_request_manual_retry() {
 }
 
 // Caller holds g_time_mutex. The first attempt must already be closed and its
-// mailbox drained. All addresses are from its original bounded DNS generation.
+// mailbox drained. Missing addresses get new static DNS slots/deadline; late
+// callbacks keep their original arguments and can never fill these new slots.
 static void sense_ntp_try_manual_retry_locked(uint32_t now_ms) {
   if (!g_ntp_manual_retry_requested || g_ntp_manual_retry_used.load() ||
       !g_ntp_attempt_finished || g_ntp_sleep_quiesced ||
       g_ntp_fresh_this_boot.load() || g_ntp_received_epoch.load() ||
       g_ntp_attempt_budget_ms != SENSE_NTP_ATTEMPT_MS) return;
-  bool have_address = false;
-  for (const SenseNtpServer& server : g_ntp_servers) {
-    if (!server.requested) return;
-    have_address = have_address || server.ipv4.load() != 0;
-  }
-  if (!have_address) return;
   sense_ntp_stop_locked();  // closes old UDP client/timers under TCPIP lock
-  g_ntp_resolve_until_ms.store(0);  // never accept old/new hostname callbacks
+  g_ntp_resolve_until_ms.store(0);  // original DNS generation stays closed
   g_ntp_manual_retry_used.store(true);
+  unsigned cached = 0;
+  for (unsigned i = 0; i < 3; ++i) {
+    const uint32_t ip = g_ntp_servers[i].ipv4.load();
+    g_ntp_manual_servers[i].ipv4.store(ip);
+    g_ntp_manual_servers[i].requested = ip != 0;
+    g_ntp_manual_servers[i].done.store(ip != 0);
+    if (ip) ++cached;
+  }
+  g_ntp_manual_resolve_until_ms.store(now_ms + SENSE_NTP_ATTEMPT_MS);
   g_ntp_manual_retry_requested = false;
   g_ntp_attempt_start_ms = now_ms;
   g_ntp_attempt_budget_ms = SENSE_NTP_MANUAL_RETRY_MS;
   g_ntp_attempt_finished = false;
-  Serial.printf("[TIME] manual SNTP retry budget_ms=%lu cached_numeric_only=1\n",
-                (unsigned long)SENSE_NTP_MANUAL_RETRY_MS);
+  Serial.printf("[TIME] manual SNTP retry budget_ms=%lu cached_numeric=%u fresh_dns_slots=%u\n",
+                (unsigned long)SENSE_NTP_MANUAL_RETRY_MS, cached, 3U - cached);
 }
 
 static void sense_ntp_begin() {
@@ -250,8 +262,14 @@ static void sense_ntp_begin() {
   }
   if ((now_ms - g_ntp_attempt_start_ms) >= g_ntp_attempt_budget_ms ||
       g_ntp_dns_users != 0 || g_ntp_running) return;
-  for (SenseNtpServer& server : g_ntp_servers) {
+  const bool manual_retry = g_ntp_manual_retry_used.load();
+  SenseNtpServer* servers = manual_retry ? g_ntp_manual_servers : g_ntp_servers;
+  const uint32_t resolve_until = manual_retry ? g_ntp_manual_resolve_until_ms.load()
+                                              : g_ntp_resolve_until_ms.load();
+  for (unsigned i = 0; i < 3; ++i) {
+    SenseNtpServer& server = servers[i];
     if (server.requested) continue;
+    if (!resolve_until || (int32_t)((uint32_t)millis() - resolve_until) >= 0) continue;
     server.requested = true;
     ip_addr_t address = {};
     LOCK_TCPIP_CORE();
@@ -265,7 +283,7 @@ static void sense_ntp_begin() {
   const char* numeric[3] = {};
   bool have_address = false;
   for (unsigned i = 0; i < 3; ++i) {
-    const uint32_t ip = g_ntp_servers[i].ipv4.load();
+    const uint32_t ip = servers[i].ipv4.load();
     if (ip == 0) continue;
     IPAddress(ip).toString().toCharArray(g_ntp_numeric_servers[i], sizeof(g_ntp_numeric_servers[i]));
     numeric[i] = g_ntp_numeric_servers[i];
@@ -279,7 +297,6 @@ static void sense_ntp_begin() {
   // synchronous, so no earlier callback can race registration/restart.
   sense_ntp_stop_locked();
   esp_sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
-  const bool manual_retry = g_ntp_manual_retry_used.load();
   esp_sntp_set_time_sync_notification_cb(manual_retry ? sense_ntp_on_manual_sync
                                                     : sense_ntp_on_sync);
   g_ntp_accept_until_ms.store(g_ntp_attempt_start_ms + g_ntp_attempt_budget_ms);
@@ -362,6 +379,7 @@ static void sense_ntp_service() {
       ((uint32_t)millis() - g_ntp_attempt_start_ms) >= g_ntp_attempt_budget_ms;
   if (g_ntp_received_epoch.load() == 0 && !expired) return;
   g_ntp_resolve_until_ms.store(0);
+  g_ntp_manual_resolve_until_ms.store(0);
   // Stop under the core lock before draining the mailbox. A timely callback
   // may finish between the first read above and acquiring that lock.
   sense_ntp_stop_locked();
@@ -383,6 +401,7 @@ static void sense_ntp_quiesce_for_sleep() {
   std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
   g_ntp_sleep_quiesced = true;
   g_ntp_resolve_until_ms.store(0);
+  g_ntp_manual_resolve_until_ms.store(0);
   sense_ntp_stop_locked();
   sense_ntp_service();  // preserve any timely reply that completed before stop
 }
