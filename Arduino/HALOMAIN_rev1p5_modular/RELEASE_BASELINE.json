@@ -709,7 +709,7 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/LAYOUT-CHECK.json",
       "sha256": "7abe054cf017d90a7a508932e3baed79ad15f17d62e1b22ad935bf171bfedb14"
     },
-    "device_acceptance": "126 installation, physical UI review, and manual OTA acceptance remain pending. A calibrated actuator tap completed, but neither USB board appeared for a health check. Last verified installed health remains 123. No board firmware write or allowance reset was performed; publication does not establish current manual eligibility.",
+    "device_acceptance": "Installed126/app0 SDK VALID on both boards verified September12. Automated functional pass found intermittent empty-owner shopping request and clock-failure terminal/retry issue; 11/12 shopping fetches, scroll, disposable delete, cloud telemetry and final sleep passed. No-update success remains unverified because clock failure then daily limit prevented manifest comparison. Physical camera/voice/settings and scheduled transfer untested.",
     "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.126.",
     "instruction": "Continue from 126 artifact source 67a61d68319144822088b8d493d8932a99883a0a and subsequent commits. Retain all prior UI, deletion and OTA fixes. Preserve published 125 artifacts and historical acceptance records."
   },
@@ -1157,16 +1157,20 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.123",
+    "version": "6.4.126",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/RELEASE-PAIR.json",
-      "sha256": "353fc04d0fc258b1a6a0abfe3c919d667f77fd8d63fb1bcc5616c76d102ab89b"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation126/RELEASE-PAIR.json",
+      "sha256": "e4263663162f2d8d0ef19c5f032fcd74756be077acf7626b6c7e8d6fd4ce9c98"
     },
     "receipt": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/MANUAL124-CASE-READY.json",
-      "sha256": "494f975fe1051ff0e86942ca4ba9c2205bde5e4c5c1f25046bfebfa7dfbd62cd"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/telemetry-device-test-20260912/full-functional001/manual002/result.json",
+      "sha256": "d4767ffd1a837dd5da79d0f8d9c4fd05f1abf4cdaca96c68a49780c41dd18e72"
     },
-    "scope": "Exact installed 123/app0/SDK VALID on both boards, with full current 123 and fallback 122 bank hashes verified and fresh closed post-clear LCD idle/CRC. This records post-manual installed health; transfer timing and a new 124 installation are not claimed."
+    "functional_test": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/telemetry-device-test-20260912/full-functional001/RESULT.json",
+      "sha256": "ab81857b687f2cdddf7e5645fbb7a1a49ce529e70a754ba6136a4ffa7f65fc4c"
+    },
+    "scope": "Exact126/app0 SDK VALID on both boards, before and after two manual checks; seven actuator wakes,11/12 successful list fetches, actual viewport scroll, exact disposable deletion and natural paired sleep. Empty-owner and manual clock-failure bugs found; not full functional acceptance."
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -1207,5 +1211,24 @@
     "device_acceptance": "125 installation and visual acceptance are pending. Last verified installed health remains 123. Publication does not reset or verify the current device allowance.",
     "publication_status": "Both production latest manifests and full linked binaries verified as 6.4.125.",
     "instruction": "Continue from 125 artifact source 91fb4716005653ce43ac484b0e2c3e28d1a455e9 and subsequent commits. Retain all prior UI, deletion and OTA fixes. Preserve the published 124 artifacts and historical acceptance records."
+  },
+  "previous_last_verified_device_health_123": {
+    "version": "6.4.123",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation123/RELEASE-PAIR.json",
+      "sha256": "353fc04d0fc258b1a6a0abfe3c919d667f77fd8d63fb1bcc5616c76d102ab89b"
+    },
+    "receipt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation124/MANUAL124-CASE-READY.json",
+      "sha256": "494f975fe1051ff0e86942ca4ba9c2205bde5e4c5c1f25046bfebfa7dfbd62cd"
+    },
+    "scope": "Exact installed 123/app0/SDK VALID on both boards, with full current 123 and fallback 122 bank hashes verified and fresh closed post-clear LCD idle/CRC. This records post-manual installed health; transfer timing and a new 124 installation are not claimed."
+  },
+  "working_candidate": {
+    "version": "6.4.127",
+    "status": "SOURCE_FIXES_PENDING_CANONICAL_BUILD_AND_DEVICE_TEST",
+    "based_on_version": "6.4.126",
+    "scope": "Per-accessor provisioning handles and empty-owner list guard; one bounded numeric-only manual SNTP retry and truthful terminal result ordering. No quota, target/debt, nightly schedule or UI redesign changes.",
+    "published": false
   }
 }

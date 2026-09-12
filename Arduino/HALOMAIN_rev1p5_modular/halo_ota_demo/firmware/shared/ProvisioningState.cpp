@@ -24,9 +24,11 @@
 #define KEY_STATE "state"
 
 static ProvisioningState::State current_state = ProvisioningState::STATE_UNPROVISIONED;
-static Preferences prefs;
+// Each call owns its NVS handle. A shared Preferences object rejects begin()
+// while another task is using it, which made valid provisioning reads fail.
 
 void ProvisioningState::init() {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     LOG_ERROR("[PROVISION] Failed to open NVS namespace");
     return;
@@ -61,6 +63,7 @@ ProvisioningState::State ProvisioningState::getState() {
 }
 
 void ProvisioningState::setState(State state) {
+  Preferences prefs;
   current_state = state;
   
   // Persist state to NVS
@@ -88,6 +91,7 @@ const char* ProvisioningState::getStateString() {
 }
 
 bool ProvisioningState::loadHomeWifiCreds(char* ssid, size_t ssid_sz, char* password, size_t password_sz) {
+  Preferences prefs;
   if (!ssid || ssid_sz == 0) {
     return false;
   }
@@ -117,6 +121,7 @@ bool ProvisioningState::loadHomeWifiCreds(char* ssid, size_t ssid_sz, char* pass
 }
 
 void ProvisioningState::saveHomeWifiCreds(const char* ssid, const char* password) {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     LOG_ERROR("[PROVISION] Failed to open NVS for writing");
     return;
@@ -130,6 +135,7 @@ void ProvisioningState::saveHomeWifiCreds(const char* ssid, const char* password
 }
 
 void ProvisioningState::clearHomeWifiCreds() {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     return;
   }
@@ -140,6 +146,7 @@ void ProvisioningState::clearHomeWifiCreds() {
 }
 
 bool ProvisioningState::loadApCreds(char* ssid, size_t ssid_sz, char* password, size_t password_sz) {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, true)) {
     return false;
   }
@@ -157,6 +164,7 @@ bool ProvisioningState::loadApCreds(char* ssid, size_t ssid_sz, char* password, 
 }
 
 void ProvisioningState::saveApCreds(const char* ssid, const char* password) {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     LOG_ERROR("[PROVISION] Failed to open NVS for writing");
     return;
@@ -170,6 +178,7 @@ void ProvisioningState::saveApCreds(const char* ssid, const char* password) {
 }
 
 void ProvisioningState::clearApCreds() {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     return;
   }
@@ -182,6 +191,7 @@ void ProvisioningState::clearApCreds() {
 }
 
 bool ProvisioningState::isProvisioned() {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, true)) {
     return false;
   }
@@ -192,6 +202,7 @@ bool ProvisioningState::isProvisioned() {
 }
 
 void ProvisioningState::setProvisioned(bool value) {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     LOG_ERROR("[PROVISION] Failed to open NVS for writing");
     return;
@@ -204,6 +215,7 @@ void ProvisioningState::setProvisioned(bool value) {
 }
 
 bool ProvisioningState::loadOwnerId(char* owner_id, size_t owner_id_sz) {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, true)) {
     return false;
   }
@@ -214,6 +226,7 @@ bool ProvisioningState::loadOwnerId(char* owner_id, size_t owner_id_sz) {
 }
 
 void ProvisioningState::saveOwnerId(const char* owner_id) {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     LOG_ERROR("[PROVISION] Failed to open NVS for writing");
     return;
@@ -279,6 +292,7 @@ bool ProvisioningState::saveTimezone(const char* tz) {
 }
 
 void ProvisioningState::clearOwnerId() {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     return;
   }
@@ -290,6 +304,7 @@ void ProvisioningState::clearOwnerId() {
 }
 
 bool ProvisioningState::loadOwnerCode(char* owner_code, size_t owner_code_sz) {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, true)) {
     return false;
   }
@@ -300,6 +315,7 @@ bool ProvisioningState::loadOwnerCode(char* owner_code, size_t owner_code_sz) {
 }
 
 void ProvisioningState::saveOwnerCode(const char* owner_code) {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     LOG_ERROR("[PROVISION] Failed to open NVS for writing");
     return;
@@ -312,6 +328,7 @@ void ProvisioningState::saveOwnerCode(const char* owner_code) {
 }
 
 void ProvisioningState::clearOwnerCode() {
+  Preferences prefs;
   if (!prefs.begin(NVS_NAMESPACE, false)) {
     return;
   }

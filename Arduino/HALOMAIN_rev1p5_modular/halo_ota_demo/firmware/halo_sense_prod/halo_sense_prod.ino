@@ -2817,9 +2817,10 @@ static void ensure_timezone_pt(const char* reason) {
 
 // Start SNTP/NTP the instant WiFi (STA) connects, so the owner-claim TLS and OTA
 // schedule calls have valid time on the first attempt rather than failing http=-1
-// while time is still invalid right after connect. Idempotent (only starts once per
-// boot) and non-blocking. Suspended network work can resume the same attempt
-// inside its original deadline; a completed/expired attempt never re-arms.
+// while time is still invalid right after connect. The kickoff is idempotent
+// and non-blocking. Suspended network work resumes its fixed deadline.
+// A live manual action may grant one separate cached-numeric retry after the
+// ordinary attempt; its original hostname/DNS generation never re-arms.
 void halo_prod_kick_time_sync(const char* reason) {
   ensure_timezone_pt(reason ? reason : "kick_time_sync");
   sense_ntp_service();
@@ -5147,10 +5148,12 @@ static uint32_t halo_idle_network_epoch(){const time_t n=time(nullptr);return n>
 
 
 
-// Complete the existing per-boot SNTP opportunity before a long DNS guard
-// can suspend it. Pending is a normal-loop retry, not a consumed OTA attempt.
+// Complete the bounded SNTP opportunity (including an explicitly granted
+// manual retry) before a long DNS guard can suspend it. Pending is normal-loop
+// service, not a consumed OTA attempt.
 static bool ota_clock_ready_before_work() {
   if (sense_time_has_fresh_sync()) return true;
+  if (halo_ota_manual_override_active()) sense_ntp_request_manual_retry();
   halo_prod_kick_time_sync("ota_preflight");
   if (sense_time_has_fresh_sync()) return true;
   if (sense_ntp_attempt_pending()) return false;
@@ -5158,16 +5161,25 @@ static bool ota_clock_ready_before_work() {
   // Drain that mailbox (or the expired attempt) before deciding to defer.
   sense_ntp_service();
   if (sense_time_has_fresh_sync()) return true;
+  // The ordinary deadline can expire between kick's service/begin and the
+  // pending observation. Give the now-closed attempt its already requested
+  // numeric retry before issuing a terminal result. No DNS generation reopens.
+  sense_ntp_begin();
+  if (sense_ntp_attempt_pending()) return false;
+  sense_ntp_service();  // also drain an immediate retry reply before deciding
+  if (sense_time_has_fresh_sync()) return true;
 
   LOG_ERROR("[OTA_CLOCK] deferred reason=fresh_sync_unavailable before_manifest=1");
   diag_record_error_persistent("ota_orch", -1, "clock_unconfirmed_defer before_manifest");
+  // Cancellation emits the terminal result immediately. Publish its reason
+  // first; this manual failure does not promise a newly scheduled short retry.
+  ota_set_last_result("clock_unconfirmed");
   ota_peer_cancel("clock_unconfirmed");
   g_peer_episode_finished = true;
   g_ota_check_done = true;
   g_ota_check_requested = false;
   OtaIntent::clearForceAndCheck();
   manual_ota_override_clear("clock_unconfirmed");
-  ota_set_last_result("clock_unconfirmed_defer");
   if (g_boot_ota_pending) boot_ota_finish("clock_unconfirmed");
   // The original persisted schedule/debt remains pending for a later boot.
   return false;

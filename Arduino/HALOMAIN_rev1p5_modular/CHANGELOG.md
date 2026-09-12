@@ -1,5 +1,13 @@
 # Firmware changelog
 
+## 6.4.127 — local functional bug-fix candidate
+
+Give each provisioning accessor its own Preferences handle so concurrent reads cannot falsely report an absent owner. Reject empty-owner shopping fetch/delete requests before HTTP.
+
+Give explicit manual OTA one bounded extra40-second clock-sync opportunity after the ordinary15-second window, using previously resolved numeric servers and preserving DNS/late-callback guards. Save the accurate clock-failure result before releasing the LCD; do not promise a newly scheduled retry after exhaustion. Daily allowance, durable debt, firmware routes and2am schedule are unchanged.
+
+Canonical build and on-device validation are pending. Public production remains126; its September12 automated pass found these defects and did not establish full functional acceptance.
+
 ## 6.4.126 — published for manual OTA testing
 
 Replace check-in expiration choices with the approved white quantity picker and one large green Confirm button. Small chevrons bracket the number, and dial changes settle in 140 ms. Confirm sends the selected quantity with an empty expiration date through the existing protocol; the old Add Date touch route is removed. The original 30-second default submission remains unchanged.

@@ -12,6 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED = ROOT / 'halo_ota_demo/firmware/shared'
+ARDUINO_JSON = Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src'
 
 
 def definition(text, signature):
@@ -86,6 +87,7 @@ def lcd_harness():
     ack = (ROOT / 'LCD_Minimal/lcd_link_ack.h').read_text()
     sense = (ROOT / 'Sense_Minimal/sense_uart_msg.h').read_text()
     prefix = r'''
+#include <ArduinoJson.h>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -93,6 +95,7 @@ def lcd_harness():
 #include <vector>
 #include <cstdint>
 #include <atomic>
+#include <utility>
 static uint32_t now_ms=100;static uint32_t millis(){return now_ms;}
 static bool g_manual_ota_override,g_manual_ota_ui_requested,g_manual_ota_ui_active,ota_locked,g_ota_screen_active;
 static bool g_lcd_ota_uart_receiving,provision_return_home_pending,busy,queue_ok=true;
@@ -109,6 +112,8 @@ static size_t test_strlcpy(char* d,const char* s,size_t n){const auto l=strlen(s
 #define strlcpy test_strlcpy
 static struct {template<class... A>void printf(const char*,A...){}void println(const char*){}} Serial;
 static std::vector<std::string> wire;
+static std::vector<std::pair<std::string,bool>> delete_results;
+static void post_list_delete_result(const char* id,bool ok){delete_results.emplace_back(id,ok);}
 static struct{void print(const char* s){wire.emplace_back(s);}void flush(){}} senseSerial;
 static void lcd_errlog_store_with_context(const char*,const char*,const char*,int,const char*){}
 struct app_event_t{int type;char data[8];};static void* app_event_queue=nullptr;
@@ -158,7 +163,7 @@ int main(){
   ship_menu_send_manual_ota("menu_action");assert(g_manual_ota_result==4&&sends==1);
   g_manual_ota_result=0;link_ack_track(43,m.type,payload);
   for(unsigned i=0;i<5;++i){now_ms+=400;link_ack_service();}
-  assert(g_manual_ota_result==4&&g_link_ack_failed==1&&sends==1);
+  assert(g_manual_ota_result==4&&g_link_ack_failed==1&&sends==1&&delete_results.empty());
   const auto until=g_manual_ota_result_until_ms;now_ms=until-1;actual_ui_tick();
   assert(g_manual_ota_ui_active&&g_ota_screen_active&&!provision_return_home_pending);
   lcd_manual_ota_finish("up_to_date");assert(g_manual_ota_result_until_ms==until&&g_manual_ota_result==4);
@@ -166,7 +171,19 @@ int main(){
   // The supported serial command runs the same physical action on this task.
   queue_ok=true;g_manual_ota_ui_requested=true;actual_ui_tick();assert(sends==2&&g_manual_ota_ui_active);
   now_ms=g_manual_ota_ui_deadline_ms;actual_ui_tick();assert(g_manual_ota_result==4);
-  puts("PASS actual LCD action single queued request, awake-proof, byte-identical ACK replay, Sense dedupe, readable refusal and bounded delivery failure");
+  // Keep the production delete-failure branch in this shared ACK-service test.
+  // Real ArduinoJson must recover the original escaped ID, without changing
+  // the manual result or interpreting malformed payloads as another item's ID.
+  const char* delete_payload=R"({"type":"INPUT_DELETE","msg_id":44,"id":"fixture\"id\\row"})";
+  wire.clear();link_ack_track(44,"INPUT_DELETE",delete_payload);
+  for(unsigned i=0;i<5;++i){now_ms+=400;link_ack_service();}
+  assert(delete_results.size()==1&&delete_results[0].first=="fixture\"id\\row"&&!delete_results[0].second);
+  assert(wire.size()==8&&g_manual_ota_result==4&&g_link_ack_failed==2);
+  for(unsigned i=0;i<wire.size();i+=2)assert(wire[i]==delete_payload&&wire[i+1]=="\n");
+  link_ack_track(45,"INPUT_DELETE","not json");
+  for(unsigned i=0;i<5;++i){now_ms+=400;link_ack_service();}
+  assert(delete_results.size()==1&&g_link_ack_failed==3&&g_manual_ota_result==4);
+  puts("PASS actual LCD action single queued request, awake-proof, byte-identical ACK replay, Sense dedupe, readable refusal, bounded delivery failure and delete-failure routing");
 }
 '''
     return '\n'.join([prefix,ack_state,seen_state,functions,ui_tick,cases])
@@ -174,9 +191,10 @@ int main(){
 
 class ManualOtaTests(unittest.TestCase):
     def compile_run(self, text):
+        self.assertTrue((ARDUINO_JSON / 'ArduinoJson.h').is_file(), 'Canonical ArduinoJson include directory is required')
         with tempfile.TemporaryDirectory(prefix='halo-manual-ota-') as directory:
             path=Path(directory);cpp=path/'check.cpp';binary=path/'check';cpp.write_text(text)
-            subprocess.run([shutil.which('c++'),'-std=c++17','-I',str(SHARED),str(cpp),'-o',str(binary)],check=True,timeout=30)
+            subprocess.run([shutil.which('c++'),'-std=c++17','-Wno-deprecated-declarations','-I',str(SHARED),'-I',str(ARDUINO_JSON),str(cpp),'-o',str(binary)],check=True,timeout=30)
             subprocess.run([str(binary)],check=True,timeout=5)
 
     def test_actual_policy(self):

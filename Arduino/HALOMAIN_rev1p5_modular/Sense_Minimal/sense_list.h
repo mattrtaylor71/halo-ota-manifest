@@ -282,6 +282,10 @@ static void delete_item_from_api(const char* requested_item_id) {
   // Match the phone's shared-UUID remove operation.
   char owner_id[64] = {0};
   load_owner_id_or_default(owner_id, sizeof(owner_id));
+  if (!owner_id[0]) {
+    shopping_list_delete_failed(item_id, "owner_unavailable");
+    return;
+  }
   String request_body = "{";
   request_body += "\"operation\":\"remove\",";
   request_body += "\"ownerId\":\"" + String(owner_id) + "\",";
@@ -461,6 +465,10 @@ static bool fetch_shopping_list_from_api() {
   // Build JSON request body
   char owner_id[64] = {0};
   load_owner_id_or_default(owner_id, sizeof(owner_id));
+  if (!owner_id[0]) {
+    list_refresh_fail("owner_unavailable");
+    return false;
+  }
   String request_body = "{";
   request_body += "\"operation\":\"view\",";
   request_body += "\"ownerId\":\"" + String(owner_id) + "\",";
