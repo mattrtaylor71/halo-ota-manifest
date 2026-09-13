@@ -2,6 +2,8 @@
 
 ## Unreleased — bounded display-transfer recovery
 
+Pause every main-loop LVGL render call while UART OTA receives or finalizes the display image, matching the existing UI-task pause. The main loop previously bypassed that pause and could submit display work during flash writes. The scheduled132→134 attempt stopped at chunk545 and the LCD boot identity changed; this establishes a failed transfer and reboot, not the precise reset cause. The rendering fix still requires hardware acceptance.
+
 Keep a scheduled recovery alive when the LCD wakes the Sense up to 15 seconds early. Preserve the verified calendar origin after its UART notice is consumed, wait within the existing readiness deadline, and admit work only once the scheduled time arrives. A second hardware run exposed loss of the separate calendar notice before preflight lock. Keep the LCD’s retained notice available under its original preflight lease, suppress it during binary transfer, and give the Sense only the existing 15-second lead for that notice to arrive. Missing notice at the actual due time still cannot authorize work. Hardware acceptance of the combined fix is pending.
 
 Retry the same-session abort exchange up to three times within its original cleanup deadline. The LCD accepts the retry separator after returning to JSON mode and hands incoming OTA bytes directly to the binary receiver after BEGIN. Cleanup still requires a matching acknowledgement before another transfer or scheduled retry can proceed. Existing work budgets, update counters and calendar credit are unchanged.

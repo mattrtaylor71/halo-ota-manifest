@@ -131,11 +131,6 @@ static void ui_task(void *arg) {
     static int last_shown_pct = -1;
     static int last_ota_phase = -1;
     static bool ota_saw_transfer = false;
-    // True once the "Updating..." overlay has been flushed to the panel at least
-    // once since the OTA screen went active. Gates lv_timer_handler() during the
-    // LCD's own OTA binary receive (see the guard below). Reset in the teardown
-    // block when the OTA screen clears, so a subsequent OTA re-pushes its frame.
-    static bool s_ota_overlay_pushed = false;
 
     // While OTA screen is active, don't process any screen transitions.
     // Just tick LVGL to keep the display alive and release the lock.
@@ -169,7 +164,6 @@ static void ui_task(void *arg) {
 
       if (!ota_overlay) {
         // Covered presentation must not keep animating behind this overlay.
-        // The existing binary first-frame/flush guard below remains unchanged.
         halo_ui_motion_stop(lv_scr_act());
         if (provision_ui_spinner) {
           provision_ui_deferred_view = (int)provision_ui_view;
@@ -276,20 +270,12 @@ static void ui_task(void *arg) {
       if (ota_overlay) {
         lv_obj_move_foreground(ota_overlay);
       }
-      // During the LCD's own OTA binary receive, esp_ota_write (Core 0) disables
-      // the flash/PSRAM cache and stalls this core; an LVGL flush from the PSRAM
-      // draw buffer (lcd_bsp buf1/buf2 are MALLOC_CAP_SPIRAM) during that window
-      // can fault -> intermittent cache-contention panic (larger images = more
-      // write windows = higher odds). So flush the "Updating..." overlay exactly
-      // ONCE to get it on the panel, then suppress further lv_timer_handler()
-      // while binary receive is active: zero SPI-DMA flush overlaps esp_ota_write.
-      // The panel/backlight stay on showing the last frame; only the per-10% %
-      // stops repainting during the raw transfer (mirrors the photo-transfer
-      // quiesce in lcd_uart_rx.h). s_ota_overlay_pushed is reset in the teardown
-      // block when g_ota_screen_active clears.
-      if (!g_lcd_ota_binary_mode || !s_ota_overlay_pushed) {
+      // Render the existing overlay during preflight. Once BEGIN owns flash,
+      // pause all flushes (including a delayed first frame) until cleanup;
+      // the main loop observes the same receive/binary guard. A PSRAM-backed
+      // LVGL flush must not overlap flash erase, write or finalization.
+      if (!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode) {
         lv_timer_handler();
-        s_ota_overlay_pushed = true;
       }
       example_lvgl_unlock();
       vTaskDelay(pdMS_TO_TICKS(50));
@@ -319,7 +305,6 @@ static void ui_task(void *arg) {
       last_shown_pct = -1;
       last_ota_phase = -1;
       ota_saw_transfer = false;
-      s_ota_overlay_pushed = false;  // re-arm the one-shot flush for the next OTA
       Serial.println("[OTA] overlay torn down (screen inactive)");
     }
 

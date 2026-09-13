@@ -4408,6 +4408,14 @@ void setup() {
   g_lcd_boot_ready.store(true);
 }
 
+// The UI task owns the first OTA overlay frame. Main-loop rendering must not
+// bypass its binary-transfer freeze while UART OTA erases, writes or finalizes
+// flash. Recheck at each call site, since the UART task can start OTA mid-loop.
+static void lcd_main_lvgl_service() {
+  if (g_lcd_ota_uart_receiving || g_lcd_ota_binary_mode) return;
+  lv_timer_handler();
+}
+
 void loop() {
   if (g_lcd_validation_pending.load()) {
     lcd_ota_self_test();
@@ -4929,7 +4937,7 @@ void loop() {
           status_screen_use_text("Resetting\nWi-Fi...");
           lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
           status_screen_shown_time = millis();
-          lv_timer_handler();
+          lcd_main_lvgl_service();
           provision_qr_wait_begin("status_button");
           // Wake the (possibly sleeping) Sense before sending the reset request,
           // mirroring the menu-path Reset-WiFi handlers. A sleeping Sense never
@@ -4993,7 +5001,7 @@ void loop() {
                 if (expiry_date_label != NULL) {
                   lv_label_set_text(expiry_date_label, expiry_date_buffer);
                   Serial.printf("[EXPIRY] Label text set to: %s\n", expiry_date_buffer);
-                  lv_timer_handler();  // Force immediate render
+                  lcd_main_lvgl_service();  // Force immediate render
                 }
                 
                 Serial.printf("[EXPIRY] Date updated: %s (pos: %d, buffer pos: %d)\n", 
@@ -5036,7 +5044,7 @@ void loop() {
               // Update display
               if (expiry_date_label != NULL) {
                 lv_label_set_text(expiry_date_label, expiry_date_buffer);
-                lv_timer_handler();
+                lcd_main_lvgl_service();
               }
               
               Serial.printf("[EXPIRY] Backspace - Date now: %s (pos: %d)\n", expiry_date_buffer, expiry_date_pos);
@@ -5086,7 +5094,7 @@ void loop() {
               if (list_container != NULL && g_active.count > 0) {
                 lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
               }
-              lv_timer_handler();
+              lcd_main_lvgl_service();
               resetActivityTimer();
             // Validate date is complete (all 8 digits entered: 2 for month, 2 for day, 4 for year)
             // Date format: MM-DD-YYYY (8 digits total, excluding dashes)
@@ -5134,7 +5142,7 @@ void loop() {
                 if (list_container != NULL && g_active.count > 0) {
                   lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
                 }
-                lv_timer_handler();
+                lcd_main_lvgl_service();
                 resetActivityTimer();
               } else {
                 Serial.printf("[EXPIRY] Date buffer still contains underscores - cannot submit\n");
@@ -5196,7 +5204,7 @@ void loop() {
         lv_obj_clear_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
         status_screen_shown_time = now;
         Serial.println("[STATUS] Showing 'On it!' status screen");
-        lv_timer_handler();  // Force immediate render
+        lcd_main_lvgl_service();  // Force immediate render
       }
       
       // Reset long press flag
@@ -5207,7 +5215,7 @@ void loop() {
       // Make sure halo is hidden (shouldn't be visible, but just in case)
       if (recording_indicator != NULL && !lv_obj_has_flag(recording_indicator, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_add_flag(recording_indicator, LV_OBJ_FLAG_HIDDEN);
-        lv_timer_handler();
+        lcd_main_lvgl_service();
       }
       // Reset long press flag
       long_press_sent = false;
@@ -5255,7 +5263,7 @@ void loop() {
       // Show solid halo for long press
       if (recording_indicator != NULL) {
         lv_obj_clear_flag(recording_indicator, LV_OBJ_FLAG_HIDDEN);
-        lv_timer_handler();  // Force immediate render
+        lcd_main_lvgl_service();  // Force immediate render
         Serial.println("[TOUCH] Showing solid halo for long press");
       }
       
@@ -5280,7 +5288,7 @@ void loop() {
       lv_obj_add_flag(status_screen, LV_OBJ_FLAG_HIDDEN);
       status_screen_shown_time = 0;
       status_screen_auto_hide_at_ms = 0;
-      lv_timer_handler();
+      lcd_main_lvgl_service();
       resetActivityTimer();
     }
     // Check if it's the "On it!" message (1 second timeout)
@@ -5300,7 +5308,7 @@ void loop() {
         // Start glowing animation (voice processing in progress)
         start_glowing_animation("voice_processing");
         
-        lv_timer_handler();
+        lcd_main_lvgl_service();
         // Reset activity timer
         resetActivityTimer();
       }
@@ -5313,7 +5321,7 @@ void loop() {
       now >= ship_menu_settings_status_hide_at_ms) {
     lv_obj_add_flag(ship_menu_settings_status, LV_OBJ_FLAG_HIDDEN);
     ship_menu_settings_status_hide_at_ms = 0;
-    lv_timer_handler();
+    lcd_main_lvgl_service();
   }
 
   // Hide API error status after a grace period
@@ -5329,7 +5337,7 @@ void loop() {
       if (list_container != NULL && g_active.count > 0) {
         lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
       }
-      lv_timer_handler();
+      lcd_main_lvgl_service();
       resetActivityTimer();
     }
   }
@@ -5346,7 +5354,7 @@ void loop() {
     if (list_container != NULL && g_active.count > 0) {
       lv_obj_clear_flag(list_container, LV_OBJ_FLAG_HIDDEN);
     }
-    lv_timer_handler();
+    lcd_main_lvgl_service();
     // Reset activity timer so user has time to see the list before sleep
     resetActivityTimer();
   }
@@ -5374,7 +5382,7 @@ void loop() {
       provision_qr_wait_start_ms = 0;
       Serial.printf("[PROVISION] wait_for_qr timeout after %lu ms\n", wait_ms);
       provision_ui_qr_timeout();
-      lv_timer_handler();
+      lcd_main_lvgl_service();
     }
   }
 
@@ -6101,7 +6109,7 @@ void loop() {
 
 loop_continue:
   if (lvgl_locked) {
-    lv_timer_handler();  // Tick LVGL animations/timers every loop iteration
+    lcd_main_lvgl_service();  // Tick LVGL animations/timers every loop iteration
     example_lvgl_unlock();
   }
 
