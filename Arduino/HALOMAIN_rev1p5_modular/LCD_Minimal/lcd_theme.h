@@ -5,8 +5,8 @@
 // inventory and trap list live in docs/HALO_UI_DESIGN.md.
 //
 // Target: 360x360 round SH8601, LVGL 8.3, LV_COLOR_DEPTH 16, LV_COLOR_16_SWAP 1.
-// No GPU, ~48KB LVGL heap (LV_MEM_SIZE in Arduino/libraries/lv_conf.h — shared by
-// every sketch on this machine, so it is NOT ours to raise unilaterally).
+// No GPU. The canonical production build selects our 96KB LCD UI heap in
+// LCD_Minimal/lv_conf.h; the shared Arduino configuration is unchanged.
 //
 // Use the primitives rather than restyling by hand. Hand-restyling is how the 43
 // distinct colours and 798 inline style calls in the pre-redesign UI happened.

@@ -83,8 +83,11 @@ class ProductionProfileTests(unittest.TestCase):
             canary = build.command(board, SOURCE, '/tmp/halo-profile-check', '/usr/bin/arduino-cli', True)
             index = plain.index('--build-property') + 1
             report_label = ' -DOTA_CHANNEL="prod"'
-            self.assertTrue(plain[index].endswith(report_label))
-            self.assertEqual(canary[index], plain[index][:-len(report_label)] + suffix)
+            self.assertEqual(plain[index].count(report_label), 1)
+            self.assertEqual(canary[index], plain[index].replace(report_label, suffix))
+            config = ' -DLV_CONF_PATH=' + str(SOURCE / 'LCD_Minimal/lv_conf.h')
+            self.assertEqual(config in plain[index], board == 'lcd')
+            self.assertEqual(config in canary[index], board == 'lcd')
             canary[index] = plain[index]
             self.assertEqual(canary, plain)
 

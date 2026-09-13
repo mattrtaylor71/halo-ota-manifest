@@ -62,6 +62,12 @@ def command(board, source, build, compiler, private_canary=False):
     flags = shipping_flags(board)
     assert all(token not in flags for token in ('OTA_S3_', 'OTA_CHANNEL_ENABLED', 'RETENTION_FIXTURE', 'RETIRE_SNAPSHOT', 'SPOOL_ENABLED=0', 'SPOOL_DRAIN_WAKE_ENABLED=0'))
     flags = shipping_flags(board, private_canary)
+    if board == 'lcd':
+        # The library and sketch must share the same owned configuration.
+        # LVGL stringifies LV_CONF_PATH itself; do not embed literal quotes.
+        config = source / 'LCD_Minimal/lv_conf.h'
+        assert config.is_file() and not any(c.isspace() for c in str(config))
+        flags += ' -DLV_CONF_PATH=' + str(config)
     for relative in ('halo_ota_demo/firmware/shared/MqttSecrets.local.h',
                      'halo_ota_demo/firmware/halo_sense_prod/MqttSecrets.local.h',
                      'halo_ota_demo/firmware/halo_sense_prod/MqttSecrets.local.cpp'):

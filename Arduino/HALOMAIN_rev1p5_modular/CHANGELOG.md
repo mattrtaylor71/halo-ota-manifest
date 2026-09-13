@@ -1,5 +1,11 @@
 # Firmware changelog
 
+## Unreleased — manual update screen memory recovery
+
+A captured 136 freeze stopped in LVGL's out-of-memory assertion while drawing a 324-byte temporary image buffer. The manual daily-limit result had arrived, but the render task held the UI mutex forever. The default assertion handler spins and the UI task kept feeding its watchdog while waiting for that mutex.
+
+Use a repository-owned LCD configuration with a 96 KiB graphics heap, preserving all other LVGL settings. Fatal LVGL assertions now call the platform panic handler instead of spinning forever. The canonical builder applies the same configuration to the LCD sketch and library; Sense and the machine-wide Arduino configuration are unchanged. A queued `uimem` readout measures free space, largest block and peak use under the UI lock. No OTA budgets, schedule, display design or transfer logic changes.
+
 ## 6.4.136 — published; scheduled transfer and paired health verified
 
 Canonical shipping pair from source `e2d85c003cc280edf9d66c697eaf0d608a881002`, build `6.4.136-20260913T184416Z-e2d85c003cc2`. Production builds, focused host regressions, artifact checks and full public manifest/binary verification passed. Version 135 contains the same runtime and was installed before the scheduled test.

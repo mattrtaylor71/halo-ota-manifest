@@ -1349,6 +1349,7 @@ static const unsigned long LCD_OTA_USER_ACTIVE_GRACE_MS = 120000; // 2 min
 static volatile bool g_manual_ota_override = false;
 static volatile bool g_manual_ota_ui_requested = false;
 static volatile bool g_manual_ota_ui_active = false;
+static std::atomic<bool> g_usb_ui_memory_requested{false};
 // 0 checking, 1 current, 2 daily limit, 3 deferred, 4 failed, 5 finished.
 static std::atomic<uint8_t> g_manual_ota_result{0};
 static unsigned long g_manual_ota_result_until_ms = 0;

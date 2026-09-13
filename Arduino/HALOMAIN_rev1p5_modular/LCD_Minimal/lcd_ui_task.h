@@ -54,6 +54,16 @@ static void ui_task(void *arg) {
       continue;
     }
 
+    if (!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode &&
+        g_usb_ui_memory_requested.exchange(false)) {
+      lv_mem_monitor_t memory{};
+      lv_mem_monitor(&memory);
+      Serial.printf("[UI_MEMORY] total=%u free=%u largest=%u max_used=%u frag_pct=%u\n",
+                    (unsigned)memory.total_size, (unsigned)memory.free_size,
+                    (unsigned)memory.free_biggest_size, (unsigned)memory.max_used,
+                    (unsigned)memory.frag_pct);
+    }
+
     // USB 'ota' and the physical Settings button use exactly the same action,
     // including its latch and awake-proof delivery, on the LVGL owner task.
     if (g_manual_ota_ui_requested) {
