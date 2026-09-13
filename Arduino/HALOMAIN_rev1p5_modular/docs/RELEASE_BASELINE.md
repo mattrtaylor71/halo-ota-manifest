@@ -1,10 +1,20 @@
+# Production OTA 139 — published and installed; manual policy cases verified with capture limits
+
+Version 139 is the current published and development pair, built from `97c45f6a20cadff2ae444b99c3928457e7b204e4`. Canonical builds, native regressions, artifact checks and full public binary readbacks passed. A manual request may now spend remaining same-day discovery allowance after a closed check; exhausted allowance reports “Daily update limit” accurately. Automatic cooldowns, debt guards, schedule and LCD behavior are unchanged.
+
+Both boards are 139/app1 SDK VALID; installation preserved 138/app0 and all NVS. With no allowance reset, one request checked both actual published 139 manifests and returned `up_to_date`; the next returned BUDGET / `policy_daily_limit` before any manifest fetch. Independent review of the original serial captures verifies Home, darkness and paired sleep in both cases. Both harness verdicts remain INCOMPLETE due to missing/interleaved text. The quota ACK and timer lines were partial, so peer ACK delivery is not proven; local stored-arm fields and actual SDK timers support the inferred 15-second LCD lead.
+
+Cloud confirms only the first result, two network windows and generation 4. The second pre-sleep upload failed and is recorded. This is scoped manual-policy acceptance, not a new firmware-transfer or scheduled OTA qualification. [RELEASE_BASELINE.json](../RELEASE_BASELINE.json) binds both original captures and the separate independent reviews. Future work starts from source 139 and subsequent records; earlier 138/137/136 evidence and qualified 117 remain preserved.
+
+## Historical checkpoint — September 13 (version 138 sleep handshake)
+
 # Production OTA 138 — published and installed; sleep handshake verified
 
-Version 138 is the current published and development pair, built from `e77c5acf7246d474fada668fbaf38ac59d2a1a16`. Canonical builds, artifact checks, 13 native regressions and full public manifest/binary readbacks passed. The LCD now stores and acknowledges future wake times during the sleep handshake without treating them as user activity or relighting the screen. The 96 KiB graphics configuration and Sense runtime are unchanged.
+At this checkpoint, version 138 was the published and development pair, built from `e77c5acf7246d474fada668fbaf38ac59d2a1a16`. Canonical builds, artifact checks, 13 native regressions and full public manifest/binary readbacks passed. The LCD now stores and acknowledges future wake times during the sleep handshake without treating them as user activity or relighting the screen. The 96 KiB graphics configuration and Sense runtime are unchanged.
 
 Both boards run 138/app0, SDK VALID; installation preserved 137/app1 and all NVS. Three manual-result cycles remained dark through the future-schedule handshake and logged deep sleep on both boards without a reboot. Each retained the existing `policy_deferred` / “Update postponed” result. OTA policy, allowance and schedule behavior were not changed. This is sleep-handshake acceptance, not a new firmware-transfer or scheduled OTA qualification.
 
-Future work starts from source 138 and subsequent release records. [RELEASE_BASELINE.json](../RELEASE_BASELINE.json) binds the exact installation, publication and three closed cycles. Version 137's memory/no-update tests, version 136's scheduled test and qualified version 117 remain preserved below.
+This checkpoint established source 138 before the subsequent manual-policy fix. [RELEASE_BASELINE.json](../RELEASE_BASELINE.json) binds the exact installation, publication and three closed cycles. Version 137's memory/no-update tests, version 136's scheduled test and qualified version 117 remain preserved below.
 
 ## Historical checkpoint — September 13 (version 137 memory recovery)
 
@@ -76,7 +86,7 @@ Manual requests are acknowledged and deduplicated, retain a stable checking/resu
 
 ## Future firmware work
 
-1. Start from version 138 artifact source `e77c5acf7246d474fada668fbaf38ac59d2a1a16` and this checkout’s subsequent release records, as recorded in `development_baseline` in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Retain the LCD sleep-handshake and future-maintenance guards, owned 96 KiB graphics configuration and memory recovery, and prior render/abort/calendar, UART, manual-clock, shopping and approved UI fixes. Historical 117/114 tags do not contain all current fixes. Verify Git state and preserve unrelated user changes; another checkout requires verified adoption.
+1. Start from version 139 artifact source `97c45f6a20cadff2ae444b99c3928457e7b204e4` and this checkout’s subsequent release records, as recorded in `development_baseline` in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Retain charged manual discovery and accurate budget refusal, LCD sleep-handshake guards, the owned 96 KiB graphics configuration and prior OTA/UART/shopping fixes. Historical 117/114 tags do not contain all current fixes. Verify Git state and preserve unrelated user changes; another checkout requires verified adoption.
 2. Allocate a new unused version above the released version. Commit the intended source, then prepare an external snapshot with `python3 -B tools/prepare_production_release.py --version <allocated-version> --epoch <explicit-UTC-seconds> --out <new-outside-git-path>`.
 3. Build using that snapshot's `source/tools/build_ota_policy_production.py --out <new-build-path>`. Use `--private-canary` only for allocated private test versions; omit it for final production artifacts. Review the recorded arguments, source commit/tree, partitions, image sizes and resource checks. See [Production OTA build](OTA_POLICY_PRODUCTION_BUILD.md).
 4. Repository Version headers are source-only/precommit metadata. The preparer generates the final three headers in the external snapshot; the publisher rejects provisional builds. Use the canonical builder rather than a direct Arduino build or an older checkout. `publish_both.sh` consumes prebuilt artifacts through the canonical publisher.

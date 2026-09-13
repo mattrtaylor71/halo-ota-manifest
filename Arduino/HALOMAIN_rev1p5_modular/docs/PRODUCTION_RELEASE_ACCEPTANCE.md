@@ -1,3 +1,18 @@
+# Version 139 manual-policy verification — September 13, 2026
+
+| Check | Actual evidence |
+|---|---|
+| Build/publication/install | Source `97c45f6a20cadff2ae444b99c3928457e7b204e4`; canonical builds, native regressions and public binary verification passed. Both 139/app1 SDK VALID; 138/app0 and all NVS preserved. |
+| Actual no-update | Both complete parsed 139 manifest identities match the sealed pair; terminal is `up_to_date`. Cloud confirms two network windows and generation 4. Independent serial review verifies Home/dark/paired shutdown. |
+| Budget refusal | Admission 5 (BUDGET), terminal `policy_daily_limit`, no manifest fetch. Independent serial review verifies Home/dark/paired shutdown. No allowance reset in either case. |
+| Capture limits | Both original harness results remain INCOMPLETE. First capture lacks a redundant Sense summary line. Second lacks the full ACK prefix and LCD target suffix: stored-arm fields and SDK timers support local arming and an inferred 15-second lead, but not complete ACK delivery to Sense. |
+| Telemetry limit | First case corroborated by cloud. Second pre-sleep upload failed (code 0, stage 4, result 9); no second cloud outcome claimed. |
+| Scope | Two manual-policy cases verified by separate offline reviews; no new firmware-transfer, scheduled 2am execution, physical navigation, power-cut, USB-free or extended soak qualification. |
+
+Original captures and independent reviews are pinned under `acceptance_results.139_manual_discovery_and_budget_refusal` in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). All earlier acceptance remains preserved below.
+
+---
+
 # Version 138 sleep-handshake verification — September 13, 2026
 
 | Check | Actual evidence |

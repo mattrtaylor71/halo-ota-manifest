@@ -1,8 +1,12 @@
 # Firmware changelog
 
-## 6.4.139 candidate — manual check uses remaining allowance
+## 6.4.139 — published; manual checks use remaining allowance
 
-An explicit manual request can spend the remaining same-day network and work allowance after a closed discovery, including a previous read-only failure. Automatic cooldowns, next-day rollover, legacy/deferred debt, active operations and transfer limits are unchanged. Preserve the actual admission reason so exhausted discovery reports “Daily update limit” rather than “Update postponed”. Version 138 display sleep handling and UI are unchanged. Build, installation and publication are pending.
+An explicit manual request can spend the remaining same-day network and work allowance after a closed discovery, including a previous read-only failure. Automatic cooldowns, next-day rollover, legacy/deferred debt, active operations and transfer limits are unchanged. Preserve the actual admission reason so exhausted discovery reports “Daily update limit” rather than “Update postponed”. Version 138 display sleep handling and UI are unchanged.
+
+Canonical builds, native regressions, artifact checks and full public binary readbacks passed from source `97c45f6a20cadff2ae444b99c3928457e7b204e4`, build `6.4.139-20260913T213006Z-97c45f6a20ca`. Both boards are 139/app1 SDK VALID; installation preserved 138/app0 and all NVS. Sense grows by 240 bytes; LCD and static/RTC memory footprints are unchanged.
+
+Without resetting allowance, one manual request checked both published 139 manifests and returned `up_to_date`, consuming the remaining network window. The next request returned `policy_daily_limit` with BUDGET admission and no manifest fetch. Independent review verifies natural Home, darkness and paired sleep in both unchanged captures. Both original harnesses remain INCOMPLETE because USB logging omitted expected text. The quota ACK frame and LCD target suffix were incomplete; local arm payload and SDK timers support the inferred 15-second lead, not proven peer ACK delivery. Cloud confirms the first result and two used windows; the second report upload failed. No new firmware-transfer or scheduled OTA qualification is claimed. Version 139 is the development baseline.
 
 ## 6.4.138 — published; coordinated sleep stays dark
 
@@ -10,7 +14,7 @@ A future wake-time message from Sense was counted as user activity while LCD wai
 
 Canonical production builds, artifact checks and full public manifest/binary readbacks passed from source `e77c5acf7246d474fada668fbaf38ac59d2a1a16`, build `6.4.138-20260913T202809Z-e77c5acf7246`. All 13 native regressions passed. Both boards are installed as 138/app0, SDK VALID, preserving 137/app1 and all NVS. LCD binary size increases by 304 bytes; static RAM, RTC use and the 96 KiB graphics configuration are unchanged.
 
-Three manual-result cycles stored and acknowledged the future schedule, stayed dark through the sleep handshake and entered deep sleep on both boards without a relight or reboot. The existing `policy_deferred` / “Update postponed” result and allowance behavior are unchanged. No firmware or allowance changes occurred during these cycles. This verifies the sleep handshake, not a new firmware transfer or scheduled OTA. Future development starts from version 138; earlier acceptance remains preserved.
+Three manual-result cycles stored and acknowledged the future schedule, stayed dark through the sleep handshake and entered deep sleep on both boards without a relight or reboot. The existing `policy_deferred` / “Update postponed” result and allowance behavior are unchanged. No firmware or allowance changes occurred during these cycles. This verifies the sleep handshake, not a new firmware transfer or scheduled OTA. At this checkpoint, version 138 became the development baseline; earlier acceptance remains preserved.
 
 ## 6.4.137 — published; manual update screen memory recovery
 
