@@ -1,3 +1,21 @@
+# Scheduled 136 verification — September 13, 2026
+
+The actual 135→136 scheduled transfer is reported by the passive cloud observer. The distinct checks below must retain their own evidence and timing.
+
+| Check | Current evidence |
+|---|---|
+| Build/publication | Canonical shipping 136 source/artifacts and full public manifest/binary readbacks passed. |
+| Scheduled setup | Native calendar due 18:55:53 UTC; LCD lead 18:55:38 UTC. Both timers logged, LCD timer SDK returned success, setup handles closed. |
+| Autonomous transfer | Cloud reports both 136, LCD updated, Sense running/selected app0; one BEGIN per board. No device command or USB open by the observer. |
+| Direct SDK health | PASS. Both 136/app0 SDK VALID, exact build and LCD Home/OTA flags clear. Independently extracted complete fresh boot FW_INFO and nonce/CRC ID1 from the original LCD capture; its later duplicate-response timeout remains recorded. |
+| Durable settlement | PASS on ordinary verification wake: the same campaign reports `policy_target_valid`, RESOLVED/generation 6 / reserved 0 at 19:11:15 UTC, with one BEGIN per board. No manual OTA request. The subsequent LCD USB health read reset the already-valid LCD; this observation is not a USB-free control. Earlier pre-query APPLY / generation 5 is preserved; completion before this wake is not claimed. |
+| Pacific restoration | PASS. Pacific 02:00 restored; both actual timer settings captured, policy/history unchanged. First night uses an uncredited absolute arm. |
+| Limits | One accelerated calendar case, connected USB; old 134 failure separately archived. No soak, fault-recovery, power-cut, USB-free or factory qualification. |
+
+Version 117 remains the preserved qualified release; its accepted scope and historical114 results below are unchanged.
+
+---
+
 # Production 117 acceptance — scoped five-fix validation
 
 The actual acceptance receipt is `halo-ui-fixes-2026-09-10/ACCEPTANCE.json`, pinned in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Compiled source is `1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f`; 116/117 are canonical production pairs with identical runtime outside generated version headers. Production 117 publication passed. The short same-version response follow-up also passed. Release tag `halo-v6.4.117`, commit and completed checkout-adoption bindings are recorded in `RELEASE_BASELINE.json`.

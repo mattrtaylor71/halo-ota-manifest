@@ -1,14 +1,16 @@
 # Firmware changelog
 
-## Unreleased — bounded display-transfer recovery
+## 6.4.136 — published; scheduled transfer and paired health verified
 
-Pause every main-loop LVGL render call while UART OTA receives or finalizes the display image, matching the existing UI-task pause. The main loop previously bypassed that pause and could submit display work during flash writes. The scheduled132→134 attempt stopped at chunk545 and the LCD boot identity changed; this establishes a failed transfer and reboot, not the precise reset cause. The rendering fix still requires hardware acceptance.
+Canonical shipping pair from source `e2d85c003cc280edf9d66c697eaf0d608a881002`, build `6.4.136-20260913T184416Z-e2d85c003cc2`. Production builds, focused host regressions, artifact checks and full public manifest/binary verification passed. Version 135 contains the same runtime and was installed before the scheduled test.
 
-Keep a scheduled recovery alive when the LCD wakes the Sense up to 15 seconds early. Preserve the verified calendar origin after its UART notice is consumed, wait within the existing readiness deadline, and admit work only once the scheduled time arrives. A second hardware run exposed loss of the separate calendar notice before preflight lock. Keep the LCD’s retained notice available under its original preflight lease, suppress it during binary transfer, and give the Sense only the existing 15-second lead for that notice to arrive. Missing notice at the actual due time still cannot authorize work. Hardware acceptance of the combined fix is pending.
+Pause both display rendering paths during UART firmware reception and finalization. Preserve the LCD calendar notice under its original preflight lease, handle its existing 15-second early wake, and retain bounded same-session abort cleanup. Daily budgets, counters, credit rules and user interface designs are unchanged.
 
-Retry the same-session abort exchange up to three times within its original cleanup deadline. The LCD accepts the retry separator after returning to JSON mode and hands incoming OTA bytes directly to the binary receiver after BEGIN. Cleanup still requires a matching acknowledgement before another transfer or scheduled retry can proceed. Existing work budgets, update counters and calendar credit are unchanged.
+The September 13 scheduled 135→136 case used accurate UTC and a recorded temporary timezone to exercise the ordinary 02:00 calendar path. Both boards woke for the 18:55:53 UTC start. Cloud reported both on 136 and LCD updated at 19:00:49 UTC. No taps or USB opens occurred during the autonomous transfer. The initial policy record remained APPLY. On the next ordinary actuator wake, direct health evidence confirmed both 136/app0 SDK VALID and Home; the same campaign then resolved natively at 19:11:15 UTC, with no manual OTA or accounting reset. The LCD USB health read reset the already-valid LCD, so this later observation is not a USB-free control. A duplicate diagnostic reply was truncated in USB logging; the original complete boot FW_INFO and nonce/CRC ID1 were independently verified.
 
-Retain specific receiver failure reasons, parser counters, cleanup outcomes and retry prerequisite results for diagnosis. This addresses concrete handoff and recovery defects; the initial missing acknowledgement in the scheduled129 case is not yet attributed to a specific receiver fault. Hardware acceptance is pending.
+Restored 02:00 Pacific and captured both actual sleep timers. The first night uses an uncredited absolute arm to preserve existing calendar history; normal daily Pacific scheduling remains configured. Final receipts are bound in RELEASE_BASELINE.json.
+
+The earlier 129 and 134 failures remain failures. The 132→134 display transfer stopped at chunk 545 and LCD boot identity changed; its precise reset cause is unproven. Failed cases were archived before the fresh test, not automatically recovered. This is one successful final-build scheduled transfer, not extended soak or fault-recovery qualification. Version 136 is the development baseline; 117 remains the preserved qualified release and recovery reference.
 
 ## 6.4.129 — published; scheduled transfer failed
 

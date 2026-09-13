@@ -1,3 +1,15 @@
+# Production OTA 136 — published and installed; scheduled transfer verified
+
+Version 136 is the current published and development pair, built from `e2d85c003cc280edf9d66c697eaf0d608a881002`. Both canonical builds, focused regressions, artifact checks and public binary readbacks passed. The September 13 scheduled 135→136 test transferred the new pair with no USB opens or taps during the autonomous window. Its 18:55:53 UTC target used accurate UTC and a temporary timezone to exercise the ordinary 02:00 calendar path.
+
+On the next ordinary actuator wake, direct health evidence confirmed both boards on 136/app0 SDK VALID and LCD Home. The same campaign resolved natively at 19:11:15 UTC, with no manual OTA or allowance reset. The LCD USB health read can reset the already-valid LCD; this later observation is not a USB-free control. The original capture contained complete Sense boot FW_INFO and nonce/CRC LCD ID1 despite a later truncated duplicate response.
+
+The daily 02:00 Pacific schedule is restored and both actual timers were captured. An uncredited arm bridges the first night while preserving existing completed history. See the hashed final result, timer and publication receipts in RELEASE_BASELINE.json. Future work starts from source 136 and subsequent records in this production checkout. Version 117 remains the preserved qualified release and recovery reference.
+
+Failures 129 and 134 remain archived failures; preparing a fresh case did not prove their automatic recovery. This single successful scheduled update does not establish extended soak, power-cut, USB-free or factory qualification.
+
+## Historical checkpoint — September12 (published129 / installed128)
+
 # Production OTA — published129; installed development build128
 
 **129 is published, but its scheduled OTA test failed.** The version-only shipping pair comes from source `bbcf3deb854de72db929da53fa078f1c732acb28`, build `6.4.129-20260912T215437Z-bbcf3deb854d`. Both canonical builds, artifact checks and public full-binary readbacks passed. Runtime and resource footprints match128; no new firmware behavior was introduced. Both boards remain exact128/app0 SDK VALID after the case. Keep128 as the development baseline; do not treat129 publication as paired OTA qualification.
@@ -44,7 +56,7 @@ Manual requests are acknowledged and deduplicated, retain a stable checking/resu
 
 ## Future firmware work
 
-1. Start from128 artifact source `7025f07cc9efd3b9128c23df6d7eb67586e287d0` and this checkout’s subsequent release-record commits, as recorded in `development_baseline` in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Retain128 owner/UART/manual-clock,121 deletion and119 OTA fixes. Historical117/114 tags do not contain all current fixes. Verify Git state and preserve unrelated user changes; another checkout requires its own safe adoption before being treated as the current baseline.
+1. Start from136 artifact source `e2d85c003cc280edf9d66c697eaf0d608a881002` and this checkout’s subsequent release-record commits, as recorded in `development_baseline` in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Retain136 render/abort/calendar fixes,128 owner/UART/manual-clock,121 deletion and119 OTA fixes. Historical117/114 tags do not contain all current fixes. Verify Git state and preserve unrelated user changes; another checkout requires its own safe adoption before being treated as the current baseline.
 2. Allocate a new unused version above the released version. Commit the intended source, then prepare an external snapshot with `python3 -B tools/prepare_production_release.py --version <allocated-version> --epoch <explicit-UTC-seconds> --out <new-outside-git-path>`.
 3. Build using that snapshot's `source/tools/build_ota_policy_production.py --out <new-build-path>`. Use `--private-canary` only for allocated private test versions; omit it for final production artifacts. Review the recorded arguments, source commit/tree, partitions, image sizes and resource checks. See [Production OTA build](OTA_POLICY_PRODUCTION_BUILD.md).
 4. Repository Version headers are source-only/precommit metadata. The preparer generates the final three headers in the external snapshot; the publisher rejects provisional builds. Use the canonical builder rather than a direct Arduino build or an older checkout. `publish_both.sh` consumes prebuilt artifacts through the canonical publisher.
