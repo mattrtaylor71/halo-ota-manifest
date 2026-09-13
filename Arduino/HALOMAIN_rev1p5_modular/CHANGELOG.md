@@ -1,10 +1,14 @@
 # Firmware changelog
 
-## Unreleased — manual update screen memory recovery
+## 6.4.137 — published; manual update screen memory recovery
 
 A captured 136 freeze stopped in LVGL's out-of-memory assertion while drawing a 324-byte temporary image buffer. The manual daily-limit result had arrived, but the render task held the UI mutex forever. The default assertion handler spins and the UI task kept feeding its watchdog while waiting for that mutex.
 
 Use a repository-owned LCD configuration with a 96 KiB graphics heap, preserving all other LVGL settings. Fatal LVGL assertions now call the platform panic handler instead of spinning forever. The canonical builder applies the same configuration to the LCD sketch and library; Sense and the machine-wide Arduino configuration are unchanged. A queued `uimem` readout measures free space, largest block and peak use under the UI lock. No OTA budgets, schedule, display design or transfer logic changes.
+
+Canonical shipping pair from source `a8ab44b851b438c57ad7ddda11c392d1e9af8bd3`, build `6.4.137-20260913T194121Z-a8ab44b851b4`. Both builds, artifact checks and full public manifest/binary readbacks passed. LCD static RAM grows by 49,152 bytes and its binary by 160 bytes; Sense resource usage is unchanged. Controlled USB installation placed both boards in 137/app1, SDK VALID, preserving 136/app0 and all NVS.
+
+Ten manual requests through the existing Settings action each returned Home naturally. Free UI memory returned to exactly 73,204 bytes and the largest block to 73,120 bytes after every cycle. Cloud confirmed `policy_daily_limit`; the stress test changed no allowance. A separate actual check against published version 137 returned `up_to_date` for Sense, found LCD already current, and returned Home naturally with the same free memory. Before that check, the fully completed version 136 policy was archived and only its Sense retry bookkeeping was cleared in one NVS sector; no unresolved debt, firmware banks, selectors, other NVS or schedule were changed. This was a declared bench allowance fixture, not natural quota renewal. No full Settings navigation, new firmware-transfer, scheduled, sleep-after-no-update or fault-recovery pass is claimed. Future development starts from version 137; the previous 136 scheduled result and qualified 117 reference remain preserved.
 
 ## 6.4.136 — published; scheduled transfer and paired health verified
 
@@ -16,7 +20,7 @@ The September 13 scheduled 135→136 case used accurate UTC and a recorded tempo
 
 Restored 02:00 Pacific and captured both actual sleep timers. The first night uses an uncredited absolute arm to preserve existing calendar history; normal daily Pacific scheduling remains configured. Final receipts are bound in RELEASE_BASELINE.json.
 
-The earlier 129 and 134 failures remain failures. The 132→134 display transfer stopped at chunk 545 and LCD boot identity changed; its precise reset cause is unproven. Failed cases were archived before the fresh test, not automatically recovered. This is one successful final-build scheduled transfer, not extended soak or fault-recovery qualification. Version 136 is the development baseline; 117 remains the preserved qualified release and recovery reference.
+The earlier 129 and 134 failures remain failures. The 132→134 display transfer stopped at chunk 545 and LCD boot identity changed; its precise reset cause is unproven. Failed cases were archived before the fresh test, not automatically recovered. This is one successful final-build scheduled transfer, not extended soak or fault-recovery qualification. At this checkpoint, version 136 became the development baseline; 117 remained the preserved qualified release and recovery reference.
 
 ## 6.4.129 — published; scheduled transfer failed
 

@@ -1,3 +1,19 @@
+# Version 137 manual UI memory verification — September 13, 2026
+
+| Check | Actual evidence |
+|---|---|
+| Source/build/publication | Committed source `a8ab44b851b438c57ad7ddda11c392d1e9af8bd3`; both canonical shipping builds, artifact checks and full public manifest/binary readbacks passed. |
+| Controlled installation | Both 137/app1 SDK VALID; original-handle nonce/CRC LCD identity and fresh Sense FW_INFO. Version 136/app0 preserved; NVS, bootloader and current-bank writes were zero. |
+| Repeated manual UI | Ten requests through the existing Settings action returned Home naturally, with no forced exit. Cloud confirmed the actual `policy_daily_limit` terminal. The stress test changed no allowance. |
+| UI memory | After all ten cycles: 98,304-byte pool, 73,204 bytes free and 73,120-byte largest block. No decline between cycles. |
+| Same-version no-update | One actual manifest comparison against published 137 returned Sense `up_to_date`, LCD already current and the `up_to_date` terminal, then Home naturally. Free UI memory returned to 73,204 bytes with a 73,120-byte largest block. |
+| No-update bench fixture | Archived the completed version 136 policy; one Sense NVS sector changed only its retry bookkeeping after verifying no unresolved debt. Both firmware banks, selectors, other NVS, LCD NVS, schedule and completed history preserved. This is not natural quota renewal. |
+| Limits | No full Settings navigation, new firmware transfer, scheduled, power-cut, USB-free, physical cold-boot or extended soak qualification. Normal sleep was not observed in the bounded no-update capture. Version 136's scheduled result and the historical qualified 117 release retain their own scope. |
+
+Receipts are pinned under `acceptance_results.137_manual_UI_memory_recovery` in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json).
+
+---
+
 # Scheduled 136 verification — September 13, 2026
 
 The actual 135→136 scheduled transfer is reported by the passive cloud observer. The distinct checks below must retain their own evidence and timing.
