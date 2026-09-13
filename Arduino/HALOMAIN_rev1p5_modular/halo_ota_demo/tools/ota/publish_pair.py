@@ -80,9 +80,9 @@ def shipping_proof(path, board, version, route='production'):
     command = json.loads(pin(p['configuration']).read_text())
     argv = command['argv']
     require(argv.count('--build-path') == 1 and argv.count('--build-property') == 1, 'Ambiguous compiler command')
-    expected_argv = [argv[0], 'compile', '--fqbn', canonical.FQBNS[board], '--build-path', argv[argv.index('--build-path') + 1],
-                     '--build-property', 'build.extra_flags=' + canonical.shipping_flags(board, route == 'private-canary'),
-                     'halo_ota_demo/firmware/halo_' + board + '_prod/halo_' + board + '_prod.ino', '--jobs', '2']
+    expected_argv = canonical.command(board, Path(p['source_root']),
+                                      argv[argv.index('--build-path') + 1], argv[0],
+                                      route == 'private-canary')
     require(argv == expected_argv, 'Actual compiler command differs from complete canonical shipping profile')
     partition_csv = Path(p['source_root']) / ('halo_ota_demo/firmware/halo_' + board + '_prod/partitions.csv')
     require(sha(partition_csv.read_bytes()) == canonical.PARTITIONS[board], 'Changed canonical partition table')
