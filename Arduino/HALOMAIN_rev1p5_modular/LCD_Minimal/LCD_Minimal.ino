@@ -961,6 +961,8 @@ static bool wake_timer_enabled = false;
 static bool wake_uart_enabled = false;
 static volatile bool sleep_ready_received = false;
 static volatile bool sleep_deny_received = false;
+// UART schedule updates must not look like a user tap while awaiting SLEEP_READY.
+static std::atomic<bool> g_lcd_sleep_handshake_active{false};
 static bool sleep_handshake_fail_link = false;
 static unsigned long sleep_deny_retry_ms = 0;
 static unsigned long sleep_deny_received_ms = 0;

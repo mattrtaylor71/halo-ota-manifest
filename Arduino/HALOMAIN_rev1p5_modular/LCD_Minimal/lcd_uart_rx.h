@@ -685,16 +685,18 @@ static void uart_process_received_message(const char* json_str) {
     if (wake_in_s > 0) {
       g_lcd_maintenance_timer_armed = 1;
       g_lcd_maintenance_wake_in_s = wake_in_s;
-      // Arm-time delivery race fix: this is the future-window arm (the LCD will
-      // deep-sleep self-wake later). Reset the activity timer + nudge stay-awake
-      // a few seconds so the Sense's repeated arm-syncs / keepalives actually
-      // hold the LCD awake until now_epoch lands — without this, receiving the
-      // arm does NOT keep the LCD awake and it idle-sleeps mid-handshake. Do NOT
-      // enter maintenance-active/headless here (that is the at-window path below).
-      resetActivityTimer();
-      unsigned long arm_until = millis() + 8000UL;
-      if (!ota_stay_awake_until_ms || (int32_t)(arm_until - ota_stay_awake_until_ms) > 0) {
-        ota_stay_awake_until_ms = arm_until;
+      // Keep the existing arm-sync grace outside coordinated sleep. During the
+      // handshake Sense sends its next wake time before SLEEP_READY; counting
+      // that background message as activity falsely cancels sleep and relights
+      // the panel. Storage and acknowledgment still run in both cases.
+      if (!g_lcd_sleep_handshake_active.load()) {
+        resetActivityTimer();
+        unsigned long arm_until = millis() + 8000UL;
+        if (!ota_stay_awake_until_ms || (int32_t)(arm_until - ota_stay_awake_until_ms) > 0) {
+          ota_stay_awake_until_ms = arm_until;
+        }
+      } else {
+        Serial.println("[LCD_MAINT] future arm stored during sleep handshake; idle unchanged");
       }
     }
     // Persist to NVS BEFORE headless entry so timer survives touch exit

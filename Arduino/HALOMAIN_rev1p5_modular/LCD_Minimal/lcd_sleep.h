@@ -659,8 +659,14 @@ static bool sleep_prepare_wake_line_for_request() {
   return false;
 }
 
+struct LcdSleepHandshakeScope {
+  LcdSleepHandshakeScope() { g_lcd_sleep_handshake_active.store(true); }
+  ~LcdSleepHandshakeScope() { g_lcd_sleep_handshake_active.store(false); }
+};
+
 // Send sleep signal to Sense board before LCD goes to sleep
 static bool notify_sense_sleep() {
+  LcdSleepHandshakeScope handshake_scope;
   Serial.println("[LCD] Notifying Sense board to sleep...");
   // Send diagnostics BEFORE the sleep handshake. After SLEEP_READY the Sense is
   // already asleep and anything sent then is lost (measured: 1 of 19 delivered).

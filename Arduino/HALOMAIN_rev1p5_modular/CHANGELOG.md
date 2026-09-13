@@ -1,5 +1,9 @@
 # Firmware changelog
 
+## Unreleased — keep the display dark during coordinated sleep
+
+A future wake-time message from Sense was counted as user activity while LCD waited for SLEEP_READY. This cancelled sleep, relit the display, and restarted the Home idle timer. Scope the sleep handshake explicitly and keep future schedule storage/acknowledgment active without extending user activity or the OTA awake hold during that handshake. Preserve normal arm-sync grace, genuine touch/scroll cancellation, and current-window OTA handling.
+
 ## 6.4.137 — published; manual update screen memory recovery
 
 A captured 136 freeze stopped in LVGL's out-of-memory assertion while drawing a 324-byte temporary image buffer. The manual daily-limit result had arrived, but the render task held the UI mutex forever. The default assertion handler spins and the UI task kept feeding its watchdog while waiting for that mutex.
