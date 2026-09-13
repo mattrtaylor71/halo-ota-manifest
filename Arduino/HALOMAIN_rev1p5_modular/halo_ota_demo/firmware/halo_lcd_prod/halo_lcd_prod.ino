@@ -290,6 +290,21 @@ static void runLcdOtaCheckOnce() {
   ota_check_in_progress = false;
 }
 
+static bool lcd_coord_preflight_notice_allowed(uint32_t now) {
+  // OTA_LOCK transfers the receiver wait into an already bounded coordinator
+  // lease. A lost first calendar notice must remain retransmittable during
+  // that handoff; the lease does not create or renew a timer origin.
+  const uint32_t until = g_lcd_coord_lease_until_ms.load();
+  if (!ota_locked || !until || (int32_t)(now - until) >= 0 ||
+      g_lcd_coord_notice_clear.load() ||
+      g_lcd_coord_notice.wake != (int)ESP_SLEEP_WAKEUP_TIMER ||
+      strncmp(g_lcd_coord_notice.schedule, "nightly_", 8) != 0 ||
+      strlen(g_lcd_coord_notice.schedule) != 16) return false;
+  for (unsigned i = 8; i < 16; ++i)
+    if (g_lcd_coord_notice.schedule[i] < '0' || g_lcd_coord_notice.schedule[i] > '9') return false;
+  return true;
+}
+
 static void lcd_coord_service() {
   lcd_coord_service_clear();
   const uint32_t until = g_lcd_coord_lease_until_ms.load();
@@ -298,19 +313,32 @@ static void lcd_coord_service() {
     lcd_timer_receiver_wait_release("lease_expired");
   }
   if (!g_lcd_coord_notice.active || !g_lcd_boot_ready.load() ||
-      !lcd_timer_receiver_wait_active() || g_lcd_ota_uart_receiving || ota_locked) return;
+      g_lcd_ota_uart_receiving || g_lcd_ota_binary_mode || g_ota_mode_active ||
+      g_img_rx_binary_mode || g_spool_tx_pending || g_spool_tx_active || g_suppress_uart_json_tx) return;
   const uint32_t now = millis();
+  const bool receiver_wait = lcd_timer_receiver_wait_active();
+  const bool preflight_notice = lcd_coord_preflight_notice_allowed(now);
+  if ((!receiver_wait && !preflight_notice) || (ota_locked && !preflight_notice)) return;
   if ((int32_t)(now - g_lcd_coord_notice_next_ms) < 0) return;
   g_lcd_coord_notice_next_ms = now + 2000;
   const bool awake_proof_recent = last_sense_rx_ms &&
       (uint32_t)(now-last_sense_rx_ms) < SENSE_RECENT_RX_FOR_SLEEP_MS;
-  if (!sense_awake_confirmed || !link_synced || !awake_proof_recent) {
+  if (receiver_wait && (!sense_awake_confirmed || !link_synced || !awake_proof_recent)) {
     // Diagnostic/keepalive RX is not the sleep handshake's awake proof.
     // Reuse its SYNC/PING path; recent RX still prevents an unnecessary pulse.
     if (!link_synced) link_sync_pending = true;
     request_sense_wake("ota_peer_rendezvous");
     if (!lcd_timer_receiver_wait_active()) return;
   }
+  // BEGIN/LOCK/terminal cleanup use this same existing owner. Recheck while
+  // held so an announcement cannot cross into binary reception. This sends
+  // no new wake pulse when the original receiver wait has already ended.
+  LcdMaintenanceStorageGuard ownership_guard;
+  if (!g_lcd_coord_notice.active || g_lcd_coord_notice_clear.load() ||
+      g_lcd_ota_uart_receiving || g_lcd_ota_binary_mode || g_ota_mode_active ||
+      g_img_rx_binary_mode || g_spool_tx_pending || g_spool_tx_active || g_suppress_uart_json_tx ||
+      (!lcd_timer_receiver_wait_active() && !lcd_coord_preflight_notice_allowed(millis())) ||
+      (ota_locked && !lcd_coord_preflight_notice_allowed(millis()))) return;
   StaticJsonDocument<512> doc;
   doc["ver"] = PROTOCOL_VERSION; doc["type"] = "OTA_PEER_READY";
   doc["msg_id"] = get_next_msg_id(); doc["ts"] = now;

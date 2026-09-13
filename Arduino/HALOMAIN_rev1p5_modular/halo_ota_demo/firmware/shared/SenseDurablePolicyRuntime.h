@@ -580,9 +580,20 @@ static bool halo_policy_boot_ready(){
     (r->phase==durable_ota::Phase::DEFERRED||
      (r->phase==durable_ota::Phase::DISCOVERY&&!durable_ota::active_phase(*r)));
   const uint32_t calendar_due=normal_deferred?normal_calendar_due():0;
+  uint32_t calendar_wait_due=calendar_due;
+  // The correlated preflight lock can precede the separate TIMER notice.
+  // Give a missing notice only the existing <=15s lead to arrive. This
+  // persisted arm is WAIT evidence only: normal_entry still requires the
+  // actual timer origin at due, and neither original deadline is renewed.
+  if(normal_deferred&&!calendar_wait_due&&!g_lcd_timer_notice.pending&&
+     !g_lcd_timer_origin.boot_id&&!g_lcd_timer_seen_boot){
+    const CoordinatorCreditState base=coord_credit_base();
+    if(base.schedule.bound&&base.schedule.id[0])
+      calendar_wait_due=base.schedule.target_epoch;
+  }
   if(normal_deferred){
     due=r->not_before;
-    if(calendar_due>due)due=calendar_due;
+    if(calendar_wait_due>due)due=calendar_wait_due;
   }
   if(r->phase==durable_ota::Phase::DEFERRED||
      (durable_ota::bench_active(*r)&&bench_retry_phase(*r))){
@@ -610,7 +621,7 @@ static bool halo_policy_boot_ready(){
       !durable_ota::bench_active(*r)&&!one_shot&&
       due-c.epoch<=durable_ota::kPeerLead&&g_boot_ota_pending&&
       g_peer_gate.active&&g_peer_gate.ready&&!g_peer_gate.legacy&&g_peer_gate.peer_boot;
-    const bool calendar_peer_wait=normal_deferred&&calendar_due&&!one_shot&&
+    const bool calendar_peer_wait=normal_deferred&&calendar_wait_due&&!one_shot&&
       due-c.epoch<=durable_ota::kPeerLead&&g_boot_ota_pending&&
       g_peer_gate.active&&g_peer_gate.ready&&!g_peer_gate.legacy&&g_peer_gate.peer_boot;
     if((one_shot||accepted||armed_peer_wait||calendar_peer_wait)&&
