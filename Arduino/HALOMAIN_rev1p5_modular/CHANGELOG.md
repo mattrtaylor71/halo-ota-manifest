@@ -1,5 +1,9 @@
 # Firmware changelog
 
+## 6.4.139 candidate — manual check uses remaining allowance
+
+An explicit manual request can spend the remaining same-day network and work allowance after a closed discovery, including a previous read-only failure. Automatic cooldowns, next-day rollover, legacy/deferred debt, active operations and transfer limits are unchanged. Preserve the actual admission reason so exhausted discovery reports “Daily update limit” rather than “Update postponed”. Version 138 display sleep handling and UI are unchanged. Build, installation and publication are pending.
+
 ## 6.4.138 — published; coordinated sleep stays dark
 
 A future wake-time message from Sense was counted as user activity while LCD waited for SLEEP_READY. This cancelled sleep, relit the display, and restarted the Home idle timer. Scope the sleep handshake explicitly and keep future schedule storage/acknowledgment active without extending user activity or the OTA awake hold during that handshake. Preserve normal arm-sync grace, genuine touch/scroll cancellation, and current-window OTA handling.

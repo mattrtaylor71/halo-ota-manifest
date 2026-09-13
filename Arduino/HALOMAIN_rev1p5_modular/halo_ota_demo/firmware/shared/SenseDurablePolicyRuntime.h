@@ -22,6 +22,17 @@ struct Work {
 };
 static Work work;
 static bool boot_reconciled=false;
+// A refusal describes this invocation, not merely the retained campaign phase.
+static durable_ota::Admission last_admission=durable_ota::Admission::NOT_DUE;
+static bool admission_allowed(durable_ota::Admission result) {
+  last_admission=result;
+  return result==durable_ota::Admission::ALLOWED;
+}
+static const char* refusal_result(bool manual) {
+  if(manual&&last_admission==durable_ota::Admission::BUDGET)return "policy_daily_limit";
+  if(!manual&&current()&&current()->phase==durable_ota::Phase::RESOLVED)return "policy_target_valid";
+  return "policy_deferred";
+}
 // A completed policy transaction only closes diagnostic capture in RAM.
 // Its journal drains/seals later under the existing optional export deadline;
 // no diagnostic result or storage tail changes the committed policy outcome.
@@ -178,6 +189,7 @@ static bool normal_entry() {
   return due&&due/86400UL==c.epoch/86400UL&&c.epoch>=due;
 }
 static bool enter(const char* reason,bool retained_legacy) {
+  last_admission=durable_ota::Admission::NOT_DUE;
   if(work.live||!g_lcd_work_budget_live||!g_lcd_work_budget.remaining_ms()||!nvs_capacity_image_valid())return false;
   work={};work.original_start=g_lcd_work_budget.started_ms;work.original_budget=g_lcd_work_budget.limit_ms;
   work.normal=normal_entry();work.legacy=retained_legacy;
@@ -243,8 +255,8 @@ static bool enter(const char* reason,bool retained_legacy) {
   char origin[64]={};strlcpy(origin,g_coord_pending[0]?g_coord_pending:reason?reason:"ordinary",sizeof(origin));
   bool first=absent();bool admitted=false;
   if(bench_manual){
-    admitted=durable_ota::bench_manual_discovery(*r,c,true,retained_legacy,false,
-      g_lcd_work_budget.remaining_ms(),origin,campaign,candidate)==durable_ota::Admission::ALLOWED;
+    admitted=admission_allowed(durable_ota::bench_manual_discovery(*r,c,true,retained_legacy,false,
+      g_lcd_work_budget.remaining_ms(),origin,campaign,candidate));
   } else if(first){
     admitted=retained_legacy?
       durable_ota::start_legacy_discovery(origin,campaign,c,true,g_coord_pending[0],true,peer_valid(),false,candidate):
@@ -260,15 +272,15 @@ static bool enter(const char* reason,bool retained_legacy) {
       const bool bench_discovery=durable_ota::bench_active(*r)&&r->phase==durable_ota::Phase::DISCOVERY;
       if(bench_discovery&&(!g_coord_credit_loaded||!g_coord_credit_mutations||retained_legacy||
           unresolved_legacy()||!peer_valid()||halo_primary_user_work_busy()))return false;
-      admitted=durable_ota::reserve_discovery(*r,c,retained_legacy,false,candidate,origin,campaign,
-          halo_ota_manual_override_active())==durable_ota::Admission::ALLOWED;
+      admitted=admission_allowed(durable_ota::reserve_discovery(*r,c,retained_legacy,false,candidate,origin,campaign,
+          halo_ota_manual_override_active()));
     }
     else if(r->one_shot.phase==durable_ota::OneShotPhase::ARMED)
-      admitted=durable_ota::one_shot_reserve(*r,c,g_coord_sense_boot_id,true,false,candidate)==durable_ota::Admission::ALLOWED;
-    else admitted=durable_ota::reserve_preflight(*r,c,false,candidate)==durable_ota::Admission::ALLOWED;
+      admitted=admission_allowed(durable_ota::one_shot_reserve(*r,c,g_coord_sense_boot_id,true,false,candidate));
+    else admitted=admission_allowed(durable_ota::reserve_preflight(*r,c,false,candidate));
   }
   if(!admitted||!commit_candidate(candidate,work.original_start,work.original_budget,first)){
-    Serial.printf("[OTA_POLICY] defer phase=%u storage=%u normal=%u\n",current()?unsigned(current()->phase):255,unsigned(state_status),unsigned(work.normal));return false;
+    Serial.printf("[OTA_POLICY] defer phase=%u storage=%u normal=%u admission=%u\n",current()?unsigned(current()->phase):255,unsigned(state_status),unsigned(work.normal),unsigned(last_admission));return false;
   }
   // This reservation was created in this boot, after checked settlement.
   if(bench_manual)boot_reconciled=true;

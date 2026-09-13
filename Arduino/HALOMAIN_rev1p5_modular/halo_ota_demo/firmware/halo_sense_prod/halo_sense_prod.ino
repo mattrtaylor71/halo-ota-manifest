@@ -5307,10 +5307,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
 #if HALO_DURABLE_OTA_POLICY
   if(!sense_policy::enter(reason,retained_legacy)) {
     const bool manual = halo_ota_manual_override_active();
-    const bool resolved = sense_policy::current() &&
-        sense_policy::current()->phase == durable_ota::Phase::RESOLVED;
-    ota_set_last_result(resolved ? (manual ? "policy_daily_limit" : "policy_target_valid")
-                                : "policy_deferred");
+    ota_set_last_result(sense_policy::refusal_result(manual));
     // Refusal consumes this user request, not its campaign credit. A retained
     // force/check latch must not silently recreate it during pre-sleep.
     if (manual) {

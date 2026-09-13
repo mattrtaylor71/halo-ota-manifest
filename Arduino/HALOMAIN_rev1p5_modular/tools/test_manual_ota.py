@@ -67,15 +67,137 @@ int main() {
   assert(encode(failed,after)&&memcmp(debt,after,sizeof(debt))==0);
   failed.phase=Phase::QUARANTINED;assert(shape(failed));
   assert(reserve_discovery(failed,{today,true,false},false,false,n,"manual",newer,true)==Admission::IDENTITY);
-  // A no-update/failed discovery cannot be reopened by repeated manual input.
+  // A closed read-only check may spend a remaining same-day window, without
+  // replacing its retained target or refreshing any daily allowance.
   assert(reserve_discovery(r,{today,true,false},false,false,n,"manual",newer,true)==Admission::ALLOWED);
   Record discovery=n,closed;
   assert(reserve_discovery(discovery,{today+1,true,false},false,false,n,"manual",campaign,true)==Admission::BUSY);
   assert(close_discovery(discovery,{today+2,true,false},2000,true,today+86400,closed,true));
-  assert(reserve_discovery(closed,{today+3,true,false},false,false,n,"manual",campaign,true)==Admission::NOT_DUE);
+  assert(reserve_discovery(closed,{today+3,true,false},false,false,n,"manual",campaign,true)==Admission::ALLOWED);
+  assert(same_target(n.target,closed.target)&&n.network_windows==closed.network_windows+1);
   assert(reserve_discovery(closed,{today+86401,true,false},false,false,n,"manual",campaign,true)==Admission::NOT_DUE);
+  // Actual138-style no-update ledger: generation2, phase9, one network window,
+  // no bound target, no apply/begin attempts, and a future normal-maintenance due.
+  Record initial,empty_closed,reopened,finished;
+  constexpr uint32_t normal_due=today+600;
+  assert(start_discovery("manual_138",campaign,{today,true,false},false,false,initial));
+  assert(close_discovery(initial,{today+2,true,false},2000,true,normal_due,empty_closed,true));
+  assert(empty_closed.generation==2&&empty_closed.phase==Phase::DISCOVERY&&target_empty(empty_closed.target));
+  assert(empty_closed.network_windows==1&&!empty_closed.day_attempts&&!empty_closed.begins[0]&&!empty_closed.begins[1]);
+  uint8_t closed_bytes[kRecordBytes];assert(encode(empty_closed,closed_bytes));
+  assert(reserve_discovery(empty_closed,{today+3,true,false},false,false,reopened,"manual_again",newer,true)==Admission::ALLOWED);
+  assert(reopened.generation==3&&reopened.network_windows==2&&reopened.reserved_work_ms==kPreflightMs);
+  assert(reopened.work_remaining_ms+kPreflightMs==empty_closed.work_remaining_ms);
+  assert(reopened.budget_day==empty_closed.budget_day&&reopened.budget_granted==empty_closed.budget_granted);
+  assert(reopened.created==empty_closed.created&&reopened.not_before==normal_due);
+  assert(strcmp(reopened.origin,empty_closed.origin)==0&&!memcmp(reopened.campaign,empty_closed.campaign,16));
+  assert(target_empty(reopened.target)&&!reopened.day_attempts&&!reopened.begins[0]&&!reopened.begins[1]&&!reopened.fast_opportunities);
+  assert(encode(reopened,after)&&decode(after,sizeof(after),decoded));
+  assert(decoded.network_windows==2&&decoded.reserved_work_ms==kPreflightMs&&target_empty(decoded.target));
+  // A duplicate cannot allocate while the first explicit check still owns work.
+  assert(reserve_discovery(reopened,{today+4,true,false},false,false,n,"duplicate",campaign,true)==Admission::BUSY);
+  assert(close_discovery(reopened,{today+5,true,false},2000,true,normal_due,finished,true));
+  assert(finished.network_windows==2&&!finished.reserved_work_ms);
+  assert(reserve_discovery(finished,{today+6,true,false},false,false,n,"third",campaign,true)==Admission::BUDGET);
+  // Neither automatic wakes nor the word "manual" bypasses the existing due gate.
+  assert(reserve_discovery(empty_closed,{today+3,true,false},false,false,n,"manual",newer)==Admission::NOT_DUE);
+  assert(reserve_discovery(empty_closed,{normal_due-1,true,true},false,false,n,"nightly",newer)==Admission::NOT_DUE);
+  assert(reserve_discovery(empty_closed,{normal_due,true,true},false,false,n,"nightly",newer)==Admission::ALLOWED);
+  assert(n.network_windows==2&&n.work_remaining_ms+kPreflightMs==empty_closed.work_remaining_ms);
+  // Production previously persisted no distinction for successful and failed
+  // unbound reads. An explicit retry of either is charged; automatic cooldown stays.
+  Record failed_read;
+  assert(close_discovery(initial,{today+2,true,false},2000,true,normal_due,failed_read,false));
+  assert(encode(failed_read,after)&&!memcmp(closed_bytes,after,sizeof(after)));
+  assert(reserve_discovery(failed_read,{today+3,true,false},false,false,n,"retry",newer,true)==Admission::ALLOWED);
+  assert(n.network_windows==2&&n.work_remaining_ms+kPreflightMs==failed_read.work_remaining_ms);
+  assert(reserve_discovery(failed_read,{today+3,true,false},false,false,n,"automatic",newer)==Admission::NOT_DUE);
+  // A reset during discovery remains fully charged; an explicit retry cannot refund it.
+  Record interrupted;
+  assert(reconcile_reset(initial,{today+2,true,false},normal_due,interrupted));
+  assert(interrupted.work_remaining_ms==initial.work_remaining_ms&&!interrupted.reserved_work_ms);
+  assert(reserve_discovery(interrupted,{today+3,true,false},false,false,n,"retry",newer,true)==Admission::ALLOWED);
+  assert(n.network_windows==2&&n.work_remaining_ms+kPreflightMs==interrupted.work_remaining_ms);
+  // Remaining work is independently bounded even when a network window remains.
+  Record low=empty_closed;low.work_remaining_ms=999;assert(shape(low));
+  assert(reserve_discovery(low,{today+3,true,false},false,false,n,"manual",newer,true)==Admission::BUDGET);
+  low.work_remaining_ms=1000;assert(shape(low));
+  assert(reserve_discovery(low,{today+3,true,false},false,false,n,"manual",newer,true)==Admission::ALLOWED);
+  assert(n.reserved_work_ms==1000&&n.work_remaining_ms==0&&n.network_windows==2);
+  // No new-day refill, legacy slow-path escape, stale clock or target-debt bypass.
+  assert(reserve_discovery(empty_closed,{today+86401,true,false},false,false,n,"manual",newer,true)==Admission::NOT_DUE);
+  Record later_due=empty_closed;later_due.not_before=today+2*86400;assert(shape(later_due));
+  assert(reserve_discovery(later_due,{today+86401,true,true},false,false,n,"manual",newer,true)==Admission::NOT_DUE);
+  assert(reserve_discovery(empty_closed,{today+3,true,false},true,false,n,"manual",newer,true)==Admission::LEGACY);
+  assert(reserve_discovery(empty_closed,{today+3,false,false},false,false,n,"manual",newer,true)==Admission::CLOCK);
+  assert(reserve_discovery(empty_closed,{today+1,true,false},false,false,n,"manual",newer,true)==Admission::CLOCK);
+  Record slow=empty_closed;slow.deferred_path=true;assert(shape(slow));
+  assert(reserve_discovery(slow,{today+3,true,false},false,false,n,"manual",newer,true)==Admission::NOT_DUE);
+  Record target_debt;
+  assert(bind_discovery(initial,{today+1,true,false},target,true,true,target_debt));
+  assert(reserve_discovery(target_debt,{today+3,true,false},false,false,n,"manual",newer,true)==Admission::BUSY);
+  assert(encode(empty_closed,after)&&!memcmp(closed_bytes,after,sizeof(after)));
   assert(encode(r,after)&&memcmp(before,after,sizeof(before))==0);
-  puts("PASS manual next-day completed114 discovery; automatic/same-day/failed/legacy/busy/clock/no-update bounds and source ledger preserved");
+  puts("PASS charged same-day manual discovery retry, duplicate/work/network bounds, normal cooldown and pending debt preserved");
+}
+'''
+
+
+def admission_result_harness():
+    runtime = (SHARED / 'SenseDurablePolicyRuntime.h').read_text()
+    declaration = next(line for line in runtime.splitlines()
+                       if line.startswith('static durable_ota::Admission last_admission='))
+    # Compile the actual reset and complete early-return predicate from enter;
+    # everything after the first work reset is outside this invocation guard test.
+    enter = definition(runtime, 'static bool enter(const char* reason,bool retained_legacy) {')
+    enter_prefix = enter[:enter.index('  work={};')] + '  return true;\n}'
+    return r'''
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+#include <initializer_list>
+#include "DurableOtaPolicy.h"
+using durable_ota::Admission;
+static durable_ota::Record record;
+static durable_ota::Record* observed=&record;
+static const durable_ota::Record* current(){return observed;}
+static struct {bool live=false;} work;
+static bool g_lcd_work_budget_live=true,image_valid=true;
+static struct {uint32_t remaining=1000;uint32_t remaining_ms(){return remaining;}} g_lcd_work_budget;
+static bool nvs_capacity_image_valid(){return image_valid;}
+''' + declaration + '\n' + '\n'.join((
+        definition(runtime, 'static bool admission_allowed(durable_ota::Admission result) {'),
+        definition(runtime, 'static const char* refusal_result(bool manual) {'),
+        enter_prefix,
+    )) + r'''
+int main(){
+  for(auto phase:{durable_ota::Phase::DISCOVERY,durable_ota::Phase::DEFERRED,
+                  durable_ota::Phase::RESOLVED,durable_ota::Phase::PREFLIGHT}){
+    record.phase=phase;
+    for(unsigned value=0;value<=unsigned(Admission::DISCOVERY);++value){
+      auto reason=Admission(value);
+      assert(admission_allowed(reason)==(reason==Admission::ALLOWED));
+      assert(last_admission==reason);
+      assert(!strcmp(refusal_result(true),reason==Admission::BUDGET?"policy_daily_limit":"policy_deferred"));
+      assert(!strcmp(refusal_result(false),phase==durable_ota::Phase::RESOLVED?"policy_target_valid":"policy_deferred"));
+    }
+  }
+  observed=nullptr;assert(!admission_allowed(Admission::BUDGET));
+  assert(!strcmp(refusal_result(true),"policy_daily_limit"));
+  assert(!strcmp(refusal_result(false),"policy_deferred"));
+  observed=&record;record.phase=durable_ota::Phase::RESOLVED;
+  // Each actual early return must discard a previous invocation's BUDGET result.
+  for(unsigned guard=0;guard<4;++guard){
+    work.live=guard==0;g_lcd_work_budget_live=guard!=1;
+    g_lcd_work_budget.remaining=guard==2?0:1000;image_valid=guard!=3;
+    assert(!admission_allowed(Admission::BUDGET));assert(!enter("manual",false));
+    assert(last_admission==Admission::NOT_DUE);
+    assert(!strcmp(refusal_result(true),"policy_deferred"));
+  }
+  work.live=false;g_lcd_work_budget_live=image_valid=true;g_lcd_work_budget.remaining=1000;
+  assert(!admission_allowed(Admission::BUDGET));assert(enter("manual",false));
+  assert(last_admission==Admission::NOT_DUE);
+  puts("PASS actual admission/result routing and stale-budget reset before every invocation guard");
 }
 '''
 
@@ -199,6 +321,9 @@ class ManualOtaTests(unittest.TestCase):
 
     def test_actual_policy(self):
         self.compile_run(policy_harness())
+
+    def test_actual_admission_result(self):
+        self.compile_run(admission_result_harness())
 
     def test_actual_lcd_action_and_delivery(self):
         self.compile_run(lcd_harness())

@@ -45,7 +45,13 @@ inline Admission reserve_discovery(const Record& old,Clock c,bool legacy_debt,
   if(legacy_debt)return Admission::LEGACY;
   if(busy || active_phase(old))return Admission::BUSY;
   if(old.phase!=Phase::RESOLVED && old.phase!=Phase::DISCOVERY)return Admission::IDENTITY;
-  if(old.phase==Phase::DISCOVERY && (!c.normal_maintenance || c.epoch<old.not_before))return Admission::NOT_DUE;
+  // A deliberate user check may spend the remaining ordinary discovery budget.
+  // Automatic wakes, legacy slow-path discovery and bench campaigns keep their
+  // cooldown. This grants no new allowance and cannot replace unresolved debt.
+  const bool manual_discovery=explicit_manual&&!bench&&!old.deferred_path&&
+      c.epoch/86400UL==old.budget_day;
+  if(old.phase==Phase::DISCOVERY && !manual_discovery &&
+      (!c.normal_maintenance || c.epoch<old.not_before))return Admission::NOT_DUE;
   if(old.phase==Phase::RESOLVED && (!new_origin || !*new_origin || strnlen(new_origin,64)>=64 ||
       !new_campaign || !nonzero(new_campaign,16) || !memcmp(new_campaign,old.campaign,16)))return Admission::IDENTITY;
   if(!next(old,c,out))return Admission::STORAGE;
