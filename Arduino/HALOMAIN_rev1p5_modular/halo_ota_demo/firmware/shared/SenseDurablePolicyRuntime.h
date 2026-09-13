@@ -342,15 +342,31 @@ static void finish() {
   if(r->phase!=durable_ota::Phase::PREFLIGHT&&r->phase!=durable_ota::Phase::APPLY){work.finished=true;return;}
   const uint32_t left=remaining();
   const uint32_t arm_start=millis(); // persistence belongs to the charged five seconds
-  const bool can_arm=left>=5000&&!self_retry_user_busy()&&retry_transport_ready()&&peer_valid();
+  const bool time_ok=left>=5000,user_idle=!self_retry_user_busy();
+  const bool transport_ok=retry_transport_ready(),peer_ok=peer_valid();
+  const bool can_arm=time_ok&&user_idle&&transport_ok&&peer_ok;
+  // gates: time/user-idle/transport/peer. transport: clean-mode/free-UART/no-task.
+  const unsigned gates=(time_ok?1U:0U)|(user_idle?2U:0U)|(transport_ok?4U:0U)|(peer_ok?8U:0U);
+  const unsigned transport=(sense_lcd_ota_retry_safe()?1U:0U)|
+    (!g_lcd_ota_proxy_owns_uart?2U:0U)|(!g_lcd_ota_task_running?4U:0U);
+  // Capture the decision after policy settlement. Optional evidence cannot
+  // extend the reserved exchange or change debt, credit, or its proof gates.
+  auto arm_diagnostic=[&](const char* outcome){
+    char detail[144];
+    snprintf(detail,sizeof(detail),"A1 gen=%lu phase=%u gates=%u transport=%u left=%lu outcome=%s",
+      current()?(unsigned long)current()->generation:0,current()?unsigned(current()->phase):0,
+      gates,transport,(unsigned long)left,outcome);
+    sense_lcd_terminal_store(detail,0);
+    Serial.printf("[OTA_POLICY] %s\n",detail);
+  };
   char request[64]={};
   if(can_arm)snprintf(request,sizeof(request),"retry_%08lx_%08lx_%lu",
       (unsigned long)r->created,(unsigned long)r->campaign[0],(unsigned long)r->attempt_ordinal);
   if(!durable_ota::finish(*r,c,elapsed+(can_arm?5000:0),true,work.failure,work.stage,work.error,
        normal,can_arm?request:nullptr,candidate)||
-       !(can_arm?commit_candidate(candidate,arm_start,5000):commit(candidate))){work.finished=true;return;}
+       !(can_arm?commit_candidate(candidate,arm_start,5000):commit(candidate))){work.finished=true;arm_diagnostic("settle_failed");return;}
   r=current();
-  if(!r||r->phase!=durable_ota::Phase::ARM_PENDING){work.finished=true;return;}
+  if(!r||r->phase!=durable_ota::Phase::ARM_PENDING){work.finished=true;arm_diagnostic("not_armed");return;}
   // No renewed pair deadline: the five-second exchange is the charge just
   // reserved above, and still must fit the invocation's original bound.
   // Check cleanup before starting/polling: a query response itself confirms
@@ -382,7 +398,7 @@ static void finish() {
        commit_candidate(candidate,arm_start,5000)&&control_live()){
       Serial.printf("[OTA_POLICY] retry_armed due=%lu expiry=%lu origin=%s target=%s\n",
         (unsigned long)current()->fast_due,(unsigned long)current()->fast_expiry,current()->origin,current()->target.version);
-      g_self_retry_arm.waiting=false;work.finished=true;return;
+      g_self_retry_arm.waiting=false;work.finished=true;arm_diagnostic("armed");return;
     }
     g_self_retry_arm.waiting=false;
   }
@@ -390,7 +406,7 @@ static void finish() {
     (void)commit_candidate(candidate,arm_start,5000);
   Serial.printf("[OTA_POLICY] retry_arm_unverified phase=%u pending_reconciliation=%u\n",
     current()?unsigned(current()->phase):0,current()&&current()->phase==durable_ota::Phase::ARM_PENDING?1:0);
-  work.finished=true;
+  work.finished=true;arm_diagnostic(ready?"arm_unverified":"peer_unverified");
 }
 struct WorkCleanup {~WorkCleanup(){finish();work.live=false;work.manifest=nullptr;}};
 #else

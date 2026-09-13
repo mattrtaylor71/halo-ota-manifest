@@ -242,9 +242,43 @@ static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadlin
 // Forward declaration
 static void lcd_ota_handle_abort(JsonObject& doc);
 
+// Stable LCD failure reasons 1..9 predate this detail. Keep the existing wire
+// record and encode the abort cause without replacing a real SDK error.
+static uint8_t lcd_ota_abort_reason_code(const char* reason, bool from_sense=false) {
+    static const char* const causes[] = {
+        "timeout", "attempt_deadline", "deadline_after_rx", "deadline_after_write",
+        "deadline_after_hash", "begin_deadline", "end_deadline", "end_size_mismatch",
+        "unexpected_frame_type", "unnegotiated_control", "duplicate_payload_mismatch",
+        "sequence_mismatch", "chunk_size_mismatch", "write_failed"
+    };
+    if (reason) for (uint8_t i=0;i<sizeof(causes)/sizeof(causes[0]);++i)
+        if (!strcmp(reason,causes[i])) return uint8_t(10+i);
+    return from_sense ? 24 : 5;
+}
+static uint32_t lcd_ota_abort_transport_flags(uint32_t crc, uint32_t frame) {
+    // bit2 marks sampled transport counters; CRC saturates at255, frames at63.
+    // These fields leave the reason and capture-time-quality bits untouched.
+    return 4u|((crc>255?255:crc)<<16)|((frame>63?63:frame)<<26);
+}
+static void lcd_ota_record_abort(const char* reason,const LcdNvsDeadline& deadline) {
+    // One existing best-effort terminal-ring call per abort, including sender
+    // cleanup. Its legacy writer may be disabled by production storage policy;
+    // the durable capsule above retains reason/bytes/parser counters separately.
+    // Sense independently retains its own sender detail.
+    char terminal[192];
+    snprintf(terminal,sizeof(terminal),"s=%u why=%.48s seq=%u next=%u bytes=%lu idle=%lu crc=%lu frame=%lu",
+        s_lcd_ota_session_id,reason?reason:"unknown",s_lcd_ota_last_seq,s_lcd_ota_expected_seq,
+        (unsigned long)s_lcd_ota_bytes_written,(unsigned long)(millis()-s_lcd_ota_last_chunk_ms),
+        (unsigned long)(s_lcd_ota_protocol?s_lcd_ota_protocol->crc_error_count():0),
+        (unsigned long)(s_lcd_ota_protocol?s_lcd_ota_protocol->frame_error_count():0));
+    lcd_ota_store_terminal("lcd","OTA_ABORT",(int)s_lcd_ota_bytes_written,terminal,deadline);
+}
 static void lcd_ota_abort_internal(const char* reason) {
 #if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
-    lcd_diag_capture_failure(halo_diag::Stage::Failure,5,0,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+    lcd_diag_capture_failure(halo_diag::Stage::Failure,lcd_ota_abort_reason_code(reason),0,
+        s_lcd_ota_bytes_written,s_lcd_ota_image_size,lcd_ota_abort_transport_flags(
+        s_lcd_ota_protocol?s_lcd_ota_protocol->crc_error_count():0,
+        s_lcd_ota_protocol?s_lcd_ota_protocol->frame_error_count():0));
 #endif
     const LcdNvsDeadline storage_deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms);
 #if defined(HALO_OTA_BENCH_CASE)
@@ -259,14 +293,7 @@ static void lcd_ota_abort_internal(const char* reason) {
                   reason ? reason : "unknown", static_cast<int>(s_lcd_ota_state.load()),
                   s_lcd_ota_bytes_written);
 
-    char terminal[160];
-    snprintf(terminal, sizeof(terminal), "s=%u why=%s seq=%u bytes=%lu idle=%lu crc=%lu frame=%lu",
-             s_lcd_ota_session_id, reason ? reason : "unknown", s_lcd_ota_last_seq,
-             (unsigned long)s_lcd_ota_bytes_written,
-             (unsigned long)(millis() - s_lcd_ota_last_chunk_ms),
-             (unsigned long)(s_lcd_ota_protocol ? s_lcd_ota_protocol->crc_error_count() : 0),
-             (unsigned long)(s_lcd_ota_protocol ? s_lcd_ota_protocol->frame_error_count() : 0));
-    lcd_ota_store_terminal("lcd", "OTA_ABORT", (int)s_lcd_ota_bytes_written, terminal,storage_deadline);
+    lcd_ota_record_abort(reason,storage_deadline);
 
     // Send abort notification to Sense
     StaticJsonDocument<256> doc;
@@ -962,11 +989,12 @@ static void lcd_ota_handle_abort(JsonObject& doc) {
     halo_bench_finish(session_id);
 #endif
 #if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
-    lcd_diag_capture_failure(halo_diag::Stage::Failure,5,0,s_lcd_ota_bytes_written,s_lcd_ota_image_size);
+    lcd_diag_capture_failure(halo_diag::Stage::Failure,lcd_ota_abort_reason_code(reason,true),0,
+        s_lcd_ota_bytes_written,s_lcd_ota_image_size,lcd_ota_abort_transport_flags(
+        s_lcd_ota_protocol?s_lcd_ota_protocol->crc_error_count():0,
+        s_lcd_ota_protocol?s_lcd_ota_protocol->frame_error_count():0));
 #endif
-    const char* sender_detail = doc["detail"] | (const char*)nullptr;
-    if (sender_detail && strlen(sender_detail) < 224)
-        lcd_ota_store_terminal("sense", "LCD_PROXY_END", 0, sender_detail,storage_deadline);
+    lcd_ota_record_abort(reason,storage_deadline);
     s_lcd_ota_state = LCD_OTA_ABORTING;
     g_lcd_ota_uart_receiving = true;
     g_lcd_ota_binary_mode = false;

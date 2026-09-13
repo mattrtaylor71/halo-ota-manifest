@@ -137,6 +137,44 @@ struct LcdOtaBudget {
   }
 };
 
+// ABORT is idempotent on the receiver for this exact session. A lost first
+// ACK otherwise strands both boards after the receiver has returned to JSON.
+// Retry twice in JSON-compatible framing, within the original cleanup/work
+// deadline; only the receive callback's session-correlated ACK proves cleanup.
+struct LcdOtaCleanupResult {
+  uint32_t elapsed_ms = 0;
+  uint8_t attempts = 0, sent_mask = 0;
+  bool acknowledged = false;
+};
+template<class Send, class Receive, class Remaining>
+static LcdOtaCleanupResult sense_lcd_abort_cleanup(Send send, Receive receive, Remaining remaining) {
+  LcdOtaCleanupResult result;
+  const uint32_t started = millis();
+  const uint32_t available = remaining();
+  const uint32_t budget = available < 36000 ? available : 36000;
+  while ((uint32_t)(millis() - started) < budget && remaining()) {
+    uint32_t elapsed = (uint32_t)(millis() - started);
+    if (result.attempts < 3 && elapsed >= uint32_t(result.attempts) * 3000) {
+      const uint8_t attempt = result.attempts++;
+      if (send(attempt != 0)) result.sent_mask |= uint8_t(1U << attempt);
+    }
+    elapsed = (uint32_t)(millis() - started);
+    if (elapsed >= budget || !remaining()) break;
+    uint32_t boundary = result.attempts < 3 ? uint32_t(result.attempts) * 3000 : budget;
+    if (boundary > budget) boundary = budget;
+    if (boundary <= elapsed) continue;
+    uint32_t wait = boundary - elapsed;
+    if (wait > remaining()) wait = remaining();
+    const bool acknowledged = receive(wait);
+    if (acknowledged && remaining() && (uint32_t)(millis() - started) < budget) {
+      result.acknowledged = true;
+      break;
+    }
+  }
+  result.elapsed_ms = (uint32_t)(millis() - started);
+  return result;
+}
+
 struct LcdOtaQuerySnapshot {
   char fw[32], running_part[16], running_state[20], boot_part[16], coord_owner[40];
   uint32_t part_size, peer_boot_id, coord_lease_ms;
@@ -617,17 +655,17 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     stream = nullptr;
   };
   auto record = [&](const char* origin, int code) {
-    snprintf(terminal, sizeof(terminal), "s=%u why=%s p=%s e=%d ms=%lu r=%lu a=%lu q=%u n=%lu c=%lu rd=%lu ak=%lu",
+    snprintf(terminal, sizeof(terminal), "s=%u why=%s p=%s e=%d ms=%lu r=%lu a=%lu q=%u n=%lu c=%lu f=%lu rd=%lu ak=%lu",
              session_id, origin, phase, code, (unsigned long)(uint32_t)(millis() - local_budget.started_ms),
              (unsigned long)bytes_read, (unsigned long)bytes_sent,
              seq, (unsigned long)retries, (unsigned long)protocol.crc_error_count(),
-             (unsigned long)(millis() - last_read_ms), (unsigned long)(millis() - last_ack_ms));
+             (unsigned long)protocol.frame_error_count(), (unsigned long)(millis() - last_read_ms), (unsigned long)(millis() - last_ack_ms));
     sense_lcd_terminal_store(terminal, code); // no UART side effect
 #if defined(HALO_OTA_BENCH_CASE)
     halo_bench_finish(session_id);
 #endif
   };
-  auto send_control = [&](const char* type, const char* reason) -> bool {
+  auto send_control = [&](const char* type, const char* reason, bool force_json = false) -> bool {
     StaticJsonDocument<512> doc;
     doc["ver"] = PROTOCOL_VERSION;
     doc["type"] = type;
@@ -640,7 +678,7 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     String output;
     serializeJson(doc, output);
     if (output.length() > MAX_CHUNK_SIZE) return false;
-    if (control_v2) return protocol.send_frame(MSG_OTA_CONTROL, 0,
+    if (control_v2 && !force_json) return protocol.send_frame(MSG_OTA_CONTROL, 0,
         reinterpret_cast<const uint8_t*>(output.c_str()), output.length());
     // Legacy peers require JSON controls. A delimiter terminates a damaged
     // prior frame; no ordinary diagnostic JSON is emitted in binary mode.
@@ -709,10 +747,18 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
     }
     if (receiver_open && !json_ready && remaining_ms()) {
       g_lcd_ota_proxy_owns_uart = true;
-      send_control("LCD_OTA_ABORT", origin);
-      // New peers explicitly ACK after cleanup. Old peers have no ABORT_ACK;
-      // their 30s idle + 5s parser bound is the fallback, never a renewed transfer.
-      receive_control(phase_limit(36000), false);
+      const auto cleanup = sense_lcd_abort_cleanup(
+        [&](bool force_json) { return send_control("LCD_OTA_ABORT", origin, force_json); },
+        [&](uint32_t wait) { return strcmp(receive_control(wait, false), "receiver_aborted") == 0; },
+        remaining_ms);
+      json_ready = cleanup.acknowledged;
+      char cleanup_detail[144];
+      snprintf(cleanup_detail, sizeof(cleanup_detail),
+        "C1 s=%u tries=%u sent=%u ack=%u ms=%lu c=%lu f=%lu rem=%lu",
+        session_id, unsigned(cleanup.attempts), unsigned(cleanup.sent_mask), cleanup.acknowledged ? 1U : 0U,
+        (unsigned long)cleanup.elapsed_ms, (unsigned long)protocol.crc_error_count(),
+        (unsigned long)protocol.frame_error_count(), (unsigned long)remaining_ms());
+      sense_lcd_terminal_store(cleanup_detail, code);
     }
     // Missing ACK never proves mode handoff. Release local ownership after the
     // bounded grace, but defer new controls until a later readiness episode

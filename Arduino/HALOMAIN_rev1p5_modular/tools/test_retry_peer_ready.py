@@ -35,6 +35,7 @@ def harness():
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+#include <string>
 #include "DurableOtaDiscovery.h"
 using durable_ota::Record;
 using durable_ota::Phase;
@@ -49,6 +50,8 @@ struct OtaManifest {};
     ))
     boundaries = r'''
 static Work work;
+static std::vector<std::string> diagnostic_records;
+static bool sense_lcd_terminal_store(const char* detail,int){diagnostic_records.emplace_back(detail);return true;}
 static Record live;
 static LcdOtaQuerySnapshot reply;
 static struct {bool entered,locked,legacy; char owner[40];} g_peer_gate;
@@ -105,7 +108,7 @@ static size_t test_strlcpy(char* out,const char* in,size_t n){
         'static bool retry_transport_ready', 'static bool retry_peer_ready', 'static void finish()'))
     cases = r'''
 static void baseline(){
-  work={};live={};reply={};g_peer_gate={};g_self_retry_arm={};
+  work={};live={};reply={};g_peer_gate={};g_self_retry_arm={};diagnostic_records.clear();
   unconfirmed=g_lcd_ota_proxy_owns_uart=g_lcd_ota_task_running=busy=false;
   lose_cleanup_on_commit=false;query_arrives=arm_ack=true;
   query_calls=arm_calls=0;committed_phases.clear();committed_generations.clear();now_ms=60126;
@@ -128,6 +131,7 @@ static void baseline(){
 int main(){
   baseline();assert(retry_peer_ready(reply,live));finish();
   assert(live.phase==Phase::ARMED&&query_calls==1&&arm_calls==1);
+  assert(diagnostic_records.size()==1&&diagnostic_records.back().find("gates=15")!=std::string::npos&&diagnostic_records.back().find("outcome=armed")!=std::string::npos);
   assert((committed_phases==std::vector<unsigned>{4,5}));
   assert((committed_generations==std::vector<unsigned>{5,6}));
   assert(live.work_remaining_ms==2334874&&live.reserved_work_ms==0);
@@ -171,6 +175,8 @@ int main(){
     baseline();if(gate==0)unconfirmed=true;if(gate==1)g_lcd_ota_proxy_owns_uart=true;
     if(gate==2)g_lcd_ota_task_running=true;if(gate==3)busy=true;
     finish();assert(query_calls==0&&arm_calls==0&&live.phase==Phase::DEFERRED);
+    assert(diagnostic_records.size()==1&&diagnostic_records.back().find(gate==3?"gates=13":"gates=11")!=std::string::npos);
+    assert(diagnostic_records.back().find(gate==0?"transport=6":gate==1?"transport=5":gate==2?"transport=3":"transport=7")!=std::string::npos);
   }
   // Cleanup lost during the pre-query commit also prevents query_poll's side effect.
   baseline();lose_cleanup_on_commit=true;finish();assert(query_calls==0&&arm_calls==0&&live.phase==Phase::ARM_PENDING);

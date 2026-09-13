@@ -174,7 +174,13 @@ static void uart_task(void *arg) {
         uart_rx_diag_raw_logged++;
       }
       
-      if (c == '\n' || c == '\r') {
+      // A control retry may leave COBS mode with a zero delimiter followed by
+      // JSON. Treat that delimiter as resynchronization, including after the
+      // receiver has already cleaned up and only its ABORT_ACK was lost.
+      if (c == 0) {
+        uart_rx_line_pos = 0;
+        uart_rx_partial_started_ms = 0;
+      } else if (c == '\n' || c == '\r') {
         if (uart_rx_line_pos > 0) {
           uart_rx_line_buffer[uart_rx_line_pos] = '\0';
           uart_rx_completed_lines_seen++;
@@ -182,11 +188,11 @@ static void uart_task(void *arg) {
           uart_rx_line_pos = 0;
           uart_rx_partial_started_ms = 0;
           // That message may have switched us into a binary transfer
-          // (IMG_XFER_BEGIN sets g_img_rx_binary_mode). If so we must stop
+          // (IMG_XFER_BEGIN or LCD_OTA_BEGIN). If so we must stop
           // line-parsing IMMEDIATELY — otherwise this loop keeps consuming the
           // incoming COBS frames as text and the transfer dies at seq=0 with a
           // frame timeout on both boards.
-          if (g_img_rx_binary_mode) break;
+          if (g_img_rx_binary_mode || g_lcd_ota_binary_mode) break;
         }
       } else if (uart_rx_line_pos < MAX_LINE_LENGTH - 1) {
         if (uart_rx_line_pos == 0) {

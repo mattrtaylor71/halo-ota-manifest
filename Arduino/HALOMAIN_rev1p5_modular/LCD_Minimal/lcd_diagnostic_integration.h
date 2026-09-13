@@ -163,7 +163,7 @@ static void lcd_diag_timer_selected(uint64_t timer_us,int32_t sdk){
 // Storage happens only after the OTA receiving/flash owner has released it.
 struct LcdDiagnosticFailureSample {
   uint64_t epoch=0;uint32_t uptime=0,accepted=0,expected=0,free=0,largest=0,minimum=0;
-  uint32_t running=0,selected=0,image_state=0;int32_t sdk=0;
+  uint32_t running=0,selected=0,image_state=0,transport_flags=0;int32_t sdk=0;
   halo_diag::Stage stage=halo_diag::Stage::Failure;uint8_t reason=0,time_quality=0;
 };
 static LcdDiagnosticFailureSample g_lcd_diag_failure;
@@ -180,7 +180,9 @@ static void lcd_diag_flush_failure(uint32_t budget,bool sleep_owner){
   f.accepted=v.accepted;f.expected=v.expected;f.internal_free=v.free;f.internal_largest=v.largest;f.internal_min=v.minimum;
   f.running_offset=v.running;f.boot_offset=v.selected;f.image_state=v.image_state;
   // bit1=LCD failure detail, bits8..15=reason, bits24..25=capture time quality.
-  f.flags=2u|(uint32_t(v.reason)<<8)|(uint32_t(v.time_quality)<<24);
+  // Optional transport flags occupy only bit2 and bits16..23/26..31. The
+  // existing 256-byte record, SDK fields and compiled-image hash stay intact.
+  f.flags=2u|(uint32_t(v.reason)<<8)|(uint32_t(v.time_quality)<<24)|v.transport_flags;
   if(!halo_diag::text_ok(kFirmwareVersion,sizeof(f.fw))||!halo_diag::text_ok(kBuildId,sizeof(f.build)))return;
   memcpy(f.fw,kFirmwareVersion,strlen(kFirmwareVersion)+1);memcpy(f.build,kBuildId,strlen(kBuildId)+1);
   const esp_app_desc_t*d=esp_app_get_description();if(d){memcpy(f.image_hash,d->app_elf_sha256,32);f.hash_kind=halo_diag::HashKind::CompiledElf;}
@@ -207,14 +209,14 @@ static void lcd_diag_prepare_attempt(const char*version,const char*sha,uint32_t 
     if(r!=halo_diag::Result::Ok)return;}
   lcd_diag_state(halo_diag::Stage::ProxyBegin);
 }
-static void lcd_diag_capture_failure(halo_diag::Stage stage,uint8_t reason,int32_t sdk,uint32_t accepted,uint32_t expected){
+static void lcd_diag_capture_failure(halo_diag::Stage stage,uint8_t reason,int32_t sdk,uint32_t accepted,uint32_t expected,uint32_t transport_flags=0){
   if(!g_lcd_diag_attempt_open||!lcd_diag_module().capture_enabled()||g_lcd_diag_failure_pending.load(std::memory_order_acquire))return;
   g_lcd_diag_attempt_open=false;auto&v=g_lcd_diag_failure;v={};
   v.free=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
   v.largest=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
   v.minimum=heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
   v.epoch=lcd_time_valid()?uint64_t(time(nullptr)):0;v.uptime=millis();v.time_quality=lcd_time_valid()?1:0;
-  v.stage=stage;v.reason=reason;v.sdk=sdk;v.accepted=accepted;v.expected=expected;
+  v.stage=stage;v.reason=reason;v.sdk=sdk;v.accepted=accepted;v.expected=expected;v.transport_flags=transport_flags;
   const esp_partition_t*r=esp_ota_get_running_partition(),*b=esp_ota_get_boot_partition();esp_ota_img_states_t state=ESP_OTA_IMG_UNDEFINED;
   v.running=r?r->address:0;v.selected=b?b->address:0;if(r)esp_ota_get_state_partition(r,&state);v.image_state=uint32_t(state);
   g_lcd_diag_failure_pending.store(true,std::memory_order_release);

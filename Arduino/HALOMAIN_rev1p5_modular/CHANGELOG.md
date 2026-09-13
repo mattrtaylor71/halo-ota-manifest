@@ -1,5 +1,11 @@
 # Firmware changelog
 
+## Unreleased — bounded display-transfer recovery
+
+Retry the same-session abort exchange up to three times within its original cleanup deadline. The LCD accepts the retry separator after returning to JSON mode and hands incoming OTA bytes directly to the binary receiver after BEGIN. Cleanup still requires a matching acknowledgement before another transfer or scheduled retry can proceed. Existing work budgets, update counters and calendar credit are unchanged.
+
+Retain specific receiver failure reasons, parser counters, cleanup outcomes and retry prerequisite results for diagnosis. This addresses concrete handoff and recovery defects; the initial missing acknowledgement in the scheduled129 case is not yet attributed to a specific receiver fault. Hardware acceptance is pending.
+
 ## 6.4.129 — published; scheduled transfer failed
 
 Version-only shipping pair from source `bbcf3deb854de72db929da53fa078f1c732acb28`, build `6.4.129-20260912T215437Z-bbcf3deb854d`. Canonical builds, artifact checks and full public manifest/binary readbacks passed. Runtime and resource footprints are unchanged from128;128 remains the installed development baseline.
