@@ -1,8 +1,10 @@
 # Firmware changelog
 
-## Unreleased — keep the display dark during coordinated sleep
+## 6.4.138 candidate — keep the display dark during coordinated sleep
 
 A future wake-time message from Sense was counted as user activity while LCD waited for SLEEP_READY. This cancelled sleep, relit the display, and restarted the Home idle timer. Scope the sleep handshake explicitly and keep future schedule storage/acknowledgment active without extending user activity or the OTA awake hold during that handshake. Preserve normal arm-sync grace, genuine touch/scroll cancellation, and current-window OTA handling.
+
+Canonical production builds and artifact checks passed from source `e77c5acf7246d474fada668fbaf38ac59d2a1a16`. All 13 native regression cases passed, including before/after reproductions of the false-touch and awake-hold cancellation paths. Physical installation and device validation are pending a usable USB wake; version 138 is not published.
 
 ## 6.4.137 — published; manual update screen memory recovery
 

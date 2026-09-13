@@ -1460,93 +1460,31 @@
     "scope": "Exact installed 123/app0/SDK VALID on both boards, with full current 123 and fallback 122 bank hashes verified and fresh closed post-clear LCD idle/CRC. This records post-manual installed health; transfer timing and a new 124 installation are not claimed."
   },
   "working_candidate": {
-    "version": "6.4.137",
-    "status": "PUBLISHED_INSTALLED_PAIRED_SDK_VALID_MANUAL_UI_STRESS_AND_NO_UPDATE_VERIFIED",
-    "artifact_source_commit": "a8ab44b851b438c57ad7ddda11c392d1e9af8bd3",
+    "version": "6.4.138",
+    "status": "FIX_BUILT_AND_HOST_TESTED_PENDING_PHYSICAL_WAKE_INSTALL_AND_DEVICE_TEST",
+    "artifact_source_commit": "e77c5acf7246d474fada668fbaf38ac59d2a1a16",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation137/RELEASE-PAIR.json",
-      "sha256": "472af96bea2373e6029b276bf55c6e5cbf46526f3dde948bd9ee1355995a96d6"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation138/RELEASE-PAIR.json",
+      "sha256": "bce2f3d0ce7811623dd2dfbb6d22998ffb32da8adbde33a17a6cf4599825b3aa"
     },
-    "source_scope": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation137/SOURCE-SCOPE.json",
-      "sha256": "0f8cb36dd64fe89a384d512e7769e034ab9e182aaef6a05bd957a64c6d0c06da"
+    "native_regression": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/sleep-relight138-fix-20260913/NATIVE-REGRESSION.json",
+      "sha256": "dd5e9ec7b24fd105f7cf9cf04bcf1d47705dd26ceb53ee34dad8a0b8f99746e9"
     },
-    "published": true,
-    "based_on_version": "6.4.136",
-    "device_validation": {
-      "status": "PASS_SCOPED_MANUAL_UI_MEMORY_STRESS_AND_SAME_VERSION_NO_UPDATE",
-      "version": "6.4.137",
-      "root_cause_evidence": {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/jtag001/RESULT.json",
-        "sha256": "ef31f797f42da1b7d06848985b9ac7899d6add94a8f384873b5832f6ba930035"
-      },
-      "installation": {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/install137-001/result.json",
-        "sha256": "c304585cb52e8afba691f3680170c43a8cdb2a718ac4cd20e6982e329b923844"
-      },
-      "paired_SDK_health": {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/installed137-identity.json",
-        "sha256": "92958b04a4f39f6151cb3cafcb37cbc857bc94319fdfa1c2a771ca1a0986c79b"
-      },
-      "manual_UI_stress": {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/manual-stress137-001/RESULT.json",
-        "sha256": "682cced6624a347b8dd1ec90c38a94807496066a80ae93ed0657ac8d4d1a31d2"
-      },
-      "cloud_terminal": {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/cloud137-stress001/RESULT.json",
-        "sha256": "29d3f737283a4f0509ba68b3a51bce238514d98d35b5053c27bba0918647337d"
-      },
-      "completed_manual_UI_cycles": 10,
-      "terminal_result": "policy_daily_limit",
-      "cloud_terminal_epoch": 1789329228,
-      "after_each_cycle_memory": {
-        "total_bytes": 98304,
-        "free_bytes": 73204,
-        "largest_block_bytes": 73120
-      },
-      "forced_Home_during_OTA": false,
-      "stress_allowance_changes": 0,
-      "installation_NVS_writes": 0,
-      "preserved_fallback_version": "6.4.136",
-      "preserved_fallback_slot": "app0",
-      "no_update_available_case": {
-        "status": "PASS_ACTUAL_SAME137_NO_UPDATE_NATURAL_HOME_MEMORY_STABLE",
-        "receipt": {
-          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/manual-no-update137-001/RESULT.json",
-          "sha256": "a23c597d40cf5fbde427acc9be42c6ff658af1428b589aff61d9f00b8810d19e"
-        },
-        "post_fixture_paired_SDK_health": {
-          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/no-update137-post-fixture-identity001/identity.json",
-          "sha256": "d0efd2b0072ef093e7a3e70fa7926a9f499bda1657f8a487b0a4facccba9bcf3"
-        },
-        "declared_completed_allowance_fixture": {
-          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/no-update137-allowance001/result.json",
-          "sha256": "0b46af07dac1a482d75b4aebae911fa80839a1abf95902bb5c8f320fddf2da09"
-        },
-        "actual_manifest_version": "6.4.137",
-        "terminal_result": "up_to_date",
-        "OTA_commands": 1,
-        "firmware_writes": 0,
-        "natural_Home": true,
-        "normal_sleep_observed": false,
-        "after_memory_free_bytes": 73204,
-        "after_memory_largest_block_bytes": 73120,
-        "fixture_scope": "Archived the fully completed 136 policy and cleared only its Sense retry_v1 bookkeeping in one NVS sector after checking no unresolved debt. Both complete firmware banks, selectors, other NVS, LCD NVS, schedule and completed history were preserved. This declared bench allowance fixture is not natural quota renewal or production-policy modification.",
-        "cloud_terminal": {
-          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/cloud137-no-update001/RESULT.json",
-          "sha256": "4cc5b68d790345cf971a9875e38ad628d1c777abeef36570103f3cd8a07f8c34"
-        }
-      },
-      "new_firmware_OTA_transfer_verified": false,
-      "scheduled_OTA_repeated_on137": false,
-      "scope": "Controlled USB installation, ten manual requests through the existing Settings action, and one same-version manifest check after a separately archived completed-allowance bench fixture. Every case returned Home naturally with stable UI heap. Actual results were policy_daily_limit in stress testing and up_to_date against published version 137. No new firmware transfer or physical Settings navigation is claimed.",
-      "limits": [
-        "The no-update case used a separately declared completed-allowance bench fixture; it does not establish natural quota renewal. Normal sleep was not observed in its bounded capture.",
-        "No new scheduled transfer, power-cut, physical cold-boot, USB-free or extended soak qualification.",
-        "The successful 135-to-136 scheduled case and historical 129/134 failures retain their own receipts."
-      ]
+    "preparation_receipt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/sleep-relight138-fix-20260913/PREPARED.json",
+      "sha256": "516219f62eed33755cd19ddc0f6c8b3120f7a2c73061754593929f4c4b62d0b6"
     },
-    "instruction": "Start future firmware work from version 137 artifact source a8ab44b851b438c57ad7ddda11c392d1e9af8bd3 and subsequent release records in this production checkout. Retain the owned LCD LVGL configuration, UI memory recovery, render/abort/calendar, UART, manual-clock, shopping and approved UI fixes. Version 117 remains the historical qualified recovery reference; another checkout needs verified adoption."
+    "based_on_version": "6.4.137",
+    "published": false,
+    "installed": false,
+    "scope": "Only LCD coordinated-sleep future maintenance activity/grace handling; no Sense, update admission, schedule, UI design or graphics-memory changes.",
+    "pending": [
+      "Wake/connect both boards and install138 preserving137 fallback and NVS.",
+      "Verify normal manual-result shutdown stays dark and both boards sleep with the2am timers.",
+      "Publish exact tested138 artifacts and update final acceptance."
+    ],
+    "instruction": "Continue the138 fix from this checkout, preserving source e77c5acf and its subsequent test/release-record commits. Public and last physically verified pair remain137 until138 installation and device checks complete."
   },
   "previous_last_verified_device_health_126": {
     "version": "6.4.126",
@@ -1912,5 +1850,94 @@
       "sha256": "2698e19a2b628646f03d852f7309772aee13e148b975139c3eaac75af1797b78"
     },
     "scope": "Both136/app0 SDKVALID exactbuild; completefreshSensebootFW_INFO plusnonceCRC LCDID1/Home fromoriginalLCDcapture. No SenseUSBopen. Fullflashhashes and135fallbackbytes not reacquired in this query; later ROM restore must retain its own evidence."
+  },
+  "previous_working_candidate_137": {
+    "version": "6.4.137",
+    "status": "PUBLISHED_INSTALLED_PAIRED_SDK_VALID_MANUAL_UI_STRESS_AND_NO_UPDATE_VERIFIED",
+    "artifact_source_commit": "a8ab44b851b438c57ad7ddda11c392d1e9af8bd3",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation137/RELEASE-PAIR.json",
+      "sha256": "472af96bea2373e6029b276bf55c6e5cbf46526f3dde948bd9ee1355995a96d6"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation137/SOURCE-SCOPE.json",
+      "sha256": "0f8cb36dd64fe89a384d512e7769e034ab9e182aaef6a05bd957a64c6d0c06da"
+    },
+    "published": true,
+    "based_on_version": "6.4.136",
+    "device_validation": {
+      "status": "PASS_SCOPED_MANUAL_UI_MEMORY_STRESS_AND_SAME_VERSION_NO_UPDATE",
+      "version": "6.4.137",
+      "root_cause_evidence": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/jtag001/RESULT.json",
+        "sha256": "ef31f797f42da1b7d06848985b9ac7899d6add94a8f384873b5832f6ba930035"
+      },
+      "installation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/install137-001/result.json",
+        "sha256": "c304585cb52e8afba691f3680170c43a8cdb2a718ac4cd20e6982e329b923844"
+      },
+      "paired_SDK_health": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/installed137-identity.json",
+        "sha256": "92958b04a4f39f6151cb3cafcb37cbc857bc94319fdfa1c2a771ca1a0986c79b"
+      },
+      "manual_UI_stress": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/manual-stress137-001/RESULT.json",
+        "sha256": "682cced6624a347b8dd1ec90c38a94807496066a80ae93ed0657ac8d4d1a31d2"
+      },
+      "cloud_terminal": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/cloud137-stress001/RESULT.json",
+        "sha256": "29d3f737283a4f0509ba68b3a51bce238514d98d35b5053c27bba0918647337d"
+      },
+      "completed_manual_UI_cycles": 10,
+      "terminal_result": "policy_daily_limit",
+      "cloud_terminal_epoch": 1789329228,
+      "after_each_cycle_memory": {
+        "total_bytes": 98304,
+        "free_bytes": 73204,
+        "largest_block_bytes": 73120
+      },
+      "forced_Home_during_OTA": false,
+      "stress_allowance_changes": 0,
+      "installation_NVS_writes": 0,
+      "preserved_fallback_version": "6.4.136",
+      "preserved_fallback_slot": "app0",
+      "no_update_available_case": {
+        "status": "PASS_ACTUAL_SAME137_NO_UPDATE_NATURAL_HOME_MEMORY_STABLE",
+        "receipt": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/manual-no-update137-001/RESULT.json",
+          "sha256": "a23c597d40cf5fbde427acc9be42c6ff658af1428b589aff61d9f00b8810d19e"
+        },
+        "post_fixture_paired_SDK_health": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/no-update137-post-fixture-identity001/identity.json",
+          "sha256": "d0efd2b0072ef093e7a3e70fa7926a9f499bda1657f8a487b0a4facccba9bcf3"
+        },
+        "declared_completed_allowance_fixture": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/no-update137-allowance001/result.json",
+          "sha256": "0b46af07dac1a482d75b4aebae911fa80839a1abf95902bb5c8f320fddf2da09"
+        },
+        "actual_manifest_version": "6.4.137",
+        "terminal_result": "up_to_date",
+        "OTA_commands": 1,
+        "firmware_writes": 0,
+        "natural_Home": true,
+        "normal_sleep_observed": false,
+        "after_memory_free_bytes": 73204,
+        "after_memory_largest_block_bytes": 73120,
+        "fixture_scope": "Archived the fully completed 136 policy and cleared only its Sense retry_v1 bookkeeping in one NVS sector after checking no unresolved debt. Both complete firmware banks, selectors, other NVS, LCD NVS, schedule and completed history were preserved. This declared bench allowance fixture is not natural quota renewal or production-policy modification.",
+        "cloud_terminal": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual136-freeze-20260913/cloud137-no-update001/RESULT.json",
+          "sha256": "4cc5b68d790345cf971a9875e38ad628d1c777abeef36570103f3cd8a07f8c34"
+        }
+      },
+      "new_firmware_OTA_transfer_verified": false,
+      "scheduled_OTA_repeated_on137": false,
+      "scope": "Controlled USB installation, ten manual requests through the existing Settings action, and one same-version manifest check after a separately archived completed-allowance bench fixture. Every case returned Home naturally with stable UI heap. Actual results were policy_daily_limit in stress testing and up_to_date against published version 137. No new firmware transfer or physical Settings navigation is claimed.",
+      "limits": [
+        "The no-update case used a separately declared completed-allowance bench fixture; it does not establish natural quota renewal. Normal sleep was not observed in its bounded capture.",
+        "No new scheduled transfer, power-cut, physical cold-boot, USB-free or extended soak qualification.",
+        "The successful 135-to-136 scheduled case and historical 129/134 failures retain their own receipts."
+      ]
+    },
+    "instruction": "Start future firmware work from version 137 artifact source a8ab44b851b438c57ad7ddda11c392d1e9af8bd3 and subsequent release records in this production checkout. Retain the owned LCD LVGL configuration, UI memory recovery, render/abort/calendar, UART, manual-clock, shopping and approved UI fixes. Version 117 remains the historical qualified recovery reference; another checkout needs verified adoption."
   }
 }
