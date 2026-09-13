@@ -1,3 +1,17 @@
+# Version 138 sleep-handshake verification — September 13, 2026
+
+| Check | Actual evidence |
+|---|---|
+| Build/publication | Source `e77c5acf7246d474fada668fbaf38ac59d2a1a16`; both canonical builds, artifact checks, 13 native regressions and full public manifest/binary readbacks passed. |
+| Installation | Both 138/app0 SDK VALID; 137/app1 preserved. NVS, bootloader and current-bank writes were zero. |
+| Three closed cycles | Each manual-result cycle stored and acknowledged the future schedule, stayed dark through the sleep handshake, and logged paired deep sleep without a relight or reboot. No firmware writes, allowance changes or diagnostic sleep override. |
+| Existing policy | Actual terminal remained `policy_deferred` / “Update postponed”. Policy, allowance and schedule logic are unchanged. |
+| Limits | Sleep-handshake functional acceptance only; no 138 firmware-transfer, scheduled OTA, physical navigation, power-cut, USB-free or extended soak qualification. |
+
+Receipts are pinned under `acceptance_results.138_sleep_handshake` in [RELEASE_BASELINE.json](../RELEASE_BASELINE.json). Earlier 137, 136 and qualified 117 evidence remains unchanged below.
+
+---
+
 # Version 137 manual UI memory verification — September 13, 2026
 
 | Check | Actual evidence |

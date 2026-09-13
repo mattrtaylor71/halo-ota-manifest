@@ -1,10 +1,12 @@
 # Firmware changelog
 
-## 6.4.138 candidate — keep the display dark during coordinated sleep
+## 6.4.138 — published; coordinated sleep stays dark
 
 A future wake-time message from Sense was counted as user activity while LCD waited for SLEEP_READY. This cancelled sleep, relit the display, and restarted the Home idle timer. Scope the sleep handshake explicitly and keep future schedule storage/acknowledgment active without extending user activity or the OTA awake hold during that handshake. Preserve normal arm-sync grace, genuine touch/scroll cancellation, and current-window OTA handling.
 
-Canonical production builds and artifact checks passed from source `e77c5acf7246d474fada668fbaf38ac59d2a1a16`. All 13 native regression cases passed, including before/after reproductions of the false-touch and awake-hold cancellation paths. Physical installation and device validation are pending a usable USB wake; version 138 is not published.
+Canonical production builds, artifact checks and full public manifest/binary readbacks passed from source `e77c5acf7246d474fada668fbaf38ac59d2a1a16`, build `6.4.138-20260913T202809Z-e77c5acf7246`. All 13 native regressions passed. Both boards are installed as 138/app0, SDK VALID, preserving 137/app1 and all NVS. LCD binary size increases by 304 bytes; static RAM, RTC use and the 96 KiB graphics configuration are unchanged.
+
+Three manual-result cycles stored and acknowledged the future schedule, stayed dark through the sleep handshake and entered deep sleep on both boards without a relight or reboot. The existing `policy_deferred` / “Update postponed” result and allowance behavior are unchanged. No firmware or allowance changes occurred during these cycles. This verifies the sleep handshake, not a new firmware transfer or scheduled OTA. Future development starts from version 138; earlier acceptance remains preserved.
 
 ## 6.4.137 — published; manual update screen memory recovery
 
@@ -14,7 +16,7 @@ Use a repository-owned LCD configuration with a 96 KiB graphics heap, preserving
 
 Canonical shipping pair from source `a8ab44b851b438c57ad7ddda11c392d1e9af8bd3`, build `6.4.137-20260913T194121Z-a8ab44b851b4`. Both builds, artifact checks and full public manifest/binary readbacks passed. LCD static RAM grows by 49,152 bytes and its binary by 160 bytes; Sense resource usage is unchanged. Controlled USB installation placed both boards in 137/app1, SDK VALID, preserving 136/app0 and all NVS.
 
-Ten manual requests through the existing Settings action each returned Home naturally. Free UI memory returned to exactly 73,204 bytes and the largest block to 73,120 bytes after every cycle. Cloud confirmed `policy_daily_limit`; the stress test changed no allowance. A separate actual check against published version 137 returned `up_to_date` for Sense, found LCD already current, and returned Home naturally with the same free memory. Before that check, the fully completed version 136 policy was archived and only its Sense retry bookkeeping was cleared in one NVS sector; no unresolved debt, firmware banks, selectors, other NVS or schedule were changed. This was a declared bench allowance fixture, not natural quota renewal. No full Settings navigation, new firmware-transfer, scheduled, sleep-after-no-update or fault-recovery pass is claimed. Future development starts from version 137; the previous 136 scheduled result and qualified 117 reference remain preserved.
+Ten manual requests through the existing Settings action each returned Home naturally. Free UI memory returned to exactly 73,204 bytes and the largest block to 73,120 bytes after every cycle. Cloud confirmed `policy_daily_limit`; the stress test changed no allowance. A separate actual check against published version 137 returned `up_to_date` for Sense, found LCD already current, and returned Home naturally with the same free memory. Before that check, the fully completed version 136 policy was archived and only its Sense retry bookkeeping was cleared in one NVS sector; no unresolved debt, firmware banks, selectors, other NVS or schedule were changed. This was a declared bench allowance fixture, not natural quota renewal. No full Settings navigation, new firmware-transfer, scheduled, sleep-after-no-update or fault-recovery pass is claimed. At this checkpoint, version 137 became the development baseline; the previous 136 scheduled result and qualified 117 reference remain preserved.
 
 ## 6.4.136 — published; scheduled transfer and paired health verified
 
