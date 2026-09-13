@@ -151,17 +151,31 @@ static bool rollback_matches(const durable_ota::Record&r,uint32_t started,uint32
     // HALO release. Join the exact immutable full BIN hash instead.
     image_matches(invalid,r.target,started,budget);
 }
+// Calendar identity survives consumption of the UART notice. This selects a
+// bound origin only; normal_entry still requires its actual due time/day.
+static uint32_t normal_calendar_due() {
+  if(g_calendar_timer_origin.id[0]&&g_calendar_timer_origin.bound)
+    return g_calendar_timer_origin.target_epoch;
+  const CoordinatorCreditState base=coord_credit_base();
+  auto observed=[&](const NightlyCreditOrigin& origin){
+    if(!origin.bound||!origin.id[0]||!origin.target_epoch)return false;
+    if(g_lcd_timer_notice.pending&&!strcmp(g_lcd_timer_notice.schedule,origin.id))return true;
+    return g_boot_ota_pending&&g_lcd_timer_origin.boot_id&&
+      g_lcd_timer_origin.boot_id==g_lcd_timer_seen_boot&&
+      g_lcd_timer_origin.wake==int(ESP_SLEEP_WAKEUP_TIMER)&&
+      !strcmp(g_lcd_timer_origin.schedule,origin.id)&&g_peer_gate.active&&
+      g_peer_gate.ready&&!g_peer_gate.legacy&&g_peer_gate.peer_boot==g_lcd_timer_origin.boot_id;
+  };
+  if(observed(base.schedule))return base.schedule.target_epoch;
+  if(observed(base.deferred))return base.deferred.target_epoch;
+  return 0;
+}
 static bool normal_entry() {
   const auto c=fresh_clock();if(!c.fresh||!c.epoch)return false;
   const auto* bench=current();if(bench&&durable_ota::bench_active(*bench))return bench_deferred_due(*bench,c);
-  // An old nightly origin is not a new day's allowance. Require this boot's
-  // observed calendar origin, or the actual LCD timer notice for today's arm.
-  if(g_calendar_timer_origin.id[0]&&g_calendar_timer_origin.target_epoch/86400ULL==c.epoch/86400UL&&
-     c.epoch>=g_calendar_timer_origin.target_epoch)return true;
-  const CoordinatorCreditState base=coord_credit_base();
-  return g_lcd_timer_notice.pending&&g_lcd_timer_notice.schedule[0]&&
-    base.schedule.bound&&!strcmp(g_lcd_timer_notice.schedule,base.schedule.id)&&
-    base.schedule.target_epoch/86400ULL==c.epoch/86400UL&&c.epoch>=base.schedule.target_epoch;
+  // An early peer proof permits waiting, never a new day's allowance.
+  const uint32_t due=normal_calendar_due();
+  return due&&due/86400UL==c.epoch/86400UL&&c.epoch>=due;
 }
 static bool enter(const char* reason,bool retained_legacy) {
   if(work.live||!g_lcd_work_budget_live||!g_lcd_work_budget.remaining_ms()||!nvs_capacity_image_valid())return false;
@@ -562,6 +576,14 @@ static bool halo_policy_boot_ready(){
   if(!durable_ota::clock_valid(*r,c)){halo_policy_note_readiness("clock_wait",c);return false;}
   bool wait=durable_ota::bench_active(*r)&&(!durable_ota::bench_live(*r,c)||r->phase==durable_ota::Phase::BENCH_READY||r->phase==durable_ota::Phase::BENCH_ABORTED||r->phase==durable_ota::Phase::RESOLVED);
   uint32_t due=0,expiry=0;bool accepted=false;
+  const bool normal_deferred=!durable_ota::bench_active(*r)&&
+    (r->phase==durable_ota::Phase::DEFERRED||
+     (r->phase==durable_ota::Phase::DISCOVERY&&!durable_ota::active_phase(*r)));
+  const uint32_t calendar_due=normal_deferred?normal_calendar_due():0;
+  if(normal_deferred){
+    due=r->not_before;
+    if(calendar_due>due)due=calendar_due;
+  }
   if(r->phase==durable_ota::Phase::DEFERRED||
      (durable_ota::bench_active(*r)&&bench_retry_phase(*r))){
     wait|=!c.normal_maintenance||c.epoch<r->not_before;
@@ -588,7 +610,10 @@ static bool halo_policy_boot_ready(){
       !durable_ota::bench_active(*r)&&!one_shot&&
       due-c.epoch<=durable_ota::kPeerLead&&g_boot_ota_pending&&
       g_peer_gate.active&&g_peer_gate.ready&&!g_peer_gate.legacy&&g_peer_gate.peer_boot;
-    if((one_shot||accepted||armed_peer_wait)&&
+    const bool calendar_peer_wait=normal_deferred&&calendar_due&&!one_shot&&
+      due-c.epoch<=durable_ota::kPeerLead&&g_boot_ota_pending&&
+      g_peer_gate.active&&g_peer_gate.ready&&!g_peer_gate.legacy&&g_peer_gate.peer_boot;
+    if((one_shot||accepted||armed_peer_wait||calendar_peer_wait)&&
        uint64_t(due-c.epoch)*1000<uint32_t(readiness_left)){
       halo_policy_note_readiness("wait_due",c,due,accepted);return false;
     }

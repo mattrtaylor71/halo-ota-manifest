@@ -6,6 +6,7 @@ No Arduino build, device or network is used.
 """
 from pathlib import Path
 import resource
+import os
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +28,8 @@ def definition(text, signature, structure=False):
 
 def harness():
     runtime = (SHARED / 'SenseDurablePolicyRuntime.h').read_text()
+    if os.environ.get('HALO_READINESS_BASELINE_REF'):
+        runtime = subprocess.check_output(['git','show',os.environ['HALO_READINESS_BASELINE_REF']+':Arduino/HALOMAIN_rev1p5_modular/halo_ota_demo/firmware/shared/SenseDurablePolicyRuntime.h'],cwd=SOURCE,text=True)
     sketch = (SHARED.parent / 'halo_sense_prod/halo_sense_prod.ino').read_text()
     caller = definition(sketch, 'static void nightly_maintenance_tick()')
     guard_start = caller.index('if (sense_action_inflight()')
@@ -44,6 +47,7 @@ def harness():
 #include <cstring>
 #include <initializer_list>
 #include "DurableOtaDiscovery.h"
+#include "CoordinatorCreditState.h"
 using durable_ota::Record;
 using durable_ota::Phase;
 static Record live;
@@ -52,6 +56,10 @@ static bool clock_fresh, storage_ok, image_valid;
 static bool g_boot_ota_pending, g_peer_episode_finished, g_ota_check_done;
 static uint32_t g_boot_ota_deadline_ms, g_lcd_timer_seen_boot;
 static const char* g_boot_ota_reason;
+static NightlyCreditOrigin g_calendar_timer_origin;
+static CoordinatorCreditState calendar_state;
+static struct {bool pending;char schedule[64];} g_lcd_timer_notice;
+static CoordinatorCreditState coord_credit_base(){return calendar_state;}
 static struct {uint32_t boot_id; int wake; char schedule[64];} g_lcd_timer_origin;
 static struct {bool active,ready,legacy; uint32_t peer_boot,deadline_ms;} g_peer_gate;
 static unsigned cancel_calls, finish_calls;
@@ -74,7 +82,8 @@ static const Record* current(){return &live;}
 static bool absent(){return false;}
 // Model the real load boundary with the real record shape check.
 static bool load_state(uint32_t,uint32_t){now_ms+=load_ms;return storage_ok&&durable_ota::shape(live);}
-static bool normal_entry(){return false;}
+static bool normal_entry();
+static bool bench_deferred_due(const Record&,durable_ota::Clock){return false;}
 static durable_ota::Clock fresh_clock(bool normal=false){return {epoch,clock_fresh,normal};}
 static bool bench_retry_phase(const Record&){return false;}
 static bool bench_deferred_request(const Record&,char (&)[64]){return false;}
@@ -85,6 +94,10 @@ static bool bench_deferred_request(const Record&,char (&)[64]){return false;}
         'static PolicyReadinessObservation g_policy_readiness;',
         definition(runtime, 'static void halo_policy_note_readiness'),
         definition(runtime, 'static bool halo_policy_accepted_lcd_origin'),
+        'namespace sense_policy {',
+        definition(runtime, 'static uint32_t normal_calendar_due') if 'static uint32_t normal_calendar_due' in runtime else '',
+        definition(runtime, 'static bool normal_entry()'),
+        '}',
         definition(runtime, 'static bool halo_policy_boot_ready'),
     ))
     cases = r'''
@@ -130,6 +143,7 @@ static void baseline(const char* reason="lcd_timer"){
   // and fresh queried peer name the new boot after that arm fired.
   g_peer_gate={true,true,false,700,now_ms+110000};
   cancel_calls=finish_calls=0;g_policy_readiness={};
+  calendar_state={};g_calendar_timer_origin={};g_lcd_timer_notice={};
 }
 static void expect_wait(bool accepted=false){
   const Record before=live;
@@ -166,7 +180,83 @@ static void admit_once(){
   assert(retry.reserved_work_ms==durable_ota::kPreflightMs);
   live=retry;canonical_roundtrip();
 }
+static void calendar_baseline(bool discovery=false){
+  baseline("coord_recovery");
+  const uint32_t due=(live.high_water/86400+1)*86400+7200;
+  Record next;
+  if(discovery){
+    uint8_t campaign[16]={9};
+    assert(durable_ota::start_discovery("ordinary",campaign,{live.created,true,false},false,false,next));live=next;
+    assert(durable_ota::close_discovery(live,{live.created+5,true,false},5000,true,due,next));
+  }else assert(durable_ota::close_fast(live,{epoch,true,false},due,next));
+  live=next;canonical_roundtrip();epoch=due-11;no_origin();
+  setenv("TZ","UTC0",1);tzset();time_t time=due;struct tm tm;gmtime_r(&time,&tm);
+  char id[64];strftime(id,sizeof(id),"nightly_%Y%m%d",&tm);
+  assert(nightly_credit_bind(calendar_state.schedule,id,due,"UTC0",true));
+  assert(credit_state_shape(calendar_state));
+  // ota_peer_service has already consumed the mailbox. Its accepted TIMER
+  // origin remains tied to this freshly queried boot.
+  g_lcd_timer_origin.boot_id=g_lcd_timer_seen_boot=g_peer_gate.peer_boot;
+  g_lcd_timer_origin.wake=ESP_SLEEP_WAKEUP_TIMER;
+  strcpy(g_lcd_timer_origin.schedule,id);
+  assert(!g_lcd_timer_notice.pending);
+}
+static bool calendar_tests(){
+  calendar_baseline();
+  const Record original=live;const uint32_t due=live.not_before;
+  assert(!sense_policy::normal_entry());
+  if(halo_policy_boot_ready()||strcmp(g_policy_readiness.decision,"wait_due")||cancel_calls||!g_boot_ota_pending){
+    fprintf(stderr,"FAIL deferred calendar lead: decision=%s due=%u pending=%d normal=%d\\n",g_policy_readiness.decision,g_policy_readiness.due,g_boot_ota_pending,sense_policy::normal_entry());return false;
+  }
+  assert(g_policy_readiness.due==due);unchanged(original);
+  for(bool discovery:{false,true}){
+    for(uint32_t lead:{15U,11U,1U}){
+      calendar_baseline(discovery);epoch=live.not_before-lead;
+      const Record before=live;assert(!sense_policy::normal_entry());expect_wait();
+      Record denied;
+      const auto pre=discovery?durable_ota::reserve_discovery(live,{epoch,true,false},false,false,denied):durable_ota::reserve_preflight(live,{epoch,true,false},false,denied);
+      assert(pre==durable_ota::Admission::NOT_DUE);unchanged(before);
+    }
+    calendar_baseline(discovery);epoch=live.not_before;
+    assert(sense_policy::normal_entry()&&halo_policy_boot_ready());
+    Record admitted;
+    if(discovery){assert(durable_ota::reserve_discovery(live,{epoch,true,true},false,false,admitted)==durable_ota::Admission::ALLOWED);}
+    else{
+      Record rolled;assert(durable_ota::rollover(live,{epoch,true,true},rolled));
+      assert(durable_ota::same_target(rolled.target,live.target)&&!strcmp(rolled.origin,live.origin));live=rolled;
+      assert(durable_ota::reserve_preflight(live,{epoch,true,true},false,admitted)==durable_ota::Admission::ALLOWED);
+    }
+    assert(admitted.network_windows==1&&admitted.reserved_work_ms==durable_ota::kPreflightMs);
+    live=admitted;canonical_roundtrip();Record duplicate;
+    const auto dup=discovery?durable_ota::reserve_discovery(live,{epoch,true,true},false,false,duplicate):durable_ota::reserve_preflight(live,{epoch,true,true},false,duplicate);
+    assert(dup==durable_ota::Admission::BUSY);
+  }
+  // Actual Sense calendar origin and the still-pending notice remain supported.
+  calendar_baseline();g_calendar_timer_origin=calendar_state.schedule;no_origin();expect_wait();
+  calendar_baseline();g_lcd_timer_notice.pending=true;strcpy(g_lcd_timer_notice.schedule,calendar_state.schedule.id);no_origin();expect_wait();
+  calendar_baseline();calendar_state.deferred=calendar_state.schedule;calendar_state.schedule={};expect_wait();
+  // Policy eligibility can be older than this morning's actual calendar arm.
+  calendar_baseline();live.not_before-=3600;canonical_roundtrip();expect_wait();assert(g_policy_readiness.due==calendar_state.schedule.target_epoch);
+#define CALENDAR_REFUSE(change) do{calendar_baseline();change;expect_refusal("not_due",true);}while(0)
+  CALENDAR_REFUSE(epoch=live.not_before-16);
+  CALENDAR_REFUSE(no_origin());CALENDAR_REFUSE(g_lcd_timer_origin.boot_id++);
+  CALENDAR_REFUSE(g_lcd_timer_origin.wake=2);CALENDAR_REFUSE(strcpy(g_lcd_timer_origin.schedule,"nightly_19990101"));
+  CALENDAR_REFUSE(calendar_state.schedule.bound=false);
+  CALENDAR_REFUSE(g_peer_gate.legacy=true);CALENDAR_REFUSE(g_peer_gate.active=false);
+  CALENDAR_REFUSE(g_peer_gate.ready=false);CALENDAR_REFUSE(g_peer_gate.peer_boot=0);
+  CALENDAR_REFUSE(g_boot_ota_pending=false);
+  CALENDAR_REFUSE(g_boot_ota_deadline_ms=now_ms+11000);
+  CALENDAR_REFUSE(g_peer_gate.deadline_ms=now_ms+11000);
+  CALENDAR_REFUSE(load_ms=1000;g_peer_gate.deadline_ms=now_ms+12000);
+#undef CALENDAR_REFUSE
+  calendar_baseline();clock_fresh=false;expect_refusal("clock_wait",false);
+  calendar_baseline();epoch=live.not_before-1;g_peer_gate.deadline_ms=now_ms;expect_refusal("deadline",false);
+  calendar_baseline();epoch=live.not_before+86400;assert(!sense_policy::normal_entry());expect_refusal("not_due",true);
+  puts("PASS: DEFERRED/inactive DISCOVERY consumed calendar origin waits15/11/1s; actual due-only normal entry and single charged reservation; stale peer/origin/date/deadline refusals");
+  return true;
+}
 int main(){
+  if(!calendar_tests())return 42;
   // Observed109 failure: fresh due-12, no accepted notice, correlated peer.
   baseline("coord_recovery");epoch=1789078710;no_origin();
   g_boot_ota_deadline_ms=g_peer_gate.deadline_ms=now_ms+116733;
@@ -293,8 +383,12 @@ class RetryWakeTests(unittest.TestCase):
             cpp.write_text(harness())
             subprocess.run([compiler, '-std=c++17', '-I', str(SHARED), str(cpp), '-o', str(binary)],
                            check=True, timeout=30)
-            subprocess.run([str(binary)], check=True, timeout=5,
+            run=subprocess.run([str(binary)], timeout=5,
                            preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_CORE, (0, 0)))
+            if os.environ.get('HALO_READINESS_BASELINE_REF'):
+                self.assertEqual(run.returncode,42,'Baseline must reproduce the precise early DEFERRED readiness failure')
+            else:
+                self.assertEqual(run.returncode,0)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,8 @@
 
 ## Unreleased — bounded display-transfer recovery
 
+Keep a scheduled recovery alive when the LCD wakes the Sense up to 15 seconds early. Preserve the verified calendar origin after its UART notice is consumed, wait within the existing readiness deadline, and admit work only once the scheduled time arrives. The September13 hardware test reproduced the early cancellation; the corrected build is awaiting its repeat test.
+
 Retry the same-session abort exchange up to three times within its original cleanup deadline. The LCD accepts the retry separator after returning to JSON mode and hands incoming OTA bytes directly to the binary receiver after BEGIN. Cleanup still requires a matching acknowledgement before another transfer or scheduled retry can proceed. Existing work budgets, update counters and calendar credit are unchanged.
 
 Retain specific receiver failure reasons, parser counters, cleanup outcomes and retry prerequisite results for diagnosis. This addresses concrete handoff and recovery defects; the initial missing acknowledgement in the scheduled129 case is not yet attributed to a specific receiver fault. Hardware acceptance is pending.
