@@ -15,6 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def definition(text, signature):
     start = text.index(signature)
     opening = text.index('{', start)
+    while ';' in text[start:opening]:  # Skip forward declarations.
+        start = text.index(signature, text.index(';', start) + 1)
+        opening = text.index('{', start)
     depth, end = 1, opening + 1
     while depth:
         if text.startswith('//', end):
@@ -55,6 +58,9 @@ def time_harness(source=None, recovery_only=False):
         'static void sense_ntp_service(',
         'static void sense_ntp_quiesce_for_sleep(',
     ]
+    if 'static void sense_ntp_request_scheduled_retry(' in source:
+        signatures.insert(signatures.index('static void sense_ntp_try_manual_retry_locked('),
+                          'static void sense_ntp_request_scheduled_retry(')
     prefix = r'''
 #include <atomic>
 #include <cassert>
@@ -131,6 +137,9 @@ static void reset(uint32_t budget=15000){
  g_ntp_running=g_ntp_sleep_quiesced=false;g_ntp_attempt_start_ms=0;g_ntp_dns_users=0;
  g_ntp_accept_until_ms=0;g_ntp_received_epoch=0;g_ntp_fresh_this_boot=false;
  g_ntp_manual_retry_requested=false;g_ntp_manual_retry_used=false;g_ntp_resolve_until_ms=0;
+#if HAS_SCHEDULED_RETRY
+ g_ntp_scheduled_retry_requested=false;g_ntp_scheduled_retry_deadline_ms=0;
+#endif
  for(auto&s:g_ntp_servers){s.requested=false;s.ipv4=0;s.done=false;}
 #if HAS_MANUAL_DNS_GENERATION
  g_ntp_manual_resolve_until_ms=0;
@@ -249,6 +258,7 @@ int main(){
 }
 '''
     prefix += '\n#define HAS_MANUAL_DNS_GENERATION ' + str(int('g_ntp_manual_servers' in state)) + '\n'
+    prefix += '\n#define HAS_SCHEDULED_RETRY ' + str(int('g_ntp_scheduled_retry_requested' in state)) + '\n'
     return '\n'.join([prefix, state, *[definition(source, s) for s in signatures], cases])
 
 
@@ -266,6 +276,9 @@ static std::string last_result="none",wire_result;
 static bool sense_time_has_fresh_sync(){return fresh;}
 static bool halo_ota_manual_override_active(){return manual;}
 static void sense_ntp_request_manual_retry(){++retries;}
+static unsigned ota_scheduled_clock_retry_deadline(){return 0;}
+static bool ota_scheduled_clock_peer_refresh_pending(){return false;}
+static void sense_ntp_request_scheduled_retry(unsigned){assert(false);}
 static void halo_prod_kick_time_sync(const char*){++kicks;}
 static bool sense_ntp_attempt_pending(){
  if(expire_after_kick){pending=false;expire_after_kick=false;retry_ready=true;}

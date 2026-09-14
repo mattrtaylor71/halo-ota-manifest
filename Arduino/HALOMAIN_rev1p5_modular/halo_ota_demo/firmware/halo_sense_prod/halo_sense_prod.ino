@@ -749,6 +749,8 @@ static bool sense_action_inflight() {
 static const unsigned long OTA_PROOF_TIMEOUT_MS = 15000;
 
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay);
+static bool ota_clock_ready_before_work();
+static uint32_t ota_scheduled_clock_retry_deadline();
 static bool is_time_valid();
 void halo_prod_kick_time_sync(const char* reason);  // Start SNTP immediately on STA-connect (idempotent, non-blocking)
 static void ota_sched_save();
@@ -4294,6 +4296,9 @@ static void nightly_maintenance_tick() {
   // retained TLS clock alone cannot authorize the paired absolute sleep arm.
   if (sense_ntp_attempt_pending()) return;
   if (!self_retry_boot_admit()) return;
+  // A clean scheduled wake can recover even without a plausible retained TLS
+  // clock. This gate still requires a fresh reply before any OTA admission.
+  if (ota_scheduled_clock_retry_deadline() && !ota_clock_ready_before_work()) return;
   if (!is_time_valid() || (!OtaIntent::cooldownAllows() && !ota_peer_continuation())) return;
 
 
@@ -5148,12 +5153,70 @@ static uint32_t halo_idle_network_epoch(){const time_t n=time(nullptr);return n>
 
 
 
-// Complete the bounded SNTP opportunity (including an explicitly granted
-// manual retry) before a long DNS guard can suspend it. Pending is normal-loop
+// A stored arm alone is not proof that this wake was scheduled: spool and
+// fallback timers also queue "nightly". Require the actual LCD TIMER notice,
+// its current nonce-qualified peer, and a typed absent policy. This authorizes
+// a time query only; fresh clock, calendar due/day and budgets still gate OTA.
+static uint32_t ota_scheduled_clock_retry_deadline() {
+#if HALO_DURABLE_OTA_POLICY
+  if (!g_boot_ota_pending || halo_ota_manual_override_active() ||
+      !sense_policy::absent() || !g_coord_credit_loaded ||
+      g_coord_credit_uncertain || g_ota_storage_uncertain ||
+      g_coord_pending[0] || g_coord_completion_target[0] || g_peer_continue_work ||
+      !g_peer_gate.active || !g_peer_gate.ready || g_peer_gate.legacy ||
+      g_peer_gate.entered || !g_lcd_timer_origin.boot_id ||
+      g_lcd_timer_origin.boot_id != g_lcd_timer_seen_boot ||
+      g_lcd_timer_origin.boot_id != g_peer_gate.peer_boot ||
+      g_lcd_timer_origin.wake != (int)ESP_SLEEP_WAKEUP_TIMER) return 0;
+  const uint32_t now = millis();
+  if (uint32_t(now - g_peer_gate.proof_ms) >= 2000) return 0;
+  int32_t left = int32_t(g_boot_ota_deadline_ms - now);
+  const int32_t peer_left = int32_t(g_peer_gate.deadline_ms - now);
+  if (peer_left < left) left = peer_left;
+  if (left <= 0) return 0;
+  const CoordinatorCreditState base = coord_credit_base();
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  auto matches = [&](const NightlyCreditOrigin& origin) {
+    return origin.bound && origin.target_epoch && origin.id[0] &&
+      !strcmp(origin.id, g_lcd_timer_origin.schedule) &&
+      !ota_peer_schedule_completed(origin.id) && g_tz_initialized &&
+      !strcmp(origin.timezone, g_tz_current) &&
+      nightly_credit_timezone_matches(origin.timezone);
+  };
+  if (matches(base.schedule) || matches(base.deferred)) return now + uint32_t(left);
+#endif
+  return 0;
+}
+
+// Peer proof can cross its 2s freshness boundary between the caller's ready
+// check and this clock gate. Wait for the existing query service in that case;
+// it neither grants a secondary attempt nor renews either readiness deadline.
+static bool ota_scheduled_clock_peer_refresh_pending() {
+#if HALO_DURABLE_OTA_POLICY
+  const uint32_t now = millis();
+  return g_boot_ota_pending && !halo_ota_manual_override_active() &&
+    sense_policy::absent() && g_peer_gate.active && !g_peer_gate.entered &&
+    int32_t(g_boot_ota_deadline_ms - now) > 0 &&
+    int32_t(g_peer_gate.deadline_ms - now) > 0 &&
+    (!g_peer_gate.ready || uint32_t(now - g_peer_gate.proof_ms) >= 2000);
+#else
+  return false;
+#endif
+}
+
+// Complete the bounded SNTP opportunity (including one qualified secondary
+// attempt) before a long DNS guard can suspend it. Pending is normal-loop
 // service, not a consumed OTA attempt.
 static bool ota_clock_ready_before_work() {
   if (sense_time_has_fresh_sync()) return true;
   if (halo_ota_manual_override_active()) sense_ntp_request_manual_retry();
+  else {
+    // Use one qualified deadline snapshot. If proof just expired, the later
+    // WAIT check sees that refusal; reversing these checks creates a 2s race.
+    const uint32_t deadline = ota_scheduled_clock_retry_deadline();
+    if (deadline) sense_ntp_request_scheduled_retry(deadline);
+    else if (ota_scheduled_clock_peer_refresh_pending()) return false;
+  }
   halo_prod_kick_time_sync("ota_preflight");
   if (sense_time_has_fresh_sync()) return true;
   if (sense_ntp_attempt_pending()) return false;

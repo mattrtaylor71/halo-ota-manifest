@@ -53,13 +53,18 @@ static bool g_ntp_running = false;
 static bool g_ntp_sleep_quiesced = false;
 static uint32_t g_ntp_attempt_start_ms = 0;
 static unsigned g_ntp_dns_users = 0;
+static uint32_t g_ntp_dns_held_ms = 0, g_ntp_dns_hold_start_ms = 0;
 static std::atomic<uint32_t> g_ntp_accept_until_ms{0};
 static std::atomic<uint32_t> g_ntp_received_epoch{0};
 static std::atomic<bool> g_ntp_fresh_this_boot{false};
-// An explicit manual action may use one extra opportunity after the ordinary
-// 15s boot window. Its DNS slots are separate; no generation is ever reopened.
+// An explicit manual action or a qualified calendar wake may use one shared
+// extra opportunity after the ordinary 15s boot window. Its DNS slots are
+// separate; no generation is ever reopened. Scheduled use keeps the original
+// readiness deadline and never sets a manual OTA intent.
 static const uint32_t SENSE_NTP_MANUAL_RETRY_MS = 40000;
 static bool g_ntp_manual_retry_requested = false;  // g_time_mutex
+static bool g_ntp_scheduled_retry_requested = false;  // g_time_mutex
+static uint32_t g_ntp_scheduled_retry_deadline_ms = 0;
 static std::atomic<bool> g_ntp_manual_retry_used{false};
 static std::atomic<uint32_t> g_ntp_resolve_until_ms{0};
 static std::atomic<uint32_t> g_ntp_manual_resolve_until_ms{0};
@@ -73,7 +78,7 @@ struct SenseNtpServer {
 static SenseNtpServer g_ntp_servers[3] = {
     {"pool.ntp.org"}, {"time.nist.gov"}, {"time.google.com"}};
 // Never reuse/reset the original DNS callback arguments after a timeout.
-// These static slots belong only to the one permitted manual recovery window.
+// These static slots belong only to the one permitted secondary window.
 static SenseNtpServer g_ntp_manual_servers[3] = {
     {"pool.ntp.org", true}, {"time.nist.gov", true}, {"time.google.com", true}};
 // SNTP retains these pointers. Never pass a temporary String/caller buffer.
@@ -219,14 +224,36 @@ static void sense_ntp_request_manual_retry() {
       !g_ntp_manual_retry_used.load()) g_ntp_manual_retry_requested = true;
 }
 
+// The production coordinator supplies an already qualified calendar wake and
+// the earlier of its original readiness deadlines. Repeated service can only
+// shorten that deadline, never renew the secondary opportunity.
+static void sense_ntp_request_scheduled_retry(uint32_t deadline_ms) {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  if (g_ntp_sleep_quiesced || g_ntp_fresh_this_boot.load() ||
+      g_ntp_manual_retry_used.load() ||
+      (int32_t)(deadline_ms - (uint32_t)millis()) <= 0) return;
+  if (!g_ntp_scheduled_retry_requested ||
+      (int32_t)(deadline_ms - g_ntp_scheduled_retry_deadline_ms) < 0)
+    g_ntp_scheduled_retry_deadline_ms = deadline_ms;
+  g_ntp_scheduled_retry_requested = true;
+}
+
 // Caller holds g_time_mutex. The first attempt must already be closed and its
 // mailbox drained. Missing addresses get new static DNS slots/deadline; late
 // callbacks keep their original arguments and can never fill these new slots.
 static void sense_ntp_try_manual_retry_locked(uint32_t now_ms) {
-  if (!g_ntp_manual_retry_requested || g_ntp_manual_retry_used.load() ||
+  if ((!g_ntp_manual_retry_requested && !g_ntp_scheduled_retry_requested) ||
+      g_ntp_manual_retry_used.load() ||
       !g_ntp_attempt_finished || g_ntp_sleep_quiesced ||
       g_ntp_fresh_this_boot.load() || g_ntp_received_epoch.load() ||
       g_ntp_attempt_budget_ms != SENSE_NTP_ATTEMPT_MS) return;
+  const bool scheduled = !g_ntp_manual_retry_requested;
+  uint32_t retry_budget = SENSE_NTP_MANUAL_RETRY_MS;
+  if (scheduled) {
+    const int32_t left = (int32_t)(g_ntp_scheduled_retry_deadline_ms - now_ms);
+    if (left <= 0) return;
+    if ((uint32_t)left < retry_budget) retry_budget = (uint32_t)left;
+  }
   sense_ntp_stop_locked();  // closes old UDP client/timers under TCPIP lock
   g_ntp_resolve_until_ms.store(0);  // original DNS generation stays closed
   g_ntp_manual_retry_used.store(true);
@@ -238,13 +265,17 @@ static void sense_ntp_try_manual_retry_locked(uint32_t now_ms) {
     g_ntp_manual_servers[i].done.store(ip != 0);
     if (ip) ++cached;
   }
-  g_ntp_manual_resolve_until_ms.store(now_ms + SENSE_NTP_ATTEMPT_MS);
+  g_ntp_manual_resolve_until_ms.store(now_ms +
+      (retry_budget < SENSE_NTP_ATTEMPT_MS ? retry_budget : SENSE_NTP_ATTEMPT_MS));
   g_ntp_manual_retry_requested = false;
+  g_ntp_scheduled_retry_requested = false;
   g_ntp_attempt_start_ms = now_ms;
-  g_ntp_attempt_budget_ms = SENSE_NTP_MANUAL_RETRY_MS;
+  g_ntp_dns_held_ms = 0;
+  g_ntp_dns_hold_start_ms = now_ms;
+  g_ntp_attempt_budget_ms = retry_budget;
   g_ntp_attempt_finished = false;
-  Serial.printf("[TIME] manual SNTP retry budget_ms=%lu cached_numeric=%u fresh_dns_slots=%u\n",
-                (unsigned long)SENSE_NTP_MANUAL_RETRY_MS, cached, 3U - cached);
+  Serial.printf("[TIME] %s SNTP retry generation=1 budget_ms=%lu cached_numeric=%u fresh_dns_slots=%u\n",
+                scheduled ? "scheduled" : "manual", (unsigned long)retry_budget, cached, 3U - cached);
 }
 
 static void sense_ntp_begin() {
@@ -255,6 +286,8 @@ static void sense_ntp_begin() {
   if (!g_ntp_attempt_started) {
     g_ntp_attempt_started = true;
     g_ntp_attempt_start_ms = now_ms;
+    g_ntp_dns_held_ms = 0;
+    g_ntp_dns_hold_start_ms = now_ms;
 #if defined(HALO_SENSE_PROD_WRAPPER) && HALO_DURABLE_OTA_POLICY
     g_ntp_attempt_budget_ms = halo_policy_ntp_budget(now_ms);
 #endif
@@ -333,13 +366,14 @@ static void sense_ntp_begin() {
 // other task from restarting it while an application DNS operation may run.
 extern "C" void halo_sntp_dns_acquire() {
   std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
-  ++g_ntp_dns_users;
+  if (g_ntp_dns_users++ == 0) g_ntp_dns_hold_start_ms = millis();
   if (g_ntp_running) sense_ntp_stop_locked();
 }
 
 extern "C" void halo_sntp_dns_release() {
   std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
-  if (g_ntp_dns_users != 0) --g_ntp_dns_users;
+  if (g_ntp_dns_users != 0 && --g_ntp_dns_users == 0)
+    g_ntp_dns_held_ms += uint32_t((uint32_t)millis() - g_ntp_dns_hold_start_ms);
   // Only normal loop service may resume the active client's fixed deadline.
 }
 
@@ -393,6 +427,18 @@ static void sense_ntp_service() {
                   (unsigned long)((uint32_t)millis() - g_ntp_attempt_start_ms));
   } else if (expired) {
     g_ntp_attempt_finished = true;
+    const bool secondary = g_ntp_manual_retry_used.load();
+    SenseNtpServer* servers = secondary ? g_ntp_manual_servers : g_ntp_servers;
+    unsigned ready = 0, requested = 0;
+    for (unsigned i = 0; i < 3; ++i) {
+      if (servers[i].ipv4.load()) ++ready;
+      if (servers[i].requested) ++requested;
+    }
+    const uint32_t held = g_ntp_dns_held_ms + (g_ntp_dns_users
+        ? uint32_t((uint32_t)millis() - g_ntp_dns_hold_start_ms) : 0);
+    Serial.printf("[TIME] SNTP timeout generation=%u budget_ms=%lu dns_ready=%u dns_requested=%u dns_holds=%u held_ms=%lu\n",
+                  secondary ? 1U : 0U, (unsigned long)g_ntp_attempt_budget_ms,
+                  ready, requested, g_ntp_dns_users, (unsigned long)held);
     Serial.println("[TIME] SNTP attempt timed out; retained time is unconfirmed");
   }
 }

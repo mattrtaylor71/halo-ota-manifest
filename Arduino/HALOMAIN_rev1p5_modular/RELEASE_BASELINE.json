@@ -2527,7 +2527,7 @@
     }
   ],
   "overnight_scheduled_campaign": {
-    "status": "MIDNIGHT_CAPTURE_ACTIVE_ADMISSION_CONFIRMED_CLOCK_DEFERRAL_FINAL_PENDING",
+    "status": "MIDNIGHT_CLOSED_CLOCK_FAILURE_NO_SHORT_RETRY",
     "case_directory": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913",
     "first_due_epoch": 1789362000,
     "last_new_due_epoch": 1789394400,
@@ -2548,7 +2548,7 @@
     "firmware_runtime_changes": 8,
     "isolated_test_fixtures": 1,
     "scheduled_passes": 0,
-    "scope": "22:00 missed admission;22:40 actual LCD watchdog transfer failure and no short retry;23:00 skipped during repair. USB140 repair/native settlement and142 bootstrap are separate interventions, not passes. Midnight142\u2192143 is armed; actual transfer, paired143 health and native settlement remain pending. USB causation unproven.",
+    "scope": "22:00 missed admission;22:40 LCD watchdog transfer failure;23:00 skipped;00:00 actual scheduled admission stopped at clock validation with six-hour fallback and no short retry. No full scheduled passes. Post-window142 health/NVS read-only audit found no partial debt. Explicit USB repairs/bootstrap are separate interventions.",
     "independent_timer_review": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/TIMER-ARM-REVIEW.json",
       "sha256": "9307f12b3f2b7dd17d33f8959da7491b8bb5b4c436460948288d20fec95495ba"
@@ -2710,7 +2710,7 @@
     },
     "active_fixed_case": {
       "case_id": "fixed142_to143_0000",
-      "phase": "OBSERVING_SCHEDULED_WAKE",
+      "phase": "CLOSED_CLOCK_DEFERRED_NO_SHORT_RETRY",
       "due_epoch": 1789369200,
       "due_local": "2026-09-14 00:00 PDT",
       "from_version": "6.4.142",
@@ -2749,25 +2749,39 @@
       },
       "observer_child_pid": 52562,
       "instrumentation": "Single passive POSIX capture; no UART commands, DTR/RTS, or reopen. USB-instrumented, not disconnected control.",
-      "interim_observation": {
-        "native_scheduled_admission": true,
-        "admission_reason": "lcd_timer",
-        "manual": false,
-        "fresh_clock_result": "fresh_sync_unavailable",
-        "terminal_observed": "clock_unconfirmed",
-        "transfer_observed": false,
-        "final_outcome": "PENDING_CAPTURE_CLOSURE",
-        "raw_path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case02-0000-143/observer001/capture/sense.raw",
-        "scope": "Live capture remains open until00:08:30; no final case failure or pass claimed."
-      },
       "interim_clock_deferral": {
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case02-0000-143/clock-interim001/RESULT.json",
         "sha256": "0190182d4d7c7a45156952e30cb271d25049277255de3076ed2e0fb90ae25ce9"
-      }
+      },
+      "native_scheduled_admission": true,
+      "first_episode_terminal": "clock_unconfirmed",
+      "Sense_fallback_seconds": 21600,
+      "LCD_fallback_seconds": 21600,
+      "verdict": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case02-0000-143/VERDICT.json",
+        "sha256": "ae81a978a5120824d8b94421267d02d09b4aaf630f13940edc10232549cd0a6d"
+      },
+      "observer_tool_exit_code": 0,
+      "observer_tool_reaped": true,
+      "post_window_identity": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case02-0000-143/post-window-identity001/identity.json",
+        "sha256": "6a31b1910ee784374ab185aa173d78248b9db5fb9d5acad12020d08b57164957"
+      },
+      "post_window_audit": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case02-0000-143/post-window-audit001/result.json",
+        "sha256": "77692f2199f86b0c8346a456b181a305c821fd3f7efb8ea42f46d56711302aee"
+      },
+      "post_window_NVS": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case02-0000-143/post-window-audit001/NVS-AUDIT.json",
+        "sha256": "f5aab0941c6e2ad22847bb63ed55229de82cf5aebcb90eddd95cb88e914ef2e4"
+      },
+      "post_window_tool_session": 35874,
+      "post_window_tool_exit_code": 0,
+      "post_window_interventions": "One actuatorwake, freshpairedidentity, read-onlyROMaudit withdeclaredresets. Zero flashwrites. Allafterclosedobservation."
     },
     "active_runbook": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/RUNBOOK-MIDNIGHT-CLOCK-DEFER.md",
-      "sha256": "94ddb8775611a9242762e78492c86ce5af64f111bb817ab2f146c6e231c010b8"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/RUNBOOK-CLOCK-FIX144.md",
+      "sha256": "2bf7e42b7789a48af8552f1b9b2afae46acb3ecab85a3d4d7a0f77e9807fb5ee"
     },
     "observation_ownership": {
       "observer_tool_session_id": 41574,
@@ -2779,7 +2793,9 @@
     "active_automation": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/AUTOMATION-FIXED142-MIDNIGHT.json",
       "sha256": "d79aeafc70cb4c929056f966b46959637c21da3c32e012e03fde0f7879f1c50f"
-    }
+    },
+    "clock_deferral_failures": 1,
+    "failed_cases": 3
   },
   "previous_single_2am_observation_plan": {
     "status": "SUPERSEDED_BEFORE_DUE_BY_USER_HOURLY_TEST_REQUEST",
@@ -3052,5 +3068,22 @@
       }
     ],
     "scope": "Failed state archived; explicit exact140 USB repair, native settlement and scoped resolved-state cleanup. Not natural OTA recovery."
+  },
+  "next_clock_fix_candidate_144": {
+    "version": "6.4.144",
+    "preflight_result": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/preflight001/RESULT.json",
+      "sha256": "2c356a3edf3cd1bb01b0bd470ea2eb0f500c89a51aa257b6fa7bbbc8d99c637e"
+    },
+    "preflight_tool_session_id": 31628,
+    "preflight_tool_exit_code": 0,
+    "status": "HOST_TESTED_AND_INDEPENDENTLY_REVIEWED_NOT_BUILT",
+    "installed": false,
+    "published": false,
+    "scope": "Firstincrement only: bounded secondserver SNTPgeneration on qualifiedscheduledLCDtimer path. Cross-sleep shortretry remainsoutstanding.",
+    "host_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/HOST-VALIDATION.json",
+      "sha256": "c0b9f04fe90727dfc0659b7e7f39224a4c0c9663a01e542f4f53c2d71a1de8a0"
+    }
   }
 }
