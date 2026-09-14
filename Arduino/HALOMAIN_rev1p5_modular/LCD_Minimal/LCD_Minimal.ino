@@ -886,6 +886,9 @@ static unsigned long last_sense_any_rx_ms = 0;
 static unsigned long wake_retry_until_ms = 0;
 static unsigned long last_wake_retry_ms = 0;
 static uint8_t wake_retry_attempts = 0;
+static std::atomic<bool> s_sense_wake_pulse_busy{false};
+static std::atomic<bool> s_sense_wake_retry_exhausted{false};
+static portMUX_TYPE s_sense_wake_state_mux = portMUX_INITIALIZER_UNLOCKED;
 static const unsigned long WAKE_RETRY_INTERVAL_MS = 1200;
 static const unsigned long WAKE_RETRY_WINDOW_MS = 10000;
 static const unsigned long WAKE_PULSE_DURATION_MS = 80;
@@ -936,6 +939,7 @@ static SenseState sense_state = SENSE_UNKNOWN;
 static uint8_t sense_missed_pongs = 0;
 static bool sense_pong_pending = false;
 static unsigned long sense_pong_deadline_ms = 0;
+static portMUX_TYPE s_sense_pong_mux = portMUX_INITIALIZER_UNLOCKED;
 static unsigned long last_sense_ping_ms = 0;
 static const unsigned long SENSE_PROBE_INTERVAL_MS = 5000;
 static const unsigned long SENSE_PONG_TIMEOUT_MS = 1500;
@@ -2275,6 +2279,7 @@ static void deferred_awake_tx_service();
 static void cancel_pending_sleep_for_user_input(const char* reason);
 static void send_sense_ping();
 static void start_sense_wake_handshake();
+static unsigned long wake_retry_interval_for_attempt(uint8_t attempt);
 
 static bool s_lcd_diag_sent_this_cycle = false;
 
@@ -2800,6 +2805,34 @@ static const char* sense_state_name(SenseState state) {
   }
 }
 
+static void sense_pong_reset() {
+  portENTER_CRITICAL(&s_sense_pong_mux);
+  sense_pong_deadline_ms = 0;
+  sense_pong_pending = false;
+  portEXIT_CRITICAL(&s_sense_pong_mux);
+}
+
+static void sense_pong_arm(unsigned long now_ms) {
+  portENTER_CRITICAL(&s_sense_pong_mux);
+  if (!sense_pong_pending) {
+    sense_pong_deadline_ms = (uint32_t)now_ms + (uint32_t)SENSE_PONG_TIMEOUT_MS;
+    sense_pong_pending = true;
+  }
+  portEXIT_CRITICAL(&s_sense_pong_mux);
+}
+
+static bool sense_pong_take_expired(unsigned long now_ms) {
+  portENTER_CRITICAL(&s_sense_pong_mux);
+  const bool expired = sense_pong_pending &&
+      (int32_t)((uint32_t)now_ms - (uint32_t)sense_pong_deadline_ms) >= 0;
+  if (expired) {
+    sense_pong_deadline_ms = 0;
+    sense_pong_pending = false;
+  }
+  portEXIT_CRITICAL(&s_sense_pong_mux);
+  return expired;
+}
+
 static void sense_state_set(SenseState next, const char* reason) {
   // Enforce the invariant BEFORE the unchanged-state early return.
   //
@@ -2826,8 +2859,7 @@ static void sense_state_set(SenseState next, const char* reason) {
 static void set_sense_awake_estimate(bool value, const char* reason) {
   if (value) {
     sense_missed_pongs = 0;
-    sense_pong_pending = false;
-    sense_pong_deadline_ms = 0;
+    sense_pong_reset();
     last_sense_sleep_ready_ms = 0;
   }
   sense_state_set(value ? SENSE_AWAKE : SENSE_UNKNOWN, reason);
@@ -3371,8 +3403,7 @@ static void note_sense_proof_of_life(const char* source) {
   last_proof_of_life_ms = millis();
   sense_rx_stale_logged = false;
   sense_missed_pongs = 0;
-  sense_pong_pending = false;
-  sense_pong_deadline_ms = 0;
+  sense_pong_reset();
   sense_state_set(SENSE_AWAKE, source);
   refresh_sm_proof_of_life(source);
 }
@@ -3564,6 +3595,10 @@ static bool wake_reason_requires_immediate_pulse(const char* reason) {
     return false;
   }
   return strcmp(reason, "user_ui_wake") == 0 ||
+         strcmp(reason, "manual_ota") == 0 ||
+         strcmp(reason, "INPUT_OTA_CHECK") == 0 ||
+         strcmp(reason, "settings_fw_info") == 0 ||
+         strcmp(reason, "INPUT_SENSE_FW") == 0 ||
          strcmp(reason, "pre_sleep_touch") == 0 ||
          strcmp(reason, "INPUT_WAKE") == 0 ||
          strcmp(reason, "scroll_wake") == 0 ||
@@ -3573,6 +3608,75 @@ static bool wake_reason_requires_immediate_pulse(const char* reason) {
          strcmp(reason, "retry") == 0 ||
          strcmp(reason, "expiry_submit") == 0 ||
          strcmp(reason, "expiry_submit_empty") == 0;
+}
+
+static void lcd_rearm_sense_wake_for_user(unsigned long now) {
+  portENTER_CRITICAL(&s_sense_wake_state_mux);
+  if (s_sense_wake_retry_exhausted.load() || wake_timer_wait_mode ||
+      (wake_retry_until_ms > 0 &&
+       (int32_t)((uint32_t)now - (uint32_t)wake_retry_until_ms) >= 0)) {
+    s_sense_wake_retry_exhausted.store(false);
+    wake_timer_wait_mode = false;
+    wake_retry_until_ms = 0;
+  }
+  portEXIT_CRITICAL(&s_sense_wake_state_mux);
+}
+
+// UI and UART retries share one pulse cadence. Claim before the blocking GPIO
+// operation so simultaneous callers cannot overlap pulses or renew the episode.
+static bool lcd_claim_sense_wake_pulse(unsigned long now) {
+  bool expected = false;
+  if (!s_sense_wake_pulse_busy.compare_exchange_strong(expected, true)) return false;
+  uint8_t retry_attempt = 0;
+  portENTER_CRITICAL(&s_sense_wake_state_mux);
+  const bool expired = wake_retry_until_ms > 0 &&
+      (int32_t)((uint32_t)now - (uint32_t)wake_retry_until_ms) >= 0;
+  if (expired) s_sense_wake_retry_exhausted.store(true);
+  if (s_sense_wake_retry_exhausted.load() || wake_timer_wait_mode ||
+      (wake_retry_until_ms > 0 &&
+       (uint32_t)(now - last_wake_retry_ms) < wake_retry_interval_for_attempt(wake_retry_attempts))) {
+    portEXIT_CRITICAL(&s_sense_wake_state_mux);
+    s_sense_wake_pulse_busy.store(false);
+    return false;
+  }
+  if (wake_retry_until_ms == 0) {
+    // Use the caller's clock sample; no clock or I/O calls under this mux.
+    sense_awake_confirmed = false;
+    wake_retry_until_ms = (uint32_t)now + (uint32_t)WAKE_RETRY_WINDOW_MS;
+    wake_retry_attempts = 0;
+    wake_timer_wait_mode = false;
+  } else {
+    if (wake_retry_attempts < 255) ++wake_retry_attempts;
+    retry_attempt = wake_retry_attempts;
+  }
+  last_int_pulse_ms = now;
+  last_wake_retry_ms = now;
+  portEXIT_CRITICAL(&s_sense_wake_state_mux);
+  if (retry_attempt) Serial.printf("[LCD] Wake retry pulse attempt=%u\n", (unsigned)retry_attempt);
+  return true;
+}
+
+// Expiry owns the physical line until its caller releases it. A new gesture
+// may rearm meanwhile, but its pulse cannot start before this custody ends.
+static bool lcd_claim_sense_wake_expiry(unsigned long now) {
+  bool expected = false;
+  if (!s_sense_wake_pulse_busy.compare_exchange_strong(expected, true)) return false;
+  portENTER_CRITICAL(&s_sense_wake_state_mux);
+  const bool expired = !sense_awake_confirmed && wake_retry_until_ms > 0 &&
+      (int32_t)((uint32_t)now - (uint32_t)wake_retry_until_ms) >= 0;
+  if (expired) {
+    s_sense_wake_retry_exhausted.store(true);
+    wake_retry_until_ms = 0;
+    wake_timer_wait_mode = true;
+    wake_timer_wait_start_ms = now;
+  }
+  portEXIT_CRITICAL(&s_sense_wake_state_mux);
+  if (!expired) s_sense_wake_pulse_busy.store(false);
+  return expired;
+}
+
+static void lcd_release_sense_wake_pulse() {
+  s_sense_wake_pulse_busy.store(false);
 }
 
 static bool wake_sense_for_request(const char* reason) {
@@ -3604,18 +3708,15 @@ static bool wake_sense_for_request(const char* reason) {
     Serial.println("[LCD] skipping Sense wake");
     return false;
   }
-  Serial.println("[LCD] waking Sense");
   unsigned long now = millis();
-  if (wake_retry_until_ms == 0) {
-    start_sense_wake_handshake();
-  }
+  if (!lcd_claim_sense_wake_pulse(now)) return false;
+  Serial.println("[LCD] waking Sense");
   maybe_extend_sense_awake_grace(reason);
-  last_int_pulse_ms = now;
-  last_wake_retry_ms = now;
   Serial.printf("[LCD_INT] pulse_sense_wake reason=%s len_ms=%lu\n",
                 reason ? reason : "unknown",
                 (unsigned long)WAKE_PULSE_SHORT_MS);
   pulseWakeSenseShort();
+  lcd_release_sense_wake_pulse();
   send_sense_ping();
   return true;
 }
@@ -3650,21 +3751,18 @@ static bool lcd_maybe_pulse_sense_int(const char* reason) {
     return false;
   }
   unsigned long now = millis();
-  if (wake_retry_until_ms == 0) {
-    start_sense_wake_handshake();
-  }
+  if (!lcd_claim_sense_wake_pulse(now)) return false;
   if (immediate_user_pulse) {
     cancel_pending_sleep_for_user_input(reason);
   }
   maybe_extend_sense_awake_grace(reason);
-  last_int_pulse_ms = now;
   Serial.printf("[LCD_INT] pulse_sense reason=%s len_ms=%lu\n",
                 reason ? reason : "unknown",
                 (unsigned long)WAKE_PULSE_DURATION_MS);
   Serial.println("[LCD] waking Sense");
   pulseWakeSense();
+  lcd_release_sense_wake_pulse();
   send_sense_ping();
-  last_wake_retry_ms = now;
   sense_status_sync_requested = false;
   sense_ota_apply_required = false;
   sense_wake_explicit_request = false;
@@ -3672,6 +3770,10 @@ static bool lcd_maybe_pulse_sense_int(const char* reason) {
 }
 
 static void request_sense_wake(const char* reason) {
+  // This label is emitted once by the manual action, including USB-triggered
+  // UI actions. Deferred INPUT_OTA_CHECK retries cannot renew this episode.
+  if (reason && strcmp(reason, "manual_ota") == 0)
+    lcd_rearm_sense_wake_for_user(millis());
   // Only skip the wake path when the Sense is GENUINELY awake (recent RX). A stale
   // awake flag falls through to lcd_maybe_pulse_sense_int(), which clears it and pulses.
   if (sense_awake_confirmed && sense_recently_heard(SENSE_AWAKE_TRUST_MS)) {
@@ -3846,8 +3948,8 @@ static void send_sense_ping() {
   }
   uart_send_input_message("INPUT_PING");
   last_sense_ping_ms = now_ms;
-  sense_pong_pending = true;
-  sense_pong_deadline_ms = now_ms + SENSE_PONG_TIMEOUT_MS;
+  // Retransmission is not a response: retain the first unanswered deadline.
+  sense_pong_arm(now_ms);
 }
 
 static void start_sense_wake_handshake() {
@@ -5448,14 +5550,12 @@ void loop() {
   if (!g_in_light_sleep) {
     unsigned long now_ms = millis();
     log_lcd_wake_pin_tick();
-    if (sense_pong_pending && sense_pong_deadline_ms > 0 &&
-        now_ms > sense_pong_deadline_ms) {
-      sense_pong_pending = false;
-      sense_pong_deadline_ms = 0;
+    if (sense_pong_take_expired(now_ms)) {
       if (sense_missed_pongs < 255) {
         sense_missed_pongs++;
       }
-      if (sense_missed_pongs >= SENSE_MISSED_PONGS_FOR_ASLEEP) {
+      // A missed ping cannot contradict the peer's explicit sleep notice.
+      if (sleep_ready_received || sense_missed_pongs >= SENSE_MISSED_PONGS_FOR_ASLEEP) {
         sense_state_set(SENSE_ASLEEP, "missed_pongs");
       } else {
         sense_state_set(SENSE_UNKNOWN, "missed_pongs");
@@ -5543,23 +5643,16 @@ void loop() {
   if (!g_in_light_sleep && !sense_awake_confirmed && wake_retry_until_ms > 0 &&
       refresh_state != REFRESH_INFLIGHT) {
     unsigned long now = millis();
-    if (now > wake_retry_until_ms) {
-      wake_retry_until_ms = 0;
-      // Enter timer-wait mode — stop pulsing, wait for Sense's failsafe timer
-      if (!wake_timer_wait_mode && !sense_awake_confirmed) {
-        wake_timer_wait_mode = true;
-        wake_timer_wait_start_ms = now;
-        release_wake_line("timer_wait");
-        Serial.println("[WAKE] pulse retries exhausted -> timer-wait mode (30s)");
-      }
+    if (lcd_claim_sense_wake_expiry(now)) {
+      release_wake_line("timer_wait");
+      Serial.println("[WAKE] pulse retries exhausted -> timer-wait mode (30s)");
+      lcd_release_sense_wake_pulse();
     } else if (now - last_wake_retry_ms >= wake_retry_interval_for_attempt(wake_retry_attempts)) {
       if (sense_recently_heard(1500UL)) {
         Serial.println("[LCD] Wake retry waiting for sync...");
         send_sense_ping();
         last_wake_retry_ms = now;
       } else {
-        ++wake_retry_attempts;
-        Serial.printf("[LCD] Wake retry pulse attempt=%u\n", (unsigned)wake_retry_attempts);
         lcd_maybe_pulse_sense_int("wake_retry");
       }
     }

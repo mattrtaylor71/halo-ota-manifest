@@ -5781,5 +5781,22 @@
       "The positive early-calendar WAIT branch was not exercised on hardware; its 13 host tests remain separate evidence.",
       "18 ERRLOG and one DIAG verified=0 notices came from intentionally disabled legacy writers under HALO_DURABLE_DIAGNOSTICS=1, not attempted NVS-write failures."
     ]
+  },
+  "candidate159": {
+    "version": "6.4.159",
+    "status": "SCOPED_LCD_WAKE_FIX_SOURCE_CANDIDATE",
+    "record": "docs/LCD_USER_WAKE_159.md",
+    "workspace": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation159",
+    "parent_baseline": "6.4.158",
+    "runtime_scope": [
+      "LCD explicit user wake admission",
+      "PONG deadline and sleep evidence",
+      "bounded concurrent wake retry episode"
+    ],
+    "sense_runtime_changed": false,
+    "policy_or_schedule_changed": false,
+    "publication_performed": false,
+    "hardware_installation_performed": false,
+    "manual_image_transfer_verified": false
   }
 }

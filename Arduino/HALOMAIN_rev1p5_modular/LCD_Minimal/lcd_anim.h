@@ -283,6 +283,9 @@ static void lcd_set_idle_screen_dark(bool dark, const char* reason) {
 static void ensure_awake_for_ui(const char* reason) {
   lcd_timer_receiver_wait_release("user_input");
   // Only call this on real user input (touch/scroll/pull-to-refresh).
+  // A new gesture may begin a new failed-wake episode; background retries may
+  // not restart the original ten-second GPIO pulse window on their own.
+  lcd_rearm_sense_wake_for_user(millis());
   lcd_allow_visible_ui(reason);
   sleep_fallback_reset("user_input");
   cancel_pending_sleep_for_user_input(reason);

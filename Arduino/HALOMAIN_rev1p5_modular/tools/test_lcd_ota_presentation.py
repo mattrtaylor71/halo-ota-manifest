@@ -133,7 +133,9 @@ int main(int argc,char** argv){
     now_ms=2000;unlock();assert(g_manual_ota_result==1&&g_manual_ota_result_until_ms==9000);
   }else if(test=="legacy"){
     g_idle_screen_dark=true;wire(R"({"type":"OTA_LOCK"})");
-    assert(ota_locked&&g_ota_screen_active&&visible_calls==1&&!g_idle_screen_dark);
+    // The UART handler publishes the overlay; only the UI owner wakes the
+    // panel. That handoff is exercised by test_lcd_ota_display_owner.py.
+    assert(ota_locked&&g_ota_screen_active&&visible_calls==1&&g_idle_screen_dark);
     assert(ota_stay_awake_until_ms==181000&&release_reason=="ota_lock");
     wire(R"({"type":"OTA_UNLOCK"})");
     assert(!ota_locked&&!g_ota_screen_active&&provision_return_home_pending);

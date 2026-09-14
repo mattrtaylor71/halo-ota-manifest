@@ -1,3 +1,11 @@
+# September 14: 6.4.159 scoped LCD wake candidate
+
+Fix delivery of Settings and Manual Update requests after Sense announces sleep and a PONG goes unanswered. Retain the original outstanding PONG deadline, preserve explicit sleep evidence and bound shared GPIO retries. New user actions can retry an exhausted wake episode; background retries cannot renew it. Short state transitions are serialized without holding a lock across GPIO or logging.
+
+Only LCD wake handling changes. Sense runtime, OTA policy, daily schedule and UI designs remain unchanged. The assembled158 failure predates networking and is separate from the unreproduced extra-wake report. See [the focused record](docs/LCD_USER_WAKE_159.md). Frozen158 remains the accepted baseline until candidate build and device results are recorded. No159 installation or firmware-transfer pass is claimed at this source checkpoint.
+
+---
+
 # September 14: freeze 6.4.158 as the default baseline
 
 Preserved exact published 158 source, paired applications, debug symbols, factory components and selected provenance in a private checksummed archive. Added the current handoff, build/release workflow, OTA validation and recovery/retention guidance. Repository instructions now explicitly select158; prior117 top-level metadata moved intact to historical qualification and older source-selection notes are archived. Added a read-only ancestry/artifact/package preflight for future development.
