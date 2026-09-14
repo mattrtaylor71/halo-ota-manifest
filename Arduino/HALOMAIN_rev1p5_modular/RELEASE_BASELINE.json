@@ -632,7 +632,7 @@
     "sha256": "3e4e7da8768ec49e779d7010e36feca7a0e047b53cd8a5fe9abab08f0adef727"
   },
   "next_focused_fix": "docs/OTA_RETRY_NEXT_FIX.md (historical diagnosis and implemented readiness correction)",
-  "test_automation_status": "CASE09_CLOSED_MISSED_NO_NEW_CASE_PLANNED_RESTORATION_PENDING",
+  "test_automation_status": "PAUSED_CAMPAIGN_CLOSED_CLOUD_WATCHER_CLOSED",
   "previous_112_artifact_source_commit": "b6ff853e4e3aa4f014a45a48230351bbed802d7c",
   "previous_112_artifact_source_firmware_tree": "8529653e0c187f0b2c1c47689f03de2efe11d5ea",
   "previous_112_release_artifact_manifest": {
@@ -1013,12 +1013,13 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case08-0600-155/VERDICT.json",
       "sha256": "383b8f9a18904b2238cba1d7b1a8fe7a6e7de8846b0f0b66e1f3d96f8e6549ed"
     },
-    "device_acceptance": "Current 155 remains paired SDK VALID. Four earlier scheduled passes remain qualified; Case09 to156 missed before admission. Closed postcase audit shows actual policy absence and no unresolved debt. A narrow source fix is host-tested but not target-built, installed or published.",
-    "instruction": "Continue from published 156 source 420b339d10035e9fb5cd92912f36a0cbf0a153b9 and subsequent reviewed commits carrying the bounded early-calendar wait fix. Installed 155/public 156 remain unchanged. The fix has 13 host tests but no completed target compile or hardware acceptance. Preserve all earlier passes, failures and capture/retry limits; restore 2 a.m. Pacific and legitimate history only after fresh identity/capacity and scoped checks.",
+    "device_acceptance": "Current 155 remains paired SDK VALID. Four earlier scheduled passes remain qualified; Case09 to 156 missed before admission. The narrow fix has 13 host tests and a canonical local Sense compile, but no paired release or physical acceptance. Production Pacific schedule/history restoration is independently verified.",
+    "instruction": "Continue from committed early-calendar fix df8cab35ef8128bdb3d312bd8c016817ad064a85 and subsequent reviewed commits. The fix passed 13 host tests and canonical local Sense compilation as 157; no paired 157 release, installation or hardware acceptance exists. Current 155/public 156 remain unchanged. Preserve prior artifact pins and acceptance limits; the production 2 a.m. Pacific schedule and legitimate history were restored with independently verified scoped metadata writes.",
     "latest_scheduled_case_verdict": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/VERDICT.json",
       "sha256": "9ccdb2a0cd57583eb43ed80857a2c56b2b078cfefb791832ce83d12856a2a814"
-    }
+    },
+    "fixed_development_source_commit": "df8cab35ef8128bdb3d312bd8c016817ad064a85"
   },
   "published_manual_test_releases": [
     {
@@ -1614,10 +1615,14 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/postcase-audit001/NVS-AUDIT.json",
       "sha256": "3148132d7b8091f4e5419da4789aa2e6081d5cf9cded6c85f8bd429470f0beb1"
     },
-    "scope": "Both boards remain 155/app0 SDK VALID after Case09 missed 156 before admission. Closed postcase read-only audit confirms actual policy absence and no unresolved debt; firmware, selectors and NVS preserved. Existing scheduled_verdict is the prior successful Case08, not a Case09 success.",
+    "scope": "Both boards remain 155/app0 SDK VALID after Case09 missed 156 before admission. Actual postcase policy absence/no debt was audited. Subsequent scoped metadata restoration retained two legitimate history entries, preserved firmware/selectors/tables and verified real 2 a.m. Pacific timer arms with paired natural sleep. Existing scheduled_verdict remains the prior successful Case08.",
     "latest_missed_case_verdict": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/VERDICT.json",
       "sha256": "9ccdb2a0cd57583eb43ed80857a2c56b2b078cfefb791832ce83d12856a2a814"
+    },
+    "post_restoration_health_and_timer_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/PRODUCTION-RESTORATION-REVIEW.json",
+      "sha256": "2fda3d1de0d17402da663cda6f01bac2a0a8ba04dfc3b83bcfde7ae97e332120"
     }
   },
   "previous_development_baseline_124": {
@@ -1674,7 +1679,7 @@
   },
   "working_candidate": {
     "version": "6.4.156",
-    "status": "PUBLISHED156_CURRENT155_CASE09_FAILED_EARLY_CALENDAR_SOURCE_FIX_ONLY",
+    "status": "PUBLISHED156_CURRENT155_CAMPAIGN_CLOSED_LOCAL157_SENSE_COMPILE_PASS",
     "artifact_source_commit": "420b339d10035e9fb5cd92912f36a0cbf0a153b9",
     "release_pair": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation156/RELEASE-PAIR.json",
@@ -1691,11 +1696,9 @@
     "local_target_version": "6.4.156",
     "scope": "Published 156 runtime/resources are unchanged from qualified 155; three generated identity headers and four exact release records are the only source changes. No new network-behavior fix is implied.",
     "pending": [
-      "Canonical local Sense compile of the reviewed early-calendar fix; no new publication or test case planned",
-      "Future physical validation of the narrow early-calendar wait fix",
-      "Root-owned guarded Pacific/history restoration is executing; final receipt and timer/readback proof pending"
+      "Physical validation of the committed early-calendar wait fix before any new release promotion"
     ],
-    "instruction": "Continue from published 156 source 420b339d10035e9fb5cd92912f36a0cbf0a153b9 and subsequent reviewed commits carrying the bounded early-calendar wait fix. Installed 155/public 156 remain unchanged. The fix has 13 host tests but no completed target compile or hardware acceptance. Preserve all earlier passes, failures and capture/retry limits; restore 2 a.m. Pacific and legitimate history only after fresh identity/capacity and scoped checks.",
+    "instruction": "Continue from committed early-calendar fix df8cab35ef8128bdb3d312bd8c016817ad064a85 and subsequent reviewed commits. The fix passed 13 host tests and canonical local Sense compilation as 157; no paired 157 release, installation or hardware acceptance exists. Current 155/public 156 remain unchanged. Preserve prior artifact pins and acceptance limits; the production 2 a.m. Pacific schedule and legitimate history were restored with independently verified scoped metadata writes.",
     "automatic_update_review": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case08-0600-155/AUTOMATIC-UPDATE-REVIEW.json",
       "sha256": "c7963538b9e03d4d8f03a4d163e72167cbddc2ecf6b64bc203f4a9de1cc1e32f"
@@ -1736,6 +1739,14 @@
     "latest_scheduled_case_verdict": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/VERDICT.json",
       "sha256": "9ccdb2a0cd57583eb43ed80857a2c56b2b078cfefb791832ce83d12856a2a814"
+    },
+    "local157_Sense_compile": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation157/LOCAL-SENSE-BUILD.json",
+      "sha256": "cf742a4dee3a975a722b5eff42da0e19cedd1a0144d221e9d358d9c2d8872dbc"
+    },
+    "production_schedule_restoration": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/PRODUCTION-RESTORATION-REVIEW.json",
+      "sha256": "2fda3d1de0d17402da663cda6f01bac2a0a8ba04dfc3b83bcfde7ae97e332120"
     }
   },
   "previous_last_verified_device_health_126": {
@@ -2596,7 +2607,7 @@
     }
   ],
   "overnight_scheduled_campaign": {
-    "status": "FOUR_AUDITED_PASSES_CASE09_MISSED_BEFORE_ADMISSION_CURRENT155_PUBLIC156",
+    "status": "CLOSED_FOUR_PASSES_FIVE_FAILURES_CURRENT155_PUBLIC156_PACIFIC_RESTORED",
     "case_directory": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913",
     "first_due_epoch": 1789362000,
     "last_new_due_epoch": 1789394400,
@@ -2617,7 +2628,7 @@
     "firmware_runtime_changes": 8,
     "isolated_test_fixtures": 1,
     "scheduled_passes": 4,
-    "scope": "Four audited scheduled passes to 152, 153, 154 and 155 remain valid. Case09 missed 156 before manifest fetch or OTA work, with calendar_future_rearm and next-day paired sleep. Current 155/public 156; actual postcase policy absent and no unresolved debt. Source fix has 13 host tests; local Sense compile and device validation pending. Prior capture/retry limits and declared fixture scope remain unchanged; Pacific/history restoration pending.",
+    "scope": "Campaign closed with four audited scheduled passes, five failed cases, four skipped nominal slots and one separate recovered-but-unsettled paired install. Current 155/public 156; 157 Sense-only local compile passed but has no paired release or hardware acceptance. Production Pacific schedule and legitimate history restored; cloud watcher closed and heartbeat paused. All earlier failure, fixture and capture/retry limitations remain unchanged.",
     "independent_timer_review": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/TIMER-ARM-REVIEW.json",
       "sha256": "9307f12b3f2b7dd17d33f8959da7491b8bb5b4c436460948288d20fec95495ba"
@@ -2746,8 +2757,20 @@
       {
         "due_epoch": 1789372800,
         "due_local": "2026-09-14 01:00 PDT",
-        "reason": "Repair/bootstrap and validation; durable settlement investigation",
-        "actual_attempt": false
+        "actual_attempt": false,
+        "reason": "Completingrecovered145case/147displayfixbootstrap andpostimagepolicyvalidation; nohourlyNEW_CASEuntilfullsettlement."
+      },
+      {
+        "due_epoch": 1789376400,
+        "due_local": "2026-09-14 02:00 PDT",
+        "actual_attempt": false,
+        "reason": "Actuator unavailable before149 bootstrap; no150 promotion or schedule installed. Planned setup cannot meet minimumlead."
+      },
+      {
+        "due_epoch": 1789380000,
+        "due_local": "2026-09-14 03:00 PDT",
+        "actual_attempt": false,
+        "reason": "Assisted recovery of failed150 and diagnostic151 preparation; no03:00 schedule armed."
       }
     ],
     "recovery": {
@@ -2854,12 +2877,8 @@
       "post_window_tool_exit_code": 0,
       "post_window_interventions": "One actuatorwake, freshpairedidentity, read-onlyROMaudit withdeclaredresets. Zero flashwrites. Allafterclosedobservation."
     },
-    "active_runbook": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/RUNBOOK-SCHEDULED155.md",
-      "sha256": "a4244ce4448ae947bea9aa07547a8e2ad0fa3ab69d30171ef9760fab2a092e61"
-    },
     "observation_ownership": {
-      "status": "CASE09_OBSERVER_AND_POSTCASE_AUDIT_CLOSED",
+      "status": "ALL_CAMPAIGN_OBSERVERS_AND_POSTCASE_ACTIONS_CLOSED",
       "closed_observer": {
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/observer001/RESULT.json",
         "sha256": "1f75a80b7da666ae6808554f2d56568dbcd0e93c84a4ff59deace330420bc536"
@@ -2868,12 +2887,39 @@
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/postcase-audit-owner001/RESULT.json",
         "sha256": "2c0d348a213ca14ab3c221813b5a679b858ef7c0c4125df8b0e36e792d293529"
       },
+      "closed_cloud_watcher": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/overnight-scheduled139-20260913/cloud001/RESULT.json",
+        "sha256": "88d587f0e72ee20d16a523e54c96bedad289aed5d30b0a940340993b2b407f05"
+      },
       "active_hardware_owner_claimed": false
     },
-    "final_restoration": "Root owner tool 6047 is executing guarded restoration after attempt001 refused before hardware access because the boards slept; that attempt wrote nothing. It proceeds after actual saved-audit capacity and fresh identity checks passed. The final restoration receipt and actual 2 a.m. Pacific timer/readback remain pending. Preserve legitimate history and failed-case evidence; no new allowance or target 157 publication/test case is planned.",
-    "active_automation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/AUTOMATION-FIXED142-MIDNIGHT.json",
-      "sha256": "d79aeafc70cb4c929056f966b46959637c21da3c32e012e03fde0f7879f1c50f"
+    "final_restoration": {
+      "status": "PASS_ACTUAL_PACIFIC_2AM_AND_LEGITIMATE_HISTORY_RESTORED",
+      "result": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/production-restore002/result.json",
+        "sha256": "b35d37b0190ed9069e0ad000bdf16798cf177197c634839f2c83e4020b101b6b"
+      },
+      "independent_review": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/PRODUCTION-RESTORATION-REVIEW.json",
+        "sha256": "2fda3d1de0d17402da663cda6f01bac2a0a8ba04dfc3b83bcfde7ae97e332120"
+      },
+      "actual_NVS_sector_writes": 3,
+      "application_writes": 0,
+      "selector_writes": 0,
+      "policy_writes": 0,
+      "retained_history_ids": [
+        "nightly_20260914",
+        "nightly_20260912"
+      ],
+      "history_overflow": false,
+      "Sense_due_epoch": 1789462800,
+      "LCD_due_epoch": 1789462785,
+      "timezone": "PST8PDT,M3.2.0,M11.1.0",
+      "paired_natural_sleep_observed": true,
+      "policy_absence_preserved": true,
+      "unresolved_debt_erased": false,
+      "read_only_operation": false,
+      "scope_limit": "Original receipt inherited misleading read_only/flash_write_trap/schedule_mutations metadata. Three actual allowlisted NVS-sector writes and full readbacks are authoritative. NVS was verified before application release; native post-release arm is proven by stored ACK and timer SDK logs, not a later ROM audit."
     },
     "clock_deferral_failures": 1,
     "failed_cases": 5,
@@ -3828,6 +3874,27 @@
         "sha256": "6084b64f53a19fa34211e243d6300cd2879c87b5c9846ff9891ac41fec874b2c"
       },
       "actual_OTA_success_proven": false
+    },
+    "cloud_observation_closure": {
+      "result": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/overnight-scheduled139-20260913/cloud001/RESULT.json",
+        "sha256": "88d587f0e72ee20d16a523e54c96bedad289aed5d30b0a940340993b2b407f05"
+      },
+      "successful_reads": 657,
+      "failed_reads": 0,
+      "observation_count": 130,
+      "all_owned_children_closed": true,
+      "stopped_by_signal": true,
+      "OTA_success_proof": false
+    },
+    "automation_status": "PAUSED",
+    "previous_active_runbook": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/RUNBOOK-SCHEDULED155.md",
+      "sha256": "a4244ce4448ae947bea9aa07547a8e2ad0fa3ab69d30171ef9760fab2a092e61"
+    },
+    "previous_active_automation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/AUTOMATION-FIXED142-MIDNIGHT.json",
+      "sha256": "d79aeafc70cb4c929056f966b46959637c21da3c32e012e03fde0f7879f1c50f"
     }
   },
   "previous_single_2am_observation_plan": {
@@ -4648,12 +4715,12 @@
     }
   },
   "current_validation_blocker": {
-    "status": "FOUR_AUDITED_PASSES_CASE09_MISSED_BEFORE_ADMISSION_CURRENT155_PUBLIC156",
+    "status": "CAMPAIGN_CLOSED_LOCAL157_SENSE_COMPILE_PASS_DEVICE_VALIDATION_PENDING",
     "hub_cycle": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation149/actuator-hub001/RESULT.json",
       "sha256": "0bf97f6b9b6a1f59c360c748a1ff09f6efd5c7d0da4274a62191a4c8ec5daf62"
     },
-    "scope": "Case09 missed 156 before admission. Actual 155 paired health and closed no-debt audit are verified. The narrow early-calendar wait fix has 13 host tests but no target build or hardware validation yet. Root-owned guarded Pacific/history restoration is executing; its final receipt remains pending.",
+    "scope": "No active test or restoration owner remains. Current 155/public 156, four audited passes and later Case09 miss preserved. The calendar fix has 13 host tests and a canonical local Sense compile; physical validation remains outstanding. Pacific schedule/history restoration and observer closure are verified.",
     "reflash_custody_review": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation149/actuator-reflash001/CUSTODY-REVIEW.json",
       "sha256": "03c5a9129ee06dd785344d3ec64a3196790d56797bb8fb9446a912f624148748"
@@ -4750,6 +4817,18 @@
     "case09_postcase_audit": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/postcase-audit001/result.json",
       "sha256": "eb5cf2e4941fc58606651ad8eb076efca3be608508a754878c825d24b3e70ddf"
+    },
+    "local157_Sense_compile": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation157/LOCAL-SENSE-BUILD.json",
+      "sha256": "cf742a4dee3a975a722b5eff42da0e19cedd1a0144d221e9d358d9c2d8872dbc"
+    },
+    "production_restoration_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/PRODUCTION-RESTORATION-REVIEW.json",
+      "sha256": "2fda3d1de0d17402da663cda6f01bac2a0a8ba04dfc3b83bcfde7ae97e332120"
+    },
+    "closed_cloud_watcher": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/overnight-scheduled139-20260913/cloud001/RESULT.json",
+      "sha256": "88d587f0e72ee20d16a523e54c96bedad289aed5d30b0a940340993b2b407f05"
     }
   },
   "diagnostic_candidate151": {
@@ -5342,11 +5421,11 @@
     "scope": "Fourth consecutive audited scheduled update: 154 to 155 installed both exact images, SDK VALID, and natively settled RESOLVED phase 8/generation 6 with no unresolved debt. Original capture covers live scheduled wake/admission through direct paired sleep. Three LCD packet retries occurred; truncated Sense messages are corroborated by complete LCD mirrors."
   },
   "next_early_calendar_wait_fix157": {
-    "status": "HOST_TESTED_SOURCE_ONLY_LOCAL_SENSE_COMPILE_PENDING",
+    "status": "COMMITTED_HOST_TESTED_CANONICAL_LOCAL_SENSE_COMPILE_PASS_NOT_INSTALLED",
     "candidate_version": "6.4.157",
     "current_device_version": "6.4.155",
     "current_publication_version": "6.4.156",
-    "source_commit": null,
+    "source_commit": "df8cab35ef8128bdb3d312bd8c016817ad064a85",
     "motivating_verdict": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case09-0700-156/VERDICT.json",
       "sha256": "9ccdb2a0cd57583eb43ed80857a2c56b2b078cfefb791832ce83d12856a2a814"
@@ -5378,11 +5457,21 @@
       }
     },
     "scope": "Retain a captured matching future LCD timer notice only when its true due boundary fits strictly inside the original boot and active-peer readiness deadlines. Both cancellation and pending-mailbox disposal honor that bounded wait. No early work, renewed deadline, allowance reset, manual/repair or timer-policy change.",
-    "canonical_build_completed": false,
     "local_compile_only": true,
     "installed": false,
     "published": false,
     "hardware_validation_passed": false,
-    "new_scheduled_case_planned": false
+    "new_scheduled_case_planned": false,
+    "canonical_local_Sense_compile_completed": true,
+    "canonical_paired_build_completed": false,
+    "LCD_build_completed": false,
+    "release_pair_created": false,
+    "local_Sense_build_receipt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation157/LOCAL-SENSE-BUILD.json",
+      "sha256": "cf742a4dee3a975a722b5eff42da0e19cedd1a0144d221e9d358d9c2d8872dbc"
+    },
+    "build_id": "6.4.157-20260914T142653Z-df8cab35ef81",
+    "binary_bytes": 1812640,
+    "elapsed_s": 67.1284430027008
   }
 }
