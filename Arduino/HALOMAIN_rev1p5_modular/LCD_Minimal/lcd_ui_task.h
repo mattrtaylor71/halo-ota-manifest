@@ -54,6 +54,14 @@ static void ui_task(void *arg) {
       continue;
     }
 
+    // Recheck under the owner joined by BEGIN. No panel power commands,
+    // widgets, layout or render may start after receive inhibition is set.
+    if (g_lcd_ota_uart_receiving || g_lcd_ota_binary_mode) {
+      example_lvgl_unlock();
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+
     if (!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode &&
         g_usb_ui_memory_requested.exchange(false)) {
       lv_mem_monitor_t memory{};

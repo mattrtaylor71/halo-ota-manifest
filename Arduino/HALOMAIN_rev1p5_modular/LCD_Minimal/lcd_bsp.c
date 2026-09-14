@@ -32,6 +32,9 @@ bool g_post_ota_recovery = false;
 static lv_disp_drv_t *s_flush_pending_drv = NULL;
 static unsigned long s_flush_start_ms = 0;
 static uint32_t flush_outstanding_count = 0;
+// Authoritative DMA ownership: unlike LVGL's force-ready bookkeeping, only a
+// real completion callback or a rejected submission can retire this count.
+static uint32_t s_flush_dma_pending = 0;
 static unsigned long last_flush_log_ms = 0;
 /* Flush stats: 1s window for rate, running average for duration */
 static unsigned long flush_stats_sec_start_ms = 0;
@@ -407,6 +410,24 @@ void lcd_lvgl_wait_tx_done(uint32_t timeout_ms) {
   }
 }
 
+// Caller inhibits new UI work BEFORE entering. Join any render already in
+// progress, then drain actual SPI completions while retaining the LVGL owner.
+// A weak wait_tx_done fallback delay is deliberately not acceptance proof.
+bool lcd_lvgl_quiesce_for_flash(uint32_t timeout_ms) {
+  const uint32_t started = (uint32_t)(esp_timer_get_time() / 1000ULL);
+  if (!timeout_ms || !lvgl_mux || !amoled_panel_io_handle || !amoled_panel_handle ||
+      !example_lvgl_lock((int)timeout_ms)) return false;
+  while (__atomic_load_n(&s_flush_dma_pending, __ATOMIC_ACQUIRE) != 0 &&
+         (uint32_t)((esp_timer_get_time() / 1000ULL) - started) < timeout_ms) {
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+  const bool drained = __atomic_load_n(&s_flush_dma_pending, __ATOMIC_ACQUIRE) == 0 &&
+      s_flush_pending_drv == NULL && flush_outstanding_count == 0 &&
+      (uint32_t)((esp_timer_get_time() / 1000ULL) - started) < timeout_ms;
+  example_lvgl_unlock();
+  return drained;
+}
+
 void lcd_panel_set_power(bool on) {
   if (amoled_panel_handle) {
     esp_lcd_panel_disp_on_off(amoled_panel_handle, on);
@@ -551,6 +572,8 @@ static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, 
   }
   s_flush_pending_drv = NULL;
   lv_disp_flush_ready(disp_driver);
+  // Publish completion after LVGL bookkeeping has finished, not before it.
+  __atomic_fetch_sub(&s_flush_dma_pending, 1U, __ATOMIC_RELEASE);
   return false;
 }
 static void example_lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
@@ -576,8 +599,10 @@ static void example_lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_
   s_flush_pending_drv = drv;
   s_flush_start_ms = (unsigned long)(esp_timer_get_time() / 1000ULL);
   flush_outstanding_count++;
+  __atomic_fetch_add(&s_flush_dma_pending, 1U, __ATOMIC_ACQ_REL);
   esp_err_t ret = esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_map);
   if (ret != ESP_OK) {
+    __atomic_fetch_sub(&s_flush_dma_pending, 1U, __ATOMIC_RELEASE);
     if (flush_outstanding_count > 0) flush_outstanding_count--;
     s_flush_submit_fail++;
     s_flush_soft_fault = 1;

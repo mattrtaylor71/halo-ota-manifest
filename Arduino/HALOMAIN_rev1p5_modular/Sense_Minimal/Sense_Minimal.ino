@@ -2966,6 +2966,7 @@ static bool parse_input_message(const char* json_str) {
     // previous reply or silently fall back to the uncorrelated legacy path.
     g_lcd_ota_query_resp_ready = false;
     g_lcd_query_boot_ready = false;
+    g_lcd_query_recovery_idle = false;
     if (!doc["lcd_fw"].is<const char*>() || !doc["ota_part_size"].is<uint32_t>() ||
         (!doc["running_part"].isUnbound() && !doc["running_part"].is<const char*>()) ||
         (!doc["running_state"].isUnbound() && !doc["running_state"].is<const char*>()) ||
@@ -3010,6 +3011,7 @@ static bool parse_input_message(const char* json_str) {
     if (strlen(owner) >= sizeof(g_lcd_query_coord_owner)) owner = "!overlength";
     strlcpy(g_lcd_query_coord_owner, owner, sizeof(g_lcd_query_coord_owner));
     g_lcd_query_coord_lease_ms = doc["coord_lease_ms"] | (uint32_t)0;
+    g_lcd_query_recovery_idle = doc["recovery_idle"].is<bool>() && (doc["recovery_idle"] | false);
     g_lcd_ota_query_resp_ready = true;
     (void)sense_lcd_query_proof_emit(Serial, coord_id, g_lcd_query_peer_boot_id,
         fw, running_part, boot_part, running_state, g_lcd_query_boot_ready, part_size);

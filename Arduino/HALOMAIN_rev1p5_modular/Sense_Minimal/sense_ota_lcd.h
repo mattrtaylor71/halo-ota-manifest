@@ -147,11 +147,13 @@ struct LcdOtaCleanupResult {
   bool acknowledged = false;
 };
 template<class Send, class Receive, class Remaining>
-static LcdOtaCleanupResult sense_lcd_abort_cleanup(Send send, Receive receive, Remaining remaining) {
+static LcdOtaCleanupResult sense_lcd_abort_cleanup(Send send, Receive receive, Remaining remaining,
+                                                uint32_t max_ms = 36000) {
   LcdOtaCleanupResult result;
   const uint32_t started = millis();
   const uint32_t available = remaining();
-  const uint32_t budget = available < 36000 ? available : 36000;
+  const uint32_t limit = max_ms < 36000 ? max_ms : 36000;
+  const uint32_t budget = available < limit ? available : limit;
   while ((uint32_t)(millis() - started) < budget && remaining()) {
     uint32_t elapsed = (uint32_t)(millis() - started);
     if (result.attempts < 3 && elapsed >= uint32_t(result.attempts) * 3000) {
@@ -178,7 +180,7 @@ static LcdOtaCleanupResult sense_lcd_abort_cleanup(Send send, Receive receive, R
 struct LcdOtaQuerySnapshot {
   char fw[32], running_part[16], running_state[20], boot_part[16], coord_owner[40];
   uint32_t part_size, peer_boot_id, coord_lease_ms;
-  bool boot_ready, correlated, coord_waiting;
+  bool boot_ready, correlated, coord_waiting, recovery_idle;
 };
 enum LcdOtaQueryPoll { LCD_QUERY_WAITING, LCD_QUERY_READY, LCD_QUERY_TIMEOUT };
 static char g_lcd_query_coord_id[40] = {0};
@@ -186,6 +188,11 @@ static uint32_t g_lcd_query_peer_boot_id = 0;
 static bool g_lcd_query_coord_waiting = false;
 static char g_lcd_query_coord_owner[40] = {0};
 static uint32_t g_lcd_query_coord_lease_ms = 0;
+static bool g_lcd_query_recovery_idle = false;
+// An invocation-local proof, cleared when durable work starts. It deliberately
+// survives the existing second proxy attempt: the arm must re-query this exact
+// boot and prove idle again. It is neither a session ACK nor reset authority.
+static uint32_t s_lcd_reboot_cleanup_boot = 0;
 static char s_lcd_query_requested_id[40] = {0};
 static uint32_t s_lcd_query_started_ms = 0;
 static uint32_t s_lcd_query_timeout_ms = 0;
@@ -226,7 +233,7 @@ static bool sense_lcd_ota_query_start(const char* coord_id, uint32_t timeout_ms)
   return true;
 }
 
-static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& snapshot) {
+static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& snapshot, bool confirm_mode = true) {
   if (!s_lcd_query_pending ||
       (uint32_t)(millis() - s_lcd_query_started_ms) >= s_lcd_query_timeout_ms) {
     s_lcd_query_pending = false;
@@ -248,13 +255,67 @@ static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& snapshot) {
   snapshot.coord_waiting = g_lcd_query_coord_waiting;
   strlcpy(snapshot.coord_owner, g_lcd_query_coord_owner, sizeof(snapshot.coord_owner));
   snapshot.coord_lease_ms = g_lcd_query_coord_lease_ms;
+  snapshot.recovery_idle = g_lcd_query_recovery_idle;
   if (!snapshot.fw[0] || !snapshot.part_size || !snapshot.boot_ready ||
       strcmp(snapshot.running_state, "VALID") != 0 || !snapshot.running_part[0] ||
       strcmp(snapshot.running_part, "?") == 0 ||
       strcmp(snapshot.running_part, snapshot.boot_part) != 0) return LCD_QUERY_WAITING;
   s_lcd_query_pending = false;
-  sense_lcd_mode_confirm();  // Fresh, validated readiness response.
+  if (confirm_mode) sense_lcd_mode_confirm();  // Recovery validates stronger proof first.
   return LCD_QUERY_READY;
+}
+
+// Reset destroys the old receiver session/handle. Only a new nonce response
+// from a different boot, running the exact known VALID image with no receive
+// state or foreign owner, substitutes for that now-impossible session ACK.
+static bool sense_lcd_reboot_cleanup_ready(const LcdOtaQuerySnapshot& before,
+                                         const LcdOtaQuerySnapshot& after) {
+  if (!before.peer_boot_id || !before.boot_ready || !before.fw[0] ||
+      !before.part_size || !before.running_part[0] || !strcmp(before.running_part,"?") ||
+      strcmp(before.running_state,"VALID") || strcmp(before.running_part,before.boot_part)) return false;
+  if (!after.correlated || !after.recovery_idle || !after.boot_ready ||
+      !after.peer_boot_id || after.peer_boot_id == before.peer_boot_id ||
+      strcmp(after.running_state,"VALID") || strcmp(after.running_part,after.boot_part) ||
+      strcmp(after.fw,before.fw) || strcmp(after.running_part,before.running_part) ||
+      after.part_size != before.part_size) return false;
+  const bool unowned = !after.coord_owner[0] && !after.coord_lease_ms;
+  const bool same_owner = before.coord_owner[0] && !strcmp(after.coord_owner,before.coord_owner) &&
+                          after.coord_lease_ms && after.coord_lease_ms <= 120000;
+  return unowned || same_owner;
+}
+
+template<class Remaining>
+static bool sense_lcd_reboot_cleanup_probe(const LcdOtaQuerySnapshot& before,
+                                          uint32_t started, uint32_t budget, Remaining remaining) {
+  auto left = [&]() -> uint32_t {
+    const uint32_t elapsed = uint32_t(millis()-started);
+    if (elapsed >= budget) return 0;
+    const uint32_t n = remaining();
+    return n < budget-elapsed ? n : budget-elapsed;
+  };
+  if (!before.peer_boot_id || !left() || g_lcd_ota_proxy_owns_uart || g_lcd_ota_task_running) return false;
+  char challenge[40];
+  snprintf(challenge,sizeof(challenge),"recover_%08lx%08lx",(unsigned long)esp_random(),(unsigned long)esp_random());
+  if (!sense_lcd_ota_query_start(challenge,left())) return false;
+  while (left()) {
+    pump_uart_rx_once();
+    if (!left()) break;
+    LcdOtaQuerySnapshot after{};
+    const auto result = sense_lcd_ota_query_poll(after,false);
+    if (result == LCD_QUERY_READY) {
+      if (!sense_lcd_reboot_cleanup_ready(before,after) || !left()) return false;
+      // Persisting the mode marker is optional for this invocation and may
+      // block; recheck the original cleanup deadline before using the proof.
+      sense_lcd_mode_confirm();
+      if (!left()) { g_lcd_ota_mode_unconfirmed.store(true); return false; }
+      s_lcd_reboot_cleanup_boot = after.peer_boot_id;
+      return true;
+    }
+    if (result == LCD_QUERY_TIMEOUT) break;
+    delay(10);
+  }
+  s_lcd_query_pending = false;
+  return false;
 }
 
 // ── Public API ───────────────────────────────────────────────────────
@@ -632,6 +693,16 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
   if (remaining_ms() <= LCD_OTA_PROXY_END_TIMEOUT_MS) return "attempt_deadline";
   if (!manifest.size || !manifest.sha256[0]) return "download_fail";
 
+  LcdOtaQuerySnapshot cleanup_baseline{};
+  strlcpy(cleanup_baseline.fw,g_lcd_ota_query_resp_fw,sizeof(cleanup_baseline.fw));
+  strlcpy(cleanup_baseline.running_part,g_lcd_query_running_part,sizeof(cleanup_baseline.running_part));
+  strlcpy(cleanup_baseline.boot_part,g_lcd_query_boot_part,sizeof(cleanup_baseline.boot_part));
+  strlcpy(cleanup_baseline.running_state,g_lcd_query_running_state,sizeof(cleanup_baseline.running_state));
+  strlcpy(cleanup_baseline.coord_owner,g_lcd_query_coord_owner,sizeof(cleanup_baseline.coord_owner));
+  cleanup_baseline.peer_boot_id=g_lcd_query_peer_boot_id;
+  cleanup_baseline.part_size=g_lcd_ota_query_resp_part_size;
+  cleanup_baseline.boot_ready=g_lcd_query_boot_ready;
+
   UartOtaProtocol protocol(&lcdSerial);
   protocol.quiet = true;
   if (!protocol.valid()) return "download_fail";
@@ -746,23 +817,34 @@ static const char* sense_lcd_ota_proxy(const OtaManifest& manifest,
       }
     }
     if (receiver_open && !json_ready && remaining_ms()) {
+      const uint32_t cleanup_started=millis();
+      const uint32_t cleanup_budget=phase_limit(36000);
+      const uint32_t proof_budget=cleanup_budget>5000?5000:0;
       g_lcd_ota_proxy_owns_uart = true;
       const auto cleanup = sense_lcd_abort_cleanup(
         [&](bool force_json) { return send_control("LCD_OTA_ABORT", origin, force_json); },
         [&](uint32_t wait) { return strcmp(receive_control(wait, false), "receiver_aborted") == 0; },
-        remaining_ms);
+        remaining_ms,cleanup_budget-proof_budget);
       json_ready = cleanup.acknowledged;
+      bool reboot_ready=false;
+      if (!json_ready && proof_budget) {
+        // The failed binary sender is finished. Ordinary TX stays blocked by
+        // the unsafe marker while only this explicit readiness probe is sent.
+        g_lcd_ota_proxy_owns_uart=false;
+        reboot_ready=sense_lcd_reboot_cleanup_probe(cleanup_baseline,cleanup_started,cleanup_budget,remaining_ms);
+        json_ready=reboot_ready;
+      }
       char cleanup_detail[144];
       snprintf(cleanup_detail, sizeof(cleanup_detail),
-        "C1 s=%u tries=%u sent=%u ack=%u ms=%lu c=%lu f=%lu rem=%lu",
+        "C1 s=%u tries=%u sent=%u ack=%u ms=%lu c=%lu f=%lu rem=%lu reboot=%u",
         session_id, unsigned(cleanup.attempts), unsigned(cleanup.sent_mask), cleanup.acknowledged ? 1U : 0U,
-        (unsigned long)cleanup.elapsed_ms, (unsigned long)protocol.crc_error_count(),
-        (unsigned long)protocol.frame_error_count(), (unsigned long)remaining_ms());
+        (unsigned long)(uint32_t(millis()-cleanup_started)), (unsigned long)protocol.crc_error_count(),
+        (unsigned long)protocol.frame_error_count(), (unsigned long)remaining_ms(),reboot_ready?1U:0U);
       sense_lcd_terminal_store(cleanup_detail, code);
     }
-    // Missing ACK never proves mode handoff. Release local ownership after the
-    // bounded grace, but defer new controls until a later readiness episode
-    // validates a fresh query response. Never silently renew this attempt.
+    // Neither a missing ACK nor a plain query proves mode handoff. The only
+    // alternate proof is the explicit new-boot/idle recovery above. Otherwise
+    // retain quarantine for a later readiness episode, without renewing work.
     if (json_ready || (!receiver_open && mode_marked)) sense_lcd_mode_confirm();
     else if (receiver_open) g_lcd_ota_mode_unconfirmed.store(true);
     if (receiver_open) g_lcd_ota_proxy_owns_uart = false;

@@ -119,15 +119,19 @@ static bool retry_peer_ready(const LcdOtaQuerySnapshot& p,const durable_ota::Rec
   if(compareSemver(p.fw,r.target.peer_version)>=0)return true;
   const auto& b=work.retry_baseline;
   // A failed write may leave the same VALID image running. The caller proves
-  // cleanup before querying; this fresh nonce must still match the exact
-  // invocation-local boot. Plain OTA_LOCK clears the preflight lease, and a
-  // long transfer can outlive it. An exactly unowned peer is safe here; a
+  // cleanup before querying; this fresh nonce must match the original boot or
+  // the exact new boot proved by this invocation's bounded reboot cleanup.
+  // The latter must explicitly prove receiver idle again. Plain OTA_LOCK
+  // clears the preflight lease, and a long transfer can outlive it. An exactly unowned peer is safe here; a
   // different live owner or inconsistent owner/lease tuple is not. Neither
   // an empty lease nor the query alone proves cleanup. Begin charges remain spent.
   const bool original_owner=!strcmp(p.coord_owner,g_peer_gate.owner)&&
     p.coord_lease_ms&&p.coord_lease_ms<=120000;
   const bool unowned=!p.coord_owner[0]&&!p.coord_lease_ms;
-  return b.boot&&p.peer_boot_id==b.boot&&
+  const bool same_boot=p.peer_boot_id==b.boot;
+  const bool proved_reboot=p.recovery_idle&&s_lcd_reboot_cleanup_boot&&
+    p.peer_boot_id==s_lcd_reboot_cleanup_boot;
+  return b.boot&&(same_boot||proved_reboot)&&
     !strcmp(p.fw,b.fw)&&!strcmp(p.running_part,b.part)&&p.part_size==b.part_size&&
     compareSemver(b.fw,r.target.peer_version)<0&&g_peer_gate.entered&&g_peer_gate.locked&&
     !g_peer_gate.legacy&&g_peer_gate.owner[0]&&(original_owner||unowned);
@@ -192,6 +196,7 @@ static bool enter(const char* reason,bool retained_legacy) {
   last_admission=durable_ota::Admission::NOT_DUE;
   if(work.live||!g_lcd_work_budget_live||!g_lcd_work_budget.remaining_ms()||!nvs_capacity_image_valid())return false;
   work={};work.original_start=g_lcd_work_budget.started_ms;work.original_budget=g_lcd_work_budget.limit_ms;
+  s_lcd_reboot_cleanup_boot=0;
   work.normal=normal_entry();work.legacy=retained_legacy;
   remember_retry_baseline();
   if(!load_state(work.original_start,work.original_budget))return false;

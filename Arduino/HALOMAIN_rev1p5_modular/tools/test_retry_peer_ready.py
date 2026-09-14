@@ -56,6 +56,7 @@ static Record live;
 static LcdOtaQuerySnapshot reply;
 static struct {bool entered,locked,legacy; char owner[40];} g_peer_gate;
 static bool unconfirmed, g_lcd_ota_proxy_owns_uart, g_lcd_ota_task_running;
+static uint32_t s_lcd_reboot_cleanup_boot;
 static bool busy, query_arrives, arm_ack, lose_cleanup_on_commit;
 static uint32_t now_ms, query_calls, arm_calls, base_epoch=1700000000;
 static std::vector<unsigned> committed_phases;
@@ -111,6 +112,7 @@ static void baseline(){
   work={};live={};reply={};g_peer_gate={};g_self_retry_arm={};diagnostic_records.clear();
   unconfirmed=g_lcd_ota_proxy_owns_uart=g_lcd_ota_task_running=busy=false;
   lose_cleanup_on_commit=false;query_arrives=arm_ack=true;
+  s_lcd_reboot_cleanup_boot=0;
   query_calls=arm_calls=0;committed_phases.clear();committed_generations.clear();now_ms=60126;
   durable_ota::Target target{};strcpy(target.version,"6.4.103");strcpy(target.peer_version,"6.4.103");
   strcpy(target.url,"https://example.com/sense.bin");target.sha256[0]=1;target.peer_sha256[0]=2;
@@ -156,6 +158,15 @@ int main(){
   assert(live.fast_due==base_epoch+540&&work.original_budget==2400000);
   // Target VALID proof remains independently admissible; old images need the exact baseline.
   baseline();strcpy(reply.fw,"6.4.103");reply.peer_boot_id=456;work.retry_baseline={};assert(retry_peer_ready(reply,live));
+  // Only explicit same-invocation reboot cleanup proof admits a different
+  // boot still running the old VALID image; the arm query must prove idle again.
+  baseline();reply.peer_boot_id=456;reply.recovery_idle=true;s_lcd_reboot_cleanup_boot=456;
+  finish();assert(live.phase==Phase::ARMED&&live.arm_peer_boot==456&&query_calls==1&&arm_calls==1);
+  assert(live.begins[1]==1&&live.network_windows==1&&live.work_remaining_ms==2334874);
+  baseline();reply.peer_boot_id=456;s_lcd_reboot_cleanup_boot=456;
+  finish();assert(live.phase==Phase::DEFERRED&&arm_calls==0);
+  baseline();reply.peer_boot_id=789;reply.recovery_idle=true;s_lcd_reboot_cleanup_boot=456;
+  finish();assert(live.phase==Phase::DEFERRED&&arm_calls==0);
   unsigned negatives=0;
 #define REJECT(change) do{baseline();change;assert(!retry_peer_ready(reply,live));++negatives;}while(0)
   REJECT(reply.correlated=false);REJECT(reply.peer_boot_id=0);REJECT(reply.peer_boot_id=456);

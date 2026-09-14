@@ -4411,7 +4411,7 @@ void setup() {
   g_lcd_boot_ready.store(true);
 }
 
-// The UI task owns the first OTA overlay frame. Main-loop rendering must not
+// Main-loop rendering must not
 // bypass its binary-transfer freeze while UART OTA erases, writes or finalizes
 // flash. Recheck at each call site, since the UART task can start OTA mid-loop.
 static void lcd_main_lvgl_service() {
@@ -4443,6 +4443,24 @@ void loop() {
     lcd_send_diag_pre_sleep();
   }
 
+  // Join BEGIN's owner handoff before any panel/LVGL work, including the
+  // display-reset fallback. The second check closes a concurrent BEGIN race.
+  bool lvgl_locked = false;
+  if (g_ui_initialized) {
+    if (!example_lvgl_lock(50)) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+      return;
+    }
+    lvgl_locked = true;
+  }
+  if (g_lcd_ota_uart_receiving || g_lcd_ota_binary_mode) {
+    if (lvgl_locked) example_lvgl_unlock();
+#ifdef HALO_LCD_PROD_WRAPPER
+    halo_lcd_prod_loop();
+#endif
+    vTaskDelay(pdMS_TO_TICKS(5));
+    return;
+  }
   // safe mode: disable timeout/force-ready flush path (LVGL finish only via SPI done)
   if (lcd_bsp_display_reset_requested()) {
       Serial.println("[LCD_FLUSH] display reset requested (flush failures exceeded threshold)");
@@ -4463,16 +4481,13 @@ void loop() {
         Serial.printf("[LCD_FLUSH] persistent DMA failure (%u resets, 0 ok) -- forcing sleep\n",
                       (unsigned)s_flush_reset_cycles);
         lcd_sleep_ts("dma_persistent_fail");
+        // This fallback historically entered sleep without the LVGL owner.
+        // Preserve that contract now that its invalidate step is serialized.
+        if (lvgl_locked) { example_lvgl_unlock(); lvgl_locked = false; }
         enterLightSleep();
+        vTaskDelay(pdMS_TO_TICKS(5));
+        return;
       }
-  }
-  bool lvgl_locked = false;
-  if (g_ui_initialized) {
-    if (!example_lvgl_lock(50)) {
-      vTaskDelay(pdMS_TO_TICKS(10));
-      return;
-    }
-    lvgl_locked = true;
   }
   // Fallback: if provisioning intro was queued but UI task hasn't shown it yet, force it
   if (provision_intro_pending && !provision_intro_visible) {

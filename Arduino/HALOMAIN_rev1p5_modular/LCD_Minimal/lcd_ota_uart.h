@@ -199,7 +199,7 @@ static void lcd_ota_send_status_json(uint8_t pct) {
 static void ui_task(void *arg);
 
 // Lightweight UI restore after UART OTA (counterpart to the freeze in handle_begin)
-static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms)) {
+static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms), bool clear_persisted_arm=true) {
     // Clear OTA progress overlay
     g_lcd_ota_show_progress = false;
     g_lcd_ota_progress_pct = -1;
@@ -227,7 +227,7 @@ static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadlin
 
     // One readback-verified disarm. Its helper publishes the actual stored
     // value; a failed commit must not be hidden by unconditional RTC clearing.
-    lcd_clear_persisted_maintenance_state("ota_complete",deadline);
+    if (clear_persisted_arm) lcd_clear_persisted_maintenance_state("ota_complete",deadline);
 
     // Don't try to restore LVGL here — this runs on Core 0 (UART task) and
     // lcd_exit_ota_mode() calls LVGL init which crashes on Core 0.
@@ -237,6 +237,28 @@ static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadlin
     resetActivityTimer();
     lcd_ota_arm_recovery_grace();
     Serial.println("[LCD_OTA_UART] OTA flags cleared");
+}
+
+// Inhibit first, then join the current LVGL owner and prove real DMA drain.
+// Retain the original attempt deadline; a refused handoff performs no NVS or
+// inactive-image mutation and uses the existing logical UI cleanup only.
+static bool lcd_ota_quiesce_before_begin() {
+    s_lcd_ota_state = LCD_OTA_RECEIVING;
+    g_lcd_ota_uart_receiving = true;
+    const uint32_t elapsed = (uint32_t)(millis() - s_lcd_ota_started_ms);
+    const uint32_t remaining = elapsed < s_lcd_ota_budget_ms ? s_lcd_ota_budget_ms - elapsed : 0;
+    const uint32_t wait_ms = remaining < 500U ? remaining : 500U;
+    Serial.printf("[LCD_OTA_UART] render_quiesce start session=%u budget_ms=%u\n", s_lcd_ota_session_id, wait_ms);
+    const bool ready = lcd_lvgl_quiesce_for_flash(wait_ms);
+    Serial.printf("[LCD_OTA_UART] render_quiesce result=%s session=%u elapsed_ms=%u\n",
+                  ready ? "drained" : "refused", s_lcd_ota_session_id,
+                  (unsigned)(millis() - s_lcd_ota_started_ms));
+    if (!ready) {
+        lcd_ota_uart_restore_ui(LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms), false);
+        s_lcd_ota_state = LCD_OTA_IDLE;
+        g_lcd_ota_uart_receiving = false;
+    }
+    return ready;
 }
 
 // Forward declaration
@@ -427,7 +449,7 @@ static void lcd_build_fw_status_json(JsonDocument& doc) {
 static void lcd_ota_handle_query(const char* coord_id = nullptr) {
     const esp_partition_t* ota_part = esp_ota_get_next_update_partition(NULL);
 
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<768> doc;
     doc["ver"]            = PROTOCOL_VERSION;
     doc["type"]           = "LCD_OTA_QUERY_RESP";
     doc["msg_id"]         = get_next_msg_id();
@@ -446,6 +468,10 @@ static void lcd_ota_handle_query(const char* coord_id = nullptr) {
     // lcd_fw, so it is intentionally called after the back-compat block.
     lcd_build_fw_status_json(doc);
     if (coord_id && coord_id[0] && strlen(coord_id) < 40) doc["coord_id"] = coord_id;
+    // UART-owner snapshot; a new boot alone is not proof that binary cleanup
+    // finished. Sense also binds this explicit idle proof to nonce/image/boot.
+    doc["recovery_idle"] = s_lcd_ota_state == LCD_OTA_IDLE && s_lcd_ota_handle == 0 &&
+        !g_lcd_ota_binary_mode && !g_lcd_ota_uart_receiving && s_lcd_ota_protocol == nullptr;
 
     const char* last_result = lcd_ota_last_result_str();
     if (last_result && last_result[0]) {
@@ -592,14 +618,28 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
         s_lcd_ota_target_version[31] = '\0';
     }
 
+    if (!lcd_ota_quiesce_before_begin()) {
+        StaticJsonDocument<256> resp;
+        resp["ver"] = PROTOCOL_VERSION;
+        resp["type"] = "LCD_OTA_BEGIN_ACK";
+        resp["msg_id"] = get_next_msg_id();
+        resp["ts"] = (uint32_t)millis();
+        resp["session_id"] = session_id;
+        resp["accepted"] = false;
+        resp["reason"] = "render_not_quiescent";
+        resp["json_ready"] = true;
+        String output;
+        serializeJson(resp, output);
+        uart_send_json(output.c_str());
+        return;
+    }
+
 #if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
     lcd_diag_prepare_attempt(version,sha256,image_size,
         s_lcd_ota_budget_ms>(uint32_t)(millis()-s_lcd_ota_started_ms)?s_lcd_ota_budget_ms-(uint32_t)(millis()-s_lcd_ota_started_ms):0);
 #endif
     // BEGIN's erase/NVS work also owns sleep. The UART task is still inside
     // this handler; binary polling starts only after the acceptance response.
-    s_lcd_ota_state = LCD_OTA_RECEIVING;
-    g_lcd_ota_uart_receiving = true;
     s_lcd_ota_last_aborted_session = 0;
 
     // Check NVS for resume
@@ -635,8 +675,8 @@ static void lcd_ota_handle_begin(JsonObject& doc) {
     // SENSE_ASLEEP guards resume normal behavior once this OTA finishes.
     g_ota_lock_window_until_ms = 0;
 
-    // Keep the UI task alive but in OTA idle mode (g_ota_screen_active).
-    // The UI task will just tick LVGL without processing events.
+    // Keep the UI task alive and feeding its unchanged watchdog, but skip
+    // panel/LVGL work until the receiving/binary flags are cleared.
     // This avoids the need to restart the UI task after OTA (which
     // caused crashes from corrupt LVGL state and download mode issues).
     g_ota_screen_active = true;

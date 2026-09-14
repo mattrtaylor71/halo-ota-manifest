@@ -32,6 +32,7 @@ bool lvgl_lock_held_by_current_task(void);
 void lvgl_assert_locked(void);
 void lcd_lvgl_Init(void);
 void lcd_lvgl_wait_tx_done(uint32_t timeout_ms);
+bool lcd_lvgl_quiesce_for_flash(uint32_t timeout_ms);
 void lcd_panel_set_power(bool on);
 void lcd_panel_deinit(void);
 void lcd_bsp_check_flush_timeout(void);
