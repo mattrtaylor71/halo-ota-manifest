@@ -1624,7 +1624,11 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual-postponed138-20260913/cloud-final001/CORROBORATION.json",
       "sha256": "476481eff064dd5039a265013bfb5949530a83dbfd06e9c1cfed3e23b6618ecc"
     },
-    "scope": "Paired 139/app1 SDK VALID is established by the closed installer identity, not inferred from cloud versions. Independent serial review of the subsequent cases verifies the actual terminal results and same-boot shutdown. Original harness captures remain INCOMPLETE; the second report did not reach the cloud."
+    "scope": "Paired 139/app1 SDK VALID is established by the closed installer identity, not inferred from cloud versions. Independent serial review of the subsequent cases verifies the actual terminal results and same-boot shutdown. Original harness captures remain INCOMPLETE; the second report did not reach the cloud.",
+    "subsequent_hourly_post_window_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/post-window-identity001/identity.json",
+      "sha256": "d5a7209be404e40305cfda5821efbee1a006c05fdae28bc225be84278ac0ba43"
+    }
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -1680,7 +1684,7 @@
   },
   "working_candidate": {
     "version": "6.4.140",
-    "status": "PUBLISHED_VERSION_ONLY_HOURLY_SCHEDULED_ACCEPTANCE_PENDING",
+    "status": "PUBLISHED_FIRST_HOURLY_TARGET_MISSED_SAME_TARGET_DIAGNOSTIC_PENDING",
     "artifact_source_commit": "d40d8438137eca8a224693d9c5454728304026cb",
     "release_pair": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation140/RELEASE-PAIR.json",
@@ -1697,11 +1701,11 @@
     "based_on_version": "6.4.139",
     "published": true,
     "installed": false,
-    "scope": "Version-only rebuild of exact139 runtime; no behavior/resource changes. User-authorized hourly fixture changes test schedule/bookkeeping only. First139-to140scheduledtransfer due22:00Pacific, with actual timer arms confirmed; paired140health and native settlement pending.",
+    "scope": "Version-only rebuild of the exact 139 runtime; no behavior or resource changes. The first 22:00 Pacific scheduled target was missed without observed 140 admission or transfer. Both boards remain 139/app1 SDK VALID; the post-window policy is absent and no pending debt was observed. A separate same-140 timezone-only diagnostic is due at 22:40, with no new allowance or firmware change.",
     "pending": [
-      "Actual scheduled139-to140 transfer",
-      "Native retry/settlement and paired140SDK health",
-      "Natural paired shutdown after scheduled case"
+      "Instrumented same-140 scheduled wake/admission diagnosis at 22:40 Pacific",
+      "Actual scheduled 139-to-140 transfer, paired 140 SDK health and native settlement",
+      "Restore Pacific 2 a.m. and legitimate production completion history after closed tests"
     ],
     "instruction": "Keep139 as the verified development baseline until the140scheduled case is actually accepted; retain this published140artifact and its exact source provenance."
   },
@@ -2520,7 +2524,7 @@
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/PREPARED.json",
         "sha256": "3d53547f5eeee1115d316a40a8b00fc700049a6d3c6db780075ef1cb85cd95a4"
       },
-      "scheduled_result": "PENDING_HOURLY_22_00_FIRST_CASE",
+      "scheduled_result": "FIRST_22_00_TARGET_MISSED_SAME_140_DIAGNOSTIC_22_40_PENDING",
       "latest_device_version_verified": "6.4.139",
       "published_epoch": 1789355541.397542,
       "previous_single_2am_preparation": {
@@ -2530,7 +2534,7 @@
     }
   ],
   "overnight_scheduled_campaign": {
-    "status": "HOURLY_FIRST_CASE_ARMED_TRANSFER_PENDING",
+    "status": "FIRST_TARGET_MISSED_WAITING_SAME140_DIAGNOSTIC_DUE",
     "case_directory": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913",
     "first_due_epoch": 1789362000,
     "last_new_due_epoch": 1789394400,
@@ -2551,10 +2555,80 @@
     "firmware_runtime_changes": 0,
     "isolated_test_fixtures": 1,
     "scheduled_passes": 0,
-    "scope": "User-authorized separately archived hourly scheduled test fixtures. Native current-policy and no-debt checks precede each setup. Actual paired10pm timers/sleep verified; transfer and paired140acceptance pending. Restore Pacific2am and original legitimate production history after closed tests.",
+    "scope": "User-authorized archived hourly scheduled fixtures. The 22:00 target was missed; no 140 admission or transfer was observed. Both boards remain healthy on 139, with no policy record or pending debt; the next-day timer was observed. The same-140 timezone-only diagnostic due at 22:40 has paired timer/sleep evidence, with no new allowance or firmware change. Restore Pacific 2 a.m. and original legitimate production history after closed tests.",
     "independent_timer_review": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/TIMER-ARM-REVIEW.json",
       "sha256": "9307f12b3f2b7dd17d33f8959da7491b8bb5b4c436460948288d20fec95495ba"
+    },
+    "missed_scheduled_targets": 1,
+    "actual_transfer_failures_proven": 0,
+    "first_case_outcome": {
+      "case_id": "hourly_20260913_2200_140",
+      "due_epoch": 1789362000,
+      "status": "TARGET_MISSED_NO_ADMISSION_OR_TRANSFER_OBSERVED",
+      "both_boards_version": "6.4.139",
+      "paired_SDK_VALID": true,
+      "policy_present": false,
+      "pending_debt_observed": false,
+      "next_day_timer_observed": true,
+      "next_day_timer_epoch": 1789448400,
+      "cloud_event": {
+        "event_key": "1789362009#pre_sleep#3a43a9949f10",
+        "captured_epoch": 1789362009,
+        "payload_sha256": "545ea10a6eaf7456737c3f0b60a9696b8fdd66a9d10af69be2bb2bf612dba43f"
+      },
+      "post_window_health": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/post-window-identity001/identity.json",
+        "sha256": "d5a7209be404e40305cfda5821efbee1a006c05fdae28bc225be84278ac0ba43"
+      },
+      "post_window_sleep": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/post-window-sleep001/RESULT.json",
+        "sha256": "67107d38a1bfa642c35b170179b9acbaeecd90d0291d5ea75d695090f04a0d3b"
+      },
+      "NVS_findings": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/audit001/NVS-AUDIT.json",
+        "sha256": "d740238d6b59cfa9fc538580bc90ea526f3abf02b0bbb0fe643d4ff48ad7f8b5"
+      },
+      "review": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/MISSED-2200-REVIEW.json",
+        "sha256": "78f1da481047b71af98d2b61f26695b6baccc4905bcd7b2d5e69ab616c16c678"
+      },
+      "leading_hypothesis": "A genuine LCD timer notice more than 15 seconds early is cancelled before its due window. This is a source-backed hypothesis; the physical cause is not confirmed."
+    },
+    "diagnostic": {
+      "case_id": "same140_diagnostic_2240",
+      "due_epoch": 1789364400,
+      "due_local": "2026-09-13 22:40 PDT",
+      "phase": "WAITING_DIAGNOSTIC_DUE",
+      "setup_result": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/diagnostic-2240/setup001/result.json",
+        "sha256": "726df9c9862b424bbe64236594cba2a113b4729a1e82dd9c4ac730185122e67a"
+      },
+      "time_zone_only_receipt": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/diagnostic-2240/setup001/TIMEZONE-ONLY-DIAGNOSTIC.json",
+        "sha256": "4829bdfc6b34b8d5a845e5624df7c7703fe4f04931a80c52429a902ef7062c0e"
+      },
+      "native_Sense_due": 1789364400,
+      "native_LCD_due": 1789364385,
+      "paired_natural_sleep_observed": true,
+      "new_allowance": false,
+      "firmware_runtime_changes": 0,
+      "natural_retry": false,
+      "passive_capture_scheduler": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/tools/observe_diagnostic_due.py",
+        "sha256": "f490d08ed6f7bacfa5743509c3c4741c3af640e70b80f19c114c3200ad204f1e"
+      },
+      "passive_capture_helper": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/tools/capture_diagnostic_pair.py",
+        "sha256": "be8a5850bd0368793d88df7c4449fd01f53bee4df4d51dab92a94c956e5f65b4"
+      },
+      "capture_start_epoch": 1789364310,
+      "capture_duration_s": 360,
+      "runbook": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/RUNBOOK-DIAGNOSTIC.md",
+        "sha256": "4aa7df02490eba753017c40a71a62e96f68a57620c0d7ba19d4668eb26fa998a"
+      },
+      "scope": "Same published 140 target. Timezone-only rearm after a read-only no-debt audit; no second allowance fixture. Passive instrumented reproduction remains pending; the first missed target stays counted."
     }
   },
   "previous_single_2am_observation_plan": {
