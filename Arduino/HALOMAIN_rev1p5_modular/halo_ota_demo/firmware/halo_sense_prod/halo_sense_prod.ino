@@ -3727,7 +3727,7 @@ static bool coord_credit_notice_ready() {
 // Unknown clock/storage/configuration and independently owed work keep their
 // existing bootstrap/recovery path. Use the same bound-origin calendar policy
 // as notice readiness and work admission, never the peer's claimed wake epoch.
-static bool coord_credit_notice_future_without_repair(const char* id) {
+static bool coord_credit_notice_future_without_repair(const char* id, uint64_t* until_due_ms = nullptr) {
   if (!id || !id[0] || !g_coord_credit_loaded || !g_coord_credit_mutations ||
       g_coord_credit_uncertain || g_nvs_reclaim_uncertain || g_serial_install_uncertain ||
       g_ota_storage_uncertain || g_peer_continue_work || g_lcd_work_budget_live ||
@@ -3743,16 +3743,32 @@ static bool coord_credit_notice_future_without_repair(const char* id) {
     if (!coord_credit_timezone_matches_configuration(confirmed)) return false;
     uint64_t now; bool fresh, finished; char tz[64]; coord_credit_clock(now, fresh, tz, finished);
     if (nightly_credit_decide(base.schedule, id, now, fresh, tz) != NightlyCreditDecision::Future) return false;
+    if (until_due_ms) *until_due_ms = (uint64_t(base.schedule.target_epoch) - 15ULL - now) * 1000ULL;
   }
   // Read debt only for a positively future origin; a failed typed read returns
   // owed/unknown, so it cannot turn an uncertain repair into a cancellation.
   return !get_lcd_ota_due_nvs();
 }
+// Keep an already captured early LCD wake only while its actual due boundary
+// fits inside the original readiness lease. This grants no work or new time.
+static bool coord_credit_future_notice_wait(const char* id, uint64_t until_due_ms) {
+  if (!g_boot_ota_pending || strcmp(g_boot_ota_reason, "lcd_timer") || !id ||
+      strcmp(id, g_lcd_timer_origin.schedule) || g_peer_gate.entered) return false;
+  const uint32_t now_ms = millis();
+  int32_t remaining = (int32_t)(g_boot_ota_deadline_ms - now_ms);
+  if (g_peer_gate.active) {
+    const int32_t peer_remaining = (int32_t)(g_peer_gate.deadline_ms - now_ms);
+    if (peer_remaining < remaining) remaining = peer_remaining;
+  }
+  return remaining > 0 && until_due_ms < (uint32_t)remaining;
+}
 static bool coord_credit_cancel_future_notice() {
   // Clock proof can arrive after the unknown-time readiness opportunity was
   // queued. Classify its captured ID, not a newer mailbox notice or next arm.
+  uint64_t until_due_ms = 0;
   if (!g_boot_ota_pending || strcmp(g_boot_ota_reason, "lcd_timer") ||
-      g_peer_gate.entered || !coord_credit_notice_future_without_repair(g_lcd_timer_origin.schedule)) return false;
+      g_peer_gate.entered || !coord_credit_notice_future_without_repair(g_lcd_timer_origin.schedule, &until_due_ms)) return false;
+  if (coord_credit_future_notice_wait(g_lcd_timer_origin.schedule, until_due_ms)) return false;
   ota_peer_cancel("calendar_future_rearm");
   boot_ota_finish("calendar_future_rearm");
   // No debt, credit, manual-intent change or sticky episode-finished latch.
@@ -3992,8 +4008,10 @@ static void ota_control_probe_service() {
 
 static void ota_peer_service() {
   coord_credit_cancel_future_notice();
+  uint64_t until_due_ms = 0;
   if (g_lcd_timer_notice.pending &&
-      coord_credit_notice_future_without_repair(g_lcd_timer_notice.schedule))
+      coord_credit_notice_future_without_repair(g_lcd_timer_notice.schedule, &until_due_ms) &&
+      !coord_credit_future_notice_wait(g_lcd_timer_notice.schedule, until_due_ms))
     g_lcd_timer_notice.pending = false; // Leave room for a later due/relative notice.
   ota_control_probe_service();
   // Do not consume/mark a new boot seen while the old transaction is busy or

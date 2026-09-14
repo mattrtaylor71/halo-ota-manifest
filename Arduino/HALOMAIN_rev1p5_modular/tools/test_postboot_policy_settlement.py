@@ -306,7 +306,7 @@ static uint32_t s_last_attempt_ms=0;
 ''' + definition((SHARED/'OtaIntent.cpp').read_text(),'static bool cooldown_allows()') + r'''
 struct OtaIntent{static bool cooldownAllows(){return cooldown_allows();}};
 static bool ota_peer_continuation(){return false;}
-static bool coord_credit_notice_future_without_repair(const char*);
+static bool coord_credit_notice_future_without_repair(const char*, uint64_t*);
 '''
     # Execute the actual future-notice function: a live pending ID must reject
     # cancellation, including a different stored future calendar arm.
@@ -323,6 +323,7 @@ static bool sense_time_has_fresh_sync(){return clock_fresh;}
     cut=future.index('  {\n    std::lock_guard<std::recursive_mutex> config_lock')
     extra+=future[:cut]+'  return true; // modeled future calendar only after the real debt guard\n}\n'
     extra+='\n'.join(definition(wrapper,sig) for sig in (
+        'static bool coord_credit_future_notice_wait(',
         'static bool coord_credit_cancel_future_notice()',
         'static bool coord_credit_calendar_entry(',
         'static bool coord_credit_prepare_work(',
