@@ -1,6 +1,6 @@
-# Active scheduled140 acceptance — September13–14
+# Active hourly scheduled OTA acceptance — September 13–14
 
-140 is published and verified from canonical version-only artifacts. The actual September14, 02:00Pacific139-to140 scheduled transfer, native retries/settlement and paired140SDK health are **pending**. The untouched device schedule and existing allowance remain intact. Passive cloud logging and the heartbeat are active through08:00Pacific. Publication is not device acceptance; the prior139manual results below retain their original scope and capture limits. The runbook and immutable preparation/publication receipts are bound in `RELEASE_BASELINE.json`.
+140 is published from verified canonical version-only artifacts. The first actual scheduled 139→140 transfer is due at September 13, 10 p.m. Pacific; transfer, native retries/settlement and paired 140 SDK health remain **pending**. The user authorized hourly accelerated tests through the night. Setup archives the original production history and changes only named test bookkeeping and the temporary timezone after closed-policy/no-debt admission. Both actual timer settings and natural sleep were observed in a separate ordinary wake capture. The earlier setup’s incomplete LCD sleep observation remains recorded. Passive cloud logging and the heartbeat are active through 8 a.m. Publication and timer setup are not device acceptance; prior 139 manual results retain their original scope. The normal 2 a.m. Pacific schedule and legitimate production history must be restored after the closed sequence.
 
 # Version 139 manual-policy verification — September 13, 2026
 

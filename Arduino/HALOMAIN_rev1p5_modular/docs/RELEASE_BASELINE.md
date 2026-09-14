@@ -1,6 +1,6 @@
-# Current publication:140; verified device baseline:139
+# Current publication: 140; verified device baseline: 139
 
-Version140 is published for the September14, 02:00Pacific scheduled test, with exact runtime and resource footprints preserved from139. The device has not been flashed with140: it must install it through its native scheduled OTA. Passive observation and the existing heartbeat are active through08:00Pacific. No scheduled140pass or paired140health is claimed yet. Future development continues from the verified139source and subsequent release records until this case is accepted. [Campaign runbook](/Users/MattTaylor/halo-device-analytics-2026-09-10/overnight-scheduled139-20260913/RUNBOOK.md); exact preparation/publication references are in `RELEASE_BASELINE.json`.
+Version 140 is published for the first hourly scheduled test at September 13, 10 p.m. Pacific. The user superseded the earlier single 2 a.m. plan. The existing production runtime stays unchanged; each completed case is followed by a separately archived schedule/allowance fixture and a new version-only OTA target. Version 141 has passed local build and artifact checks but is not published. No scheduled 140 pass or paired 140 health is claimed yet. Future development continues from the verified 139 runtime and subsequent release records until the case is accepted. [Current campaign runbook](/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/RUNBOOK.md); exact preparation and publication references are in `RELEASE_BASELINE.json`.
 
 # Production OTA 139 — published and installed; manual policy cases verified with capture limits
 

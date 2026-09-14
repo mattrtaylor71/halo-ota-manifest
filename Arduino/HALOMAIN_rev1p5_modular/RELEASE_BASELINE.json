@@ -1680,7 +1680,7 @@
   },
   "working_candidate": {
     "version": "6.4.140",
-    "status": "PUBLISHED_VERSION_ONLY_SCHEDULED_OVERNIGHT_ACCEPTANCE_PENDING",
+    "status": "PUBLISHED_VERSION_ONLY_HOURLY_SCHEDULED_ACCEPTANCE_PENDING",
     "artifact_source_commit": "d40d8438137eca8a224693d9c5454728304026cb",
     "release_pair": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation140/RELEASE-PAIR.json",
@@ -1697,7 +1697,7 @@
     "based_on_version": "6.4.139",
     "published": true,
     "installed": false,
-    "scope": "Version-only rebuild of exact139 runtime. No firmware behavior, resources, daily allowance or device schedule changed. Actual139-to140 native2am transfer and paired health remain pending.",
+    "scope": "Version-only rebuild of exact139 runtime; no behavior/resource changes. User-authorized hourly fixture changes test schedule/bookkeeping only. First139-to140scheduledtransfer due22:00Pacific, with actual timer arms confirmed; paired140health and native settlement pending.",
     "pending": [
       "Actual scheduled139-to140 transfer",
       "Native retry/settlement and paired140SDK health",
@@ -2517,16 +2517,48 @@
         "sha256": "13dde7701604a8a022ddc2a6b505661eeb37373b0e92a2c7fb8bc597c6d30153"
       },
       "scheduled_test_preparation": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/PREPARED.json",
+        "sha256": "3d53547f5eeee1115d316a40a8b00fc700049a6d3c6db780075ef1cb85cd95a4"
+      },
+      "scheduled_result": "PENDING_HOURLY_22_00_FIRST_CASE",
+      "latest_device_version_verified": "6.4.139",
+      "published_epoch": 1789355541.397542,
+      "previous_single_2am_preparation": {
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/overnight-scheduled139-20260913/PREPARED.json",
         "sha256": "949be229c66ecbacd2094e12425e94399611ba9f0b4f399160a35ef9cec1b873"
-      },
-      "scheduled_result": "PENDING",
-      "latest_device_version_verified": "6.4.139",
-      "published_epoch": 1789355541.397542
+      }
     }
   ],
   "overnight_scheduled_campaign": {
-    "status": "ACTIVE_PENDING_NATIVE_2AM",
+    "status": "HOURLY_FIRST_CASE_ARMED_TRANSFER_PENDING",
+    "case_directory": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913",
+    "first_due_epoch": 1789362000,
+    "last_new_due_epoch": 1789394400,
+    "end_epoch": 1789398000,
+    "interval_s": 3600,
+    "runbook": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/RUNBOOK.md",
+      "sha256": "dae74828d72322e40cffb74301b01d8db022dbd9792ffbabf31fc57725d11fa4"
+    },
+    "prepared": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/PREPARED.json",
+      "sha256": "3d53547f5eeee1115d316a40a8b00fc700049a6d3c6db780075ef1cb85cd95a4"
+    },
+    "automation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/AUTOMATION-CURRENT.json",
+      "sha256": "627f421903d6497f9a16665eae2ce031f85d8e8c8f89fa6ced50bb5e05e63855"
+    },
+    "firmware_runtime_changes": 0,
+    "isolated_test_fixtures": 1,
+    "scheduled_passes": 0,
+    "scope": "User-authorized separately archived hourly scheduled test fixtures. Native current-policy and no-debt checks precede each setup. Actual paired10pm timers/sleep verified; transfer and paired140acceptance pending. Restore Pacific2am and original legitimate production history after closed tests.",
+    "independent_timer_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/TIMER-ARM-REVIEW.json",
+      "sha256": "9307f12b3f2b7dd17d33f8959da7491b8bb5b4c436460948288d20fec95495ba"
+    }
+  },
+  "previous_single_2am_observation_plan": {
+    "status": "SUPERSEDED_BEFORE_DUE_BY_USER_HOURLY_TEST_REQUEST",
     "case_directory": "/Users/MattTaylor/halo-device-analytics-2026-09-10/overnight-scheduled139-20260913",
     "due_epoch": 1789376400,
     "end_epoch": 1789398000,
@@ -2547,5 +2579,26 @@
     "timezone_changes": 0,
     "scheduled_passes": 0,
     "scope": "One actual native2am139-to140 campaign and observation of its genuine retries. No accelerated future-day credit consumption."
+  },
+  "prepared_next_hourly_release": {
+    "version": "6.4.141",
+    "published": false,
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation141/RELEASE-PAIR.json",
+      "sha256": "f3e71a6cd7f869e5063d942901abcb5a95fc912ba27e9e7a78c0725c78110dc8"
+    },
+    "build_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation141/BUILD-CLOSURE.json",
+      "sha256": "b6bdbb8a3e3aa49f37deab9dd54a9a7e3451b0a2a26f3194e5e1ef58700f13d7"
+    },
+    "context": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation141/NEXT-RELEASE.json",
+      "sha256": "365f320f22a863c0361c80af7aba5b7fc31081a39f7a6a8c52936965ad74ee3d"
+    },
+    "publication_preparation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation141/publish141/prepared/release.json",
+      "sha256": "e0bf9eb9c0d4df4037df1ed2fa08e879de58d30a2dbe708f08fbebb869bcd9b6"
+    },
+    "scope": "Same runtime/resources; local build, check and seal complete. Stage/promote/verify only after140physicalcaseaccepted."
   }
 }

@@ -1,6 +1,6 @@
-# September 13–14: version140 published for overnight scheduled OTA
+# September 13–14: hourly scheduled OTA tests
 
-Published the canonical version-only140 pair from `d40d8438137eca8a224693d9c5454728304026cb`. Both runtime inventories, image sizes, static RAM and RTC usage match139 except generated identity metadata. Exact public manifests and complete binaries were verified. The unit is left on139 for its existing September14, 02:00Pacific update; no USB flash, manual request, allowance reset or timezone change was performed. Passive cloud logging and the existing heartbeat are active through08:00Pacific. Scheduled transfer, retry, settlement and paired140health remain pending;139 remains the verified development baseline.
+The user replaced the earlier single 2 a.m. plan with full scheduled updates every hour, beginning at 10 p.m. Pacific. Version 140 remains the published target for the first 139→140 transfer. Separately archived test setup changes only the temporary schedule and completed OTA bookkeeping, after native policy and outstanding-debt checks; firmware and unrelated settings are preserved. Both timer settings were observed after an ordinary actuator wake. Version 141 is built, checked, sealed and locally prepared with the same runtime and resource usage, awaiting the first case’s acceptance before publication. The existing cloud observer and heartbeat supervise the sequence through 8 a.m.; actual transfers, retries, health and settlement remain pending. Restore the normal 2 a.m. Pacific schedule and legitimate production completion history after the closed tests.
 
 # Firmware changelog
 
