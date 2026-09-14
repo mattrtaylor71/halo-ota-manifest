@@ -1,8 +1,10 @@
 # HALO Firmware Agent Guide
 
+- Latest working code: use `RELEASE_BASELINE.json.current_working_source` (159 LCD wake fix) and read `docs/LCD_USER_WAKE_159.md`. Preserve frozen158 as the recovery/previous scheduled qualification reference; do not revert the159 wake fix for subsequent releases. Public latest159; the assembled unit is LCD159/Sense158 until its next eligible OTA.
+
 ## Release Baseline
 
-- Start future OTA work from `RELEASE_BASELINE.json.current_baseline`: frozen 6.4.158, tag `halo-v6.4.158`, or a reviewed descendant. Read `docs/FROZEN_RELEASE_158.md` and `docs/BUILD_AND_RELEASE.md`. Historical 117 qualification and older release checkpoints do not select the current source.
+- Start future OTA work from `RELEASE_BASELINE.json.current_working_source`, retaining159 wake handling and the158 fixes. `current_baseline` and tag `halo-v6.4.158` identify the immutable recovery/previous scheduled qualification. Read `docs/FROZEN_RELEASE_158.md`, `docs/LCD_USER_WAKE_159.md` and `docs/BUILD_AND_RELEASE.md`. Historical117 qualification does not select the current source.
 - Run `python3 -B tools/verify_frozen_baseline.py` before preparing new firmware. Preserve the immutable 158 tag and binaries; new changes need an unused version at least 6.4.159. The guard verifies committed ancestry and retained bytes, not uncommitted edits or device acceptance.
 - Use `docs/PRODUCTION_RELEASE_ACCEPTANCE.md` for finite shipping acceptance. Preserve the distinction between bench evidence, shipping build evidence and actual production acceptance.
 - Prepare release metadata from clean committed source with `tools/prepare_production_release.py`, then use the external snapshot's `tools/build_ota_policy_production.py`. Follow `docs/OTA_POLICY_PRODUCTION_BUILD.md`; do not publish repository precommit metadata or substitute a flag-free Arduino build. `publish_both.sh` consumes prebuilt artifacts only.

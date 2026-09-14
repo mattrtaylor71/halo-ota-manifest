@@ -1,3 +1,11 @@
+# September 14: publish159 and verify the scoped LCD wake fix
+
+Published exact159 pair from `da3057b4ed59ad49804daa9974bb73084b5b5ac9`. Installed LCD159/app1 SDK VALID through LCD USB, retaining the158 fallback and all NVS; Sense remains158/app0 SDK VALID with unchanged executable code. Six host suites, three manual-request/wake/terminal/sleep cycles and two seven-item shopping-list refreshes passed. Publication and complete binary readbacks passed; final passive observation found no extra USB wake. See [the159 handoff](docs/LCD_USER_WAKE_159.md) and its exact acceptance receipts.
+
+The real daily discovery allowance blocked all firmware downloads. No quota reset, new paired159 OTA, scheduled159 transfer, physical power-cut or USB-free pass is claimed. Continue development from this159 source or reviewed descendants; keep frozen158 as the preserved recovery and earlier scheduled qualification reference. Daily02:00Pacific scheduling is unchanged.
+
+---
+
 # September 14: 6.4.159 scoped LCD wake candidate
 
 Fix delivery of Settings and Manual Update requests after Sense announces sleep and a PONG goes unanswered. Retain the original outstanding PONG deadline, preserve explicit sleep evidence and bound shared GPIO retries. New user actions can retry an exhausted wake episode; background retries cannot renew it. Short state transitions are serialized without holding a lock across GPIO or logging.
