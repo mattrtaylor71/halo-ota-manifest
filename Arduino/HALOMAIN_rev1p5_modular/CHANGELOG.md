@@ -1,3 +1,7 @@
+# September 13–14: version140 published for overnight scheduled OTA
+
+Published the canonical version-only140 pair from `d40d8438137eca8a224693d9c5454728304026cb`. Both runtime inventories, image sizes, static RAM and RTC usage match139 except generated identity metadata. Exact public manifests and complete binaries were verified. The unit is left on139 for its existing September14, 02:00Pacific update; no USB flash, manual request, allowance reset or timezone change was performed. Passive cloud logging and the existing heartbeat are active through08:00Pacific. Scheduled transfer, retry, settlement and paired140health remain pending;139 remains the verified development baseline.
+
 # Firmware changelog
 
 ## 6.4.139 — published; manual checks use remaining allowance

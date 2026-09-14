@@ -1,3 +1,7 @@
+# Active scheduled140 acceptance — September13–14
+
+140 is published and verified from canonical version-only artifacts. The actual September14, 02:00Pacific139-to140 scheduled transfer, native retries/settlement and paired140SDK health are **pending**. The untouched device schedule and existing allowance remain intact. Passive cloud logging and the heartbeat are active through08:00Pacific. Publication is not device acceptance; the prior139manual results below retain their original scope and capture limits. The runbook and immutable preparation/publication receipts are bound in `RELEASE_BASELINE.json`.
+
 # Version 139 manual-policy verification — September 13, 2026
 
 | Check | Actual evidence |

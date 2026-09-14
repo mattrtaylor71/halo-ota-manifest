@@ -1,3 +1,7 @@
+# Current publication:140; verified device baseline:139
+
+Version140 is published for the September14, 02:00Pacific scheduled test, with exact runtime and resource footprints preserved from139. The device has not been flashed with140: it must install it through its native scheduled OTA. Passive observation and the existing heartbeat are active through08:00Pacific. No scheduled140pass or paired140health is claimed yet. Future development continues from the verified139source and subsequent release records until this case is accepted. [Campaign runbook](/Users/MattTaylor/halo-device-analytics-2026-09-10/overnight-scheduled139-20260913/RUNBOOK.md); exact preparation/publication references are in `RELEASE_BASELINE.json`.
+
 # Production OTA 139 — published and installed; manual policy cases verified with capture limits
 
 Version 139 is the current published and development pair, built from `97c45f6a20cadff2ae444b99c3928457e7b204e4`. Canonical builds, native regressions, artifact checks and full public binary readbacks passed. A manual request may now spend remaining same-day discovery allowance after a closed check; exhausted allowance reports “Daily update limit” accurately. Automatic cooldowns, debt guards, schedule and LCD behavior are unchanged.
@@ -102,4 +106,4 @@ The [factory and recovery guide](PRODUCTION_FACTORY_RECOVERY.md) identifies the 
 
 The default development checkout is `/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular`. Its recorded adoption procedure archives the selected preimages and index, updates only release-owned files, retires only the exact archived local MQTT overrides, and preserves unrelated tracked and untracked changes. Verify the recorded adoption receipt before relying on that checkout's baseline. Hard reset, clean and remote branch replacement are outside this handoff.
 
-Keep historical failed-case receipts and immutable artifact packages available through the baseline JSON. Follow the accepted tag and subsequent documented release commits for future work; do not relabel or rebuild old artifact bytes under a new source identity. The recurring soak automation remains paused. This release includes local Git handoff, not an unrelated remote repository push.
+Keep historical failed-case receipts and immutable artifact packages available through the baseline JSON. Follow the accepted tag and subsequent documented release commits for future work; do not relabel or rebuild old artifact bytes under a new source identity. The recurring soak automation was paused at that historical release; the current overnight campaign is described above. This release includes local Git handoff, not an unrelated remote repository push.
