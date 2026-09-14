@@ -355,12 +355,22 @@ static void wifi_guard_poll() {
 // ── WiFi event handler ──────────────────────────────────────────────
 
 static void handle_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
-  Serial.printf("[WIFI_EVENT] event=%d t=%lu status=%d inflight=%d state=%d\n",
-                (int)event,
-                millis(),
-                (int)WiFi.status(),
-                wifi_connect_inflight ? 1 : 0,
-                (int)wifi_state);
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    Serial.printf("[WIFI_EVENT] event=%d t=%lu status=%d inflight=%d state=%d reason=%u\n",
+                  (int)event,
+                  millis(),
+                  (int)WiFi.status(),
+                  wifi_connect_inflight ? 1 : 0,
+                  (int)wifi_state,
+                  (unsigned)info.wifi_sta_disconnected.reason);
+  } else {
+    Serial.printf("[WIFI_EVENT] event=%d t=%lu status=%d inflight=%d state=%d\n",
+                  (int)event,
+                  millis(),
+                  (int)WiFi.status(),
+                  wifi_connect_inflight ? 1 : 0,
+                  (int)wifi_state);
+  }
 #if defined(ARDUINO_EVENT_WIFI_STA_GOT_IP)
   if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
     wifi_guard_set_inflight(false);
