@@ -1,5 +1,188 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "current_baseline": {
+    "version": "6.4.158",
+    "status": "FROZEN_PUBLISHED_INSTALLED_SCHEDULED_OTA_QUALIFIED",
+    "source_selection": "Use this current baseline or reviewed descendants; historical records are not the current development source.",
+    "release_tag": "halo-v6.4.158",
+    "release_tag_object": "14b17d7e4ed19e89a5f69dd1f613f9638233e29c",
+    "artifact_source_commit": "b6d06da5997e2252a3472697f30dc8111ab90367",
+    "artifact_source_firmware_tree": "6e1a6b0bf8e8d5739075fa96e680667483312fd9",
+    "build_id": "6.4.158-20260914T145324Z-b6d06da5997e",
+    "build_epoch": 1789397604,
+    "runtime_fix_ancestor": "df8cab35ef8128bdb3d312bd8c016817ad064a85",
+    "acceptance_records_commit": "f589a1148580ec7e563325e29b1e251deb30622d",
+    "git_remote_push_performed": false,
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation158/RELEASE-PAIR.json",
+      "sha256": "efaadb688d714b0f9957f1782d27953bf28e63549c502f5a272f1b05f48a38d0"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation158/SOURCE-SCOPE.json",
+      "sha256": "85aa156be961b195dcdc66e64fd97fa9e6974dec97db3074e1cca9b7b4106bb4"
+    },
+    "build_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation158/BUILD-CLOSURE.json",
+      "sha256": "8678b7c81de99f6eaf9b65d25b7114fb3f2a582dd2015bdf0873e9a104d4630f"
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation158/PUBLISHED.json",
+      "sha256": "80df189bceb86ed20e7c859496de9236c54a3490d0bccf1f83db8e3fd563fe82"
+    },
+    "scheduled_OTA_verdict": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled158-confirmation-20260914/confirmation001/VERDICT.json",
+      "sha256": "9471c0b06e61c2e3dc0c7553162956c2b191e37080f0720821eae4b25903120a"
+    },
+    "production_restoration": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled158-confirmation-20260914/PRODUCTION-RESTORATION-REVIEW.json",
+      "sha256": "3baf3cd5938c93dc1508c30d84133bda12df739719e5237b65812b02bb6b7bd9"
+    },
+    "release_tag_receipt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled158-confirmation-20260914/RELEASE-TAG.json",
+      "sha256": "e4d6cb659ed99080c7a547ad4ad65271a95868735202ff4276300336015d1976"
+    },
+    "applications": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation158/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "017795e6fc298c93d8ebeb7f4f3bcd1d3683d6db4902d07b19ba50ec0b2f5d56",
+        "bytes": 1812640,
+        "package_path": "sense/halo_sense_prod.ino.bin"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation158/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "d2d3e6eb38e09c5b699dd2cb7b25abdd139bf7649b7deb047bab1f51a228ee91",
+        "bytes": 1891872,
+        "package_path": "lcd/halo_lcd_prod.ino.bin"
+      }
+    },
+    "schedule": {
+      "local_time": "02:00",
+      "timezone": "PST8PDT,M3.2.0,M11.1.0",
+      "LCD_lead_seconds": 15,
+      "last_verified_Sense_due_epoch": 1789462800,
+      "last_verified_LCD_due_epoch": 1789462785
+    },
+    "qualification_scope": "Small monitored rollout; one full scheduled 157-to-158 paired update with exact hashes, SDK VALID, native RESOLVED and production schedule restoration. Not exhaustive product, power-cut, USB-free or factory-station qualification.",
+    "acceptance_limits": [
+      "OTA subsystem qualification only; historical 117 full-product qualification is unchanged.",
+      "USB-connected instrumented test; USB-free and power-interruption acceptance not claimed.",
+      "Initial raw prefixes were missed; scheduled origin/admission and both post-update reboot-to-sleep traces were captured.",
+      "Three packet retries recovered; no terminal transfer failure or watchdog reset was observed.",
+      "The positive early-calendar WAIT branch was not exercised on hardware; the 13-test focused regression suite remains separate evidence.",
+      "18 ERRLOG and one DIAG verified=0 notices came from intentionally disabled legacy writers under HALO_DURABLE_DIAGNOSTICS=1, not attempted NVS-write failures."
+    ],
+    "handoff": "docs/FROZEN_RELEASE_158.md",
+    "build_and_release": "docs/BUILD_AND_RELEASE.md",
+    "validation": "docs/OTA_158_VALIDATION.md",
+    "preflight": "tools/verify_frozen_baseline.py",
+    "frozen_package": {
+      "path": "/Users/MattTaylor/halo-releases/6.4.158",
+      "manifest": {
+        "path": "/Users/MattTaylor/halo-releases/6.4.158/MANIFEST.json",
+        "sha256": "82e90ce790d740f75266523c82630dd633cdecf8a42d224974a63600c4bcf4b4"
+      },
+      "checksums": {
+        "path": "/Users/MattTaylor/halo-releases/6.4.158/SHA256SUMS",
+        "sha256": "606bd0811b6273a3bbcbd773f93227f0980fd7c1d742b83eb97c309570f8cf21"
+      },
+      "archive": {
+        "path": "/Users/MattTaylor/halo-releases/halo-6.4.158-frozen.tar.gz",
+        "sha256": "8337aa4a39967350323d311cf3826933b7e904d594429fa95e6c8b5b5815ed69",
+        "bytes": 32476401
+      },
+      "verification": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled158-confirmation-20260914/freeze158/RESULT.json",
+        "sha256": "0b173e606c2b469f584675e3aca89683af3da647078968c789bde0056bf53fc9"
+      },
+      "independent_source_review": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled158-confirmation-20260914/freeze158/SOURCE-PEER.json",
+        "sha256": "0ddf79be3f03b5bc809a836b738e1582d304c6e479095d9a4428b1160ab87263"
+      },
+      "scope": "Private local immutable archive; no current device NVS/raw captures. Exact Git history retains tracked historical logs. Source export declares 13 nonbuild log omissions. External toolchain and transitive evidence dependencies remain separately retained; no new hardware factory qualification."
+    },
+    "handoff_verification": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/scheduled158-confirmation-20260914/freeze158/HANDOFF-VERIFICATION.json",
+      "sha256": "d4f5f386aa7c0b580da7d72e1c3b98a6db98a38d49296c4d1a2d813f36f119a5"
+    }
+  },
+  "historical_product_qualification_117": {
+    "status": "released",
+    "candidate_version": "6.4.117",
+    "canary_versions": [],
+    "canary_profile": null,
+    "controlled_baseline_version": "6.4.116",
+    "release_commit": "9ec80b63a029b39709c19811890054e210739dcc",
+    "release_tree": "94e1c52ac66c1eec3b6911f65e21765edfffa251",
+    "release_tag": "halo-v6.4.117",
+    "artifact_source_commit": "1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f",
+    "artifact_source_firmware_tree": "53ddadf8623f8ab0d15363f9b675233f8d762409",
+    "release_artifact_manifest": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release117-build001/RELEASE-PAIR.json",
+      "sha256": "4893b04d4e3e86480312b9dfd63b667df171fead26c6b07a598b69263b44dd25"
+    },
+    "shipping_acceptance_receipt": {
+      "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/ACCEPTANCE.json",
+      "sha256": "946beda6d7735443e72ba8bbe23d83142b7987a4934e568efbbfdb55994c96ef"
+    },
+    "production_publication_receipt": {
+      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-promote001/result.json",
+      "sha256": "653feb0ce3d675ad215bb187351966ba9cface6eeef9b6b45438f63098d5a317"
+    },
+    "previous_production_manifest_archive": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-publication001/sense-previous-latest.json",
+        "sha256": "163dd1c5acf03f1c487e6dec2b1f476e61fe84f30782e9e76c190c06452ecea4"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-publication001/lcd-previous-latest.json",
+        "sha256": "359c0503698e016cafee44ae051fc3ec977024f7e2dc3abd168ff3cc9ae16e49"
+      }
+    },
+    "source_basis": {
+      "name": "Focused UI and acknowledged manual OTA fixes over the114 production runtime",
+      "artifact_source_commit": "1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f",
+      "native_regression": "tools/test_manual_ota.py"
+    },
+    "qualification_scope": "Scoped five-fix validation: device-backed 116 list navigation; one 116-to-117 Settings-action manual OTA through the existing USB command; exact paired 117 hashes/SDK VALID, Home, cleared terminal flags, logged deep sleep and 30 seconds paired USB absence. One subsequent same-version request produced policy_daily_limit with a stable eight-second result, then Home and paired natural sleep/15 seconds quiet. No new scheduled, fault, soak, power-cut or USB-free qualification.",
+    "autonomous_calendar_scope": "Not repeated for117. Prior114 scheduled acceptance remains in previous_114_release and versioned acceptance_results.",
+    "default_checkout_adoption": {
+      "status": "PASS_RELEASE_ADOPTED_UNRELATED_STATE_PRESERVED",
+      "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
+      "branch": "codex/halo-production-v6.4.114",
+      "release_commit": "9ec80b63a029b39709c19811890054e210739dcc",
+      "receipt": {
+        "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/original-adoption117.json",
+        "sha256": "07d062cd777c409ff0201b643e06ebdfde901c70c8eced268786b9cb183541b1"
+      },
+      "followup": "The subsequent documentation-only binding commit is fast-forwarded into this same checkout and recorded in halo-ui-fixes-2026-09-10/FINAL-RELEASE.json. Unrelated tracked changes are preserved."
+    },
+    "candidate_artifacts": {
+      "116": {
+        "pair": {
+          "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release116-build001/RELEASE-PAIR.json",
+          "sha256": "357ff0df17deb38bcba49218152276d131ceb6a1aa9858a1e4fca950a3e33721"
+        }
+      },
+      "117": {
+        "pair": {
+          "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release117-build001/RELEASE-PAIR.json",
+          "sha256": "4893b04d4e3e86480312b9dfd63b667df171fead26c6b07a598b69263b44dd25"
+        }
+      }
+    },
+    "recovery_package": null,
+    "recovery_package_independent_peer": null,
+    "portable_release_archive": null,
+    "release_scope_decision": {
+      "status": "PASS_REPORTED_FIVE_FIXES_MAIN_VALIDATION",
+      "scope": "Only five reported defects. USBconnected Garage Member test. No new scheduled, fault, soak, physical powercut or USB-free qualification. USBopen resets distinguished from sleep evidence. Manual action exercised via same UI-task Settings handler through existing USB command; physical fingerhit target and new physical screenshot not claimed.",
+      "followup_response_check": "PASS: one same-version request, Daily update limit result from tested source, stable sampled overlay through8.444s/off8.944s, Home/OTA flags0 and paired natural sleep/15s quiet.",
+      "new_factory_package": false,
+      "release_handoff": "Pending actual root commit/tag/adoption bindings"
+    },
+    "production_publication_closure": null,
+    "qualified_baseline_version": "6.4.117"
+  },
   "factory_and_rollback_instructions": "docs/PRODUCTION_FACTORY_RECOVERY.md",
   "canonical_builder": "tools/build_ota_policy_production.py",
   "acceptance_plan": "docs/PRODUCTION_RELEASE_ACCEPTANCE.md",
@@ -907,82 +1090,6 @@
       "scope": "Finite assertion expired normally. No renewal; global power preferences unchanged."
     }
   },
-  "status": "released",
-  "candidate_version": "6.4.117",
-  "canary_versions": [],
-  "canary_profile": null,
-  "controlled_baseline_version": "6.4.116",
-  "release_commit": "9ec80b63a029b39709c19811890054e210739dcc",
-  "release_tree": "94e1c52ac66c1eec3b6911f65e21765edfffa251",
-  "release_tag": "halo-v6.4.117",
-  "artifact_source_commit": "1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f",
-  "artifact_source_firmware_tree": "53ddadf8623f8ab0d15363f9b675233f8d762409",
-  "release_artifact_manifest": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release117-build001/RELEASE-PAIR.json",
-    "sha256": "4893b04d4e3e86480312b9dfd63b667df171fead26c6b07a598b69263b44dd25"
-  },
-  "shipping_acceptance_receipt": {
-    "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/ACCEPTANCE.json",
-    "sha256": "946beda6d7735443e72ba8bbe23d83142b7987a4934e568efbbfdb55994c96ef"
-  },
-  "production_publication_receipt": {
-    "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-promote001/result.json",
-    "sha256": "653feb0ce3d675ad215bb187351966ba9cface6eeef9b6b45438f63098d5a317"
-  },
-  "previous_production_manifest_archive": {
-    "sense": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-publication001/sense-previous-latest.json",
-      "sha256": "163dd1c5acf03f1c487e6dec2b1f476e61fe84f30782e9e76c190c06452ecea4"
-    },
-    "lcd": {
-      "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production117-publication001/lcd-previous-latest.json",
-      "sha256": "359c0503698e016cafee44ae051fc3ec977024f7e2dc3abd168ff3cc9ae16e49"
-    }
-  },
-  "source_basis": {
-    "name": "Focused UI and acknowledged manual OTA fixes over the114 production runtime",
-    "artifact_source_commit": "1e624b5e8d2f44f8f1c91cbe455df5f2f8d7a66f",
-    "native_regression": "tools/test_manual_ota.py"
-  },
-  "qualification_scope": "Scoped five-fix validation: device-backed 116 list navigation; one 116-to-117 Settings-action manual OTA through the existing USB command; exact paired 117 hashes/SDK VALID, Home, cleared terminal flags, logged deep sleep and 30 seconds paired USB absence. One subsequent same-version request produced policy_daily_limit with a stable eight-second result, then Home and paired natural sleep/15 seconds quiet. No new scheduled, fault, soak, power-cut or USB-free qualification.",
-  "autonomous_calendar_scope": "Not repeated for117. Prior114 scheduled acceptance remains in previous_114_release and versioned acceptance_results.",
-  "default_checkout_adoption": {
-    "status": "PASS_RELEASE_ADOPTED_UNRELATED_STATE_PRESERVED",
-    "path": "/Users/MattTaylor/Documents/Arduino/HALOMAIN_rev1p5_modular",
-    "branch": "codex/halo-production-v6.4.114",
-    "release_commit": "9ec80b63a029b39709c19811890054e210739dcc",
-    "receipt": {
-      "path": "/Users/MattTaylor/halo-ui-fixes-2026-09-10/original-adoption117.json",
-      "sha256": "07d062cd777c409ff0201b643e06ebdfde901c70c8eced268786b9cb183541b1"
-    },
-    "followup": "The subsequent documentation-only binding commit is fast-forwarded into this same checkout and recorded in halo-ui-fixes-2026-09-10/FINAL-RELEASE.json. Unrelated tracked changes are preserved."
-  },
-  "candidate_artifacts": {
-    "116": {
-      "pair": {
-        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release116-build001/RELEASE-PAIR.json",
-        "sha256": "357ff0df17deb38bcba49218152276d131ceb6a1aa9858a1e4fca950a3e33721"
-      }
-    },
-    "117": {
-      "pair": {
-        "path": "/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-release117-build001/RELEASE-PAIR.json",
-        "sha256": "4893b04d4e3e86480312b9dfd63b667df171fead26c6b07a598b69263b44dd25"
-      }
-    }
-  },
-  "recovery_package": null,
-  "recovery_package_independent_peer": null,
-  "portable_release_archive": null,
-  "release_scope_decision": {
-    "status": "PASS_REPORTED_FIVE_FIXES_MAIN_VALIDATION",
-    "scope": "Only five reported defects. USBconnected Garage Member test. No new scheduled, fault, soak, physical powercut or USB-free qualification. USBopen resets distinguished from sleep evidence. Manual action exercised via same UI-task Settings handler through existing USB command; physical fingerhit target and new physical screenshot not claimed.",
-    "followup_response_check": "PASS: one same-version request, Daily update limit result from tested source, stable sampled overlay through8.444s/off8.944s, Home/OTA flags0 and paired natural sleep/15s quiet.",
-    "new_factory_package": false,
-    "release_handoff": "Pending actual root commit/tag/adoption bindings"
-  },
-  "production_publication_closure": null,
-  "qualified_baseline_version": "6.4.117",
   "development_baseline": {
     "version": "6.4.158",
     "status": "PUBLISHED_INSTALLED158_SCHEDULED_OTA_QUALIFIED",
@@ -1015,7 +1122,7 @@
     "last_closed_paired_identity_version": "6.4.158",
     "final_device_acceptance": true,
     "device_acceptance": "One scheduled 157\u2192158 OTA: both app0 SDK VALID, exact native RESOLVED phase 8/generation 6 with no reserved work; Pacific schedule restored. OTA qualification only.",
-    "instruction": "Continue from local release tag halo-v6.4.158 at artifact source b6d06da5997e2252a3472697f30dc8111ab90367, or reviewed descendants preserving early-calendar fix df8cab35ef8128bdb3d312bd8c016817ad064a85. One scheduled 157\u2192158 update is qualified and the 2 a.m. Pacific schedule is restored. Preserve the distinct historical overnight verdicts and stated acceptance limits.",
+    "instruction": "Use current_baseline as the authoritative default. Continue from local release tag halo-v6.4.158 at artifact source b6d06da5997e2252a3472697f30dc8111ab90367, or reviewed descendants preserving early-calendar fix df8cab35ef8128bdb3d312bd8c016817ad064a85. One scheduled 157\u2192158 update is qualified and the 2 a.m. Pacific schedule is restored. Preserve the distinct historical overnight verdicts and stated acceptance limits.",
     "current_device_version": "6.4.158",
     "installed": true,
     "local_release_tag": {

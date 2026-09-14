@@ -1,6 +1,6 @@
 # Historical production6.4.114 factory and recovery package
 
-**Historical package:**117 is now the active fixed baseline; see [RELEASE_BASELINE.json](../RELEASE_BASELINE.json) for its exact paired artifacts. This guide and merged factory package remain114-specific. No117 factory package or factory-station qualification was created for the scoped UI/manual OTA fix.
+**Historical procedure:** 158 is the frozen current baseline. Read [the 158 handoff](FROZEN_RELEASE_158.md) and `RELEASE_BASELINE.json.current_baseline.frozen_package` for the exact retained 158 components and offline layout verification. This guide's payload names and examples remain 114-specific. No paired factory-station hardware qualification is claimed for 158; do not infer it from the presence of merged images or apply these old 114 commands as a current update plan.
 
 This document describes the exact shipping artifacts built from commit `1224f28ab2d1307d54cf71956b30da2bbccead3d`, with build ID `6.4.114-20260910T225056Z-1224f28ab2d1`. The firmware uses the normal production OTA endpoints and reports channel `prod`; bench, one-shot, probe and fault controls are disabled. Artifact qualification has passed. Device acceptance and production promotion are separate receipts in `RELEASE_BASELINE.json`; this document does not claim those actions have happened.
 

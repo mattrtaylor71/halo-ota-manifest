@@ -1,3 +1,11 @@
+# September 14: freeze 6.4.158 as the default baseline
+
+Preserved exact published 158 source, paired applications, debug symbols, factory components and selected provenance in a private checksummed archive. Added the current handoff, build/release workflow, OTA validation and recovery/retention guidance. Repository instructions now explicitly select158; prior117 top-level metadata moved intact to historical qualification and older source-selection notes are archived. Added a read-only ancestry/artifact/package preflight for future development.
+
+This is a documentation and host-tooling freeze only. No firmware/runtime bytes, device state, production manifests, schedule or immutable release tag changed. Existing scoped OTA acceptance and remaining USB-free, power-interruption, full-product and factory-station gaps are unchanged. No remote Git push or independent off-machine backup is claimed.
+
+---
+
 # September 14: release 158 scheduled OTA confirmed; Pacific schedule restored
 
 **Version 158 is published and installed on both boards. The single scheduled 157→158 confirmation passed**, including exact native settlement and restoration of the production schedule. The September 14, 09:10:36 PDT update completed automatically: both boards reached app0/SDK VALID; policy was RESOLVED (phase 8, generation 6), with one network window, one daily attempt and no reserved work. Three packet retries recovered; no terminal transfer failure or watchdog reset was observed.

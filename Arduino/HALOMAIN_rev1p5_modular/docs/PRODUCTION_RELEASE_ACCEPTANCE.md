@@ -1,3 +1,5 @@
+> Current baseline: **frozen 6.4.158**. Read [the handoff](FROZEN_RELEASE_158.md) and [closed OTA evidence](OTA_158_VALIDATION.md). The records below retain their checkpoint dates and scopes; older pending/current instructions do not supersede `RELEASE_BASELINE.json.current_baseline`.
+
 # Scheduled 157→158 OTA accepted; production Pacific schedule restored
 
 **Version 158 is published and installed on both boards. The single scheduled 157→158 confirmation passed**, including exact native settlement and restoration of the production schedule. The September 14, 09:10:36 PDT update completed automatically: both boards reached app0/SDK VALID; policy was RESOLVED (phase 8, generation 6), with one network window, one daily attempt and no reserved work. Three packet retries recovered; no terminal transfer failure or watchdog reset was observed.

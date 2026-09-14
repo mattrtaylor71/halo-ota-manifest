@@ -1,12 +1,12 @@
 # Production OTA build
 
-Start from the verified source commit in `RELEASE_BASELINE.json`. If that record is pending, the outputs are release candidates. Preserve exact source/build/publication provenance as described in [Release baseline](RELEASE_BASELINE.md). `halo_ota_demo/publish_both.sh` now delegates to the verified prebuilt-artifact publisher; it does not compile firmware.
+Start from `RELEASE_BASELINE.json` → `current_baseline`. Follow [Build and release](BUILD_AND_RELEASE.md) for the frozen 158 baseline and future newly allocated versions. Unqualified new outputs remain release candidates. Preserve exact source/build/publication provenance as described in [Release baseline](RELEASE_BASELINE.md). `halo_ota_demo/publish_both.sh` now delegates to the verified prebuilt-artifact publisher; it does not compile firmware.
 
 Prepare a release snapshot from clean committed source, then compile that snapshot:
 
 ```sh
 python3 -B tools/prepare_production_release.py --version <allocated-version> --epoch <explicit-UTC-seconds> --out /absolute/path/to/new-snapshot
-python3 -B /absolute/path/to/new-snapshot/source/tools/build_ota_policy_production.py --out /absolute/path/to/new-build --private-canary
+python3 -B /absolute/path/to/new-snapshot/source/tools/build_ota_policy_production.py --out /absolute/path/to/new-build
 ```
 
 Allocate unused versions from the current release record and immutable artifact inventory; do not reuse historical candidate numbers. For a final production version, prepare its explicit version and omit `--private-canary`. The preparer requires the committed path manifest and clean source scope, records full Git commit/tree and changes only three generated metadata headers in the external snapshot. Its build ID is deterministic for the explicit source/version/epoch. Repository metadata remains clearly precommit/source-only; the publisher rejects provisional proofs. Never publish a direct build of those provisional headers.
@@ -30,7 +30,7 @@ The canonical entry supplies these flags automatically:
 
 It supplies no private channel, S3 route, capture fixture, snapshot-retirement or spool-disable override. Existing production configuration and spool defaults remain in use. Version headers and firmware metadata are not rewritten. Policy and diagnostics are enabled through this build entry across compilation units; low-level compatibility builds that omit these flags retain their existing source fallbacks and do not qualify as this production build.
 
-The explicit `--private-canary` option appends only the fixed dev-bucket channel/prefix for `halo/ota/canary/production-release-20260909`. All shipping limits and disabled bench/one-shot/probe/fault controls stay the same. Such artifacts are labeled canary and cannot be presented as default-route production builds. The default invocation above does not select this option.
+The explicit `--private-canary` option appends only the fixed dev-bucket channel/prefix for `halo/ota/canary/production-release-20260909`. All shipping limits and disabled bench/one-shot/probe/fault controls stay the same. Such artifacts are labeled canary and cannot be presented as default-route production builds. The production example above omits this option. Select it only for an explicitly scoped private-route candidate; it is not the normal release workflow.
 
 The exact Sense target is `esp32:esp32:XIAO_ESP32S3:PSRAM=opi,USBMode=hwcdc,CDCOnBoot=default`. The LCD target is `esp32:esp32:esp32s3:PartitionScheme=custom,FlashSize=8M,USBMode=hwcdc,CDCOnBoot=cdc,PSRAM=opi`. The configured LCD image layout is 8 MiB. Preserve the checked board libraries, pin assignments and partition tables when reproducing a qualified build.
 
