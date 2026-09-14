@@ -6,7 +6,7 @@ The closed Case06 audit confirms **RESOLVED phase 8/generation 6**, zero reserve
 
 Version 154 is built, checked and published from source `4ef231c1a047597bc63e3f67c853b48e843428ab`; both public manifests and full binaries are verified. Its runtime and resource footprints match qualified 153, with generated identity headers and four pinned release records as the only changes. Continue development from this source and subsequent reviewed commits. Version 154 is not yet installed on the unit.
 
-The next 153 → 154 test is queued for **05:00 PDT**. Owner 81729/PID32535 is waiting to perform an ordinary wake, fresh identity and guarded setup at 04:42, then transfer directly to passive observation. It is **not yet armed**, and no future outcome is claimed. Restoration of 2 a.m. Pacific scheduling and legitimate history remains pending. Exact verdict, audit, qualification and publication receipts are bound in `RELEASE_BASELINE.json`; following sections are historical checkpoints.
+The next 153 → 154 test is **armed for 05:00 PDT**. Sense epoch 1789387200 and LCD epoch 1789387185 are verified, with LCD SDK return 0 and paired natural sleep. Setup child43167 closed/reaped at 04:44:29; owner81729/PID32535 automatically transferred to the passive observer, already waiting for 04:58:30–05:08:30. No additional wake is needed. The actual OTA outcome remains pending. Restoration of 2 a.m. Pacific scheduling and legitimate history remains pending. Exact verdict, audit, qualification and publication receipts are bound in `RELEASE_BASELINE.json`; following sections are historical checkpoints.
 
 ---
 

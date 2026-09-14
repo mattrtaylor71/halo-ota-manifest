@@ -3565,13 +3565,13 @@
       "case_id": "case07-0500-154",
       "from_version": "6.4.153",
       "to_version": "6.4.154",
-      "status": "QUEUED_OWNER_WAITING_NOT_ARMED",
+      "status": "ARMED_WAITING_FOR_ACTUAL_SCHEDULED_OTA",
       "intended_due_local": "2026-09-14 05:00 PDT",
       "intended_due_epoch": 1789387200,
       "preparation_planned_local": "2026-09-14 04:42 PDT",
-      "actual_arm_verified": false,
+      "actual_arm_verified": true,
       "scheduled_pass": false,
-      "scope": "Actual owner is waiting until04:42 for one ordinary wake, fresh identity, guarded setup then same-PID passive observer. Actual timer arm and scheduled transfer remain future.",
+      "scope": "Actual setup closed/reaped and both board timers/paired sleep verified. SamePID32535/tool81729 observer is waiting for04:58:30\u201305:08:30. No further wake needed; actual OTA outcome is pending.",
       "owner_tool_session_id": 81729,
       "owner_pid": 32535,
       "owner_started": {
@@ -3581,6 +3581,21 @@
       "launcher": {
         "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/tools/start_scheduled154_at0442.py",
         "sha256": "ea92a4edc238bea81eac7ed5ff76a64391daf7253e78ebacd61fdfef52c4b205"
+      },
+      "actual_Sense_timer_epoch": 1789387200,
+      "actual_LCD_timer_epoch": 1789387185,
+      "paired_natural_preupdate_sleep": true,
+      "setup_result": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case07-0500-154/setup001/result.json",
+        "sha256": "81d3e034d4cf96d659903dce779add4ffdaf670ba1f1dba9ac9e43ad58369c10"
+      },
+      "setup_owner_closed": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case07-0500-154/setup-observer-owner001/SETUP-CLOSED.json",
+        "sha256": "1bdc6811b7d3422fcc9fdc4bbe636304223588907d7a56a3bc9864160b6b71aa"
+      },
+      "arming_review": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case07-0500-154/ARM-REVIEW.json",
+        "sha256": "7ee2212ac15364db2a555c82bfc9bf038e69ca9d13137fb206403fdb7312239f"
       }
     }
   },
