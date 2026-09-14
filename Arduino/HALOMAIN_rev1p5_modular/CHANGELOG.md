@@ -1,3 +1,11 @@
+# September14: publish160 for the user’s manual OTA test
+
+Version-only production pair from `957ca816aaf1e90a5fe67b75f891e9d70e44f486`, build `6.4.160-20260914T233149Z-957ca816aaf1`. Runtime matches tested159 except the three generated identity headers. Both canonical builds, artifact checks, independent review, public manifests and complete binary readbacks passed; executable sections and image/static/RTC footprints match159. Local tag `halo-v6.4.160` identifies the exact artifact source; no Git remote push.
+
+No device command, installation, allowance reset or schedule change was performed for this bump. The user will test manually; the last observed Sense daily limit remains a separate possible blocker. Recorded device health remains LCD159/Sense158. Exact receipts are under `hardware-validation160` and pinned in RELEASE_BASELINE.json. Keep the159 wake fixes and158 recovery archive for future work.
+
+---
+
 # September 14: publish159 and verify the scoped LCD wake fix
 
 Published exact159 pair from `da3057b4ed59ad49804daa9974bb73084b5b5ac9`. Installed LCD159/app1 SDK VALID through LCD USB, retaining the158 fallback and all NVS; Sense remains158/app0 SDK VALID with unchanged executable code. Six host suites, three manual-request/wake/terminal/sleep cycles and two seven-item shopping-list refreshes passed. Publication and complete binary readbacks passed; final passive observation found no extra USB wake. See [the159 handoff](docs/LCD_USER_WAKE_159.md) and its exact acceptance receipts.

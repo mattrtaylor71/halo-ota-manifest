@@ -872,7 +872,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.159",
+  "current_production_latest_version": "6.4.160",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -900,6 +900,49 @@
       "acceptance": "Both canonical production builds and artifact/served-byte checks passed. Installation of115 remains for user manual test; prior114 device acceptance is not relabeled as115 acceptance.",
       "manual_eligibility_note": "Last observed114 ledger was RESOLVED with13ms; shipping manual discovery cannot refill a later UTCday. If retained unchanged, immediate manual OTA is blocked until eligible normal maintenance or explicit separate lab-state preparation. No allowance reset or device wake occurred for this publication.",
       "published_epoch": 1789086042.673225
+    },
+    {
+      "version": "6.4.160",
+      "status": "PUBLISHED_VERSION_ONLY_BUMP_USER_MANUAL_TEST_PENDING",
+      "artifact_source_commit": "957ca816aaf1e90a5fe67b75f891e9d70e44f486",
+      "artifact_source_firmware_tree": "41abf6705e180038d27a57a6a103220a9485e1f8",
+      "build_id": "6.4.160-20260914T233149Z-957ca816aaf1",
+      "runtime_baseline": "6.4.159",
+      "runtime_changed": false,
+      "resource_deltas": {
+        "sense": {
+          "size": 0,
+          "static_ram_bytes": 0,
+          "rtc_slow_bytes": 0,
+          "linked_program_bytes": 0
+        },
+        "lcd": {
+          "size": 0,
+          "static_ram_bytes": 0,
+          "rtc_slow_bytes": 0,
+          "linked_program_bytes": 0
+        }
+      },
+      "release_pair": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/RELEASE-PAIR.json",
+        "sha256": "67144809d9d2025f0fed4eb8ca8985e89dbe23f77f5c01c7be188a3dfce815ab"
+      },
+      "publication": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/PUBLISHED.json",
+        "sha256": "8b586e941c22152913b5da67a436cabfa7c91f8e64f1d11713858157b11866c4"
+      },
+      "build_review": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/BUILD-REVIEW.json",
+        "sha256": "8a3dbaa0cf496bdf643a66074da376baf1786e6713bc685c27203202232955f8"
+      },
+      "release_tag": "halo-v6.4.160",
+      "release_tag_receipt": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/RELEASE-TAG.json",
+        "sha256": "5df78797cfba82c1292b44a72b91634e65457f1cb5e97b0b1d84491eb7e39d78"
+      },
+      "hardware_actions_this_release": 0,
+      "allowance_reset_performed": false,
+      "git_remote_push_performed": false
     }
   ],
   "previous_114_release": {
@@ -5950,7 +5993,11 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation159/RELEASE-TAG.json",
       "sha256": "417dd300c74820c3c9ad3755cf4aae8f1b498bfecf0e4b287537060ec5f88ae9"
     },
-    "git_remote_push_performed": false
+    "git_remote_push_performed": false,
+    "latest_version_only_publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/PUBLISHED.json",
+      "sha256": "8b586e941c22152913b5da67a436cabfa7c91f8e64f1d11713858157b11866c4"
+    }
   },
   "previous_verified_paired_health_158": {
     "version": "6.4.158",
@@ -5971,5 +6018,48 @@
       "sha256": "9471c0b06e61c2e3dc0c7553162956c2b191e37080f0720821eae4b25903120a"
     },
     "scope": "Both boards 158/app0 SDK VALID. Exact native policy was RESOLVED phase 8/generation 6 before scoped completed-test bookkeeping retirement; verified readback had no owed work, then both boards naturally slept with the production Pacific timers."
+  },
+  "published_manual_test_release_160": {
+    "version": "6.4.160",
+    "status": "PUBLISHED_VERSION_ONLY_BUMP_USER_MANUAL_TEST_PENDING",
+    "artifact_source_commit": "957ca816aaf1e90a5fe67b75f891e9d70e44f486",
+    "artifact_source_firmware_tree": "41abf6705e180038d27a57a6a103220a9485e1f8",
+    "build_id": "6.4.160-20260914T233149Z-957ca816aaf1",
+    "runtime_baseline": "6.4.159",
+    "runtime_changed": false,
+    "resource_deltas": {
+      "sense": {
+        "size": 0,
+        "static_ram_bytes": 0,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": 0
+      },
+      "lcd": {
+        "size": 0,
+        "static_ram_bytes": 0,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": 0
+      }
+    },
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/RELEASE-PAIR.json",
+      "sha256": "67144809d9d2025f0fed4eb8ca8985e89dbe23f77f5c01c7be188a3dfce815ab"
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/PUBLISHED.json",
+      "sha256": "8b586e941c22152913b5da67a436cabfa7c91f8e64f1d11713858157b11866c4"
+    },
+    "build_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/BUILD-REVIEW.json",
+      "sha256": "8a3dbaa0cf496bdf643a66074da376baf1786e6713bc685c27203202232955f8"
+    },
+    "release_tag": "halo-v6.4.160",
+    "release_tag_receipt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation160/RELEASE-TAG.json",
+      "sha256": "5df78797cfba82c1292b44a72b91634e65457f1cb5e97b0b1d84491eb7e39d78"
+    },
+    "hardware_actions_this_release": 0,
+    "allowance_reset_performed": false,
+    "git_remote_push_performed": false
   }
 }

@@ -1,6 +1,6 @@
 # HALO Firmware Agent Guide
 
-- Latest working code: use `RELEASE_BASELINE.json.current_working_source` (159 LCD wake fix) and read `docs/LCD_USER_WAKE_159.md`. Preserve frozen158 as the recovery/previous scheduled qualification reference; do not revert the159 wake fix for subsequent releases. Public latest159; the assembled unit is LCD159/Sense158 until its next eligible OTA.
+- Latest working code: use `RELEASE_BASELINE.json.current_working_source` (159 LCD wake fix) and read `docs/LCD_USER_WAKE_159.md`. Preserve frozen158 as the recovery/previous scheduled qualification reference; do not revert the159 wake fix for subsequent releases. Public latest160 (version-only bump); the assembled unit is LCD159/Sense158 until its next eligible OTA.
 
 ## Release Baseline
 
