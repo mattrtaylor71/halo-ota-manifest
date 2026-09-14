@@ -963,10 +963,9 @@ static void uart_process_received_message(const char* json_str) {
                   (unsigned long)LCD_OTA_LOCK_STAY_AWAKE_MS);
     // Publish existing OTA ownership before releasing the timer rendezvous.
     lcd_timer_receiver_wait_release("ota_lock");
-    // Wake display from idle-dark if needed
-    if (!coord[0] && g_idle_screen_dark) {
-      lcd_set_idle_screen_dark(false, "ota_lock");
-    }
+    // Publish visibility only. The UI task's existing OTA overlay wakes the
+    // panel under its LVGL owner. A UART-side panel command can race that
+    // first render on the same SPI device and strand both its queue and UI.
     Serial.println("[OTA] lock received - blocking LCD OTA");
     // Do NOT touch LVGL here — this runs on Core 0 (UART task).
     // Calling lv_obj_clean/lv_label_create corrupts LVGL state and

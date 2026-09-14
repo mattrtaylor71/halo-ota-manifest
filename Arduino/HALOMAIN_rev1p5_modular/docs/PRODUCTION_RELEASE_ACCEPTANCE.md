@@ -1,3 +1,21 @@
+# September 14: display ownership correction, candidate147
+
+Legacy OTA_LOCK now leaves panel wake to the existing UI task, preventing a concurrent UART-side command to the same SPI display. The actual-source interleaving regression reproduces the old double entry and passes with this one-file correction; independent source review and the focused flash/render/UART recovery regressions pass. The500ms quiescence deadline, DMA completion proof, watchdogs and visual design are unchanged. This is source validation only;147 has not yet been built, installed or published.
+
+The existing144→145 case remains untouched. Its automatic retry fired; after a UART-task watchdog and verified rebooted-peer cleanup, a second BEGIN was accepted and the LCD transfer passed70% at00:54. This is live progress, not a completed case or full scheduled pass. Initial-episode failures remain archived below.
+
+# Scheduled 144 → 145: initial episode archived; native retry pending
+
+The 00:45 scheduled run acquired fresh time on its first SNTP attempt (1,808ms) and parsed both exact 145 manifests. The secondary clock attempt was not exercised. Both LCD BEGIN requests were refused after the 500 ms render-quiescence deadline; the LCD `ui_task` later watchdog-reset. Sense preserved the target and armed a native retry: phase 5/gen7, Sense 1789372193 (00:49:53), LCD 1789372178 (00:49:38). **The initial episode is archived; the overall case and native retry outcome remain pending.** No image transfer was accepted in the initial episode. The separate native retry has since accepted session 63727, drained rendering in 0 ms and persisted at least 786,460 of 1,891,888 bytes; its final transfer and paired acceptance remain pending.
+
+Source review confirms that legacy `OTA_LOCK` can wake the panel directly from UART while the UI owner uses the same SPI display. That race matches the quiescence refusals and watchdog, although the actual blocked UI-task PC was not captured. A minimal ownership fix is in progress, not yet built or accepted. Published 145 and installed 144 remain the current pair; 146 is built/checked/sealed locally with unchanged 144 runtime, unpublished and withheld.
+
+Instrumentation is explicitly incomplete: first observer import failed before USB; replacement 91194 was intentionally stopped after both original descriptors naturally disappeared, closing with `CAPTURE_INCOMPLETE`/exit2 after 329.834 seconds. It did not complete the planned 570/600-second window. Separate passive retry capture 66305 has no overlap or device commands; its actual capture timestamp is 00:49:39.230, 1.230 seconds after the LCD target despite the earlier root launch, and its absolute stop is 00:58:30. No complete pre-wake coverage is claimed. The closed initial result, raw logs/events and source review are pinned in `INITIAL-EPISODE.json` and `RELEASE_BASELINE.json`.
+
+Closed campaign counts remain 0 passes, 1 missed 22:00 admission, 1 failed 22:40 transfer, 1 midnight clock failure and 1 skipped 23:00 slot. The open 00:45 episode adds two BEGIN refusals and one observed retry arm, not an overall case verdict. Secondary SNTP recovery, complete OTA acceptance and the six-hour clock-failure fallback gap remain open. Continue from source `a8a3cced632f08f15120ed0d006444c59bdcdd46` plus the focused pending fix; historical 117/139/143 evidence remains preserved. Earlier sections below are historical checkpoints.
+
+---
+
 # Fixed 142 → 143 scheduled acceptance — midnight armed, outcome pending
 
 The midnight capture is closed: the actual scheduled LCD timer triggered OTA, Wi-Fi connected, but the 15-second network-time attempt timed out before any manifest request. Both boards armed six-hour fallback wakes. No transfer or short automatic retry occurred. A post-window actuator wake and read-only ROM audit verified paired 142 health, absent policy and no partial-transfer debt; those resets are declared interventions. The failing NTP server/packet path and USB causation remain unproven.
