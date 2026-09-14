@@ -22,6 +22,16 @@ struct Work {
 };
 static Work work;
 static bool boot_reconciled=false;
+// Legacy completion must not cancel the readiness episode before enter()
+// commits the exact target's durable settlement. A checked RESOLVED record
+// also permits retrying legacy completion after its separate write failed.
+static bool postboot_completion_ready() {
+  if(absent())return true;
+  const auto* r=current();
+  return r&&r->phase==durable_ota::Phase::RESOLVED&&
+    durable_ota::target_valid(r->target)&&!strcmp(r->origin,g_coord_pending)&&
+    !strcmp(r->target.version,kFirmwareVersion);
+}
 // A refusal describes this invocation, not merely the retained campaign phase.
 static durable_ota::Admission last_admission=durable_ota::Admission::NOT_DUE;
 static bool admission_allowed(durable_ota::Admission result) {

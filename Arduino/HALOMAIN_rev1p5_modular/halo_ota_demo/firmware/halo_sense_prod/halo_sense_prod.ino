@@ -6224,6 +6224,9 @@ void halo_prod_loop() {
   }
   g_ota_pending_verify_active = g_health_gate.getPendingVerify() && !g_health_gate.getMarkedValid();
   if (g_coord_pending[0] && g_coord_completion_target[0] &&
+#if HALO_DURABLE_OTA_POLICY
+      sense_policy::postboot_completion_ready() &&
+#endif
       strcmp(g_coord_completion_target, kFirmwareVersion) == 0 && !get_lcd_ota_due_nvs()) {
     const esp_partition_t* running = esp_ota_get_running_partition();
     esp_ota_img_states_t state;

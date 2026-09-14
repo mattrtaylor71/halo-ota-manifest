@@ -632,7 +632,7 @@
     "sha256": "3e4e7da8768ec49e779d7010e36feca7a0e047b53cd8a5fe9abab08f0adef727"
   },
   "next_focused_fix": "docs/OTA_RETRY_NEXT_FIX.md (historical diagnosis and implemented readiness correction)",
-  "test_automation_status": "PAUSED",
+  "test_automation_status": "ACTIVE_OVERNIGHT_SCHEDULED_FIX_AND_TEST",
   "previous_112_artifact_source_commit": "b6ff853e4e3aa4f014a45a48230351bbed802d7c",
   "previous_112_artifact_source_firmware_tree": "8529653e0c187f0b2c1c47689f03de2efe11d5ea",
   "previous_112_release_artifact_manifest": {
@@ -984,67 +984,48 @@
   "production_publication_closure": null,
   "qualified_baseline_version": "6.4.117",
   "development_baseline": {
-    "version": "6.4.145",
-    "status": "CLOCK_FIX_PUBLISHED_145_INSTALLED_RUNTIME144_ACCEPTANCE_PENDING",
-    "artifact_source_commit": "a8a3cced632f08f15120ed0d006444c59bdcdd46",
-    "artifact_source_firmware_tree": "d3e01b86bd2f89e8eedb6f88923aa45d639f29f4",
-    "build_id": "6.4.145-20260914T072430Z-a8a3cced632f",
+    "version": "6.4.147",
+    "status": "INSTALLED147_HOST_VALIDATED_DURABLE145_SETTLEMENT_OPEN",
+    "artifact_source_commit": "06650a1685c660eaf149bd275625e9bbb9a059b4",
+    "artifact_source_firmware_tree": "f9667a5ddc4e7351a96ec7323f8d4dca7e27f7d8",
+    "build_id": "6.4.147-20260914T075757Z-06650a1685c6",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/RELEASE-PAIR.json",
-      "sha256": "f7719e2c2ff36df611e0d8987d5aed18128eb4c1f10f95fdb6a831f45b9d1452"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/RELEASE-PAIR.json",
+      "sha256": "ef38897f45463d332e429c0dd0cfcad28092f54abefa6f324856731c30365f6d"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/SOURCE-SCOPE.json",
-      "sha256": "b3488861ab6e815d91885daff76cba20081ca91d652ca67f3244c0dfcc0e47b3"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/SOURCE-SCOPE.json",
+      "sha256": "7387635d386c649313e25257bb805b1faaa0c4a9adb40c13ef9e391045965e4e"
     },
-    "verified_publication": {
+    "build_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/BUILD-CLOSURE.json",
+      "sha256": "b7391279668b117b320bddca3d2d453bbd2f31776abffb0d1233889a5d47d4f9"
+    },
+    "host_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/HOST-VALIDATION.json",
+      "sha256": "c10281fe891a06ad8a1178aabf966e026e901bb4212a86977037b7997649f6c3"
+    },
+    "installation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/install001/result.json",
+      "sha256": "67f5521640dd1a57a77db18e9db5bc91c7415a58130421fedba686add243e360"
+    },
+    "paired_SDK_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/identity001/identity.json",
+      "sha256": "68b50cb2729d730ccd0921c6c440b66b4d99634b000365183ea574a5ab6b9de8"
+    },
+    "published": false,
+    "current_publication_version": "6.4.145",
+    "current_publication_receipt": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/PUBLISHED.json",
       "sha256": "72f1090ca42ddd1a8a9837512424578dccd305f528a84d4e3f0681fa8bae3d3d"
     },
-    "build_closure": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/BUILD-CLOSURE.json",
-      "sha256": "1501e805557d23b0a3fe2ffe2e1ca2ac2ef76c70deeaf54d728e0452e3e75fe3"
+    "same_runtime_local_target_version": "6.4.148",
+    "same_runtime_local_target_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation148/RELEASE-PAIR.json",
+      "sha256": "1385792b3eaadfbcbce237bf421fe693063f49a26a6455a1120b3faf6631a602"
     },
-    "host_validation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/HOST-VALIDATION.json",
-      "sha256": "c0b9f04fe90727dfc0659b7e7f39224a4c0c9663a01e542f4f53c2d71a1de8a0"
-    },
-    "SDK_SNTP_timing_review": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/SDK-SNTP-TIMING-REVIEW.json",
-      "sha256": "80f5cc938478e4d78f939e9257a2cd2145d9172a8b2101807ee0d85bc478cb34"
-    },
-    "installed_runtime_baseline_version": "6.4.144",
-    "installed_runtime_baseline_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/RELEASE-PAIR.json",
-      "sha256": "422e0a8433eace8785c42eb7c2d8950fbb78a0b2c89ee462c8fc1043cce1d370"
-    },
-    "installation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/install001/result.json",
-      "sha256": "c0777ee9a42992e251bb5435204aac39aa2aa394f96e84622d6e6c744f74f07f"
-    },
-    "paired_SDK_health": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/installed-identity001.json",
-      "sha256": "1b758c7515e1819da8b16358e7a53d69620a7a98ff7165a285e5ea568b0ba9ff"
-    },
-    "fresh_case_identity": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/identity001/identity.json",
-      "sha256": "c2894a113f803a2d49d43442c15f49fce98f6f22d8f06964660910630c79c646"
-    },
-    "publication_status": "Both145 latest manifests and full binaries verified.144 USB bootstrap was not published.145 shares144 runtime; only generated version metadata differs.",
-    "device_acceptance": "Paired144 SDK VALID after USB bootstrap and fresh Home/idle before schedule.00:45 native admission, primarySNTP and both145 manifests confirmed, but LCD BEGINs refused and ui_task watchdog reset. Native retry arm observed; execution/outcome pending. SecondarySNTP unexercised.145 transfer/paired acceptance remains incomplete.",
-    "instruction": "Continue from a8a3cced632f08f15120ed0d006444c59bdcdd46 and subsequent committed records in this production checkout. Use prepare_next_release144.py for future version-only hourly packages. Preserve existing LCD/UI/watchdog/reboot fixes, shipping flags, partitions and manual/active-policy budgets.144 is installed,145 is published; neither same-wake clock recovery nor a full scheduled145 transfer is yet accepted. The six-hour fallback after a failed wake remains an open recovery gap.",
-    "next_version_helper": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/tools/prepare_next_release144.py",
-      "sha256": "015b45fd8afac007ab79509a573d06783bcb24c519fad3791ee654fe32f6241b"
-    },
-    "next_version_helper_validation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/tools/PREPARE-NEXT144-HOST.json",
-      "sha256": "3048bb61ab2285dea8e3526eff6a0abe0d2fbe8c4d563a03efcdad09ef4d92ea"
-    },
-    "initial_scheduled_episode": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/INITIAL-EPISODE.json",
-      "sha256": "9277e18835ef599b2a6ef2478abdb8945b9ee06ffef78857077dfb84687e5258"
-    }
+    "device_acceptance": "Fresh147/app0 SDK VALID/Home after explicit USB bootstrap preserving145 fallback and NVS. Installer summary SDK-health-not-yet-observed is retained; fresh identity supplies health separately. Recovered145 paired installation=1; durable APPLY/gen12 in pre147 snapshot means fully settled scheduled acceptance=0.",
+    "instruction": "Continue from147 source06650a1685c660eaf149bd275625e9bbb9a059b4 in this production checkout.148 is sealed locally but withheld; latest published145. Do not clear credits/debt or stage148 while native durable145 settlement remains unresolved. Preserve existing UI, shipping flags, partitions, manual budgets and historical recovery evidence."
   },
   "published_manual_test_releases": [
     {
@@ -1619,32 +1600,20 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.144",
+    "version": "6.4.147",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/RELEASE-PAIR.json",
-      "sha256": "422e0a8433eace8785c42eb7c2d8950fbb78a0b2c89ee462c8fc1043cce1d370"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/RELEASE-PAIR.json",
+      "sha256": "ef38897f45463d332e429c0dd0cfcad28092f54abefa6f324856731c30365f6d"
     },
     "receipt": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/identity001/identity.json",
-      "sha256": "c2894a113f803a2d49d43442c15f49fce98f6f22d8f06964660910630c79c646"
-    },
-    "closed_install_identity": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/installed-identity001.json",
-      "sha256": "1b758c7515e1819da8b16358e7a53d69620a7a98ff7165a285e5ea568b0ba9ff"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/identity001/identity.json",
+      "sha256": "68b50cb2729d730ccd0921c6c440b66b4d99634b000365183ea574a5ab6b9de8"
     },
     "installation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/install001/result.json",
-      "sha256": "c0777ee9a42992e251bb5435204aac39aa2aa394f96e84622d6e6c744f74f07f"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/install001/result.json",
+      "sha256": "67f5521640dd1a57a77db18e9db5bc91c7415a58130421fedba686add243e360"
     },
-    "scope": "Pre-schedule paired144 SDK VALID/Home and closed timer setup remain verified. Subsequent LCD watchdog is archived in INITIAL-EPISODE.json; no new complete paired postfailure health acceptance is claimed.",
-    "scheduled_setup": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/setup001/result.json",
-      "sha256": "f671aae4c4ce6cca0288f9b66541a840b4064b94a6cca782dfcceadf06fb4700"
-    },
-    "subsequent_initial_0045_episode": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/INITIAL-EPISODE.json",
-      "sha256": "9277e18835ef599b2a6ef2478abdb8945b9ee06ffef78857077dfb84687e5258"
-    }
+    "scope": "Fresh closed identity confirms both147/app0 SDK VALID, LCD idle and Home after explicit USB bootstrap.145 fallback and NVS preserved. No policy settlement, scheduled147 pass or physical power-cycle qualification."
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -1699,33 +1668,38 @@
     "scope": "Exact installed 123/app0/SDK VALID on both boards, with full current 123 and fallback 122 bank hashes verified and fresh closed post-clear LCD idle/CRC. This records post-manual installed health; transfer timing and a new 124 installation are not claimed."
   },
   "working_candidate": {
-    "version": "6.4.145",
-    "status": "PUBLISHED145_NATIVE_RETRY_TRANSFER_IN_PROGRESS_OUTCOME_PENDING",
-    "artifact_source_commit": "a8a3cced632f08f15120ed0d006444c59bdcdd46",
+    "version": "6.4.147",
+    "status": "INSTALLED147_LOCAL148_WITHHELD_PENDING_DURABLE_POLICY_SETTLEMENT",
+    "artifact_source_commit": "06650a1685c660eaf149bd275625e9bbb9a059b4",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/RELEASE-PAIR.json",
-      "sha256": "f7719e2c2ff36df611e0d8987d5aed18128eb4c1f10f95fdb6a831f45b9d1452"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/RELEASE-PAIR.json",
+      "sha256": "ef38897f45463d332e429c0dd0cfcad28092f54abefa6f324856731c30365f6d"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/SOURCE-SCOPE.json",
-      "sha256": "b3488861ab6e815d91885daff76cba20081ca91d652ca67f3244c0dfcc0e47b3"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/SOURCE-SCOPE.json",
+      "sha256": "7387635d386c649313e25257bb805b1faaa0c4a9adb40c13ef9e391045965e4e"
     },
-    "verified_publication": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/PUBLISHED.json",
-      "sha256": "72f1090ca42ddd1a8a9837512424578dccd305f528a84d4e3f0681fa8bae3d3d"
-    },
-    "based_on_version": "6.4.144",
-    "published": true,
-    "installed": false,
-    "scope": "Actual00:45 scheduled admission and primarySNTP succeeded; both exact145 manifests parsed. TwoLCD BEGINs refused at500ms quiescence; LCD ui_task watchdog followed. Native phase5/gen7 retry armed. Separate retry capture ongoing; no overall145 case verdict.",
+    "published": false,
+    "installed": true,
+    "current_publication_version": "6.4.145",
+    "local_target_version": "6.4.148",
+    "scope": "147 panel-wake fix installed;148 same-runtime target sealed locally. Prior native145 paired recovery established; durable policy settlement not established.",
     "pending": [
-      "Observe existing native retry capture66305 to closure; do not substitute manual/USB repair",
-      "Validate minimal UARTpanel-wake ownership fix after current case closes",
-      "Complete an actual scheduled transfer and exact paired health/settlement",
-      "Verify secondarySNTP recovery when exercised and resolve six-hour clock fallback gap",
-      "Restore2amPacific/history after closed campaign while preserving failed debt"
+      "Fix confirmed legacy-completion/durable-settlement ordering gap without clearing credits or145 debt",
+      "Prove exact145 native settlement before staging any newer target or opening a new case",
+      "Validate147 panel-wake fix in actual scheduled OTA",
+      "Verify secondarySNTP path and six-hour clock-failure recovery",
+      "Restore2amPacific/history after closure preserving unresolved obligations"
     ],
-    "instruction": "Continue from a8a3cced632f08f15120ed0d006444c59bdcdd46 and subsequent committed records in this production checkout. Use prepare_next_release144.py for future version-only hourly packages. Preserve existing LCD/UI/watchdog/reboot fixes, shipping flags, partitions and manual/active-policy budgets.144 is installed,145 is published; neither same-wake clock recovery nor a full scheduled145 transfer is yet accepted. The six-hour fallback after a failed wake remains an open recovery gap."
+    "instruction": "Continue from147 source06650a1685c660eaf149bd275625e9bbb9a059b4 in this production checkout.148 is sealed locally but withheld; latest published145. Do not clear credits/debt or stage148 while native durable145 settlement remains unresolved. Preserve existing UI, shipping flags, partitions, manual budgets and historical recovery evidence.",
+    "native_policy_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/postimage-policy001/REVIEW.json",
+      "sha256": "a643ff89ec63617def79ee0b3862cc6df0a4dcb18315dd3730c5e74770d6f3c4"
+    },
+    "native_resolution_ordering_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/native-resolution-review001/REVIEW.json",
+      "sha256": "efec33b3bebb9ffe0993423b5f47c127a943c7a1e57660cd1adba845a26ee5b3"
+    }
   },
   "previous_last_verified_device_health_126": {
     "version": "6.4.126",
@@ -2556,7 +2530,7 @@
     }
   ],
   "overnight_scheduled_campaign": {
-    "status": "INITIAL_0045_BEGIN_FAILURE_CLOSED_NATIVE_RETRY_OBSERVATION_ACTIVE",
+    "status": "PAIRED145_RECOVERED_DURABLE_POLICY_UNSETTLED_148_WITHHELD",
     "case_directory": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913",
     "first_due_epoch": 1789362000,
     "last_new_due_epoch": 1789394400,
@@ -2577,7 +2551,7 @@
     "firmware_runtime_changes": 8,
     "isolated_test_fixtures": 1,
     "scheduled_passes": 0,
-    "scope": "Closed outcomes remain22:00 missed admission,22:40 transfer failure,00:00 clockfailure and23:00 skipped;0fullscheduledpasses.00:45 initial episode reached clock/manifests but refused bothBEGINs and watchdog-resetLCD; native retry is armed and its separate observation pending. Do not add an overall00:45 failure/pass before native retry closure.",
+    "scope": "Original3failures remain:22:00miss,22:40transferfail,midnightclockfail.00:45 recovered both145 images/SDKVALID via native retry, but pre147NVS retains APPLY/gen12. Pairedinstall1/fullsettled0/clean0.23:00 and01:00 skipped.148 withheld; no credit/debt reset.",
     "independent_timer_review": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case01-2200-140/TIMER-ARM-REVIEW.json",
       "sha256": "9307f12b3f2b7dd17d33f8959da7491b8bb5b4c436460948288d20fec95495ba"
@@ -2695,12 +2669,18 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/ABSENT-POLICY-REVIEW.json",
       "sha256": "bb77acb02d40e5aa666de36c4a8c5c73245f60eb919ad3578d460a1baaf8731c"
     },
-    "native_retries": 0,
+    "native_retries": 1,
     "skipped_slots": [
       {
         "due_epoch": 1789365600,
         "due_local": "2026-09-13 23:00 PDT",
         "reason": "Failed140 transfer remains unresolved; focused142 fixes in canonical build",
+        "actual_attempt": false
+      },
+      {
+        "due_epoch": 1789372800,
+        "due_local": "2026-09-14 01:00 PDT",
+        "reason": "Repair/bootstrap and validation; durable settlement investigation",
         "actual_attempt": false
       }
     ],
@@ -2814,10 +2794,8 @@
     },
     "observation_ownership": {
       "cloud_tool_session_id": 65610,
-      "closed_initial_capture_tool_session_id": 91194,
-      "active_native_retry_capture_tool_session_id": 66305,
-      "capture_directory": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/native-retry003",
-      "instruction": "Consume the root-owned native retry capture. No device commands, resets, taps or overlapping observers."
+      "closed_native_retry_capture_tool_session_id": 66305,
+      "instruction": "Native retry capture is closed. Root owns next diagnostics; preserve actual debt and prove settlement before a new case."
     },
     "final_restoration": "Restore2amPacific and legitimate history only after closure using exact retirement003/clean142 receipt chain; preserve new unresolved debt. First142 setup is timezone-only, not ordinary NEW_CASE.",
     "active_automation": {
@@ -2828,7 +2806,7 @@
     "failed_cases": 3,
     "active_clock_case": {
       "case_id": "fixed144_to145_0045",
-      "phase": "NATIVE_RETRY_TRANSFER_IN_PROGRESS_OUTCOME_PENDING",
+      "phase": "PAIRED_INSTALL_COMPLETE_DURABLE_POLICY_UNSETTLED",
       "due_epoch": 1789371900,
       "due_local": "2026-09-14 00:45 PDT",
       "from_version": "6.4.144",
@@ -2911,7 +2889,7 @@
           "requested_stop_epoch": 1789372710.0,
           "overlap_with_initial_capture": false,
           "handoff_gap_s": 9.699976921081543,
-          "outcome": "PENDING_SEPARATE_CAPTURE",
+          "outcome": "CLOSED_PAIRED145_INSTALL_RECOVERED_DURABLE_POLICY_NOT_SETTLED",
           "timing_limit": "Actual capture started1.230seconds after the LCD retry target, despite earlier root launch; do not claim it covered the entire pre-wake interval."
         }
       },
@@ -2930,15 +2908,77 @@
       "native_retry_armed": true,
       "native_retry_Sense_due": 1789372193,
       "native_retry_LCD_due": 1789372178,
-      "overall_case_verdict": "PENDING_NATIVE_RETRY",
-      "native_retry_interim": {
-        "LCD_session": 63727,
-        "BEGIN_accepted": true,
-        "render_quiesce_elapsed_ms": 0,
-        "persisted_offset_at_least": 786460,
-        "target_size": 1891888,
-        "scope": "Observed in still-open native-retry003 capture; actual native retry progressed into image transfer. This is an interim observation, not completed transfer, paired acceptance or overall case success.",
-        "raw_path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/native-retry003/lcd.raw"
+      "overall_case_verdict": "PAIRED_INSTALL_COMPLETE_SETTLEMENT_PENDING",
+      "actual_success": false,
+      "paired_install_complete": true,
+      "recovered_paired_installs": 1,
+      "full_settled_scheduled_passes": 0,
+      "settlement_correction": {
+        "status": "PAIRED145_INSTALL_COMPLETE_DURABLE_POLICY_UNSETTLED",
+        "recovered_paired_installs": 1,
+        "full_settled_scheduled_passes": 0,
+        "clean_first_attempt_passes": 0,
+        "prior_verdict_superseded": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/VERDICT.json",
+          "sha256": "4ffdd5cd2b712a3086b2b4bc14f7c076b25ea091e9c4f1ecd465b7a042aa20fd"
+        },
+        "closed_native_retry_capture": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/native-retry003/RESULT.json",
+          "sha256": "f332b5d7f777d21c6ad4303b55ad57071f5a6b1372bb60e1e007575d7bb45eee"
+        },
+        "prior_independent_native_review": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/NATIVE-RETRY-REVIEW.json",
+          "sha256": "1a7381711b4a6898162eaa9ac05de66a370b293df94911715a5003bf1abc2e7e"
+        },
+        "post_window145_identity": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/post-window-identity001/identity.json",
+          "sha256": "026b2f1c4d3c567dc26cd61b2d1e5a31dd4c7d673e167fd6eb41b6ff7545279a"
+        },
+        "actual_pre147_install_NVS": {
+          "sense": {
+            "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/install001/sense-nvs-before.bin",
+            "sha256": "58a914a35fd6342567c22564a3f47db50841ddb8d4d15874fdca779d8326f6f4"
+          },
+          "lcd": {
+            "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/install001/lcd-nvs-before.bin",
+            "sha256": "78738ca6f7d103d17b3696b022c3a4295a8bada3b114ae572a84308a51c4a4b4"
+          }
+        },
+        "actual_policy_observation": {
+          "phase": 3,
+          "phase_name": "APPLY",
+          "generation": 12,
+          "scope": "Native decoding confirms APPLY/gen12 and reserved work in frozen pre147 installer NVS, unchanged through its final readback. This is not a fresh policy read after147 application execution. Both145 SDK VALID/coordinator done_ids/sleep do not establish durable settlement.",
+          "network_windows": 2,
+          "day_attempts": 2,
+          "Sense_apply_begins": 1,
+          "LCD_apply_begins": 4,
+          "reserved_work_ms": 1498000
+        },
+        "receipt_correction": "VERDICT-v3 binds frozen native decoding and source ordering review; original and v2 verdicts and earlier peer review remain immutable. Recovered paired install1, fully settled scheduled0, clean0.",
+        "credits_or_debt_reset": false,
+        "new_release_staging_allowed": false,
+        "corrected_verdict": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/VERDICT-v3.json",
+          "sha256": "ee254fb56363ae9156f174aff47f9320852959581e355cc72af2a52e5eeda9d9"
+        },
+        "prior_v2_verdict": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/VERDICT-v2.json",
+          "sha256": "5fc5cadf2516f6e6936c9390cfcb438b4517782564867c6b12d318cb97fbfc50"
+        },
+        "native_policy_review": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/postimage-policy001/REVIEW.json",
+          "sha256": "a643ff89ec63617def79ee0b3862cc6df0a4dcb18315dd3730c5e74770d6f3c4"
+        },
+        "native_resolution_ordering_review": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/native-resolution-review001/REVIEW.json",
+          "sha256": "efec33b3bebb9ffe0993423b5f47c127a943c7a1e57660cd1adba845a26ee5b3"
+        },
+        "confirmed_ordering_gap": "Legacy coordinator completion can commit done_ids and cancel boot work before the bounded durable exact-target reconciliation runs. The145 obligation remains active; a newer147 image cannot satisfy exact145 target identity."
+      },
+      "verdict": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/VERDICT-v3.json",
+        "sha256": "ee254fb56363ae9156f174aff47f9320852959581e355cc72af2a52e5eeda9d9"
       }
     },
     "last_completed_case": {
@@ -2985,13 +3025,81 @@
       "physical_acceptance": false,
       "outstanding": [
         "Actual same-wake secondary-clock recovery",
-        "Complete scheduled145 transfer and exact paired health/settlement",
+        "Durable exact145 policy settlement after recovered paired transfer and health",
         "Short retry across sleep after failed clock acquisition; six-hour fallback remains"
       ]
     },
     "initial_0045_failed_episodes": 1,
     "native_retry_arms_observed": 1,
-    "successful_native_retries": 0
+    "successful_native_retries": 0,
+    "full_settled_scheduled_passes": 0,
+    "automatically_recovered_scheduled_passes": 0,
+    "recovered_paired_installs": 1,
+    "clean_first_attempt_scheduled_passes": 0,
+    "native_retry_paired_installs": 1,
+    "case03_settlement_correction": {
+      "status": "PAIRED145_INSTALL_COMPLETE_DURABLE_POLICY_UNSETTLED",
+      "recovered_paired_installs": 1,
+      "full_settled_scheduled_passes": 0,
+      "clean_first_attempt_passes": 0,
+      "prior_verdict_superseded": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/VERDICT.json",
+        "sha256": "4ffdd5cd2b712a3086b2b4bc14f7c076b25ea091e9c4f1ecd465b7a042aa20fd"
+      },
+      "closed_native_retry_capture": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/native-retry003/RESULT.json",
+        "sha256": "f332b5d7f777d21c6ad4303b55ad57071f5a6b1372bb60e1e007575d7bb45eee"
+      },
+      "prior_independent_native_review": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/NATIVE-RETRY-REVIEW.json",
+        "sha256": "1a7381711b4a6898162eaa9ac05de66a370b293df94911715a5003bf1abc2e7e"
+      },
+      "post_window145_identity": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/post-window-identity001/identity.json",
+        "sha256": "026b2f1c4d3c567dc26cd61b2d1e5a31dd4c7d673e167fd6eb41b6ff7545279a"
+      },
+      "actual_pre147_install_NVS": {
+        "sense": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/install001/sense-nvs-before.bin",
+          "sha256": "58a914a35fd6342567c22564a3f47db50841ddb8d4d15874fdca779d8326f6f4"
+        },
+        "lcd": {
+          "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/install001/lcd-nvs-before.bin",
+          "sha256": "78738ca6f7d103d17b3696b022c3a4295a8bada3b114ae572a84308a51c4a4b4"
+        }
+      },
+      "actual_policy_observation": {
+        "phase": 3,
+        "phase_name": "APPLY",
+        "generation": 12,
+        "scope": "Native decoding confirms APPLY/gen12 and reserved work in frozen pre147 installer NVS, unchanged through its final readback. This is not a fresh policy read after147 application execution. Both145 SDK VALID/coordinator done_ids/sleep do not establish durable settlement.",
+        "network_windows": 2,
+        "day_attempts": 2,
+        "Sense_apply_begins": 1,
+        "LCD_apply_begins": 4,
+        "reserved_work_ms": 1498000
+      },
+      "receipt_correction": "VERDICT-v3 binds frozen native decoding and source ordering review; original and v2 verdicts and earlier peer review remain immutable. Recovered paired install1, fully settled scheduled0, clean0.",
+      "credits_or_debt_reset": false,
+      "new_release_staging_allowed": false,
+      "corrected_verdict": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/VERDICT-v3.json",
+        "sha256": "ee254fb56363ae9156f174aff47f9320852959581e355cc72af2a52e5eeda9d9"
+      },
+      "prior_v2_verdict": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/VERDICT-v2.json",
+        "sha256": "5fc5cadf2516f6e6936c9390cfcb438b4517782564867c6b12d318cb97fbfc50"
+      },
+      "native_policy_review": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/postimage-policy001/REVIEW.json",
+        "sha256": "a643ff89ec63617def79ee0b3862cc6df0a4dcb18315dd3730c5e74770d6f3c4"
+      },
+      "native_resolution_ordering_review": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/native-resolution-review001/REVIEW.json",
+        "sha256": "efec33b3bebb9ffe0993423b5f47c127a943c7a1e57660cd1adba845a26ee5b3"
+      },
+      "confirmed_ordering_gap": "Legacy coordinator completion can commit done_ids and cancel boot work before the bounded durable exact-target reconciliation runs. The145 obligation remains active; a newer147 image cannot satisfy exact145 target identity."
+    }
   },
   "previous_single_2am_observation_plan": {
     "status": "SUPERSEDED_BEFORE_DUE_BY_USER_HOURLY_TEST_REQUEST",
@@ -3017,20 +3125,26 @@
     "scope": "One actual native2am139-to140 campaign and observation of its genuine retries. No accelerated future-day credit consumption."
   },
   "prepared_next_hourly_release": {
-    "version": "6.4.145",
-    "published": true,
+    "version": "6.4.148",
+    "status": "LOCAL_SEALED_WITHHELD_POLICY_SETTLEMENT_OPEN",
+    "published": false,
     "installed": false,
-    "status": "PUBLISHED_0045_TARGET_ACCEPTANCE_PENDING",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/RELEASE-PAIR.json",
-      "sha256": "f7719e2c2ff36df611e0d8987d5aed18128eb4c1f10f95fdb6a831f45b9d1452"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation148/RELEASE-PAIR.json",
+      "sha256": "1385792b3eaadfbcbce237bf421fe693063f49a26a6455a1120b3faf6631a602"
     },
-    "verified_publication": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/PUBLISHED.json",
-      "sha256": "72f1090ca42ddd1a8a9837512424578dccd305f528a84d4e3f0681fa8bae3d3d"
+    "build_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation148/BUILD-CLOSURE.json",
+      "sha256": "c72ddd67b34fe6b58af2456d45cea8e10c435b0f6608b2be525428f0e821de13"
     },
-    "runtime_baseline": "6.4.144",
-    "scope": "Generated version metadata only; no completed scheduled pass."
+    "build_tool_session_id": 36550,
+    "checker_tool_session_id": 50126,
+    "build_and_check_exit_codes": [
+      0,
+      0
+    ],
+    "runtime_baseline": "6.4.147",
+    "scope": "Identical147 committed source except three generated identity headers; all resource deltas0. No staging, promotion or OTA acceptance."
   },
   "focused_runtime_fix_in_development": {
     "status": "COMMITTED_BUILT142_INSTALLED_PUBLISHED143_ACCEPTANCE_PENDING",
@@ -3425,29 +3539,213 @@
     }
   },
   "next_LCD_panel_wake_fix": {
-    "status": "SOURCE_FIXED_FOCUSED_TESTS_AND_INDEPENDENT_REVIEW_PASS_NOT_BUILT",
-    "source_review": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/display-wake-review001/REVIEW.json",
-      "sha256": "e9b3d77d033a7a5e1fb82b5024996e339c24bfb8e605cd90239c9c2b29145d9f"
+    "version": "6.4.147",
+    "status": "COMMITTED_BUILT_INSTALLED_HOST_VALIDATED_SCHEDULED_ACCEPTANCE_PENDING",
+    "source_commit": "06650a1685c660eaf149bd275625e9bbb9a059b4",
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/SOURCE-SCOPE.json",
+      "sha256": "7387635d386c649313e25257bb805b1faaa0c4a9adb40c13ef9e391045965e4e"
     },
-    "scope": "Serialize panel wake through existing UI owner; remove direct legacy OTA_LOCK UARTpanel wake. Preserve500ms quiescence and actualDMA drain. Source race confirmed; physical blockedUI PC unavailable.",
-    "installed": false,
-    "published": false,
-    "physical_acceptance": false,
-    "candidate_version": "6.4.147",
     "host_validation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/display-owner-fix/host-tests001.json",
-      "sha256": "7d9337ee924bfc9df28fe7c334ff4a84cae7b6d033411c76fbdf603b23d91892"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/HOST-VALIDATION.json",
+      "sha256": "c10281fe891a06ad8a1178aabf966e026e901bb4212a86977037b7997649f6c3"
     },
-    "independent_source_review": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/display-wake-review001/SOURCE-PEER147.json",
-      "sha256": "91a983df0b44e7ba2050244258cc9225ddd3b750686a5a7b5cfadc8d2f97cce0"
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/RELEASE-PAIR.json",
+      "sha256": "ef38897f45463d332e429c0dd0cfcad28092f54abefa6f324856731c30365f6d"
     },
-    "runtime_paths": [
-      "LCD_Minimal/lcd_uart_rx.h"
+    "installation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/install001/result.json",
+      "sha256": "67f5521640dd1a57a77db18e9db5bc91c7415a58130421fedba686add243e360"
+    },
+    "fresh_identity": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/identity001/identity.json",
+      "sha256": "68b50cb2729d730ccd0921c6c440b66b4d99634b000365183ea574a5ab6b9de8"
+    },
+    "scope": "Only LCD_Minimal/lcd_uart_rx.h removes direct UART panel wake; existing UI owner handles wake.500ms quiescence and realDMA drain retained. Sense resource deltas0; LCDbinary-16/linked-12/static0/RTC0 vs144.",
+    "installed": true,
+    "published": false,
+    "physical_acceptance": false
+  },
+  "previous_development_baseline_145": {
+    "version": "6.4.145",
+    "status": "CLOCK_FIX_PUBLISHED_145_INSTALLED_RUNTIME144_ACCEPTANCE_PENDING",
+    "artifact_source_commit": "a8a3cced632f08f15120ed0d006444c59bdcdd46",
+    "artifact_source_firmware_tree": "d3e01b86bd2f89e8eedb6f88923aa45d639f29f4",
+    "build_id": "6.4.145-20260914T072430Z-a8a3cced632f",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/RELEASE-PAIR.json",
+      "sha256": "f7719e2c2ff36df611e0d8987d5aed18128eb4c1f10f95fdb6a831f45b9d1452"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/SOURCE-SCOPE.json",
+      "sha256": "b3488861ab6e815d91885daff76cba20081ca91d652ca67f3244c0dfcc0e47b3"
+    },
+    "verified_publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/PUBLISHED.json",
+      "sha256": "72f1090ca42ddd1a8a9837512424578dccd305f528a84d4e3f0681fa8bae3d3d"
+    },
+    "build_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/BUILD-CLOSURE.json",
+      "sha256": "1501e805557d23b0a3fe2ffe2e1ca2ac2ef76c70deeaf54d728e0452e3e75fe3"
+    },
+    "host_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/HOST-VALIDATION.json",
+      "sha256": "c0b9f04fe90727dfc0659b7e7f39224a4c0c9663a01e542f4f53c2d71a1de8a0"
+    },
+    "SDK_SNTP_timing_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/SDK-SNTP-TIMING-REVIEW.json",
+      "sha256": "80f5cc938478e4d78f939e9257a2cd2145d9172a8b2101807ee0d85bc478cb34"
+    },
+    "installed_runtime_baseline_version": "6.4.144",
+    "installed_runtime_baseline_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/RELEASE-PAIR.json",
+      "sha256": "422e0a8433eace8785c42eb7c2d8950fbb78a0b2c89ee462c8fc1043cce1d370"
+    },
+    "installation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/install001/result.json",
+      "sha256": "c0777ee9a42992e251bb5435204aac39aa2aa394f96e84622d6e6c744f74f07f"
+    },
+    "paired_SDK_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/installed-identity001.json",
+      "sha256": "1b758c7515e1819da8b16358e7a53d69620a7a98ff7165a285e5ea568b0ba9ff"
+    },
+    "fresh_case_identity": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/identity001/identity.json",
+      "sha256": "c2894a113f803a2d49d43442c15f49fce98f6f22d8f06964660910630c79c646"
+    },
+    "publication_status": "Both145 latest manifests and full binaries verified.144 USB bootstrap was not published.145 shares144 runtime; only generated version metadata differs.",
+    "device_acceptance": "Paired144 SDK VALID after USB bootstrap and fresh Home/idle before schedule.00:45 native admission, primarySNTP and both145 manifests confirmed, but LCD BEGINs refused and ui_task watchdog reset. Native retry arm observed; execution/outcome pending. SecondarySNTP unexercised.145 transfer/paired acceptance remains incomplete.",
+    "instruction": "Continue from a8a3cced632f08f15120ed0d006444c59bdcdd46 and subsequent committed records in this production checkout. Use prepare_next_release144.py for future version-only hourly packages. Preserve existing LCD/UI/watchdog/reboot fixes, shipping flags, partitions and manual/active-policy budgets.144 is installed,145 is published; neither same-wake clock recovery nor a full scheduled145 transfer is yet accepted. The six-hour fallback after a failed wake remains an open recovery gap.",
+    "next_version_helper": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/tools/prepare_next_release144.py",
+      "sha256": "015b45fd8afac007ab79509a573d06783bcb24c519fad3791ee654fe32f6241b"
+    },
+    "next_version_helper_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/tools/PREPARE-NEXT144-HOST.json",
+      "sha256": "3048bb61ab2285dea8e3526eff6a0abe0d2fbe8c4d563a03efcdad09ef4d92ea"
+    },
+    "initial_scheduled_episode": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/INITIAL-EPISODE.json",
+      "sha256": "9277e18835ef599b2a6ef2478abdb8945b9ee06ffef78857077dfb84687e5258"
+    }
+  },
+  "previous_working_candidate_145": {
+    "version": "6.4.145",
+    "status": "PUBLISHED145_NATIVE_RETRY_TRANSFER_IN_PROGRESS_OUTCOME_PENDING",
+    "artifact_source_commit": "a8a3cced632f08f15120ed0d006444c59bdcdd46",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/RELEASE-PAIR.json",
+      "sha256": "f7719e2c2ff36df611e0d8987d5aed18128eb4c1f10f95fdb6a831f45b9d1452"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/SOURCE-SCOPE.json",
+      "sha256": "b3488861ab6e815d91885daff76cba20081ca91d652ca67f3244c0dfcc0e47b3"
+    },
+    "verified_publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation145/PUBLISHED.json",
+      "sha256": "72f1090ca42ddd1a8a9837512424578dccd305f528a84d4e3f0681fa8bae3d3d"
+    },
+    "based_on_version": "6.4.144",
+    "published": true,
+    "installed": false,
+    "scope": "Actual00:45 scheduled admission and primarySNTP succeeded; both exact145 manifests parsed. TwoLCD BEGINs refused at500ms quiescence; LCD ui_task watchdog followed. Native phase5/gen7 retry armed. Separate retry capture ongoing; no overall145 case verdict.",
+    "pending": [
+      "Observe existing native retry capture66305 to closure; do not substitute manual/USB repair",
+      "Validate minimal UARTpanel-wake ownership fix after current case closes",
+      "Complete an actual scheduled transfer and exact paired health/settlement",
+      "Verify secondarySNTP recovery when exercised and resolve six-hour clock fallback gap",
+      "Restore2amPacific/history after closed campaign while preserving failed debt"
     ],
-    "built": false,
-    "actual_OTA_acceptance": false,
-    "behavior": "Legacy OTA_LOCK publishes visibility only; existing UI task wakes and renders the panel under LVGL. Retains the500ms quiesce deadline, realDMAcompletion proof andwatchdogs."
+    "instruction": "Continue from a8a3cced632f08f15120ed0d006444c59bdcdd46 and subsequent committed records in this production checkout. Use prepare_next_release144.py for future version-only hourly packages. Preserve existing LCD/UI/watchdog/reboot fixes, shipping flags, partitions and manual/active-policy budgets.144 is installed,145 is published; neither same-wake clock recovery nor a full scheduled145 transfer is yet accepted. The six-hour fallback after a failed wake remains an open recovery gap."
+  },
+  "previous_verified_device_health_144": {
+    "version": "6.4.144",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/RELEASE-PAIR.json",
+      "sha256": "422e0a8433eace8785c42eb7c2d8950fbb78a0b2c89ee462c8fc1043cce1d370"
+    },
+    "receipt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/identity001/identity.json",
+      "sha256": "c2894a113f803a2d49d43442c15f49fce98f6f22d8f06964660910630c79c646"
+    },
+    "closed_install_identity": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/installed-identity001.json",
+      "sha256": "1b758c7515e1819da8b16358e7a53d69620a7a98ff7165a285e5ea568b0ba9ff"
+    },
+    "installation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation144/install001/result.json",
+      "sha256": "c0777ee9a42992e251bb5435204aac39aa2aa394f96e84622d6e6c744f74f07f"
+    },
+    "scope": "Pre-schedule paired144 SDK VALID/Home and closed timer setup remain verified. Subsequent LCD watchdog is archived in INITIAL-EPISODE.json; no new complete paired postfailure health acceptance is claimed.",
+    "scheduled_setup": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/setup001/result.json",
+      "sha256": "f671aae4c4ce6cca0288f9b66541a840b4064b94a6cca782dfcceadf06fb4700"
+    },
+    "subsequent_initial_0045_episode": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hourly-scheduled140-20260913/case03-0045-145/INITIAL-EPISODE.json",
+      "sha256": "9277e18835ef599b2a6ef2478abdb8945b9ee06ffef78857077dfb84687e5258"
+    }
+  },
+  "local_target148": {
+    "version": "6.4.148",
+    "status": "LOCAL_SEALED_WITHHELD_POLICY_SETTLEMENT_OPEN",
+    "published": false,
+    "installed": false,
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation148/RELEASE-PAIR.json",
+      "sha256": "1385792b3eaadfbcbce237bf421fe693063f49a26a6455a1120b3faf6631a602"
+    },
+    "build_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation148/BUILD-CLOSURE.json",
+      "sha256": "c72ddd67b34fe6b58af2456d45cea8e10c435b0f6608b2be525428f0e821de13"
+    },
+    "build_tool_session_id": 36550,
+    "checker_tool_session_id": 50126,
+    "build_and_check_exit_codes": [
+      0,
+      0
+    ],
+    "runtime_baseline": "6.4.147",
+    "scope": "Identical147 committed source except three generated identity headers; all resource deltas0. No staging, promotion or OTA acceptance."
+  },
+  "next_ordered_settlement_fix149": {
+    "status": "SOURCE_CANDIDATE_HOST_VALIDATED_HARDWARE_PENDING",
+    "version": "6.4.149",
+    "runtime_paths": [
+      "halo_ota_demo/firmware/shared/SenseDurablePolicyRuntime.h",
+      "halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.ino"
+    ],
+    "host_validation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation149/HOST-VALIDATION.json",
+      "sha256": "aa1f3d7ade0acc23598fe05bb2a39e85c256764a6790780b9ef18b71484ef53f"
+    },
+    "preflight": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation149/preflight001/RESULT.json",
+      "sha256": "3df0e5ff1e5a848cf664b34b389c90504d0476438c6458304276ce995f4145f9"
+    },
+    "scope": "Require committed matching durable RESOLVED before legacy postboot completion; original exact-image, fresh-peer and budgeted reconciliation reused. Unknown/corrupt debt remains blocked; typed absent compatibility retained.",
+    "published": false,
+    "installed": false,
+    "scheduled_acceptance": false
+  },
+  "explicit_retained145_return": {
+    "result": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/return145-001/result.json",
+      "sha256": "e586d682ab623591c9c02a5b2fdea35c8fe86f599575676f1274766f8c85f1df"
+    },
+    "identity": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/hardware-validation147/retained145-identity001/identity.json",
+      "sha256": "a6894d2b80ecf48362a442c96f5c9c8a3b698a5d44e19634a99d4222cc19c5b3"
+    },
+    "selector_only": true,
+    "NVS_writes": 0,
+    "image_writes": 0,
+    "target_policy_before": {
+      "phase": 6,
+      "generation": 13
+    },
+    "native_resolution_pending": true,
+    "actual_scheduled_pass": false
   }
 }
