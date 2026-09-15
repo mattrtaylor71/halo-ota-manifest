@@ -49,55 +49,8 @@ static void sleep_defer_queued_background_uploads() {
     UploadJob queued = {};
     while (xQueueReceive(queue, &queued, 0) == pdTRUE) {
       bool saved = false;
-#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
-      // Try to persist each upload — persist_save overwrites previous slot,
-      // so last one wins. This is better than only saving the first one,
-      // because the most recent capture is typically the most important.
-      if (queued.image_buf && queued.image_len > 0) {
-        uint8_t next_retries = (queued.retries < 0xFF) ? (uint8_t)(queued.retries + 1) : 0xFF;
-        saved = upload_persist_save(queued, next_retries);
-        if (saved) {
-          saved_count++;
-          g_upload_persist_attempted_this_boot = true;
-          upload_persist_note_event("sleep_deferred", queued.mode, saved_count, next_retries);
-          Serial.printf("[SLEEP] deferred_upload_saved label=%s job_id=%lu mode=%s retries=%u saved_total=%u\n",
-                        label ? label : "upload",
-                        (unsigned long)queued.job_id,
-                        queued.mode,
-                        (unsigned)next_retries,
-                        (unsigned)saved_count);
-        }
-      }
-#endif
-      // LAST RESORT before destroying a user's capture: the SD spool.
-      //
-      // NVS/SPIFFS persistence is one small slot and fails routinely; this path
-      // used to go straight from "not persisted" to free(), which silently threw
-      // away the photo (measured 2026-08-21). The LCD's SD card is the fallback
-      // the spool exists to be, and the drain picks it up on a later wake.
-      if (!saved && !queued.is_voice && queued.image_buf && queued.image_len > 0) {
-        if (sense_spool_image_to_lcd(queued, queued.image_buf, queued.image_len)) {
-          saved = true;
-          saved_count++;
-          Serial.printf("[SLEEP] deferred_upload_spooled label=%s job_id=%lu mode=%s len=%u\n",
-                        label ? label : "upload",
-                        (unsigned long)queued.job_id,
-                        queued.mode,
-                        (unsigned)queued.image_len);
-          uart_send_sense_diag("upload", "sleep_spool", queued.mode,
-                               (int32_t)queued.job_id, "spooled_to_sd");
-        }
-      }
-      if (!saved) {
-        dropped_count++;
-        Serial.printf("[SLEEP] deferred_upload_dropped label=%s job_id=%lu mode=%s voice=%d PHOTO_LOST\n",
-                      label ? label : "upload",
-                      (unsigned long)queued.job_id,
-                      queued.mode,
-                      queued.is_voice ? 1 : 0);
-        uart_send_sense_diag("upload", "sleep_drop", queued.mode,
-                             (int32_t)queued.job_id, "queue_not_persisted");
-      }
+      saved = upload_persist_handle_failure(queued, "sleep_deferred");
+      if (saved) ++saved_count; else ++dropped_count;
       if (queued.image_buf) {
         free(queued.image_buf);
         queued.image_buf = NULL;
@@ -143,7 +96,9 @@ static bool queue_upload_job(uint32_t job_id,
                              size_t image_len,
                              uint8_t retries,
                              bool from_persisted,
-                             uint32_t created_epoch) {
+                             uint32_t created_epoch,
+                             const UploadJob::ImageEnvelope* image,
+                             bool from_image_sd) {
   if (!image_buf || image_len == 0) {
     return false;
   }
@@ -174,6 +129,10 @@ static bool queue_upload_job(uint32_t job_id,
   } else {
     memset(&job.camera_meta, 0, sizeof(job.camera_meta));
   }
+  job.from_image_sd = from_image_sd;
+  if (image) job.image = *image;
+  else if (from_persisted || !sense_image_freeze_envelope(job)) return false;
+  if (!sense_image_payload_matches(job)) return false;
   // Plain FIFO for every mode. Dish used to xQueueSendToFront and jump ahead of
   // captures the user took first; that priority existed only to shorten the wait
   // for the nutrition result, which no longer exists.
@@ -196,7 +155,9 @@ static bool queue_voice_upload_job(uint32_t job_id,
                                    size_t audio_len,
                                    uint8_t retries,
                                    bool from_persisted,
-                                   uint32_t created_epoch) {
+                                   uint32_t created_epoch,
+                                   const UploadJob::VoiceEnvelope* voice,
+                                   bool from_voice_sd) {
   if (!audio_buf || audio_len == 0 || !upload_queue || upload_queue_is_full()) {
     return false;
   }
@@ -211,6 +172,10 @@ static bool queue_voice_upload_job(uint32_t job_id,
   job.from_persisted = from_persisted;
   job.created_ms = millis();
   job.created_epoch = created_epoch;
+  job.from_voice_sd = from_voice_sd;
+  if (voice) job.voice = *voice;
+  else if (from_persisted || !sense_voice_freeze_envelope(job)) return false;
+  if (!sense_voice_envelope_valid(job)) return false;
   BaseType_t ok = xQueueSend(upload_queue, &job, pdMS_TO_TICKS(10));
   if (ok != pdTRUE) {
     return false;

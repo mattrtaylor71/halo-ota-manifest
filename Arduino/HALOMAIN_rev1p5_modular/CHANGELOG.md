@@ -1,3 +1,9 @@
+## Unreleased — offline photo and voice backup integration
+
+- Integrate corrected voice SD custody onto accepted162 and add a distinct checked photo queue with frozen request identity; preserve current OTA/camera/wake fixes.
+- Preserve UART input while transferring saved media; use full-length typed replies and verified backend custody before retirement.
+- Add bounded direct-USB offline diagnostics for device testing. Candidate only: build, installation and physical acceptance are not yet complete. See `docs/OFFLINE_MEDIA_BACKUP.md`.
+
 # September 15: camera input recovery162 accepted
 
 Fix Sense input starvation during upload cleanup before sleep and preserve unrelated commands during photo-backup READY waits. Retain the158 OTA safeguards,159 LCD wake fix, existing budgets and photo-storage policy. Both exact162 images are published and installed; both boards report SDK VALID. USB installation preserved NVS and the previous selected firmware banks, without clearing OTA allowance or recovery debt.

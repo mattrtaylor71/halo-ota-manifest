@@ -129,7 +129,9 @@ static void uart_task(void *arg) {
     // the inbound branch because the link can only carry one transfer at a time.
     if (g_spool_tx_pending) {
       g_spool_tx_pending = false;
-      lcd_spool_send_file(g_spool_tx_slot);
+      if (g_voice_tx_pending) lcd_voice_send_file();
+      else if (g_image_tx_pending) lcd_image_send_file();
+      else lcd_spool_send_file(g_spool_tx_slot);
       g_spool_tx_slot = 0;
       continue;
     }
@@ -138,7 +140,9 @@ static void uart_task(void *arg) {
     // Placed BEFORE the OTA branch: both use the same COBS transport, and if an
     // image transfer is in flight it must own the link until it finishes.
     if (g_img_rx_binary_mode) {
-      lcd_img_receive_loop();
+      if (g_voice_rx) lcd_voice_receive_loop();
+      else if (g_image_rx) lcd_image_receive_loop();
+      else lcd_img_receive_loop();
       vTaskDelay(pdMS_TO_TICKS(1));
       continue;
     }
@@ -429,6 +433,10 @@ static void uart_task(void *arg) {
             } else if (strcmp(usb_buf, "wifi") == 0) {
               Serial.println("[USB_CMD] shortcut 'wifi' -> dumping wifi summaries");
               diag_dump_wifi_summaries(Serial);
+            } else if (strcmp(usb_buf, "imagequeue") == 0) {
+              lcd_image_queue_diagnostic();
+            } else if (strcmp(usb_buf, "voicequeue") == 0) {
+              lcd_voice_queue_diagnostic();
             } else if (strcmp(usb_buf, "scan") == 0) {
               Serial.println("[USB_CMD] shortcut 'scan' -> INPUT_WIFI_SCAN");
               uart_send_input_message("INPUT_WIFI_SCAN");

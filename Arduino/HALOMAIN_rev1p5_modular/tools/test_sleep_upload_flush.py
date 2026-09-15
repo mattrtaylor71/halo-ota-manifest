@@ -86,6 +86,13 @@ static bool sense_spool_image_to_lcd(const UploadJob&,const uint8_t*,size_t){
  if(on_spool)on_spool();
  delay(60);in_spool=false;return spool_succeeds;
 }
+// Storage custody remains an explicit boundary double. The production flush
+// now routes all media through one safe-store entry; callback/cancellation
+// assertions below remain unchanged.
+static bool upload_persist_handle_failure(const UploadJob& job,const char*){
+ if(upload_persist_save(job,job.retries))return true;
+ return sense_spool_image_to_lcd(job,job.image_buf,job.image_len);
+}
 static void record_free(void* p){assert(p);++frees;}
 #define free record_free
 ''' + helper + r'''

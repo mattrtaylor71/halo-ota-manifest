@@ -44,7 +44,9 @@ static bool queue_voice_upload_job(uint32_t job_id,
                                    size_t audio_len,
                                    uint8_t retries,
                                    bool from_persisted,
-                                   uint32_t created_epoch);
+                                   uint32_t created_epoch,
+                                   const UploadJob::VoiceEnvelope* voice,
+                                   bool from_voice_sd);
 
 // ── Structs ──────────────────────────────────────────────────────────
 
@@ -62,7 +64,7 @@ struct PersistedUploadMetaV1 {
   char expiry_date[16];
 };
 
-struct PersistedUploadMeta {
+struct PersistedUploadMetaV2 {
   uint32_t magic;
   uint16_t version;
   uint16_t header_size;
@@ -77,12 +79,33 @@ struct PersistedUploadMeta {
   UploadJob::CameraUploadMeta camera_meta;
 };
 
+struct PersistedUploadMeta : PersistedUploadMetaV2 {
+  UploadJob::VoiceEnvelope voice;
+  uint32_t checksum;
+};
+
+static uint32_t upload_persist_meta_checksum(const PersistedUploadMeta& meta) {
+  // This derived type is not standard-layout: do not use offsetof on it.
+  // Cover the complete stored prefix, including identity, flags, age and PCM
+  // checksum. The writer zeroes the record before filling any fields.
+  const uint8_t* begin = reinterpret_cast<const uint8_t*>(&meta);
+  const uint8_t* end = reinterpret_cast<const uint8_t*>(&meta.checksum);
+  return sense_voice_crc32(begin, static_cast<size_t>(end - begin));
+}
+
 // ── Constants ────────────────────────────────────────────────────────
 
 static const uint32_t UPLOAD_PERSIST_MAGIC = 0x48555031UL;  // HUP1
-static const uint16_t UPLOAD_PERSIST_VERSION = 2;
+static const uint16_t UPLOAD_PERSIST_VERSION = 3;
 static const char* UPLOAD_PERSIST_META_PATH = "/upload_retry.meta";
 static const char* UPLOAD_PERSIST_IMAGE_PATH = "/upload_retry.bin";
+static const char* UPLOAD_PERSIST_VOICE_ATTEMPT_PATH = "/voice_retry.attempt";
+static const char* UPLOAD_PERSIST_VOICE_ATTEMPT_TMP = "/voice_retry.attempt.part";
+struct PersistedVoiceAttempt {
+  char request_id[33];
+  uint32_t epoch;
+  uint32_t checksum;
+};
 static const uint8_t UPLOAD_PERSIST_MAX_RETRIES = 5;
 static const uint32_t UPLOAD_PERSIST_MAX_AGE_S = 86400UL;
 static const unsigned long UPLOAD_PERSIST_CHECK_INTERVAL_MS = 2000;
@@ -101,6 +124,20 @@ static char g_upload_persist_last_result[24] = "none";
 static char g_upload_persist_last_reason[32] = "";
 static unsigned long g_upload_persist_last_event_ms = 0;
 static uint8_t g_upload_persist_last_retries = 0;
+static StaticSemaphore_t g_upload_persist_mutex_storage;
+static SemaphoreHandle_t g_upload_persist_mutex = nullptr;
+
+// Worker fallback and main-loop sleep rescue can meet after the flush budget.
+// Serialize the complete check/read/write/delete transaction, including nested
+// helper reads. No file is opened while merely waiting for this bounded lease.
+class UploadPersistLease {
+ public:
+  UploadPersistLease() : held_(g_upload_persist_mutex &&
+      xSemaphoreTakeRecursive(g_upload_persist_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {}
+  ~UploadPersistLease() { if (held_) xSemaphoreGiveRecursive(g_upload_persist_mutex); }
+  bool held() const { return held_; }
+ private: bool held_;
+};
 
 static const uint8_t UPLOAD_PERSIST_FLAG_ADD_TO_SHOPPING = 1u << 0;
 static const uint8_t UPLOAD_PERSIST_FLAG_IS_VOICE = 1u << 1;
@@ -172,6 +209,8 @@ static bool upload_persist_has_pending() {
 }
 
 static bool upload_persist_delete() {
+  UploadPersistLease lease;
+  if (!lease.held()) return false;
   if (!g_upload_persist_ready) {
     return false;
   }
@@ -189,6 +228,8 @@ static bool upload_persist_delete() {
 // ── Meta read/write ──────────────────────────────────────────────────
 
 static bool upload_persist_read_meta(PersistedUploadMeta* meta) {
+  UploadPersistLease lease;
+  if (!lease.held()) return false;
   if (!meta || !upload_persist_has_pending()) {
     return false;
   }
@@ -201,6 +242,10 @@ static bool upload_persist_read_meta(PersistedUploadMeta* meta) {
   bool ok = false;
   if (file_size == sizeof(PersistedUploadMeta)) {
     ok = (file.read((uint8_t*)meta, sizeof(*meta)) == (int)sizeof(*meta));
+  } else if (file_size == sizeof(PersistedUploadMetaV2)) {
+    PersistedUploadMetaV2 legacy = {};
+    ok = file.read((uint8_t*)&legacy, sizeof(legacy)) == (int)sizeof(legacy);
+    if (ok) static_cast<PersistedUploadMetaV2&>(*meta) = legacy;
   } else if (file_size == sizeof(PersistedUploadMetaV1)) {
     PersistedUploadMetaV1 legacy = {};
     ok = (file.read((uint8_t*)&legacy, sizeof(legacy)) == (int)sizeof(legacy));
@@ -222,18 +267,33 @@ static bool upload_persist_read_meta(PersistedUploadMeta* meta) {
   if (!ok) {
     return false;
   }
-  bool valid_v2 = (meta->version == UPLOAD_PERSIST_VERSION &&
+  bool valid_v3 = (file_size == sizeof(*meta) && meta->version == UPLOAD_PERSIST_VERSION &&
                    meta->header_size == sizeof(*meta));
-  bool valid_v1 = (meta->version == 1 &&
+  bool valid_v2 = file_size == sizeof(PersistedUploadMetaV2) &&
+                  meta->version == 2 && meta->header_size == sizeof(PersistedUploadMetaV2);
+  bool valid_v1 = (file_size == sizeof(PersistedUploadMetaV1) && meta->version == 1 &&
                    meta->header_size == sizeof(PersistedUploadMetaV1));
   if (meta->magic != UPLOAD_PERSIST_MAGIC ||
-      (!valid_v2 && !valid_v1) ||
+      (!valid_v3 && !valid_v2 && !valid_v1) ||
+      (valid_v3 && meta->checksum != upload_persist_meta_checksum(*meta)) ||
       meta->image_len == 0 ||
       meta->image_len > UPLOAD_PERSIST_MAX_IMAGE_BYTES) {
     return false;
   }
   meta->mode[sizeof(meta->mode) - 1] = '\0';
   meta->expiry_date[sizeof(meta->expiry_date) - 1] = '\0';
+  if (valid_v3 && (meta->reserved & UPLOAD_PERSIST_FLAG_IS_VOICE) && meta->created_epoch == 0 &&
+      SPIFFS.exists(UPLOAD_PERSIST_VOICE_ATTEMPT_PATH)) {
+    PersistedVoiceAttempt attempt = {};
+    File marker = SPIFFS.open(UPLOAD_PERSIST_VOICE_ATTEMPT_PATH, "r");
+    if (!marker) return false;
+    const bool read = marker.size() == sizeof(attempt) && marker.read((uint8_t*)&attempt, sizeof(attempt)) == (int)sizeof(attempt);
+    marker.close();
+    if (!read || memcmp(attempt.request_id, meta->voice.request_id, sizeof(attempt.request_id)) ||
+        attempt.epoch < TIME_VALID_MIN_EPOCH ||
+        attempt.checksum != sense_voice_crc32((const uint8_t*)&attempt, offsetof(PersistedVoiceAttempt, checksum))) return false;
+    meta->created_epoch = attempt.epoch;
+  }
   return true;
 }
 
@@ -258,21 +318,96 @@ static bool upload_persist_write_blob(const char* path, const uint8_t* data, siz
   return written == len;
 }
 
+static bool upload_persist_voice_matches(const UploadJob& job, const PersistedUploadMeta& meta) {
+  if (!sense_voice_envelope_valid(job) || meta.version != 3 ||
+      meta.image_len != job.image_len || meta.created_epoch != job.created_epoch ||
+      !(meta.reserved & UPLOAD_PERSIST_FLAG_IS_VOICE) ||
+      memcmp(&meta.voice, &job.voice, sizeof(job.voice))) return false;
+  File file = SPIFFS.open(UPLOAD_PERSIST_IMAGE_PATH, "r");
+  if (!file) return false;
+  bool ok = file.size() == job.image_len;
+  uint32_t crc = 0xffffffffU;
+  uint8_t chunk[256]; size_t read = 0;
+  while (ok && read < job.image_len) {
+    const size_t n = job.image_len - read < sizeof(chunk) ? job.image_len - read : sizeof(chunk);
+    if (file.read(chunk, n) != (int)n) { ok = false; break; }
+    for (size_t i = 0; i < n; ++i) {
+      crc ^= chunk[i];
+      for (unsigned b = 0; b < 8; ++b) crc = (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1U)));
+    }
+    read += n;
+  }
+  file.close();
+  return ok && ~crc == job.voice.crc32;
+}
+
+static bool upload_persist_delete_voice(const UploadJob& job) {
+  UploadPersistLease lease;
+  if (!lease.held()) return false;
+  PersistedUploadMeta pending = {};
+  if (!upload_persist_read_meta(&pending) || !upload_persist_voice_matches(job, pending)) return false;
+  const bool removed = upload_persist_delete();
+  // Commit record first: losing power during cleanup must not resurrect an
+  // already-attempted recording as epoch-zero/never-attempted.
+  if (!SPIFFS.exists(UPLOAD_PERSIST_META_PATH) && !SPIFFS.exists(UPLOAD_PERSIST_IMAGE_PATH)) {
+    SPIFFS.remove(UPLOAD_PERSIST_VOICE_ATTEMPT_PATH);
+    SPIFFS.remove(UPLOAD_PERSIST_VOICE_ATTEMPT_TMP);
+  }
+  return removed;
+}
+
+static bool upload_persist_start_voice_attempt(UploadJob& job, uint32_t epoch) {
+  UploadPersistLease lease;
+  if (!lease.held()) return false;
+  PersistedUploadMeta pending = {};
+  if (!upload_persist_read_meta(&pending)) return false;
+  UploadJob check = job; check.created_epoch = pending.created_epoch;
+  if (!upload_persist_voice_matches(check, pending)) return false;
+  if (pending.created_epoch) { job.created_epoch = pending.created_epoch; return sense_voice_replay_age_ok(job); }
+  if (epoch < TIME_VALID_MIN_EPOCH || SPIFFS.exists(UPLOAD_PERSIST_VOICE_ATTEMPT_PATH) ||
+      SPIFFS.exists(UPLOAD_PERSIST_VOICE_ATTEMPT_TMP)) return false;
+  PersistedVoiceAttempt attempt = {};
+  memcpy(attempt.request_id, job.voice.request_id, sizeof(attempt.request_id));
+  attempt.epoch = epoch;
+  attempt.checksum = sense_voice_crc32((const uint8_t*)&attempt, offsetof(PersistedVoiceAttempt, checksum));
+  if (!upload_persist_write_blob(UPLOAD_PERSIST_VOICE_ATTEMPT_TMP, (const uint8_t*)&attempt, sizeof(attempt)) ||
+      !SPIFFS.rename(UPLOAD_PERSIST_VOICE_ATTEMPT_TMP, UPLOAD_PERSIST_VOICE_ATTEMPT_PATH) ||
+      !upload_persist_read_meta(&pending) || pending.created_epoch != epoch) return false;
+  job.created_epoch = epoch;
+  return upload_persist_voice_matches(job, pending);
+}
+
 // ── Save / Load ──────────────────────────────────────────────────────
 
 static bool upload_persist_save(const UploadJob& job, uint8_t next_retries) {
+  UploadPersistLease lease;
+  if (!lease.held()) return false;
   if (!g_upload_persist_ready || !job.image_buf || job.image_len == 0) {
     return false;
   }
+  PersistedUploadMeta pending = {};
+  if (upload_persist_has_pending()) {
+    const bool read = upload_persist_read_meta(&pending);
+    const bool prior_voice = !read || (pending.reserved & UPLOAD_PERSIST_FLAG_IS_VOICE) || !strcmp(pending.mode, "voice");
+    if (job.is_voice || prior_voice) {
+      // Never replace another user's recording or a legacy payload. A failed
+      // replay already has a durable copy; do not rewrite it during low space.
+      return read && job.is_voice && upload_persist_voice_matches(job, pending);
+    }
+  }
+  if (job.is_voice && (!sense_voice_envelope_valid(job) ||
+      SPIFFS.exists(UPLOAD_PERSIST_META_PATH) || SPIFFS.exists(UPLOAD_PERSIST_IMAGE_PATH) ||
+      SPIFFS.exists(UPLOAD_PERSIST_VOICE_ATTEMPT_PATH) || SPIFFS.exists(UPLOAD_PERSIST_VOICE_ATTEMPT_TMP))) return false;
 
-  PersistedUploadMeta meta = {};
+  PersistedUploadMeta meta;
+  memset(&meta, 0, sizeof(meta));
   meta.magic = UPLOAD_PERSIST_MAGIC;
   meta.version = UPLOAD_PERSIST_VERSION;
   meta.header_size = sizeof(meta);
   meta.job_id = job.job_id;
   meta.image_len = (uint32_t)job.image_len;
   meta.created_epoch = job.created_epoch;
-  if (meta.created_epoch < TIME_VALID_MIN_EPOCH) {
+  if (!job.is_voice && meta.created_epoch < TIME_VALID_MIN_EPOCH) {
     time_t now = time(nullptr);
     if (now >= (time_t)TIME_VALID_MIN_EPOCH) {
       meta.created_epoch = (uint32_t)now;
@@ -292,6 +427,8 @@ static bool upload_persist_save(const UploadJob& job, uint8_t next_retries) {
   strncpy(meta.mode, job.mode, sizeof(meta.mode) - 1);
   strncpy(meta.expiry_date, job.expiry_date, sizeof(meta.expiry_date) - 1);
   meta.camera_meta = job.camera_meta;
+  meta.voice = job.voice;
+  meta.checksum = upload_persist_meta_checksum(meta);
 
   size_t existing_bytes = upload_persist_file_size(UPLOAD_PERSIST_META_PATH) +
                           upload_persist_file_size(UPLOAD_PERSIST_IMAGE_PATH);
@@ -311,12 +448,12 @@ static bool upload_persist_save(const UploadJob& job, uint8_t next_retries) {
 
   if (!upload_persist_write_blob(UPLOAD_PERSIST_IMAGE_PATH, job.image_buf, job.image_len)) {
     Serial.println("[UPLOAD_PERSIST] image_write_failed");
-    upload_persist_delete();
+    if (!job.is_voice) upload_persist_delete();
     return false;
   }
   if (!upload_persist_write_blob(UPLOAD_PERSIST_META_PATH, (const uint8_t*)&meta, sizeof(meta))) {
     Serial.println("[UPLOAD_PERSIST] meta_write_failed");
-    upload_persist_delete();
+    if (!job.is_voice) upload_persist_delete();
     return false;
   }
 
@@ -325,35 +462,40 @@ static bool upload_persist_save(const UploadJob& job, uint8_t next_retries) {
                 (unsigned)meta.image_len,
                 (unsigned)meta.retries,
                 meta.mode);
+  if (job.is_voice) {
+    PersistedUploadMeta verified = {};
+    return upload_persist_read_meta(&verified) && upload_persist_voice_matches(job, verified);
+  }
   return true;
 }
 
 static bool upload_persist_load(UploadJob* job) {
+  UploadPersistLease lease;
+  if (!lease.held()) return false;
   if (!job) {
     return false;
   }
   PersistedUploadMeta meta = {};
   if (!upload_persist_read_meta(&meta)) {
-    Serial.println("[UPLOAD_PERSIST] invalid_meta clearing");
-    upload_persist_delete();
+    Serial.println("[UPLOAD_PERSIST] invalid_meta retained for recovery");
     return false;
   }
-  if (meta.retries >= UPLOAD_PERSIST_MAX_RETRIES) {
-    Serial.printf("[UPLOAD_PERSIST] drop_max_retries retries=%u\n", (unsigned)meta.retries);
-    upload_persist_delete();
+  const bool voice = (meta.reserved & UPLOAD_PERSIST_FLAG_IS_VOICE) || !strcmp(meta.mode, "voice");
+  if (voice && (meta.version != 3 || meta.retries >= UPLOAD_PERSIST_MAX_RETRIES)) {
+    Serial.println("[UPLOAD_PERSIST] voice_retained legacy_or_expired; not replayed");
     return false;
   }
-  if (upload_persist_is_stale(meta)) {
-    Serial.printf("[UPLOAD_PERSIST] drop_stale age_limit_s=%lu\n",
-                  (unsigned long)UPLOAD_PERSIST_MAX_AGE_S);
-    upload_persist_delete();
+  if (!voice) {
+    // Legacy photos lack a frozen request/owner and cannot safely join the new
+    // idempotent upload contract. Hold their bytes for explicit recovery.
+    Serial.println("[UPLOAD_PERSIST] legacy_photo_retained; identity_unavailable");
     return false;
   }
 
   File file = SPIFFS.open(UPLOAD_PERSIST_IMAGE_PATH, "r");
   if (!file) {
     Serial.println("[UPLOAD_PERSIST] image_open_failed");
-    upload_persist_delete();
+    if (!voice) upload_persist_delete();
     return false;
   }
   if (file.size() != meta.image_len) {
@@ -361,7 +503,7 @@ static bool upload_persist_load(UploadJob* job) {
                   (unsigned)file.size(),
                   (unsigned)meta.image_len);
     file.close();
-    upload_persist_delete();
+    if (!voice) upload_persist_delete();
     return false;
   }
 
@@ -377,7 +519,7 @@ static bool upload_persist_load(UploadJob* job) {
   if (!ok) {
     free(image_buf);
     Serial.println("[UPLOAD_PERSIST] image_read_failed");
-    upload_persist_delete();
+    if (!voice) upload_persist_delete();
     return false;
   }
 
@@ -394,8 +536,16 @@ static bool upload_persist_load(UploadJob* job) {
   loaded.created_epoch = meta.created_epoch;
   loaded.from_persisted = true;
   loaded.camera_meta = meta.camera_meta;
+  loaded.voice = meta.voice;
   strncpy(loaded.mode, meta.mode, sizeof(loaded.mode) - 1);
   strncpy(loaded.expiry_date, meta.expiry_date, sizeof(loaded.expiry_date) - 1);
+  if (loaded.is_voice && (!sense_voice_owner_matches(loaded) ||
+      (loaded.created_epoch != 0 && !sense_voice_replay_age_ok(loaded)) ||
+      sense_voice_crc32(image_buf, loaded.image_len) != loaded.voice.crc32)) {
+    free(image_buf);
+    Serial.println("[UPLOAD_PERSIST] voice_retained identity_age_or_crc");
+    return false;
+  }
   *job = loaded;
 
   Serial.printf("[UPLOAD_PERSIST] loaded job_id=%lu len=%u retries=%u psram=%d mode=%s\n",
@@ -410,16 +560,16 @@ static bool upload_persist_load(UploadJob* job) {
 // ── Setup ────────────────────────────────────────────────────────────
 
 static void upload_persist_setup() {
+  if (!g_upload_persist_mutex)
+    g_upload_persist_mutex = xSemaphoreCreateRecursiveMutexStatic(&g_upload_persist_mutex_storage);
+  if (!g_upload_persist_mutex) return;
   if (g_upload_persist_ready) {
     return;
   }
   if (!SPIFFS.begin(false)) {
-    Serial.println("[UPLOAD_PERSIST] mount_failed trying_format");
-    if (!SPIFFS.begin(true)) {
-      Serial.println("[UPLOAD_PERSIST] mount_failed disabled");
-      return;
-    }
-    Serial.println("[UPLOAD_PERSIST] mounted_after_format");
+    // Mount failure is not permission to erase queued user recordings.
+    Serial.println("[UPLOAD_PERSIST] mount_failed retained; internal fallback disabled");
+    return;
   }
   g_upload_persist_ready = true;
   g_upload_persist_cached_count = upload_persist_has_pending() ? 1 : 0;
@@ -475,7 +625,9 @@ static void upload_persist_maybe_replay() {
                                            job.image_len,
                                            job.retries,
                                            true,
-                                           job.created_epoch)
+                                           job.created_epoch,
+                                           &job.voice,
+                                           false)
                   : queue_upload_job(job.job_id,
                                      job.mode,
                                      job.expiry_date,
@@ -504,57 +656,72 @@ static void upload_persist_maybe_replay() {
 
 // ── Failure handler (outside #if guard — has internal guard) ─────────
 
-static void upload_persist_handle_failure(const UploadJob& job, const char* reason) {
+static bool sense_voice_prepare_first_attempt(UploadJob& job) {
+  if (!sense_voice_owner_matches(job)) return false;
+  if (job.created_epoch != 0) return sense_voice_replay_age_ok(job);
+  const time_t now = time(nullptr);
+  if (!sense_time_has_fresh_sync() || now < (time_t)TIME_VALID_MIN_EPOCH) return false;
+  if (job.from_voice_sd) return sense_voice_spool_mark_attempt(job, (uint32_t)now);
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
-  uint8_t next_retries = (job.retries < 0xFF) ? (uint8_t)(job.retries + 1) : 0xFF;
-  bool saved = upload_persist_save(job, next_retries);
-  if (saved && job.is_voice) {
-    g_upload_persist_replay_not_before_ms = millis() + UPLOAD_PERSIST_VOICE_REPLAY_BACKOFF_MS;
-  }
-  uint8_t cached_count = upload_persist_has_pending() ? 1 : 0;
-  g_upload_persist_attempted_this_boot = true;
-  upload_persist_note_event(saved ? "cached" : "cache_fail",
-                            reason ? reason : "unknown",
-                            cached_count,
-                            next_retries);
-  dump_system_truth(saved ? "upload_cached" : "upload_cache_fail");
-
-  // SPIFFS could not take it — for a real capture it never can. The partition is
-  // 173,441 B total and needs roughly twice the image size to write, while images
-  // are 140-190 KB, so upload_persist_save() always hits skip_save. Every caller
-  // frees job.image_buf immediately after this returns, so without the fallback
-  // below a failed upload silently DESTROYS the user's photo.
-  //
-  // That was the live behaviour: the SD spool existed but was only wired into the
-  // sleep path (a job parked because the foreground was busy), not into the
-  // upload-failure path — which is the case it was built for. Measured: a forced
-  // upload failure left `upload=0 q=0` at sleep entry with nothing on the card.
-  //
-  // Spooling here covers every failure reason at once (put_fail, put_timeout,
-  // presign_fail, presign_timeout, voice_post_fail) rather than patching each
-  // call site and missing one.
-  if (!saved && !job.is_voice && job.image_buf && job.image_len > 0) {
-    Serial.printf("[UPLOAD_PERSIST] SPIFFS full — spooling job_id=%lu to LCD SD card\n",
-                  (unsigned long)job.job_id);
-    const bool spooled = sense_spool_image_to_lcd(job, job.image_buf, job.image_len);
-    saved = spooled;
-    uart_send_sense_diag("upload", spooled ? "spooled_to_sd" : "spool_failed",
-                         job.mode, (int32_t)job.job_id,
-                         spooled ? "kept_on_sd" : "PHOTO_LOST");
-    Serial.printf("[UPLOAD_PERSIST] SD spool %s for job_id=%lu\n",
-                  spooled ? "OK" : "FAILED", (unsigned long)job.job_id);
-  }
-
-  Serial.printf("[UPLOAD_PERSIST] failure reason=%s job_id=%lu saved=%d next_retries=%u from_persisted=%d\n",
-                reason ? reason : "unknown",
-                (unsigned long)job.job_id,
-                saved ? 1 : 0,
-                (unsigned)next_retries,
-                job.from_persisted ? 1 : 0);
-#else
-  (void)job;
-  (void)reason;
+  if (job.from_persisted) return upload_persist_start_voice_attempt(job, (uint32_t)now);
 #endif
+  // Fresh RAM-only job: no uncertain previous POST exists. Failure persistence
+  // carries this timestamp unchanged; a durable epoch-zero replay marks first.
+  job.created_epoch = (uint32_t)now;
+  return true;
+}
+
+static bool upload_persist_handle_failure(const UploadJob& job, const char* reason) {
+  if (job.is_voice) {
+    bool saved = job.from_voice_sd;
+#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
+    if (!saved && job.from_persisted) {
+      UploadPersistLease lease;
+      PersistedUploadMeta pending = {};
+      saved = lease.held() && upload_persist_read_meta(&pending) && upload_persist_voice_matches(job, pending);
+    }
+#endif
+    const uint32_t deadline = sense_voice_spool_operation_deadline();
+    // Bounded RAM retry; no loop survives indefinitely when both stores fail.
+    for (unsigned attempt = 0; !saved && attempt < 2 && sense_voice_spool_remaining(deadline); ++attempt) {
+      saved = sense_voice_spool_store(job, deadline);
+#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
+      if (!saved && sense_voice_spool_remaining(deadline) > 1000)
+        saved = upload_persist_save(job, job.retries < 255 ? job.retries + 1 : 255);
+#endif
+      if (!saved && attempt == 0 && sense_voice_spool_remaining(deadline) > 500) delay(500);
+    }
+#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
+    g_upload_persist_attempted_this_boot = true;
+    g_upload_persist_replay_not_before_ms = millis() + UPLOAD_PERSIST_VOICE_REPLAY_BACKOFF_MS;
+#endif
+    g_voice_spool_replayed_this_boot = true;
+    char payload_sha[65] = {};
+    sense_image_hash(job.image_buf, job.image_len, payload_sha);
+    Serial.printf("[MEDIA_BACKUP] kind=voice request=%s job=%lu bytes=%u crc=%08lx sha256=%s saved=%u from_sd=%u\n",
+                  job.voice.request_id,(unsigned long)job.job_id,(unsigned)job.image_len,
+                  (unsigned long)job.voice.crc32,payload_sha,saved?1:0,job.from_voice_sd?1:0);
+    uart_send_sense_diag("voice", saved ? "saved_for_retry" : "storage_failed", "voice",
+                         (int32_t)job.job_id, saved ? "durable_copy_retained" : "not_saved");
+    if (!saved) uart_send_ui_status_extended("VOICE", "ERROR", "Voice not saved. Please try again.");
+    return saved;
+  }
+  // New photos use the checked multi-record SD queue. The old single SPIFFS
+  // photo record cannot carry this frozen identity and is never overwritten.
+  const uint32_t deadline = sense_image_spool_operation_deadline();
+  bool saved = job.from_image_sd;
+  for (unsigned attempt = 0; !saved && attempt < 2 && sense_image_spool_remaining(deadline); ++attempt) {
+    saved = sense_image_spool_store(job, deadline);
+    if (!saved && attempt == 0 && sense_image_spool_remaining(deadline) > 500) delay(500);
+  }
+  g_image_spool_replayed_this_boot = true;
+  Serial.printf("[MEDIA_BACKUP] kind=image request=%s job=%lu bytes=%u crc=%08lx sha256=%s saved=%u from_sd=%u\n",
+                job.image.request_id,(unsigned long)job.job_id,(unsigned)job.image_len,
+                (unsigned long)job.image.crc32,job.image.checksum_sha256,saved?1:0,job.from_image_sd?1:0);
+  uart_send_sense_diag("upload", saved ? "saved_for_retry" : "storage_failed", job.mode,
+                      (int32_t)job.job_id, saved ? "durable_copy_retained" : "not_saved");
+  if (!saved) uart_send_ui_status_extended("SCAN", "ERROR", "Photo not saved. Please try again.");
+  return saved;
 }
 
 #endif // SENSE_UPLOAD_PERSIST_H

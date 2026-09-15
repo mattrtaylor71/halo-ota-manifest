@@ -96,7 +96,7 @@ class SenseImgSpoolLease {
 static bool sense_spool_image_to_lcd_once(const UploadJob& job,
                                           const uint8_t* buf,
                                           size_t len) {
-  if (!buf || len == 0 || !sense_uart_ordinary_tx_allowed()) return false;
+  if (job.is_voice || !buf || len == 0 || !sense_uart_ordinary_tx_allowed()) return false;
   const uint32_t job_id = job.job_id;
   SenseImgSpoolLease lease(job_id);
   if (!lease.held()) return false;
@@ -276,7 +276,7 @@ static void sense_spool_hold_lcd_awake() {
 static bool sense_spool_image_to_lcd(const UploadJob& job,
                                      const uint8_t* buf,
                                      size_t len) {
-  if (!sense_uart_ordinary_tx_allowed()) return false;
+  if (job.is_voice || !sense_uart_ordinary_tx_allowed()) return false;
   for (int attempt = 1; attempt <= SENSE_IMG_SPOOL_ATTEMPTS; attempt++) {
     sense_spool_hold_lcd_awake();
     if (sense_spool_image_to_lcd_once(job, buf, len)) {

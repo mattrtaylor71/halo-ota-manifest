@@ -23,7 +23,9 @@
 #define SENSE_WIFI_H
 
 // ── Wi-Fi Functions ────────────────────────────────────────────────
+static bool sense_backup_offline_active();
 bool wifi_is_connected() {
+  if(sense_backup_offline_active())return false;
   return WiFi.status() == WL_CONNECTED;
 }
 
@@ -48,6 +50,8 @@ static unsigned long last_wifi_fail_ms = 0;
 static char last_wifi_fail_reason[24] = "";
 static char wifi_connect_owner[24] = "";
 static unsigned long wifi_last_scan_dump_ms = 0;
+
+#include "sense_backup_diagnostic.h"
 
 // ── WiFi Diagnostic Accumulator (per wake cycle) ──────────────────
 struct WifiDiagAccum {
@@ -228,6 +232,8 @@ static const char* wifi_guard_connect_owner() {
 }
 
 static bool wifi_guard_try_claim_connect(const char* owner) {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return false;
   if (wifi_connect_mutex != NULL) {
     if (xSemaphoreTake(wifi_connect_mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
       return false;
@@ -267,6 +273,8 @@ static void wifi_guard_note_fail(const char* reason) {
 }
 
 static void wifi_dump_scan(const char* reason) {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return;
   unsigned long now = millis();
   if (wifi_last_scan_dump_ms > 0 && (now - wifi_last_scan_dump_ms) < 30000) {
     return;
@@ -288,6 +296,8 @@ static void wifi_dump_scan(const char* reason) {
 }
 
 static void wifi_guard_handle_timeout(unsigned long elapsed_ms) {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return;
   WiFi.disconnect(true, true);
   WiFi.mode(WIFI_STA);
   wifi_guard_set_inflight(false);
@@ -314,6 +324,8 @@ static void wifi_guard_mark_failed(wl_status_t status, const char* reason) {
 }
 
 static void wifi_guard_poll() {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return;
   if (!wifi_connect_inflight) {
     return;
   }
@@ -428,6 +440,8 @@ static void handle_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
 // ── WiFi connection functions ───────────────────────────────────────
 
 static bool ensure_wifi_connected(const char* reason, uint32_t timeout_ms) {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return false;
 #ifdef HALO_SENSE_PROD_WRAPPER
   if (halo_provisioning_active()) {
     Serial.println("[WIFI] Provisioning active - skipping Wi-Fi connect");
@@ -586,6 +600,8 @@ static bool ensure_wifi_connected(const char* reason, uint32_t timeout_ms) {
 }
 
 static bool wifi_connect() {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return false;
   unsigned long start_ms = millis();
   Serial.printf("[BOOT_FLOW] stage=wifi_connect_begin t=%lu status=%d inflight=%d state=%d\n",
                 start_ms,
@@ -631,6 +647,8 @@ static const uint8_t WIFI_MAINT_MAX_FAILS_BEFORE_RESET = 3;
 static const unsigned long WIFI_MAINT_LOG_INTERVAL_MS = 5000;
 
 static void service_wifi_maintenance(unsigned long now_ms) {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return;
 #ifdef HALO_SENSE_PROD_WRAPPER
   // Don't interfere with provisioning — it owns WiFi mode (AP_STA)
   if (halo_provisioning_active()) {
@@ -796,6 +814,8 @@ static bool ensure_time_valid(const char* reason, uint32_t timeout_ms) {
 static bool wifi_hard_reset_and_reconnect(const char* reason, uint32_t timeout_ms);
 
 static bool ensure_wifi_ready(const char* reason, uint32_t timeout_ms) {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return false;
   if (WiFi.status() == WL_CONNECTED) {
     return true;
   }
@@ -822,6 +842,8 @@ static bool ensure_wifi_ready(const char* reason, uint32_t timeout_ms) {
 }
 
 static bool wifi_hard_reset_and_reconnect(const char* reason, uint32_t timeout_ms) {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return false;
   if (wifi_connect_inflight) {
     Serial.printf("[WIFI_RECOVER] force_reset reason=%s owner=%s (was inflight)\n",
                   reason ? reason : "unknown",
@@ -877,6 +899,8 @@ static bool wifi_hard_reset_and_reconnect(const char* reason, uint32_t timeout_m
 }
 
 static void wifi_recover_if_needed(const char* reason, int http_code) {
+  SenseBackupWifiCall backup_call;
+  if(!backup_call)return;
   if (http_code >= 0) {
     return;
   }

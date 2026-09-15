@@ -153,7 +153,13 @@ static bool put_to_presigned_url(const String& url,
                                  const char* contentType,
                                  uint32_t job_id,
                                  uint32_t deadline_ms,
-                                 bool* aborted_for_budget) {
+                                 bool* aborted_for_budget,
+                                 const PresignReply* durable,
+                                 int* response_code) {
+  if (response_code) *response_code = 0;
+  SenseBackupWifiCall backup_call; if (!backup_call) return false;
+  if (durable && durable->immutable_image &&
+      (durable->expected_image_bytes != len || durable->checksum_sha256_b64.length() != 44)) return false;
   Serial.printf("[UPLOAD] Starting PUT to S3, size: %u bytes\n", len);
 
   // Release camera DMA reservation to defragment internal SRAM for TLS.
@@ -346,6 +352,10 @@ static bool put_to_presigned_url(const String& url,
     tls.printf("Host: %s\r\n", host.c_str());
     tls.printf("Content-Type: %s\r\n", resolved_ct);
     tls.printf("Content-Length: %u\r\n", (unsigned)len);
+    if (durable && durable->immutable_image) {
+      tls.print("If-None-Match: *\r\n");
+      tls.printf("x-amz-checksum-sha256: %s\r\n", durable->checksum_sha256_b64.c_str());
+    }
     tls.print("Connection: close\r\n\r\n");
     if (hdr_written <= 0) {
       char hdr_err[128] = {0};
@@ -474,6 +484,7 @@ static bool put_to_presigned_url(const String& url,
   tls.stop();
   http_queue_unlock("UPLOAD_PUT", effective_job);
 
+  if (response_code) *response_code = code;
   Serial.printf("[UPLOAD] PUT status: %d\n", code);
   if (resp.length()) {
     Serial.print("[UPLOAD] PUT response: ");

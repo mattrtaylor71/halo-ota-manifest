@@ -15,6 +15,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <atomic>
 #include <HardwareSerial.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -126,7 +127,7 @@ __attribute__((weak)) uint32_t ota_get_timer_delta_s() { return 0; }
 #endif
 #define MAX_LINE_LENGTH 4096  // Allows richer UI_VOICE_RESPONSE payloads over UART
 #define UART_RX_RING_SIZE 2048
-#define UART_RX_FRAME_MAX 512
+#define UART_RX_FRAME_MAX 1024
 
 #ifndef HALO_DEBUG_SENSITIVE
 #define HALO_DEBUG_SENSITIVE 0
@@ -613,6 +614,11 @@ struct PresignReply {
   String content_type;
   String result_url;
   int    ttl_s;
+  bool immutable_image = false;
+  bool upload_stored = false;
+  String checksum_sha256_b64;
+  String operation_token;
+  uint32_t expected_image_bytes = 0;
 
   PresignReply() : ttl_s(0) {}  // Constructor to initialize ttl_s
 };
@@ -631,13 +637,17 @@ static bool queue_upload_job(uint32_t job_id,
                              size_t image_len,
                              uint8_t retries = 0,
                              bool from_persisted = false,
-                             uint32_t created_epoch = 0);
+                             uint32_t created_epoch = 0,
+                             const UploadJob::ImageEnvelope* image = nullptr,
+                             bool from_image_sd = false);
 static bool queue_voice_upload_job(uint32_t job_id,
                                    uint8_t* audio_buf,
                                    size_t audio_len,
                                    uint8_t retries = 0,
                                    bool from_persisted = false,
-                                   uint32_t created_epoch = 0);
+                                   uint32_t created_epoch = 0,
+                                   const UploadJob::VoiceEnvelope* voice = nullptr,
+                                   bool from_voice_sd = false);
 // Forward declarations — sense_upload_exec.h (late include)
 static bool get_presign_checkin(PresignReply& out, const char* expiry_date = NULL, uint16_t quantity = 1, const UploadJob::CameraUploadMeta* camera_meta = nullptr, uint32_t deadline_ms = 0);
 static bool put_to_presigned_url(const String& url,
@@ -646,7 +656,9 @@ static bool put_to_presigned_url(const String& url,
                                  const char* contentType,
                                  uint32_t job_id = 0,
                                  uint32_t deadline_ms = 0,
-                                 bool* aborted_for_budget = NULL);
+                                 bool* aborted_for_budget = NULL,
+                                 const PresignReply* durable = nullptr,
+                                 int* response_code = nullptr);
 // Forward declarations — sense_sleep.h (late include)
 #ifdef HALO_SENSE_PROD_WRAPPER
 // Implemented in halo_sense_prod.ino (needs SenseOtaPolicy + g_ota_check_requested,
@@ -865,9 +877,13 @@ static void diag_record_error_persistent(const char* stage, int32_t code, const 
 #include "sense_wifi.h"
 #include "sense_upload.h"
 #include "sense_voice.h"
+#include "sense_voice_spool.h"
+#include "sense_image_identity.h"
+#include "sense_image_spool.h"
 #include "sense_list.h"
 #include "sense_camera.h"
 #include "sense_presign.h"
+#include "sense_image_upload.h"
 #include "sense_scan.h"
 #include "sense_op_queue.h"
 static unsigned long last_lcd_diag_ms = 0;
@@ -1759,6 +1775,18 @@ static const char* sense_device_state_name() {
 // actually reach the backend instead of sitting there durably and uselessly.
 #include "sense_spool_drain.h"
 
+// Direct USB diagnostic admission; no change to ordinary Wi-Fi/OTA policy.
+static bool sense_backup_diagnostic_busy() {
+  bool ota = g_lcd_ota_task_running || g_lcd_ota_proxy_owns_uart;
+#ifdef HALO_SENSE_PROD_WRAPPER
+  ota = ota || halo_provisioning_active() || halo_prod_boot_ota_pending();
+#endif
+  return ota || http_inflight || upload_inflight || current_job.active || foreground_active ||
+      voice_recording_active || dish_scan_inflight || scan_ui_inflight ||
+      g_img_spool_tx_active || g_img_spool_request_active.load() || g_spool_owns_uart ||
+      sleep_requested || sleep_coord_requested || sleep_sm_state != SLEEP_SM_IDLE;
+}
+
 // ── Defer normal uploads until the device is going to sleep ──────────────
 //
 // WHY: esp_camera_init() needs ONE contiguous 16,384-byte internal DMA block; a
@@ -1878,14 +1906,19 @@ static void upload_worker_task(void *arg) {
         if (WiFi.status() != WL_CONNECTED) {
           Serial.println("[VOICE_QUEUE] Wi-Fi not connected, connecting...");
           accepted = voice_ensure_wifi_connected() &&
-                     voice_upload_and_parse(job.image_buf, job.image_len, job.job_id);
+                     sense_voice_prepare_first_attempt(job) &&
+                     voice_upload_and_parse(job);
         } else {
-          accepted = voice_upload_and_parse(job.image_buf, job.image_len, job.job_id);
+          accepted = sense_voice_prepare_first_attempt(job) && voice_upload_and_parse(job);
         }
         if (accepted) {
           Serial.println("[VOICE_QUEUE] async accept complete; backend owns completion");
-          if (job.from_persisted) {
-            upload_persist_delete();
+          if (job.from_voice_sd) {
+            const bool deleted = sense_voice_spool_delete(job);
+            uart_send_sense_diag("voice", deleted ? "sd_delivered" : "sd_delete_pending", "voice",
+                                 (int32_t)job.job_id, deleted ? "durable_backend_ack" : "original_slot_kept");
+          } else if (job.from_persisted) {
+            upload_persist_delete_voice(job);
             upload_persist_note_event("retry_uploaded", job.mode, g_upload_persist_cached_count, job.retries);
             dump_system_truth("upload_retry_uploaded");
             Serial.printf("[UPLOAD_PERSIST] retry_uploaded job_id=%lu retries=%u cached=%u\n",
@@ -1900,6 +1933,10 @@ static void upload_worker_task(void *arg) {
         free(job.image_buf);
         upload_inflight = false;
         continue;
+      }
+      if (!sense_image_prepare_first_attempt(job)) {
+        upload_persist_handle_failure(job, "image_identity_or_time");
+        free(job.image_buf); upload_inflight = false; continue;
       }
       uint32_t job_start_ms = millis();
       uint32_t job_deadline_ms = job_start_ms + ACTION_AWAKE_BUDGET_MS;
@@ -1964,8 +2001,7 @@ static void upload_worker_task(void *arg) {
           continue;
         }
         const char* expiry = (job.expiry_date[0] != '\0') ? job.expiry_date : NULL;
-        presign_success = is_check ? get_presign_checkin(upload_presign, expiry, job.quantity, &job.camera_meta, presign_deadline_ms)
-                                   : get_presign(upload_presign, job.mode, expiry, job.add_to_shopping_list, &job.camera_meta, presign_deadline_ms);
+        presign_success = sense_image_get_presign(job, upload_presign, presign_deadline_ms);
         if (presign_success) {
           break;
         }
@@ -2048,13 +2084,22 @@ static void upload_worker_task(void *arg) {
         }
         bool aborted_for_budget = false;
         diag_note_stage("upload_put", 0);
-        upload_success = put_to_presigned_url(upload_presign.put_url,
+        int put_http_code = 0;
+        upload_success = upload_presign.upload_stored || put_to_presigned_url(upload_presign.put_url,
                                               job.image_buf,
                                               job.image_len,
                                               upload_presign.content_type.length() ? upload_presign.content_type.c_str() : "image/jpeg",
                                               job.job_id,
                                               put_deadline_ms,
-                                              &aborted_for_budget);
+                                              &aborted_for_budget,
+                                              &upload_presign,
+                                              &put_http_code);
+        if (!upload_success && put_http_code == 412 && upload_presign.immutable_image) {
+          // A lost success reply is not a second capture. Ask the backend to
+          // verify the original object's checksum and length; retain on doubt.
+          upload_success = sense_image_reconcile_stored(job, upload_presign, put_deadline_ms);
+          if (!upload_success) break;
+        }
         if (aborted_for_budget) {
           presign_set_error_text("Upload timeout");
           budget_exhausted = true;
@@ -2140,7 +2185,11 @@ static void upload_worker_task(void *arg) {
       // still cannot hold a real capture.
       sense_spool_on_upload_result(job.job_id, true);
       if (g_cycle_uploads_ok < 0xFFFF) g_cycle_uploads_ok++;
-      if (job.from_persisted) {
+      if (job.from_image_sd) {
+        const bool deleted = sense_image_spool_delete(job);
+        uart_send_sense_diag("upload", deleted ? "sd_delivered" : "sd_delete_pending", job.mode,
+                            (int32_t)job.job_id, deleted ? "durable_backend_ack" : "original_slot_kept");
+      } else if (job.from_persisted) {
         upload_persist_delete();
         upload_persist_note_event("retry_uploaded", job.mode, g_upload_persist_cached_count, job.retries);
         dump_system_truth("upload_retry_uploaded");
@@ -2617,6 +2666,7 @@ static bool parse_input_message(const char* json_str) {
     uart_send_sense_diag("wifi", "scan_done", "complete", n, "scan_complete");
 
   } else if (strcmp(type, "INPUT_WIFI_TEST") == 0) {
+    SenseBackupWifiCall backup_call; if (!backup_call) return;
     // WiFi cold-start test — disconnect, scan, reconnect with detailed timing
     Serial.println("[UART] INPUT_WIFI_TEST received");
     uart_send_sense_diag("wifi", "test_start", "starting", 0, "cold_start_test");
@@ -4000,7 +4050,8 @@ void setup() {
         WiFi.setSleep(false);
         esp_wifi_set_ps(WIFI_PS_NONE);
         if (wifi_guard_try_claim_connect("boot_setup")) {
-          WiFi.begin(ssid, pass);
+          SenseBackupWifiCall backup_call;
+          if (backup_call) WiFi.begin(ssid, pass);
           wifi_guard_set_state(WIFI_STATE_CONNECTING, "boot_begin", WiFi.status());
           Serial.printf("[BOOT_FLOW] stage=wifi_begin_immediate t=%lu ssid=%s status=%d heap=%u\n",
                         millis(),
@@ -4042,6 +4093,7 @@ void setup() {
 }
 
 void loop() {
+  sense_backup_diagnostic_tick();
   // Process incoming UART messages (line-based JSON protocol) - non-blocking.
   // Skip when the LCD OTA proxy task owns the serial port for binary
   // COBS framing — the proxy reads lcdSerial directly during that phase.
@@ -4068,7 +4120,9 @@ void loop() {
         else
 #endif
         if (usb_rx_len > 0) {
-          if (usb_rx_line[0] == '{') {
+          if (sense_backup_usb_command(usb_rx_line)) {
+            // Local USB only; never accepted by parse_input_message().
+          } else if (usb_rx_line[0] == '{') {
 #if HALO_DIAGNOSTIC_ADMISSION && HALO_DURABLE_DIAGNOSTICS && HALO_DURABLE_OTA_POLICY
             Serial.printf("[DEBUG_INJECT] USB JSON bytes=%u\n",unsigned(usb_rx_len));
             if(!halo_diag_auth_usb_line(usb_rx_line,usb_rx_len)) {
@@ -4336,6 +4390,8 @@ void loop() {
   // The opportunistic tick stays for the case where the device happens to be
   // idle with WiFi up anyway. It rarely fires; the drain wake is the real path.
   sense_spool_drain_tick();
+  sense_voice_spool_replay_tick();
+  sense_image_spool_replay_tick();
 
   // Relay the wake history once the link is up, exactly once per boot. Deferred
   // to here rather than setup() because the LCD may not be listening yet, and a

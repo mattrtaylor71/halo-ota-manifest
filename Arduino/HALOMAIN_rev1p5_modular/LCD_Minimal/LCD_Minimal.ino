@@ -4022,6 +4022,8 @@ bool lcd_ota_in_progress_for_sd_guard() {
   return ota_locked || g_ota_screen_active || lcd_ota_uart_active();
 }
 
+#include "lcd_voice_spool.h"
+#include "lcd_image_spool.h"
 #include "lcd_uart_rx.h"
 
 

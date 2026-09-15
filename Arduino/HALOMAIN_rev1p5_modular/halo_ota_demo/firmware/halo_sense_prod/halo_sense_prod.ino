@@ -6064,6 +6064,9 @@ static void handle_mqtt_commands() {
 }
 
 void halo_prod_loop() {
+  // The direct-USB offline diagnostic is bounded and RAM-only. Defer new
+  // network/OTA work until its automatic expiry or explicit local resume.
+  if (sense_backup_offline_active()) return;
   // Validation is local main-loop work even when user operations own the rest
   // of this iteration. A Wi-Fi outage cannot invalidate a healthy image.
   g_health_gate.markUartInitialized(uart_initialized && uart_is_driver_installed(LCD_UART_PORT));

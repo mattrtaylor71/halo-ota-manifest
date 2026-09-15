@@ -107,6 +107,8 @@ static void uart_process_received_message(const char* json_str) {
   }
   last_sense_any_rx_ms = millis();
   last_sense_msg_ms = last_sense_any_rx_ms;
+  if (lcd_voice_uart(doc)) return;
+  if (lcd_image_uart(doc)) return;
   Serial.printf("[PROTO] RX: type=%s\n", type);
 #if SHIP_MENU_UI
   if (provisioning_input_locked()) {

@@ -676,37 +676,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
                     (unsigned long)upload_worker_parked_job.job_id,
                     upload_worker_parked_job.mode,
                     (unsigned)upload_worker_parked_job.image_len);
-      bool parked_saved = false;
-#if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
-      if (upload_worker_parked_job.image_buf && upload_worker_parked_job.image_len > 0) {
-        uint8_t retries = (upload_worker_parked_job.retries < 0xFF)
-                          ? (uint8_t)(upload_worker_parked_job.retries + 1) : 0xFF;
-        parked_saved = upload_persist_save(upload_worker_parked_job, retries);
-        if (parked_saved) {
-          Serial.println("[SLEEP_UPLOAD_FLUSH] parked job SAVED to NVS");
-          upload_persist_note_event("sleep_parked", upload_worker_parked_job.mode, 1, retries);
-        }
-      }
-#endif
-      // SPIFFS could not take it. For a real capture it never can: the spool
-      // partition is 173,441 B and images are 177-189 KB, so upload_persist_save()
-      // always hits skip_save (measured: len=189246 avail=173441 required=254858).
-      // Before this fallback existed the code below simply freed the buffer and the
-      // photo was gone — PSRAM does not survive deep sleep. Spool it to the LCD's
-      // 480MB SD card instead. ~16s at 115200, paid only here on the way to sleep,
-      // after the user has already been told "Logged!".
-      if (!parked_saved &&
-          upload_worker_parked_job.image_buf &&
-          upload_worker_parked_job.image_len > 0) {
-        Serial.println("[SLEEP_UPLOAD_FLUSH] SPIFFS full — spooling to LCD SD card");
-        parked_saved = sense_spool_image_to_lcd(upload_worker_parked_job,
-                                                upload_worker_parked_job.image_buf,
-                                                upload_worker_parked_job.image_len);
-        if (parked_saved) {
-          uart_send_sense_diag("upload", "sleep_parked_sd", upload_worker_parked_job.mode,
-                               (int32_t)upload_worker_parked_job.job_id, "spooled_to_sd");
-        }
-      }
+      const bool parked_saved = upload_persist_handle_failure(upload_worker_parked_job, "sleep_parked");
       if (!parked_saved) {
         Serial.println("[SLEEP_UPLOAD_FLUSH] WARNING: parked job could NOT be persisted");
         uart_send_sense_diag("upload", "sleep_parked_drop", upload_worker_parked_job.mode,
@@ -745,7 +715,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
           Serial.printf("[SLEEP_UPLOAD_FLUSH] rescuing queued job_id=%lu mode=%s len=%u -> SD\n",
                         (unsigned long)leftover.job_id, leftover.mode,
                         (unsigned)leftover.image_len);
-          saved = sense_spool_image_to_lcd(leftover, leftover.image_buf, leftover.image_len);
+          saved = upload_persist_handle_failure(leftover, "sleep_queued");
           uart_send_sense_diag("upload", saved ? "sleep_queued_sd" : "sleep_queued_drop",
                                leftover.mode, (int32_t)leftover.job_id,
                                saved ? "spooled_to_sd" : "PHOTO_LOST");

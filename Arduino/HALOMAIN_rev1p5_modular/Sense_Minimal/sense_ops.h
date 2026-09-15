@@ -42,6 +42,24 @@ struct UploadJob {
   uint32_t created_ms;
   uint32_t created_epoch;
   bool from_persisted;
+  // Frozen before the first POST. A retry must retain the backend identity and
+  // account binding across sleep, SD replay and a later provisioning change.
+  struct VoiceEnvelope {
+    char owner_id[64];
+    char device_id[32];
+    char session_id[96];
+    char request_id[33];
+    uint32_t crc32;
+  } voice;
+  bool from_voice_sd;
+  struct ImageEnvelope {
+    char owner_id[64];
+    char device_id[32];
+    char request_id[33];
+    char checksum_sha256[65];
+    uint32_t crc32;
+  } image;
+  bool from_image_sd;
   struct CameraUploadMeta {
     uint8_t profile;
     uint8_t flash_enabled;

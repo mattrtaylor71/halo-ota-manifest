@@ -30,10 +30,12 @@
 
 #ifndef SENSE_VOICE_H
 #define SENSE_VOICE_H
+#include <mbedtls/sha256.h>
 
 // ── Voice WiFi helpers ─────────────────────────────────────────────
 
 static bool voice_ensure_wifi_connected() {
+  SenseBackupWifiCall backup_call; if (!backup_call) return false;
   if (WiFi.status() == WL_CONNECTED) {
     wifi_guard_set_state(WIFI_STATE_CONNECTED, "voice_already_connected", WL_CONNECTED);
     return true;
@@ -282,13 +284,101 @@ static void voice_audio_callback(const int16_t *samples, size_t num_samples) {
 
 // ── Voice upload ───────────────────────────────────────────────────
 
+static uint32_t sense_voice_crc32(const uint8_t* data, size_t len) {
+  uint32_t crc = 0xffffffffU;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= data[i];
+    for (unsigned b = 0; b < 8; ++b)
+      crc = (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1U)));
+  }
+  return ~crc;
+}
+
+static bool sense_voice_request_id_valid(const char* id) {
+  if (!id || strnlen(id, 33) != 32) return false;
+  for (unsigned i = 0; i < 32; ++i)
+    if (!((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f'))) return false;
+  return true;
+}
+
+static bool sense_voice_envelope_valid(const UploadJob& job) {
+  return job.is_voice && job.image_len > 0 && job.image_len <= 512U * 1024U &&
+         (job.image_len & 1U) == 0 && job.voice.owner_id[0] &&
+         job.voice.device_id[0] && job.voice.session_id[0] &&
+         memchr(job.voice.owner_id, 0, sizeof(job.voice.owner_id)) &&
+         memchr(job.voice.device_id, 0, sizeof(job.voice.device_id)) &&
+         memchr(job.voice.session_id, 0, sizeof(job.voice.session_id)) &&
+         job.voice.request_id[32] == 0 &&
+         sense_voice_request_id_valid(job.voice.request_id);
+}
+
+static bool sense_voice_replay_age_ok(const UploadJob& job) {
+  const time_t now = time(nullptr);
+  return sense_time_has_fresh_sync() && job.created_epoch >= TIME_VALID_MIN_EPOCH &&
+         now >= (time_t)job.created_epoch &&
+         (uint64_t)(now - job.created_epoch) <= 7ULL * 86400ULL;
+}
+
+static bool sense_voice_owner_matches(const UploadJob& job) {
+  char owner[64] = {}, device[32] = {};
+  load_owner_id_or_default(owner, sizeof(owner));
+  load_runtime_device_id(device, sizeof(device));
+  return sense_voice_envelope_valid(job) && !strcmp(owner, job.voice.owner_id) &&
+         !strcmp(device[0] ? device : TREPO_DEVICE_ID, job.voice.device_id);
+}
+
+static bool sense_voice_freeze_envelope(UploadJob& job) {
+  load_owner_id_or_default(job.voice.owner_id, sizeof(job.voice.owner_id));
+  load_runtime_device_id(job.voice.device_id, sizeof(job.voice.device_id));
+  if (!job.voice.device_id[0])
+    snprintf(job.voice.device_id, sizeof(job.voice.device_id), "%s", TREPO_DEVICE_ID);
+  snprintf(job.voice.session_id, sizeof(job.voice.session_id), "%s", voice_session_get_or_create());
+  g_voice_session_last_turn_ms = millis();
+  snprintf(job.voice.request_id, sizeof(job.voice.request_id), "%08lx%08lx%08lx%08lx",
+           (unsigned long)esp_random(), (unsigned long)esp_random(),
+           (unsigned long)esp_random(), (unsigned long)esp_random());
+  job.voice.crc32 = sense_voice_crc32(job.image_buf, job.image_len);
+  const time_t now = time(nullptr);
+  if (sense_time_has_fresh_sync() && now >= (time_t)TIME_VALID_MIN_EPOCH)
+    job.created_epoch = (uint32_t)now;
+  return sense_voice_envelope_valid(job);
+}
+
+static bool sense_voice_backend_ack(const UploadJob& job, int code, JsonDocument& ack) {
+  if (code != 202 || !ack["accepted"].is<bool>() || !ack["accepted"].as<bool>() ||
+      !ack["async"].is<bool>() || !ack["async"].as<bool>() ||
+      !ack["duplicate"].is<bool>() || !ack["jobId"].is<const char*>()) return false;
+  if (ack["duplicate"].as<bool>()) {
+    const char* state = ack["status"] | "";
+    if (strcmp(state, "accepted") && strcmp(state, "enqueued") &&
+        strcmp(state, "processing") && strcmp(state, "completed")) return false;
+  }
+  char key[256], expected[65];
+  const int n = snprintf(key, sizeof(key), "request:%s|%s|%s|%s", job.voice.owner_id,
+                         job.voice.device_id, job.voice.session_id, job.voice.request_id);
+  if (n < 0 || (size_t)n >= sizeof(key)) return false;
+  uint8_t digest[32];
+  if (mbedtls_sha256((const unsigned char*)key, (size_t)n, digest, 0) != 0) return false;
+  for (unsigned i = 0; i < 32; ++i) snprintf(expected + 2 * i, 3, "%02x", digest[i]);
+  return strcmp(expected, ack["jobId"].as<const char*>()) == 0;
+}
+
 // Upload raw PCM audio to async quick-ack API.
 // Success means backend durably accepted the work; firmware does not wait for result payloads.
 // Backend now accepts raw PCM sample-rate via header, so firmware sends original 16 kHz capture directly.
-static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, uint32_t voice_job_id) {
+static bool voice_upload_and_parse(const UploadJob& job) {
+  SenseBackupWifiCall backup_call; if (!backup_call) return false;
+  const uint8_t* audio_buf = job.image_buf;
+  const size_t audio_size = job.image_len;
+  const uint32_t voice_job_id = job.job_id;
   if (audio_buf == NULL || audio_size == 0) {
     Serial.println("[VOICE] No audio data to upload");
     uart_send_sense_diag("voice", "no_audio", "VOICE_POST", 0, "empty_buffer");
+    return false;
+  }
+  if (!sense_voice_owner_matches(job) || !sense_voice_replay_age_ok(job) ||
+      sense_voice_crc32(audio_buf, audio_size) != job.voice.crc32) {
+    uart_send_sense_diag("voice", "upload_blocked", "VOICE_POST", -1, "identity_or_crc");
     return false;
   }
 
@@ -312,15 +402,14 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
   String quick_ack_url = String(QUICK_ACK_BASE_URL) + String(QUICK_ACK_ENDPOINT);
   char owner_id[64] = {0};
   char device_id[32] = {0};
-  load_owner_id_or_default(owner_id, sizeof(owner_id));
-  load_runtime_device_id(device_id, sizeof(device_id));
+  snprintf(owner_id, sizeof(owner_id), "%s", job.voice.owner_id);
+  snprintf(device_id, sizeof(device_id), "%s", job.voice.device_id);
   if (owner_id[0] == '\0') {
     Serial.println("[VOICE] ERROR: owner_id empty — device not fully provisioned");
     uart_send_sense_diag("voice", "error", "voice", -1, "owner_id_empty");
     return false;
   }
-  const char* session_id = voice_session_get_or_create();
-  g_voice_session_last_turn_ms = millis();
+  const char* session_id = job.voice.session_id;
 
   Serial.print("[VOICE] Uploading to: ");
   Serial.println(quick_ack_url);
@@ -367,12 +456,21 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
     http.addHeader("x-audio-sample-rate", "16000");
     http.addHeader("x-audio-format", "pcm_s16le_mono");
     http.addHeader("x-session-id", session_id ? session_id : "");
+    http.addHeader("x-request-id", job.voice.request_id);
 
     Serial.printf("[VOICE] HTTP POST attempt=%u/%u\n", (unsigned)attempt, (unsigned)max_attempts);
     int httpResponseCode = http.POST((uint8_t*)audio_buf, audio_size);
     Serial.printf("[VOICE] HTTP Response: %d\n", httpResponseCode);
 
-    if (httpResponseCode >= 200 && httpResponseCode < 300) {
+    StaticJsonDocument<512> voice_ack;
+    bool durable_ack = false;
+    if (httpResponseCode == 202 && http.getSize() >= 0 && http.getSize() <= 512) {
+      const String reply = http.getString();
+      durable_ack = reply.length() <= 512 &&
+                    deserializeJson(voice_ack, reply) == DeserializationError::Ok &&
+                    sense_voice_backend_ack(job, httpResponseCode, voice_ack);
+    }
+    if (durable_ack) {
       Serial.printf("[VOICE] Async accept success: %d\n", httpResponseCode);
       uart_send_sense_diag("voice", "upload_ok", "VOICE_POST", (int32_t)httpResponseCode, "accepted");
       http.end();
@@ -391,7 +489,7 @@ static bool voice_upload_and_parse(const uint8_t* audio_buf, size_t audio_size, 
       uart_send_sense_diag("voice", "upload_fail", "VOICE_POST", (int32_t)httpResponseCode, vfail);
     }
     log_http_failure_details("VOICE_QUICK_ACK_POST", quick_ack_url.c_str(), httpResponseCode, &client);
-    if (httpResponseCode > 0) {
+    if (httpResponseCode > 0 && httpResponseCode != 202 && http.getSize() >= 0 && http.getSize() <= 512) {
       String error_response = http.getString();
       Serial.printf("[VOICE] Error response: %s\n", error_response.c_str());
     }

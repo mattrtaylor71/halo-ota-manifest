@@ -110,6 +110,7 @@ static bool http_post_json_with_retries(const char* url,
                                         const char* bearer,
                                         uint32_t job_id,
                                         uint32_t deadline_ms) {
+  SenseBackupWifiCall backup_call; if (!backup_call) { http_code = -1; resp_body = ""; return false; }
   // Release camera DMA reservation to defragment internal SRAM for TLS.
   bool dma_was_reserved_post = (g_camera_dma_reserve != nullptr);
   if (dma_was_reserved_post) camera_dma_reserve_release("presign_post");
@@ -239,6 +240,7 @@ static bool http_get_with_retries(const char* url,
                                   const char* bearer,
                                   uint32_t job_id,
                                   uint32_t deadline_ms) {
+  SenseBackupWifiCall backup_call; if (!backup_call) { http_code = -1; resp_body = ""; return false; }
   // Release camera DMA reservation to defragment internal SRAM for TLS.
   bool dma_was_reserved_get = (g_camera_dma_reserve != nullptr);
   if (dma_was_reserved_get) camera_dma_reserve_release("presign_get");
