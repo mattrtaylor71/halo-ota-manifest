@@ -1759,47 +1759,41 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "status": "PASS_SCOPED_CAMERA_RECOVERY_162",
-    "recorded_at": "2026-09-15T19:56:43.987893+00:00",
+    "recorded_at": "2026-09-15T22:17:59.075179+00:00",
+    "build_id": "6.4.163-20260915T215252Z-4cdefb2b4139",
     "versions": {
-      "sense": "6.4.162",
-      "lcd": "6.4.162"
+      "sense": "6.4.163",
+      "lcd": "6.4.163"
     },
     "boards": {
       "sense": {
-        "version": "6.4.162",
-        "running": "app1",
+        "version": "6.4.163",
         "state": "VALID",
+        "running": "app1",
         "boot": "app1"
       },
       "lcd": {
-        "version": "6.4.162",
-        "running": "app0",
+        "version": "6.4.163",
         "state": "VALID",
+        "running": "app0",
         "boot": "app0"
       }
     },
-    "build_id": "6.4.162-20260915T182022Z-b78efd38ed3f",
+    "status": "PASS_SCOPED_OFFLINE_MEDIA_BACKUP_163",
+    "acceptance": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/ACCEPTANCE.json",
+      "sha256": "13156739178aeee20d4c506cd451513c94c7f4433c18fd0deddd1d6f5112d926"
+    },
     "installation_health": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/INSTALLED.json",
-      "sha256": "395782cfefd007bccf72a43fa3a5e8ef368ce5011a98667bbe2fb4b5f5e3ca19"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/INSTALLATION-r2.json",
+      "sha256": "9276bcf13aa54abdaaccf4e2a14a65ec9e939cd44b63eadea3bb6736a26e4637"
     },
     "paired_live_health": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/lcd-service-install001/lcd-released.raw",
-      "sha256": "bd1f271e7d103ee04bb1400c63c2641b1d240a08fe8fbdc3c51966239c995a56"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/FINAL-HEALTH.json",
+      "sha256": "7d9f3bb05e0a7ac7fd66d710da1a35050dd91ee76803a364a63a3ba0c6581ccb"
     },
-    "physical_acceptance": "PASS_SCOPED_CAMERA_RECOVERY_162",
-    "scope": "Both162 SDK VALID, scoped camera/input/upload recovery accepted and final fresh coordinated sleep observed. Verified NVS and selected fallback banks preserved at installation. No new OTA or full-product qualification.",
-    "acceptance": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/ACCEPTANCE.json",
-      "sha256": "f6a7bc58d8e6bace35632ae201ff656eab008cdf1c2f00427a85c73aa33af52f"
-    },
-    "camera_actions_confirmed": 6,
-    "final_normal_coordinated_sleep": true,
     "all_hardware_owners_reaped": true,
-    "devices_left_asleep": true,
-    "camera_actions_at_installed_checkpoint": 0,
-    "installation_checkpoint_at": "2026-09-15T19:42:01.005878+00:00"
+    "scope": "Private paired163 SDK VALID and scoped offline-media/foreground acceptance; public OTA162 unchanged. See pinned acceptance for actual observations and limitations."
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -5994,52 +5988,71 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.162",
-    "status": "PASS_SCOPED_CAMERA_RECOVERY_162",
-    "artifact_source_commit": "b78efd38ed3ffc795a9fab086a04302c89f0c922",
-    "artifact_source_firmware_tree": "7b2586bee5f75b7cf1a5c94798ad60d8f8d5dd4a",
-    "build_id": "6.4.162-20260915T182022Z-b78efd38ed3f",
+    "version": "6.4.163",
+    "status": "PASS_SCOPED_OFFLINE_MEDIA_BACKUP_163",
+    "artifact_source_commit": "4cdefb2b413930dfb68624640272154aeaf0b2fc",
+    "artifact_source_firmware_tree": "8c37b4873700e8d6dff36d840e7870dc670d1332",
+    "build_id": "6.4.163-20260915T215252Z-4cdefb2b4139",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Exact162 camera input-recovery source or reviewed descendants retaining158 OTA and159 LCD wake fixes. Frozen158 remains the recovery/previous scheduled qualification reference; previous_working_source_159 preserves the prior scoped accepted source.",
+    "source_selection": "Use this exact163 source or reviewed descendants for future development. Preserve previous_working_source_162, previous_working_source_159 and immutable current_baseline158. Public OTA remains162.",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/RELEASE-PAIR.json",
-      "sha256": "52314e60a74b1ec4a44906d05294679bcc0580ed557fcaf0cee7f9ed2fa5034e"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/RELEASE-PAIR.json",
+      "sha256": "ee9122a56b7d04f10ee9cae5060d5c9eb7076d8422f94e4d54219211d1287524"
     },
-    "publication": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/PUBLISHED.json",
-      "sha256": "3b7642b217a572cdf5a9338c770f4c4102f81aa77ce95e91e047a9466a251f6c"
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/host-final001/RESULT.json",
+      "sha256": "83f480c7dba85d0a46a1cd2ae86641ce81028c02cf991ca6c5ec423f83e686b8"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/SOURCE-SCOPE.json",
+      "sha256": "e1c7c3062802949dc3995f4f6975cf02e9a067dd928c6491db3c21ee5a4b22e9"
     },
     "installation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/INSTALLED.json",
-      "sha256": "395782cfefd007bccf72a43fa3a5e8ef368ce5011a98667bbe2fb4b5f5e3ca19"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/INSTALLATION-r2.json",
+      "sha256": "9276bcf13aa54abdaaccf4e2a14a65ec9e939cd44b63eadea3bb6736a26e4637"
     },
     "acceptance": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/ACCEPTANCE.json",
-      "sha256": "f6a7bc58d8e6bace35632ae201ff656eab008cdf1c2f00427a85c73aa33af52f"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/ACCEPTANCE.json",
+      "sha256": "13156739178aeee20d4c506cd451513c94c7f4433c18fd0deddd1d6f5112d926"
     },
+    "final_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/FINAL-HEALTH.json",
+      "sha256": "7d9f3bb05e0a7ac7fd66d710da1a35050dd91ee76803a364a63a3ba0c6581ccb"
+    },
+    "physical_receipts": [
+      {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/physical-candidate003/RESULT.json",
+        "sha256": "373eaa0c43dbb0b1cb036b3f7b23c09f807d9c4342c0c8ee9b3ec73db61b6883"
+      }
+    ],
+    "cloud_receipts": [
+      {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/CLOUD-VOICE003/RESULT.json",
+        "sha256": "c72a7b7cd84df2de12dd32c7235a548bb71172b6bd959911defbdae3f489c67e"
+      },
+      {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/CLOUD-IMAGE002/RESULT.json",
+        "sha256": "e8fcb334a992957a5fd7f9b2ae835f7300596054a47cb3f693ec70a1a5d23a36"
+      }
+    ],
     "installed_firmware": {
-      "sense": "6.4.162",
-      "lcd": "6.4.162"
+      "sense": "6.4.163",
+      "lcd": "6.4.163"
     },
-    "camera_actions_confirmed": 6,
-    "populated_upload_flush_interruptions": 2,
-    "cloud_objects_verified": 6,
-    "policy_or_schedule_changed": false,
-    "quota_or_debt_reset": false,
-    "daily_allowance_service_implemented": false,
+    "published": false,
+    "current_public_ota_version": "6.4.162",
+    "backend_rollout": "verified_test_owner_only",
     "ota_transfer_tested": false,
+    "power_cut_tested": false,
     "full_product_qualification": false,
-    "handoff": "docs/CAMERA_INPUT_RECOVERY_162.md",
+    "handoff": "docs/OFFLINE_MEDIA_BACKUP.md",
     "limitations": [
-      "Scoped camera/input/upload-recovery qualification, not a new full-device or scheduled-OTA qualification.",
-      "Menu actions were injected through the normal LCD USB application command path; actuator exercised wake only.",
-      "USBs were connected; no independent-power or USB-free test in this acceptance.",
-      "One interrupted acquisition was3070ms versus the nominal3000ms target; all completed.",
-      "The long interruption case used the unchanged LCD denial-ceiling sleep fallback while Sense drained. A separate fresh Dish case completed a normal coordinated sleep.",
-      "Legacy offline photo SD fallback remains disabled; this does not qualify durable storage across power loss.",
-      "Wi-Fi recovered during testing; no RF/enclosure redesign or guaranteed reception claim.",
-      "Camera driver failure modes beyond the reproduced upload-flush starvation are not covered."
+      "Private assisted installation and scoped offline-media/foreground acceptance only; public OTA remains6.4.162.",
+      "Durable image backend rollout is restricted to the verified test owner; other owners retain backups on retriable503. Broader rollout requires separate validation.",
+      "USB-instrumented local Wi-Fi disconnection and ordinary sleep/reboot are not RF-loss, abrupt power-cut, USB-free, OTA-transfer, or full-product qualification.",
+      "Backend custody permits retirement; it does not by itself prove recognition, transcription, or list mutation.",
+      "Legacy /spool files remain untouched and legacy photo replay stays disabled."
     ]
   },
   "previous_verified_paired_health_158": {
@@ -6291,5 +6304,97 @@
       "lcd": "6.4.159",
       "sense": "6.4.158"
     }
+  },
+  "previous_working_source_162": {
+    "version": "6.4.162",
+    "status": "PASS_SCOPED_CAMERA_RECOVERY_162",
+    "artifact_source_commit": "b78efd38ed3ffc795a9fab086a04302c89f0c922",
+    "artifact_source_firmware_tree": "7b2586bee5f75b7cf1a5c94798ad60d8f8d5dd4a",
+    "build_id": "6.4.162-20260915T182022Z-b78efd38ed3f",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Exact162 camera input-recovery source or reviewed descendants retaining158 OTA and159 LCD wake fixes. Frozen158 remains the recovery/previous scheduled qualification reference; previous_working_source_159 preserves the prior scoped accepted source.",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/RELEASE-PAIR.json",
+      "sha256": "52314e60a74b1ec4a44906d05294679bcc0580ed557fcaf0cee7f9ed2fa5034e"
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/PUBLISHED.json",
+      "sha256": "3b7642b217a572cdf5a9338c770f4c4102f81aa77ce95e91e047a9466a251f6c"
+    },
+    "installation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/INSTALLED.json",
+      "sha256": "395782cfefd007bccf72a43fa3a5e8ef368ce5011a98667bbe2fb4b5f5e3ca19"
+    },
+    "acceptance": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/ACCEPTANCE.json",
+      "sha256": "f6a7bc58d8e6bace35632ae201ff656eab008cdf1c2f00427a85c73aa33af52f"
+    },
+    "installed_firmware": {
+      "sense": "6.4.162",
+      "lcd": "6.4.162"
+    },
+    "camera_actions_confirmed": 6,
+    "populated_upload_flush_interruptions": 2,
+    "cloud_objects_verified": 6,
+    "policy_or_schedule_changed": false,
+    "quota_or_debt_reset": false,
+    "daily_allowance_service_implemented": false,
+    "ota_transfer_tested": false,
+    "full_product_qualification": false,
+    "handoff": "docs/CAMERA_INPUT_RECOVERY_162.md",
+    "limitations": [
+      "Scoped camera/input/upload-recovery qualification, not a new full-device or scheduled-OTA qualification.",
+      "Menu actions were injected through the normal LCD USB application command path; actuator exercised wake only.",
+      "USBs were connected; no independent-power or USB-free test in this acceptance.",
+      "One interrupted acquisition was3070ms versus the nominal3000ms target; all completed.",
+      "The long interruption case used the unchanged LCD denial-ceiling sleep fallback while Sense drained. A separate fresh Dish case completed a normal coordinated sleep.",
+      "Legacy offline photo SD fallback remains disabled; this does not qualify durable storage across power loss.",
+      "Wi-Fi recovered during testing; no RF/enclosure redesign or guaranteed reception claim.",
+      "Camera driver failure modes beyond the reproduced upload-flush starvation are not covered."
+    ]
+  },
+  "previous_device_health_162": {
+    "status": "PASS_SCOPED_CAMERA_RECOVERY_162",
+    "recorded_at": "2026-09-15T19:56:43.987893+00:00",
+    "versions": {
+      "sense": "6.4.162",
+      "lcd": "6.4.162"
+    },
+    "boards": {
+      "sense": {
+        "version": "6.4.162",
+        "running": "app1",
+        "state": "VALID",
+        "boot": "app1"
+      },
+      "lcd": {
+        "version": "6.4.162",
+        "running": "app0",
+        "state": "VALID",
+        "boot": "app0"
+      }
+    },
+    "build_id": "6.4.162-20260915T182022Z-b78efd38ed3f",
+    "installation_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/INSTALLED.json",
+      "sha256": "395782cfefd007bccf72a43fa3a5e8ef368ce5011a98667bbe2fb4b5f5e3ca19"
+    },
+    "paired_live_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/lcd-service-install001/lcd-released.raw",
+      "sha256": "bd1f271e7d103ee04bb1400c63c2641b1d240a08fe8fbdc3c51966239c995a56"
+    },
+    "physical_acceptance": "PASS_SCOPED_CAMERA_RECOVERY_162",
+    "scope": "Both162 SDK VALID, scoped camera/input/upload recovery accepted and final fresh coordinated sleep observed. Verified NVS and selected fallback banks preserved at installation. No new OTA or full-product qualification.",
+    "acceptance": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/ACCEPTANCE.json",
+      "sha256": "f6a7bc58d8e6bace35632ae201ff656eab008cdf1c2f00427a85c73aa33af52f"
+    },
+    "camera_actions_confirmed": 6,
+    "final_normal_coordinated_sleep": true,
+    "all_hardware_owners_reaped": true,
+    "devices_left_asleep": true,
+    "camera_actions_at_installed_checkpoint": 0,
+    "installation_checkpoint_at": "2026-09-15T19:42:01.005878+00:00"
   }
 }

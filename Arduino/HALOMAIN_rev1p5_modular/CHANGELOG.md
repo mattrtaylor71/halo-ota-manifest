@@ -1,9 +1,8 @@
-## Unreleased — offline photo and voice backup integration
+# September15: private163 offline media backup accepted within scope
 
-- Integrate corrected voice SD custody onto accepted162 and add a distinct checked photo queue with frozen request identity; preserve current OTA/camera/wake fixes.
-- Preserve UART input while transferring saved media; use full-length typed replies and verified backend custody before retirement.
-- Add bounded direct-USB offline diagnostics. The first private163 pair passed canonical builds,19 host groups and three physical offline-save/reboot/replay/cloud-retirement cases. Public OTA remains162.
-- Close foreground interaction races: protect actual voice gesture timing, yield background replay through the existing bound cleanup handshake, retain pending RAM media across LCD admission contention, and bound transfer sleep custody without pretending UART resynchronization succeeded. Follow-up installation and acceptance remain pending. See `docs/OFFLINE_MEDIA_BACKUP.md`.
+Select candidate003 `4cdefb2b4139` as the future development source; preserve prior162 and frozen158. Separate checked SD voice/photo queues retain original identity through sleep/reboot and delete only after verified backend custody. Foreground arbitration rejects busy voice gestures before false feedback, yields replay for queued camera intent through bound cleanup, and retains busy-refused RAM media.
+
+Canonical builds/artifact checks and22 host regression groups passed. Actual installation, scoped physical/cloud results and final paired SDK VALID health are pinned in `/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/ACCEPTANCE.json` (SHA256 `13156739178aeee20d4c506cd451513c94c7f4433c18fd0deddd1d6f5112d926`). Public OTA stays162. Durable image backend rollout remains limited to the verified test owner; no new OTA-transfer, abrupt power-cut or full-product pass is claimed. See `docs/OFFLINE_MEDIA_BACKUP.md`.
 
 # September 15: camera input recovery162 accepted
 
@@ -11,7 +10,7 @@ Fix Sense input starvation during upload cleanup before sleep and preserve unrel
 
 Validation:17 source regression groups and3 negative controls passed. Six actual captures completed (two each Discard, Check-in and Dish), with all six stored images independently verified through S3. Two captures interrupted populated upload cleanup: ACK63/73ms and cancellation93/133ms. A fresh final Dish cycle completed coordinated sleep. One acquisition took3070ms against the nominal3000ms target; the longer interruption run used the existing LCD denial-limit sleep fallback.
 
-Current working source is162 (`b78efd38ed3ffc795a9fab086a04302c89f0c922`), retaining159 and frozen158 as prior references. Sense image size grows3952bytes and static RAM112bytes; LCD footprints are unchanged. Tests used USB and application command injection, with the actuator for wake. Offline photo SD fallback remains disabled. LCD allowance controls are designed but not implemented; no new OTA transfer or full-product qualification is claimed.
+Working source at this checkpoint was162 (`b78efd38ed3ffc795a9fab086a04302c89f0c922`), retaining159 and frozen158 as prior references. Sense image size grows3952bytes and static RAM112bytes; LCD footprints are unchanged. Tests used USB and application command injection, with the actuator for wake. Offline photo SD fallback remains disabled. LCD allowance controls are designed but not implemented; no new OTA transfer or full-product qualification is claimed.
 
 See [the camera recovery handoff](docs/CAMERA_INPUT_RECOVERY_162.md) and its pinned `ACCEPTANCE.json` for raw evidence, installation history and remaining limits.
 
