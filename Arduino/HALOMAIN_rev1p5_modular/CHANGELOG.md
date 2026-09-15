@@ -1,6 +1,12 @@
-# September15: scoped camera-input recovery candidate162
+# September 15: camera input recovery162 accepted
 
-Repair the reproduced offline pre-sleep command starvation and preserve unrelated input during photo-backup READY waits. Keep existing production159 runtime/158 OTA protections, budgets and photo-storage policy. Add actual-source fault tests and LCD-visible cleanup timing. See [the camera recovery handoff](docs/CAMERA_INPUT_RECOVERY_162.md) for evidence, retained limitations and the finite device acceptance plan. Canonical production162 builds and artifact checks passed from `b78efd38ed3ffc795a9fab086a04302c89f0c922`. Sealed pair SHA `52314e60a74b1ec4a44906d05294679bcc0580ed557fcaf0cee7f9ed2fa5034e`;17 regression groups and3 negative controls passed. Sense adds3952image bytes and112static RAM bytes; LCD footprints are unchanged. The user identified the offline trigger as home Wi-Fi provisioning while in the garage. Garage provisioning restored Wi-Fi. Exact162 images and latest manifests are now published with full readbacks. Three native manual requests ended before download; the fresh policy shows both daily discovery windows used. Candidate installation and physical fault acceptance remain pending an eligible native window or Sense USB access. Installed Sense158/LCD159 and preserved voice161 are unchanged.
+Fix Sense input starvation during upload cleanup before sleep and preserve unrelated commands during photo-backup READY waits. Retain the158 OTA safeguards,159 LCD wake fix, existing budgets and photo-storage policy. Both exact162 images are published and installed; both boards report SDK VALID. USB installation preserved NVS and the previous selected firmware banks, without clearing OTA allowance or recovery debt.
+
+Validation:17 source regression groups and3 negative controls passed. Six actual captures completed (two each Discard, Check-in and Dish), with all six stored images independently verified through S3. Two captures interrupted populated upload cleanup: ACK63/73ms and cancellation93/133ms. A fresh final Dish cycle completed coordinated sleep. One acquisition took3070ms against the nominal3000ms target; the longer interruption run used the existing LCD denial-limit sleep fallback.
+
+Current working source is162 (`b78efd38ed3ffc795a9fab086a04302c89f0c922`), retaining159 and frozen158 as prior references. Sense image size grows3952bytes and static RAM112bytes; LCD footprints are unchanged. Tests used USB and application command injection, with the actuator for wake. Offline photo SD fallback remains disabled. LCD allowance controls are designed but not implemented; no new OTA transfer or full-product qualification is claimed.
+
+See [the camera recovery handoff](docs/CAMERA_INPUT_RECOVERY_162.md) and its pinned `ACCEPTANCE.json` for raw evidence, installation history and remaining limits.
 
 ---
 
