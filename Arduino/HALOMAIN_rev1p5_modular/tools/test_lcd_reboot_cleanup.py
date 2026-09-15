@@ -40,6 +40,10 @@ static void delay(uint32_t n){now_ms+=n;}
 ''' + extracted + r'''
 static bool g_lcd_ota_proxy_owns_uart, g_lcd_ota_task_running, s_lcd_query_pending;
 static std::atomic<bool> g_lcd_ota_mode_unconfirmed{true};
+static std::atomic<bool> s_lcd_query_proof_held{false};
+// Admission contention is covered by the dedicated photo/query harness. This
+// fixture keeps the cleanup proof and original operation deadlines isolated.
+struct UartJsonTxLock { bool held() const { return true; } };
 static uint32_t s_lcd_reboot_cleanup_boot;
 static LcdOtaQuerySnapshot reply;
 enum {LCD_QUERY_WAITING,LCD_QUERY_READY,LCD_QUERY_TIMEOUT};
@@ -49,7 +53,7 @@ static bool sense_lcd_ota_query_start(const char* nonce,uint32_t n){
 }
 static void pump_uart_rx_once(){now_ms+=response_delay;response_delay=0;}
 static int sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& out,bool confirm){
-  assert(!confirm);out=reply;s_lcd_query_pending=false;return LCD_QUERY_READY;
+  assert(!confirm);out=reply;s_lcd_query_pending=false;s_lcd_query_proof_held=true;return LCD_QUERY_READY;
 }
 static void sense_lcd_mode_confirm(){++confirms;g_lcd_ota_mode_unconfirmed=false;now_ms+=persist_delay;}
 static uint32_t remaining(){
@@ -100,6 +104,7 @@ static bool run(const LcdOtaQuerySnapshot& before){
 ''' + fail + r'''
   const char* result=fail("chunk_retry_exhausted",-1);
   assert(!strcmp(result,"chunk_retry_exhausted")&&!g_lcd_ota_proxy_owns_uart);
+  assert(!s_lcd_query_proof_held);
   assert(uint32_t(now_ms-started)<=36000);
   return json_ready;
 }

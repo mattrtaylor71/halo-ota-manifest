@@ -33,6 +33,61 @@
 static uint32_t g_img_spool_sent = 0;
 static uint32_t g_img_spool_failed = 0;
 
+// READY is consumed by the common line collector, never by a private reader
+// which could swallow INPUT_MENU_SELECT. All fields here are protected by the
+// raw RX lease except the published result read by the waiting worker.
+static uint32_t s_img_ready_job = 0;
+static bool sense_img_spool_begin_matches(const char* line) {
+  if (!line || strlen(line) > 1024 || !g_img_spool_request_active.load() ||
+      s_img_ready_result.load() != -1) return false;
+  StaticJsonDocument<768> doc;
+  return deserializeJson(doc, line) == DeserializationError::Ok &&
+         !strcmp(doc["type"] | "", "IMG_XFER_BEGIN") &&
+         doc["ver"].is<unsigned>() && doc["ver"].as<unsigned>() == PROTOCOL_VERSION &&
+         doc["job_id"].is<uint32_t>() && doc["job_id"].as<uint32_t>() == s_img_ready_job;
+}
+static bool sense_img_spool_on_json(const char* line) {
+  if (!line || !strstr(line, "IMG_XFER_READY")) return false;
+  StaticJsonDocument<192> doc;
+  if (deserializeJson(doc, line) != DeserializationError::Ok ||
+      strcmp(doc["type"] | "", "IMG_XFER_READY")) return false;
+  // This legacy control reply has no msg_id/ts. It never validates an INPUT.
+  if (!g_img_spool_request_active.load() || s_img_ready_result.load() != -1 ||
+      !doc["ver"].is<unsigned>() || doc["ver"].as<unsigned>() != PROTOCOL_VERSION ||
+      !doc["job_id"].is<uint32_t>() || doc["job_id"].as<uint32_t>() != s_img_ready_job ||
+      !doc["ok"].is<unsigned>() || doc["ok"].as<unsigned>() > 1) return true;
+  const bool accepted = doc["ok"].as<unsigned>() == 1;
+  int pending = -1;
+  // Cancellation can release this request while a collector owns RX. A late
+  // reply must never resurrect binary ownership after that release.
+  s_img_ready_result.compare_exchange_strong(pending, accepted ? 1 : 0);
+  return true;
+}
+
+class SenseImgSpoolLease {
+ public:
+  explicit SenseImgSpoolLease(uint32_t job) : held_(false) {
+    UartJsonTxLock tx;
+    if (!tx.held() || !sense_uart_ordinary_tx_allowed() || sense_lcd_query_busy()) return;
+    UartRxLock rx(1000);
+    if (!rx.held() || !sense_uart_ordinary_tx_allowed() || uart_dispatch_depth.load()) return;
+    s_img_ready_job = job;
+    s_img_ready_result.store(-1);
+    g_img_spool_request_active.store(true);
+    held_ = true;
+  }
+  ~SenseImgSpoolLease() {
+    if (!held_) return;
+    // No destructor wait: collection has a finite byte bound, but its task
+    // can be preempted. Atomic cancellation closes admission even in that case.
+    s_img_ready_result.store(-2);
+    g_img_spool_tx_active = false;
+    g_img_spool_request_active.store(false);
+  }
+  bool held() const { return held_; }
+ private: bool held_;
+};
+
 // Send one image to the LCD. Returns true only when the LCD confirms the whole
 // file landed on SD — the caller must NOT drop its copy on false.
 //
@@ -43,6 +98,8 @@ static bool sense_spool_image_to_lcd_once(const UploadJob& job,
                                           size_t len) {
   if (!buf || len == 0 || !sense_uart_ordinary_tx_allowed()) return false;
   const uint32_t job_id = job.job_id;
+  SenseImgSpoolLease lease(job_id);
+  if (!lease.held()) return false;
   const char* mode = job.mode;
 
   // 1) Ask the LCD to open the file. It replies IMG_XFER_READY and switches to
@@ -93,34 +150,21 @@ static bool sense_spool_image_to_lcd_once(const UploadJob& job,
     // (host-reproduced: decoded_len=520, data_len=59649). The LCD also drains
     // defensively; this removes the residue at the source so neither side has
     // to be right for the transfer to work.
-    lcdSerial.print(out); lcdSerial.print('\n'); lcdSerial.flush();
+    uart_send_json(out.c_str(), false, true);
   }
 
-  // Wait for IMG_XFER_READY. Parsed loosely on purpose: we only need to know
-  // the LCD opened the file, and a strict parse here would add a failure mode
-  // on the path whose whole job is not to lose data.
-  bool ready = false;
-  {
-    unsigned long deadline = millis() + SENSE_IMG_SPOOL_READY_TIMEOUT_MS;
-    String line;
-    while ((long)(millis() - deadline) < 0) {
-      while (lcdSerial.available()) {
-        char c = (char)lcdSerial.read();
-        if (c == '\n' || c == '\r') {
-          if (line.indexOf("IMG_XFER_READY") >= 0) {
-            ready = (line.indexOf("\"ok\":1") >= 0);
-            deadline = 0;   // break outer
-            break;
-          }
-          line = "";
-        } else if (line.length() < 220) {
-          line += c;
-        }
-      }
-      if (deadline == 0) break;
-      delay(5);
-    }
+  // Collection does not dispatch app callbacks while this caller owns a
+  // photo. A separate main/sleep pump can dispatch ordinary queued input when
+  // this function runs on the upload worker. Main-owned rescue waits until its
+  // next safe custody boundary before dispatching those same preserved bytes.
+  const uint32_t ready_started = millis();
+  while (s_img_ready_result.load() == -1 &&
+         uint32_t(millis() - ready_started) < SENSE_IMG_SPOOL_READY_TIMEOUT_MS) {
+    uart_collect_rx_once();
+    delay(5);
   }
+  const bool ready = uint32_t(millis() - ready_started) < SENSE_IMG_SPOOL_READY_TIMEOUT_MS &&
+                     s_img_ready_result.load() == 1;
   if (!ready) {
     Serial.printf("[IMG_SPOOL] job=%lu LCD not ready — keeping image in RAM\n",
                   (unsigned long)job_id);
@@ -128,14 +172,11 @@ static bool sense_spool_image_to_lcd_once(const UploadJob& job,
     return false;
   }
 
-  // Let the LCD actually enter binary mode before the first frame goes out.
-  // It sets g_img_rx_binary_mode inside its RX handler, but its uart_task may
-  // still be part-way through a line-mode iteration; bytes arriving in that
-  // window get eaten by the line parser and the transfer dies at seq=0 with a
-  // frame timeout on both sides (observed exactly that). Also drain anything
-  // left over from the JSON handshake so it cannot be mistaken for COBS data.
+  // READY switched the common collector off before any binary byte. Preserve
+  // already queued ordinary lines; never flush them as handshake residue.
+  UartRxLock binary_rx(1000);
+  if (!binary_rx.held()) return false;
   delay(120);
-  while (lcdSerial.available()) lcdSerial.read();
 
   // 2) Stream the payload as COBS frames.
   g_img_spool_tx_active = true;   // hold off our own JSON for the whole transfer
@@ -180,15 +221,15 @@ static bool sense_spool_image_to_lcd_once(const UploadJob& job,
   // 3) Finish. The LCD only promotes .part -> .jpg when its byte count matches,
   //    so a truncated transfer cannot be mistaken for a complete image.
   if (ok) {
-    proto.send_frame(MSG_IMG_END, seq, nullptr, 0);
+    ok = proto.send_frame(MSG_IMG_END, seq, nullptr, 0);
     static uint8_t rframe[MAX_FRAME_SIZE];
     uint8_t rtype = 0; uint16_t rseq = 0;
     size_t rlen = sizeof(rframe);   // IN/OUT: must carry capacity IN
-    ok = proto.recv_frame(&rtype, &rseq, rframe, &rlen, SENSE_IMG_SPOOL_ACK_TIMEOUT_MS)
-         && rtype == MSG_IMG_ACK;
+    ok = ok && proto.recv_frame(&rtype, &rseq, rframe, &rlen, SENSE_IMG_SPOOL_ACK_TIMEOUT_MS)
+         && rtype == MSG_IMG_ACK && rseq == seq;
   }
 
-  g_img_spool_tx_active = false;
+  binary_rx.release();
   uint32_t ms = millis() - t0;
   Serial.printf("[IMG_SPOOL] job=%lu result=%s bytes=%u ms=%lu rate_Bps=%lu\n",
                 (unsigned long)job_id, ok ? "OK" : "FAIL", (unsigned)off,
@@ -228,11 +269,7 @@ static void sense_spool_hold_lcd_awake() {
   k["ts"] = (uint32_t)millis();
   k["request_id"] = "img_spool";
   String out; serializeJson(k, out);
-  // Written straight to lcdSerial like the handshake below, not via
-  // uart_send_json(): sense_uart.h is included AFTER this header. Bare '\n' for
-  // the same reason the IMG_XFER_BEGIN write uses one -- println() emits "\r\n"
-  // and the stray byte corrupts the first COBS frame.
-  lcdSerial.print(out); lcdSerial.print('\n'); lcdSerial.flush();
+  uart_send_json(out.c_str());
   delay(60);   // let the LCD act on it before the transfer handshake
 }
 

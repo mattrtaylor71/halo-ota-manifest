@@ -6061,5 +6061,15 @@
     "hardware_actions_this_release": 0,
     "allowance_reset_performed": false,
     "git_remote_push_performed": false
+  },
+  "camera_input_recovery_candidate_162": {
+    "version": "6.4.162",
+    "status": "SOURCE_CANDIDATE_HOST_REGRESSIONS_PHYSICAL_ACCEPTANCE_PENDING",
+    "runtime_base_commit": "f89a9efaae6413edc95713f73657d841e45ccb14",
+    "handoff": "docs/CAMERA_INPUT_RECOVERY_162.md",
+    "evidence_workspace": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915",
+    "installed": false,
+    "published": false,
+    "voice161_included": false
   }
 }

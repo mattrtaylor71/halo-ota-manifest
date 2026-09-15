@@ -1,3 +1,9 @@
+# September15: scoped camera-input recovery candidate162
+
+Repair the reproduced offline pre-sleep command starvation and preserve unrelated input during photo-backup READY waits. Keep existing production159 runtime/158 OTA protections, budgets and photo-storage policy. Add actual-source fault tests and LCD-visible cleanup timing. See [the camera recovery handoff](docs/CAMERA_INPUT_RECOVERY_162.md) for evidence, retained limitations and the finite device acceptance plan. Candidate build/installation/publication remain pending at this source checkpoint; published160 and preserved voice161 are unchanged.
+
+---
+
 # September14: publish160 for the user’s manual OTA test
 
 Version-only production pair from `957ca816aaf1e90a5fe67b75f891e9d70e44f486`, build `6.4.160-20260914T233149Z-957ca816aaf1`. Runtime matches tested159 except the three generated identity headers. Both canonical builds, artifact checks, independent review, public manifests and complete binary readbacks passed; executable sections and image/static/RTC footprints match159. Local tag `halo-v6.4.160` identifies the exact artifact source; no Git remote push.

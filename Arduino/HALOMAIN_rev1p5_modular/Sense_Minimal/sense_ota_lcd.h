@@ -197,15 +197,38 @@ static char s_lcd_query_requested_id[40] = {0};
 static uint32_t s_lcd_query_started_ms = 0;
 static uint32_t s_lcd_query_timeout_ms = 0;
 static bool s_lcd_query_pending = false;
+static std::atomic<bool> s_lcd_query_sync_active{false};
+static std::atomic<bool> s_lcd_query_proof_held{false};
 static bool s_lcd_query_legacy_boundary = false;
 static bool sense_lcd_ota_retry_safe() { return !g_lcd_ota_mode_unconfirmed.load(); }
 
 static void sense_lcd_terminal_flush();
 
+// Called under the ordinary TX admission lease. An abandoned asynchronous
+// request expires at its original deadline; a late poll cannot confirm mode.
+static bool sense_lcd_query_busy() {
+  return s_lcd_query_sync_active.load() || s_lcd_query_proof_held.load() ||
+         (s_lcd_query_pending && (uint32_t)(millis() - s_lcd_query_started_ms) < s_lcd_query_timeout_ms);
+}
+
+class SenseLcdSyncQueryLease {
+ public:
+  SenseLcdSyncQueryLease() : held_(false) {
+    UartJsonTxLock admission;
+    if (!admission.held() || g_img_spool_request_active.load() || g_img_spool_tx_active || g_spool_owns_uart || sense_lcd_query_busy()) return;
+    s_lcd_query_sync_active.store(true); held_ = true;
+  }
+  ~SenseLcdSyncQueryLease() { if (held_) s_lcd_query_sync_active.store(false); }
+  bool held() const { return held_; }
+ private: bool held_;
+};
+
 static bool sense_lcd_ota_query_start(const char* coord_id, uint32_t timeout_ms) {
+  UartJsonTxLock admission;
+  if (!admission.held() || sense_lcd_query_busy()) return false;
   if (!coord_id || !coord_id[0] || strlen(coord_id) >= sizeof(s_lcd_query_requested_id) ||
       !timeout_ms || timeout_ms > 120000 || g_lcd_ota_proxy_owns_uart ||
-      g_spool_owns_uart || g_img_spool_tx_active) return false;
+      g_spool_owns_uart || g_img_spool_tx_active || g_img_spool_request_active.load()) return false;
   // Never discard queued user/peer input. The normal pump owns it. A new
   // correlated reply is safe even with pending input; legacy fallback requires
   // an observed empty parser/FIFO boundary before this challenge is sent.
@@ -229,11 +252,14 @@ static bool sense_lcd_ota_query_start(const char* coord_id, uint32_t timeout_ms)
   doc["ts"] = (uint32_t)millis();
   String output;
   serializeJson(doc, output);
+  admission.release(); // ordinary sender reacquires; pending still excludes image spooling
   uart_send_json(output.c_str(), true);  // Explicit bounded readiness probe.
   return true;
 }
 
 static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& snapshot, bool confirm_mode = true) {
+  UartJsonTxLock admission;
+  if (!admission.held()) return LCD_QUERY_WAITING;
   if (!s_lcd_query_pending ||
       (uint32_t)(millis() - s_lcd_query_started_ms) >= s_lcd_query_timeout_ms) {
     s_lcd_query_pending = false;
@@ -262,6 +288,7 @@ static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& snapshot, b
       strcmp(snapshot.running_part, snapshot.boot_part) != 0) return LCD_QUERY_WAITING;
   s_lcd_query_pending = false;
   if (confirm_mode) sense_lcd_mode_confirm();  // Recovery validates stronger proof first.
+  else s_lcd_query_proof_held.store(true);
   return LCD_QUERY_READY;
 }
 
@@ -297,6 +324,9 @@ static bool sense_lcd_reboot_cleanup_probe(const LcdOtaQuerySnapshot& before,
   char challenge[40];
   snprintf(challenge,sizeof(challenge),"recover_%08lx%08lx",(unsigned long)esp_random(),(unsigned long)esp_random());
   if (!sense_lcd_ota_query_start(challenge,left())) return false;
+  struct ProofLease {
+    ~ProofLease() { s_lcd_query_proof_held.store(false); }
+  } proof_lease;
   while (left()) {
     pump_uart_rx_once();
     if (!left()) break;
@@ -314,7 +344,10 @@ static bool sense_lcd_reboot_cleanup_probe(const LcdOtaQuerySnapshot& before,
     if (result == LCD_QUERY_TIMEOUT) break;
     delay(10);
   }
-  s_lcd_query_pending = false;
+  {
+    UartJsonTxLock admission;
+    if (admission.held()) s_lcd_query_pending = false;
+  }
   return false;
 }
 
@@ -336,6 +369,8 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
                                 const char* expected_boot_fw = nullptr,
                                 uint32_t max_budget_ms = 35000) {
   if (!lcd_fw_out || fw_len == 0 || !max_budget_ms) return false;
+  SenseLcdSyncQueryLease query_lease;
+  if (!query_lease.held()) return false;
   lcd_fw_out[0] = '\0';
   if (part_size_out) *part_size_out = 0;
 
@@ -374,13 +409,16 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
     // Bound the legacy drain by the installed hardware FIFO capacity and the
     // original query budget. Continuous input cannot keep this loop alive.
     size_t discarded = 0;
+    if (!uart_rx_mutex || xSemaphoreTake(uart_rx_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return false;
     while (lcdSerial.available() > 0 && discarded < 1024 &&
            (millis() - query_started_ms) < query_budget_ms) {
       lcdSerial.read();
       ++discarded;
     }
-    if (lcdSerial.available() > 0 || (millis() - query_started_ms) >= query_budget_ms) return false;
+    const bool drain_failed = lcdSerial.available() > 0 || (millis() - query_started_ms) >= query_budget_ms;
     uart_reset_rx_state();
+    xSemaphoreGive(uart_rx_mutex);
+    if (drain_failed) return false;
 
     // Send query (fresh msg_id each attempt)
     StaticJsonDocument<128> doc;

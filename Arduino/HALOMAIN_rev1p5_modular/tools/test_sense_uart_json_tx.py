@@ -52,7 +52,13 @@ def harness(root, expect_joined):
 #include <vector>
 using namespace std::chrono_literals;
 static constexpr bool fixed = FIXED, expect_joined = EXPECT_JOINED;
+static constexpr unsigned expected_mutexes = EXPECTED_MUTEXES;
 static bool g_lcd_ota_proxy_owns_uart, g_spool_owns_uart, g_img_spool_tx_active;
+static std::atomic<bool> g_img_spool_request_active{false};
+static std::atomic<int> s_img_ready_result{-2};
+static uint32_t s_img_ready_job=42;
+static constexpr unsigned PROTOCOL_VERSION=1;
+static bool sense_img_spool_binary_pending() { return s_img_ready_result==1 || g_img_spool_tx_active; }
 static std::atomic<bool> g_lcd_ota_mode_unconfirmed{false};
 static std::atomic<unsigned> uart_tx_count{0}, last_uart_tx_ms{0}, now_ms{100};
 static unsigned millis() { return ++now_ms; }
@@ -82,6 +88,7 @@ static int xSemaphoreTake(SemaphoreHandle_t s, unsigned wait_ms) {
     if (change_owner == 2) g_lcd_ota_proxy_owns_uart = true;
     if (change_owner == 3) g_spool_owns_uart = true;
     if (change_owner == 4) g_img_spool_tx_active = true;
+    if (change_owner == 5) {g_img_spool_request_active=true;s_img_ready_result=-1;}
     schedule_cv.notify_all();
   }
   if (inject_timeout || !s->mutex.try_lock_for(std::chrono::milliseconds(wait_ms))) return 0;
@@ -114,7 +121,8 @@ static struct {
   void flush() { if (fixed) assert(own_message_lock); }
 } lcdSerial;
 #define HALO_DEBUG_SENSITIVE 0
-'''.replace('FIXED', str(locked).lower()).replace('EXPECT_JOINED', str(expect_joined).lower())
+'''.replace('FIXED', str(locked).lower()).replace('EXPECT_JOINED', str(expect_joined).lower()).replace(
+        'EXPECTED_MUTEXES', '2' if 'uart_rx_mutex_storage' in source else '1')
     cases = r'''
 static const char* diag = R"({"ver":1,"type":"SENSE_DIAG","msg_id":19,"ts":5017})";
 static const char* list = R"({"ver":1,"type":"UI_LIST","msg_id":20,"ts":5030,"items":[{"id":"fixture","text":"QA item"}]})";
@@ -122,6 +130,7 @@ static const char* query = R"({"ver":1,"type":"LCD_OTA_QUERY","msg_id":21,"ts":5
 static void clear_state() {
   wire.clear(); coordinate = false; first_payload = second_payload = second_attempted = false;
   g_lcd_ota_mode_unconfirmed = false;
+  g_img_spool_request_active=false;s_img_ready_result=-2;
   g_lcd_ota_proxy_owns_uart = g_spool_owns_uart = g_img_spool_tx_active = false;
   change_owner = 0; inject_timeout = false; uart_tx_count = 0;
 }
@@ -152,8 +161,10 @@ int main() {
   if (fixed) {
     uart_send_json(diag); assert(wire.empty() && skip_logs == 1);
   }
-  uart_json_tx_init(); uart_json_tx_init();
-  if (fixed) assert(creates == 1);
+  uart_json_tx_init();
+  const unsigned first_init_creates = creates;
+  uart_json_tx_init();
+  if (fixed) assert(creates == expected_mutexes && creates == first_init_creates);
   collide();
   if (expect_joined) {
     assert(wire == std::string(diag) + list + "\n\n");
@@ -168,7 +179,7 @@ int main() {
     assert(uart_tx_count == 2);
   }
   puts("PASS 101 deterministic concurrent diagnostic/list sends preserve both complete frames");
-  for (int owner = 1; owner <= 4; ++owner) {
+  for (int owner = 1; owner <= 5; ++owner) {
     collide(owner); assert(wire == std::string(diag) + "\n");
     assert(uart_tx_count == 1);
   }
@@ -194,7 +205,21 @@ int main() {
   puts("PASS fail-closed uninitialized/timeout recovery, null admission, and unchanged12KB message bytes; USB logging outside lock");
 }
 '''
-    return '\n'.join([prefix, state, definition(source, 'static void uart_send_json('), cases])
+    photo = (Path(__file__).resolve().parents[1] / 'Sense_Minimal/sense_img_spool.h').read_text()
+    begin_guard = definition(photo, 'static bool sense_img_spool_begin_matches(')
+    if 'explicit_img_begin' in source:
+        cases = cases.replace('  clear_state(); inject_timeout = true;', r'''  clear_state();
+  g_img_spool_request_active=true; s_img_ready_result=-1;
+  const char* begin=R"({"ver":1,"type":"IMG_XFER_BEGIN","job_id":42})";
+  const char* wrong=R"({"ver":1,"type":"IMG_XFER_BEGIN","job_id":43})";
+  uart_send_json(diag);uart_send_json(query,true);uart_send_json(begin);uart_send_json(wrong,false,true);
+  assert(wire.empty());uart_send_json(begin,false,true);assert(wire==std::string(begin)+"\n");
+  wire.clear();s_img_ready_result=1;uart_send_json(diag);uart_send_json(begin,false,true);assert(wire.empty());
+  s_img_ready_result=0;uart_send_json(diag);assert(wire==std::string(diag)+"\n");
+  g_img_spool_request_active=false;s_img_ready_result=-2;
+  puts("PASS pending READY reserves TX for exact own BEGIN; accepted blocks and explicit refusal restores ordinary JSON");
+  clear_state(); inject_timeout = true;''')
+    return '\n'.join([prefix, state, begin_guard, definition(source, 'static void uart_send_json('), cases])
 
 
 def main():

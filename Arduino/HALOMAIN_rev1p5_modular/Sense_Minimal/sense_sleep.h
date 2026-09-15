@@ -384,6 +384,25 @@ static void (*g_lcd_maint_coschedule_hook)(uint32_t wake_in_s) = nullptr;
 // Reports the actual selected interval on the next available cloud report.
 static void (*g_sleep_timer_selected_hook)(uint32_t seconds) = nullptr;
 
+// Called only by the main task at a boundary with no locally dequeued photo.
+// The UART pump owns/leases raw RX and releases it before invoking callbacks.
+// Only a new, deduplicated user action changes this generation; link traffic
+// must not renew a sleep/flush deadline. A guardian-forced teardown stays owned.
+static bool sleep_upload_flush_yield_to_user(uint32_t user_generation,
+                                           unsigned long started_ms,
+                                           unsigned long budget_ms) {
+  if (guardian_force_sleep) return false;
+  pump_uart_rx_once();
+  if (sense_user_action_generation() == user_generation) return false;
+  g_upload_flush_requested = false;
+  char detail[96];
+  snprintf(detail, sizeof(detail), "queued=%lu elapsed_ms=%lu budget_ms=%lu",
+           (unsigned long)upload_queue_count(), millis() - started_ms, budget_ms);
+  uart_send_sense_diag("sleep", "flush_cancel", "user_activity", 0, detail);
+  sleep_notify_late_block("user_activity");
+  return true;
+}
+
 static void sense_enter_deep_sleep(SenseSleepKind kind) {
 #ifdef STRESS_TEST_NO_SLEEP
   // Bench builds must stay on the USB bus. The only previous guard was in the
@@ -397,6 +416,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
                 (unsigned long)(++s_no_sleep_suppressed), (int)kind);
   return;
 #endif
+  const uint32_t sleep_user_generation = sense_user_action_generation();
   Serial.println("========================================");
   Serial.println("[SENSE] Preparing for DEEP SLEEP...");
   Serial.println("========================================");
@@ -584,7 +604,11 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     // the camera needs — see uploads_held_for_session() in Sense_Minimal.ino.
     // THIS is the moment they are released: the user has stopped, the camera is
     // about to be torn down, and the full internal heap is available.
-    g_upload_flush_requested = true;
+    // Close the temporary worker gate on every exit, including cancellation
+    // and a later sleep admission refusal. Queue/parked ownership is unchanged.
+    struct FlushGate {
+      ~FlushGate() { g_upload_flush_requested = false; }
+    } flush_gate;
 
     // Budget must scale with what is actually queued.
     //
@@ -610,6 +634,16 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     bool had_pending = (initial_count > 0 || upload_inflight || has_parked ||
                         upload_worker_holding_in_place);
 
+    if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
+                                        UPLOAD_FLUSH_TIMEOUT_MS)) return;
+    char flush_detail[96];
+    snprintf(flush_detail, sizeof(flush_detail),
+             "queued=%lu inflight=%u parked=%u budget_ms=%lu",
+             (unsigned long)initial_count, upload_inflight ? 1 : 0,
+             has_parked ? 1 : 0, UPLOAD_FLUSH_TIMEOUT_MS);
+    uart_send_sense_diag("sleep", "flush_start", "upload", 0, flush_detail);
+    g_upload_flush_requested = true;
+
     if (had_pending) {
       Serial.printf("[SLEEP_UPLOAD_FLUSH] start pending=%lu inflight=%d parked=%d\n",
                     (unsigned long)initial_count, upload_inflight ? 1 : 0, has_parked ? 1 : 0);
@@ -619,6 +653,8 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
            (upload_queue_count() > 0 || upload_inflight || upload_worker_has_parked_job ||
             upload_worker_holding_in_place) &&
            (millis() - flush_start) < UPLOAD_FLUSH_TIMEOUT_MS) {
+      if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
+                                          UPLOAD_FLUSH_TIMEOUT_MS)) return;
       // Log progress periodically
       if ((millis() - last_log) >= UPLOAD_FLUSH_LOG_INTERVAL_MS) {
         last_log = millis();
@@ -632,6 +668,8 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
       delay(100);  // Yield to upload_worker_task on Core 1
     }
 
+    if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
+                                        UPLOAD_FLUSH_TIMEOUT_MS)) return;
     // If parked job still exists after timeout, persist it before sleeping
     if (upload_worker_has_parked_job) {
       Serial.printf("[SLEEP_UPLOAD_FLUSH] parked job exists: job_id=%lu mode=%s len=%u\n",
@@ -681,6 +719,8 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
       upload_worker_has_parked_job = false;
     }
 
+    if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
+                                        UPLOAD_FLUSH_TIMEOUT_MS)) return;
     // Rescue anything STILL QUEUED after the flush budget expired.
     //
     // The parked-job block above only ever handled ONE job, which was correct
@@ -693,8 +733,13 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     {
       UploadJob leftover = {};
       uint32_t rescued = 0, lost = 0;
-      while (upload_queue != NULL &&
-             xQueueReceive(upload_queue, &leftover, 0) == pdTRUE) {
+      while (upload_queue != NULL) {
+        // Dispatch only before taking ownership or after the previous item's
+        // existing save/drop decision. A spool READY reader preserves ordinary
+        // input for this boundary; it must not run application callbacks.
+        if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
+                                            UPLOAD_FLUSH_TIMEOUT_MS)) return;
+        if (xQueueReceive(upload_queue, &leftover, 0) != pdTRUE) break;
         bool saved = false;
         if (leftover.image_buf && leftover.image_len > 0) {
           Serial.printf("[SLEEP_UPLOAD_FLUSH] rescuing queued job_id=%lu mode=%s len=%u -> SD\n",
@@ -725,6 +770,13 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
                     millis() - flush_start,
                     (remaining == 0 && !upload_inflight) ? "DRAINED" : "TIMEOUT");
     }
+    if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
+                                        UPLOAD_FLUSH_TIMEOUT_MS)) return;
+    snprintf(flush_detail, sizeof(flush_detail),
+             "queued=%lu inflight=%u elapsed_ms=%lu budget_ms=%lu",
+             (unsigned long)upload_queue_count(), upload_inflight ? 1 : 0,
+             millis() - flush_start, UPLOAD_FLUSH_TIMEOUT_MS);
+    uart_send_sense_diag("sleep", "flush_end", "upload", 0, flush_detail);
   }
 
   // 1. Shut down Wi-Fi + BT before deep sleep

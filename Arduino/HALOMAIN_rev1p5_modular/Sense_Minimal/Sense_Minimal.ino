@@ -753,6 +753,7 @@ static const unsigned long LIST_REFRESH_COOLDOWN_MS = 3000;
 static char g_last_refresh_reason[32] = "unknown";
 static bool link_synced = false;
 static unsigned long last_user_activity_ms = 0;
+#include "sense_user_activity.h"
 static unsigned long sleep_grace_until_ms = 0;
 static bool wake_requested = false;
 static unsigned long last_input_wake_ms = 0;
@@ -788,9 +789,8 @@ static SemaphoreHandle_t g_list_mutex = NULL;
 // True while the Sense is STREAMING an image out to the LCD. Suppresses this
 // board's own JSON TX so a periodic SENSE_DIAG cannot land inside the COBS
 // frames it is transmitting.
-static bool g_img_spool_tx_active = false;
+static std::atomic<bool> g_img_spool_tx_active{false};
 static bool sense_uart_ordinary_tx_allowed();  // Defined with the transport guard below.
-#include "sense_img_spool.h"  // spool captures to the LCD SD card (Step 4)
 #include "sense_diag.h"
 #include "sense_errlog.h"
 // True while the SD-spool drain is streaming an image back from the LCD over
@@ -806,6 +806,7 @@ static uint32_t g_spool_drain_wake_start_ms = 0;
 static uint32_t g_spool_drain_wake_ok_at_start = 0;
 
 #include "sense_uart.h"
+#include "sense_img_spool.h"  // spool captures to the LCD SD card (Step 4)
 // After sense_uart.h: the relay uses uart_send_sense_diag().
 #include "sense_wakelog.h"   // per-wake-cycle history that survives deep sleep
 
@@ -2252,12 +2253,6 @@ static bool parse_input_message(const char* json_str) {
                                strcmp(type, "INPUT_SLEEP") != 0 &&
                                strcmp(type, "INPUT_PING") != 0;
   if (is_user_input_message) {
-    cancel_pending_sleep_for_user_action(type);
-    // Someone is using the device. Abandon any in-flight background drain so the
-    // link and the CPU belong to them immediately; the image stays on the SD
-    // card and the drain retries once things are quiet again.
-    sense_spool_drain_yield_to_user();
-
     const uint32_t in_msg_id = (uint32_t)(doc["msg_id"] | 0);
 
     // Ack BEFORE doing any work. The LCD retransmits on a 400ms timer, and some
@@ -2277,6 +2272,13 @@ static bool parse_input_message(const char* json_str) {
       return true;
     }
     sense_input_mark_seen(in_msg_id);
+    if (sense_user_action_cancels_flush(type)) {
+      sense_note_admitted_user_action();
+      cancel_pending_sleep_for_user_action(type);
+      // Yield background work only for a new user action, not a repeated ACK
+      // request or an automatic firmware/status query.
+      sense_spool_drain_yield_to_user();
+    }
   }
   // Drain replies from the LCD (what is spooled / ready to stream).
   if (strcmp(type, "SPOOL_LIST") == 0) {

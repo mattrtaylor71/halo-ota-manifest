@@ -26,6 +26,12 @@
 
 // Forward declaration - parse_input_message stays in .ino (dispatch layer)
 static bool parse_input_message(const char* json_str);
+static bool sense_img_spool_on_json(const char* json_str);
+static bool sense_img_spool_begin_matches(const char* json_str);
+static bool sense_lcd_query_busy();
+static std::atomic<bool> g_img_spool_request_active{false};
+static std::atomic<int> s_img_ready_result{-2}; // cancelled, pending(-1), refused(0), binary(1)
+static bool sense_img_spool_binary_pending() { return s_img_ready_result.load() == 1; }
 
 // LCD OTA proxy UART ownership flag — when true, suppress JSON TX
 // (binary COBS framing is in progress on lcdSerial)
@@ -36,6 +42,7 @@ static std::atomic<bool> g_lcd_ota_mode_unconfirmed{true};
 static bool s_lcd_mode_marker_pending = true;
 static bool sense_uart_ordinary_tx_allowed() {
   return !g_lcd_ota_proxy_owns_uart && !g_spool_owns_uart && !g_img_spool_tx_active &&
+         !g_img_spool_request_active.load() &&
          !g_lcd_ota_mode_unconfirmed.load();
 }
 
@@ -93,9 +100,34 @@ static bool uart_initialized = false;
 // avoids adding an allocation to the memory-sensitive upload/OTA paths.
 static StaticSemaphore_t uart_json_tx_mutex_storage;
 static SemaphoreHandle_t uart_json_tx_mutex = NULL;
+static StaticSemaphore_t uart_rx_mutex_storage;
+static SemaphoreHandle_t uart_rx_mutex = NULL;
+static std::atomic<uint32_t> uart_dispatch_depth{0};
+
+class UartDispatchLease {
+ public:
+  void claim() { uart_dispatch_depth.fetch_add(1); held_ = true; }
+  ~UartDispatchLease() { if (held_) uart_dispatch_depth.fetch_sub(1); }
+ private:
+  bool held_ = false;
+};
 static constexpr uint32_t UART_JSON_TX_LOCK_WAIT_MS = 2000;
 
+class UartRxLock {
+ public:
+  explicit UartRxLock(uint32_t wait_ms = 0) : held_(uart_rx_mutex != NULL &&
+      xSemaphoreTake(uart_rx_mutex, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {}
+  ~UartRxLock() { release(); }
+  bool held() const { return held_; }
+  void release() { if (held_) { xSemaphoreGive(uart_rx_mutex); held_ = false; } }
+ private:
+  bool held_;
+};
+
 static void uart_json_tx_init() {
+  if (uart_rx_mutex == NULL) {
+    uart_rx_mutex = xSemaphoreCreateMutexStatic(&uart_rx_mutex_storage);
+  }
   if (uart_json_tx_mutex == NULL) {
     uart_json_tx_mutex = xSemaphoreCreateMutexStatic(&uart_json_tx_mutex_storage);
   }
@@ -206,7 +238,13 @@ static void uart_reset_rx_state() {
 }
 
 static void link_reset_parser_state() {
-  uart_reset_rx_state();
+  UartRxLock rx(1000);
+  if (!rx.held()) return;
+  // SYNC resets only an unfinished wire frame. Complete queued INPUTs retain
+  // their order and must not disappear because a SYNC preceded them.
+  uart_rx_frame_len = 0;
+  uart_rx_frame_overflow = false;
+  uart_rx_oversize_drop = 0;
 }
 
 static void uart_ring_push(char c) {
@@ -231,107 +269,81 @@ static bool uart_ring_pop(char* out) {
 
 // ── RX frame processing ─────────────────────────────────────────────
 
+// Only complete ordinary JSON lines enter the ring. The raw collector and
+// binary reader share one lease; protocol callbacks run after releasing it.
 static void uart_process_rx_ring() {
-  char c = '\0';
-  while (uart_ring_pop(&c)) {
-    if (c == '\n') {
-      if (uart_rx_frame_overflow) {
-        Serial.printf("[PROTO] frame_oversize dropped_to_newline bytes=%u\n",
-                      (unsigned)uart_rx_oversize_drop);
-      } else if (uart_rx_frame_len > 0) {
-        size_t start = 0;
-        size_t end = uart_rx_frame_len;
-        while (start < end && uart_rx_frame[start] == ' ') {
-          start++;
-        }
-        while (end > start && uart_rx_frame[end - 1] == ' ') {
-          end--;
-        }
-        size_t trimmed_len = end > start ? (end - start) : 0;
-        if (trimmed_len > 0) {
-          if (uart_rx_frame[start] != '{') {
-            Serial.printf("[PROTO] dropped_nonjson_line len=%u first_char=%c\n",
-                          (unsigned)trimmed_len,
-                          uart_rx_frame[start]);
-          } else {
-            if (start > 0 || end < uart_rx_frame_len) {
-              memmove(uart_rx_frame, uart_rx_frame + start, trimmed_len);
-            }
-            uart_rx_frame[trimmed_len] = '\0';
-            parse_input_message(uart_rx_frame);
-          }
-        }
+  for (size_t frames = 0; frames < UART_RX_RING_SIZE; ++frames) {
+    char line[UART_RX_FRAME_MAX + 1];
+    size_t n = 0;
+    UartDispatchLease dispatch;
+    {
+      UartRxLock rx;
+      if (!rx.held() || g_lcd_ota_proxy_owns_uart || g_spool_owns_uart ||
+          (g_img_spool_request_active.load() && s_img_ready_result.load() != 0) ||
+          (g_img_spool_tx_active || sense_img_spool_binary_pending()) || !uart_rx_ring_count) return;
+      char c;
+      while (uart_ring_pop(&c) && c != '\n') {
+        if (n < UART_RX_FRAME_MAX) line[n++] = c;
       }
-      uart_rx_frame_len = 0;
-      uart_rx_frame_overflow = false;
-      uart_rx_dropped_since_frame = 0;
-      uart_rx_oversize_drop = 0;
-      continue;
+      line[n] = '\0';
+      // Reserve callback admission before releasing RX. A worker must not
+      // BEGIN between this check and the callback's ACK/UI writes. Nested
+      // pumps add depth; neither RX nor TX stays locked across callbacks.
+      dispatch.claim();
     }
-    if (uart_rx_frame_overflow) {
-      uart_rx_dropped_since_frame++;
-      uart_rx_oversize_drop++;
-      continue;
-    }
-    if (uart_rx_frame_len >= UART_RX_FRAME_MAX) {
-      uart_rx_frame_overflow = true;
-      uart_rx_dropped_since_frame++;
-      uart_rx_oversize_drop++;
-      continue;
-    }
-    uart_rx_frame[uart_rx_frame_len++] = c;
+    if (n) parse_input_message(line);
   }
 }
 
-// ── One-shot RX pump ─────────────────────────────────────────────────
-//
-// Drains any bytes waiting on lcdSerial into the RX ring and dispatches
-// complete JSON frames via uart_process_rx_ring().  This is the same work
-// the main loop() performs each iteration, factored out so blocking waits
-// (e.g. sense_lcd_ota_query) can keep processing inbound frames such as
-// INPUT_OTA_CHECK instead of dropping them.
-//
-// No-op while the LCD OTA proxy owns the serial port (binary COBS framing).
-static void pump_uart_rx_once() {
-  if (g_lcd_ota_proxy_owns_uart) {
-    return;
-  }
-  // The spool drain owns the port while an image streams back from the LCD.
-  // The JSON line reader below would consume those COBS bytes as text and the
-  // transfer would die at seq=0 — the same failure the outbound direction hit.
-  if (g_spool_owns_uart) {
-    return;
-  }
-  // Same rule for the OUTBOUND direction. The earlier spooltest transfers passed
-  // only because the device was idle; during a real upload failure the Sense is
-  // emitting rssi SENSE_DIAG every ~2s, and those bytes land inside its own COBS
-  // stream — observed as "[IMG_SPOOL] ack timeout at seq=5" with the LCD
-  // reporting frame_timeout. Third instance of this same bug class: every
-  // transfer direction needs BOTH boards quiet.
-  if (g_img_spool_tx_active) {
-    return;
-  }
-  while (lcdSerial.available() > 0) {
-    char c = lcdSerial.read();
-    if (UART_RX_DEBUG) {
-      Serial.printf("[UART_RAW] rx_byte=0x%02X\n", (uint8_t)c);
-    }
-    if (c == '\n') {
-      uart_ring_push('\n');
-    } else if (c == '\r') {
+// Collection alone is safe from either the main sleep path or upload worker.
+// It never executes user actions while a caller owns a dequeued photo. READY
+// has a dedicated typed mailbox because deployed LCD159 omits msg_id/ts.
+static void uart_collect_rx_once() {
+  UartRxLock rx;
+  if (!rx.held() || g_lcd_ota_proxy_owns_uart || g_spool_owns_uart ||
+      (g_img_spool_tx_active || sense_img_spool_binary_pending())) return;
+  size_t read = 0;
+  while (lcdSerial.available() > 0 && read++ < 1024) {
+    const char c = (char)lcdSerial.read();
+    if (c == '\r') continue;
+    if (c != '\n') {
+      if (!uart_rx_is_printable(c)) { ++uart_rx_dropped_since_frame; continue; }
+      if (uart_rx_frame_len < UART_RX_FRAME_MAX && !uart_rx_frame_overflow)
+        uart_rx_frame[uart_rx_frame_len++] = c;
+      else { uart_rx_frame_overflow = true; ++uart_rx_oversize_drop; }
       continue;
-    } else if (uart_rx_is_printable(c)) {
-      uart_ring_push(c);
-    } else {
-      uart_rx_dropped_since_frame++;
     }
+    uart_rx_frame[uart_rx_frame_len] = '\0';
+    if (!uart_rx_frame_overflow && uart_rx_frame_len) {
+      if (!sense_img_spool_on_json(uart_rx_frame)) {
+        if (uart_rx_frame_len + 1 <= UART_RX_RING_SIZE - uart_rx_ring_count) {
+          for (size_t i = 0; i < uart_rx_frame_len; ++i) uart_ring_push(uart_rx_frame[i]);
+          uart_ring_push('\n');
+        } else {
+          // Refuse a whole line; never overwrite a queued command or enqueue
+          // a truncated JSON prefix. The existing sender retries unacked input.
+          uart_rx_dropped_since_frame += uart_rx_frame_len + 1;
+        }
+      }
+    }
+    uart_rx_frame_len = 0;
+    uart_rx_frame_overflow = false;
+    uart_rx_oversize_drop = 0;
+    if (sense_img_spool_binary_pending()) break; // positive READY: COBS owns subsequent bytes
   }
+}
+
+static void pump_uart_rx_once() {
+  uart_collect_rx_once();
   uart_process_rx_ring();
 }
 
 // ── Post-wake RX sanitization ────────────────────────────────────────
 
 static void wake_rx_sanitize() {
+  UartRxLock rx(1000);
+  if (!rx.held() || g_lcd_ota_proxy_owns_uart || g_spool_owns_uart ||
+      g_img_spool_request_active.load()) return;
   uart_reset_rx_state();
   const unsigned long start_ms = millis();
   const unsigned long max_ms = 20;
@@ -340,7 +352,6 @@ static void wake_rx_sanitize() {
   uint8_t first_bytes[8];
   size_t first_len = 0;
   int last_byte = -1;
-  bool saw_frame_start = false;
   while (lcdSerial.available() > 0 &&
          (millis() - start_ms) < max_ms &&
          read_bytes < max_bytes) {
@@ -352,8 +363,8 @@ static void wake_rx_sanitize() {
     read_bytes++;
     last_byte = raw & 0xFF;
     if (c == '{') {
-      uart_ring_push(c);
-      saw_frame_start = true;
+      uart_rx_frame[0] = c;
+      uart_rx_frame_len = 1;
       break;
     }
     if (uart_rx_dropped_since_frame < 0xFFFFFFFFu) {
@@ -363,6 +374,8 @@ static void wake_rx_sanitize() {
       first_bytes[first_len++] = static_cast<uint8_t>(raw);
     }
   }
+  const unsigned long dropped = uart_rx_dropped_since_frame;
+  rx.release();
   char first_hex[3 * 8 + 1];
   size_t pos = 0;
   for (size_t i = 0; i < first_len && pos + 3 < sizeof(first_hex); i++) {
@@ -380,12 +393,9 @@ static void wake_rx_sanitize() {
     strcpy(first_hex, "-");
   }
   Serial.printf("[UART_SAN] dropped_bytes=%lu first_bytes_hex=%s last_byte=0x%02X\n",
-                uart_rx_dropped_since_frame,
+                dropped,
                 first_hex,
                 last_byte >= 0 ? last_byte : 0xFF);
-  if (saw_frame_start) {
-    uart_process_rx_ring();
-  }
 }
 
 // ── Message ID generation ────────────────────────────────────────────
@@ -427,7 +437,8 @@ static bool validate_protocol_message(JsonDocument& doc) {
 
 // ── Core TX ──────────────────────────────────────────────────────────
 
-static void uart_send_json(const char* json_str, bool explicit_mode_probe = false) {
+static void uart_send_json(const char* json_str, bool explicit_mode_probe = false,
+                           bool explicit_img_begin = false) {
   if (!json_str) return;
   const size_t len = strlen(json_str);
   // Task context only; there are no callbacks or recursive sends in this scope.
@@ -437,6 +448,12 @@ static void uart_send_json(const char* json_str, bool explicit_mode_probe = fals
   if (!tx_lock.held()) {
     Serial.println("[UART_TX] json_skipped reason=tx_lock_unavailable");
     return;
+  }
+  // The LCD may switch to binary as soon as it emits READY, before our RX
+  // collector observes it. Reserve TX from BEGIN admission until explicit
+  // refusal or transfer completion; only this request's own BEGIN may pass.
+  if (g_img_spool_request_active.load() && s_img_ready_result.load() != 0) {
+    if (!explicit_img_begin || !sense_img_spool_begin_matches(json_str)) return;
   }
   // Block JSON TX while LCD OTA proxy owns the UART for binary COBS framing
   if (g_lcd_ota_proxy_owns_uart) {
@@ -464,7 +481,7 @@ static void uart_send_json(const char* json_str, bool explicit_mode_probe = fals
   // its own outbound COBS stream. The transfer then dies at a random chunk
   // (seq=5, 24, 34 across runs) because the interferer is periodic, not
   // positional.
-  if (g_img_spool_tx_active) {
+  if (g_img_spool_tx_active || sense_img_spool_binary_pending()) {
     return;
   }
   last_uart_tx_ms = millis();
