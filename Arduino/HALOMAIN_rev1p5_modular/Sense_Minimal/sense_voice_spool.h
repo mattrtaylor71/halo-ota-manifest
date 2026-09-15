@@ -169,7 +169,8 @@ static bool sense_voice_spool_cleanup(UartOtaProtocol& proto, const UploadJob& j
   return idle;
 }
 
-static bool sense_voice_spool_store(const UploadJob& job, uint32_t deadline) {
+static bool sense_voice_spool_store(const UploadJob& job, uint32_t deadline, bool* busy_refused = nullptr) {
+  if (busy_refused) *busy_refused = false;
   if (job.from_voice_sd) return true; // failed replay still has its original committed slot
   if (!job.image_buf || !sense_voice_owner_matches(job) ||
       sense_voice_crc32(job.image_buf, job.image_len) != job.voice.crc32) return false;
@@ -195,6 +196,7 @@ static bool sense_voice_spool_store(const UploadJob& job, uint32_t deadline) {
       d["len"].is<uint32_t>() && d["len"].as<uint32_t>() == job.image_len &&
       d["crc32"].is<uint32_t>() && d["crc32"].as<uint32_t>() == job.voice.crc32) {
     sense_lcd_mode_confirm();
+    if (busy_refused) *busy_refused = !strcmp(d["reason"] | "", "busy");
     return false; // ordinary refusal is not stored, but did not enter binary
   }
   if (got_ready &&

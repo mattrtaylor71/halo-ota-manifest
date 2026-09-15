@@ -802,6 +802,11 @@ static SemaphoreHandle_t g_list_mutex = NULL;
 // board's own JSON TX so a periodic SENSE_DIAG cannot land inside the COBS
 // frames it is transmitting.
 static std::atomic<bool> g_img_spool_tx_active{false};
+// RAM custody includes admission waits between individual SD transactions.
+static std::atomic<uint32_t> g_media_custody_waiters{0};
+// setup() and loop() share Arduino's owner task. Background upload retries may
+// collect bytes, but only this task may dispatch ordinary input callbacks.
+static TaskHandle_t g_sense_main_task_handle = NULL;
 static bool sense_uart_ordinary_tx_allowed();  // Defined with the transport guard below.
 #include "sense_diag.h"
 #include "sense_errlog.h"
@@ -1296,6 +1301,10 @@ static bool sense_can_sleep_now(const char** reason) {
   // Bounded by the drain's own deadlines (SPOOL_DRAIN_FRAME_TIMEOUT_MS per frame,
   // 60s for the whole transfer), and it yields immediately to any user action via
   // sense_spool_drain_yield_to_user(), so this can delay sleep but never hold it.
+  if (g_media_custody_waiters.load()) {
+    if (reason) *reason = "media_custody";
+    return false;
+  }
   if (g_spool_owns_uart || g_img_spool_tx_active) {
     if (reason) *reason = "spool_transfer";
     return false;
@@ -1840,18 +1849,17 @@ static void upload_worker_task(void *arg) {
   for (;;) {
     UploadJob job = {};
     bool got_job = false;
-    if (upload_worker_has_parked_job && !uploads_held_for_session(NULL)) {
-      job = upload_worker_parked_job;
-      upload_worker_has_parked_job = false;
+    const char* parked_stage = "idle";
+    unsigned long parked_at_ms = 0;
+    if (!uploads_held_for_session(NULL) &&
+        upload_worker_take_parked_job(job, &parked_stage, &parked_at_ms)) {
       Serial.printf("[UPLOAD_QUEUE] resume_parked job_id=%lu mode=%s voice=%d stage=%s parked_ms=%lu q=%lu\n",
                     (unsigned long)job.job_id,
                     job.mode,
                     job.is_voice ? 1 : 0,
-                    upload_worker_parked_stage ? upload_worker_parked_stage : "foreground",
-                    upload_worker_parked_at_ms > 0 ? (unsigned long)(millis() - upload_worker_parked_at_ms) : 0UL,
+                    parked_stage ? parked_stage : "foreground",
+                    parked_at_ms > 0 ? (unsigned long)(millis() - parked_at_ms) : 0UL,
                     (unsigned long)upload_queue_count());
-      upload_worker_parked_stage = "idle";
-      upload_worker_parked_at_ms = 0;
       got_job = true;
     } else if (!uploads_held_for_session(NULL) && upload_queue != NULL &&
                // NON-BLOCKING on purpose. This used to wait 200ms, which raced the
@@ -3721,6 +3729,7 @@ scan_exit:
 
 
 void setup() {
+  g_sense_main_task_handle = xTaskGetCurrentTaskHandle();
   Serial.printf("[BOOT_FLOW] stage=setup_enter t=%lu heap=%u min_heap=%u\n",
                 millis(),
                 (unsigned)ESP.getFreeHeap(),

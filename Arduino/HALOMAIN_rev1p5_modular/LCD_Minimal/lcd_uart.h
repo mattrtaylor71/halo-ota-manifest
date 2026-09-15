@@ -36,6 +36,8 @@ static void lcd_force_wake_sense(const char* reason);
 // binary COBS frames during LCD OTA.  Set by lcd_ota_uart.h.
 static bool g_suppress_uart_json_tx = false;
 
+#include "lcd_media_foreground.h"
+
 // ── UART TX Queue ────────────────────────────────────────────────────
 typedef struct {
   char type[24];
@@ -50,6 +52,15 @@ static unsigned long deferred_awake_tx_last_ping_ms = 0;
 static uint32_t uart_tx_dropped_count = 0;             // enqueues that failed (queue full)
 
 #include "lcd_deferred_ring.h"   // deferred-until-awake TX ring (host-testable)
+
+// Only the UART task reads this ring or admits an SD control request.
+static bool lcd_media_deferred_intent_pending() {
+  for(uint8_t i=0;i<deferred_ring_count;++i) {
+    const uint8_t at=(deferred_ring_head+i)%DEFERRED_AWAKE_RING_SLOTS;
+    if(lcd_media_is_intent(deferred_ring[at].msg.type))return true;
+  }
+  return false;
+}
 
 // How long a message may sit deferred waiting for the Sense to prove it is
 // awake before we give up on it. Draining uart_tx_queue is gated on the
@@ -66,7 +77,12 @@ static uint32_t uart_tx_dropped_count = 0;             // enqueues that failed (
 // when losing input is least acceptable.
 static inline bool uart_tx_enqueue(const tx_msg_t* msg, const char* site) {
   if (!uart_tx_queue || !msg) return false;
+  if (!lcd_media_queue_begin(msg->type)) {
+    Serial.printf("[MEDIA_BUSY] rejected type=%s site=%s\n",msg->type,site?site:"?");
+    return false;
+  }
   if (xQueueSend(uart_tx_queue, msg, pdMS_TO_TICKS(10)) == pdTRUE) return true;
+  lcd_media_queue_end(msg->type);
   uart_tx_dropped_count++;
   Serial.printf("[UART_TX_DROP] queue full - DROPPED type=%s site=%s total_dropped=%lu "
                 "deferred=%d deferred_type=%s\n",

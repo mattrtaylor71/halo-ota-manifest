@@ -82,7 +82,7 @@ static std::deque<Event> input_events;
 static std::vector<Frame> output_frames;
 enum class Peer {Passive,Accept,WrongChunk,DropChunk,DropEnd,WrongEnd,AbortChunk};
 static Peer peer=Peer::Passive;
-static bool drop_commit_ack=false;
+static bool drop_commit_ack=false,auto_abort=true;
 static std::string abort_text;
 class UartOtaProtocol {
  public:
@@ -97,6 +97,10 @@ class UartOtaProtocol {
     }
     if(type==MSG_IMG_END&&peer!=Peer::Passive&&peer!=Peer::DropEnd)
       input_events.push_back({FRAME,MSG_IMG_ACK,(uint16_t)(seq+(peer==Peer::WrongEnd?1:0)),{},""});
+    // Actual Sense closes every FETCH with its bound JSON-ready ABORT handshake.
+    // Queue this after the terminal frame ACK or NACK, never before a data ACK.
+    if(auto_abort && !abort_text.empty() && ((type==MSG_IMG_END && peer!=Peer::DropEnd) || type==MSG_IMG_NACK))
+      input_events.push_back({JSON,0,0,{},abort_text});
     return !(drop_commit_ack&&type==MSG_IMG_ACK&&n==40);
   }
   ReceiveEvent recv_event(uint8_t* type,uint16_t* seq,uint8_t* p,size_t* n,char* json,size_t cap,uint32_t timeout){
@@ -107,6 +111,16 @@ class UartOtaProtocol {
     if(*n)std::memcpy(p,e.bytes.data(),*n);return FRAME;
   }
 };
+#if __has_include("LCD_Minimal/lcd_media_foreground.h")
+#define HAS_MEDIA_FOREGROUND 1
+using portMUX_TYPE=unsigned;
+#define portMUX_INITIALIZER_UNLOCKED 0
+static unsigned media_critical_depth=0;
+static void portENTER_CRITICAL(portMUX_TYPE*){check(media_critical_depth==0,"media critical section is not nested");++media_critical_depth;}
+static void portEXIT_CRITICAL(portMUX_TYPE*){check(media_critical_depth==1,"media critical section is balanced");--media_critical_depth;}
+#include "LCD_Minimal/lcd_media_foreground.h"
+static bool lcd_media_deferred_intent_pending(){return false;}
+#endif
 #define LCD_VOICE_SPOOL_DIR "voice-default"
 #include "LCD_Minimal/lcd_voice_spool.h"
 static const std::vector<uint8_t> pcm{1,2,3,4,5,6,7,8};
@@ -123,8 +137,11 @@ static void reset_case(){
   g_voice_rx=g_voice_tx_pending=g_voice_tx_abort_pending=false;
   g_img_rx_active=g_img_rx_binary_mode=g_spool_tx_pending=g_spool_tx_active=g_suppress_uart_json_tx=false;
   g_voice_have_last=false;g_sleep_transition=false;ota_busy=false;image_valid=true;mount_ok=true;g_lcd_sleep_commit_gate=false;
+#ifdef HAS_MEDIA_FOREGROUND
+  lcd_media_release();
+#endif
   input_events.clear();output_frames.clear();senseSerial.output.clear();senseSerial.incoming.clear();
-  senseSerial.continuous=false;senseSerial.reads=0;json_pins.clear();peer=Peer::Passive;drop_commit_ack=false;tick_ms+=1000;
+  senseSerial.continuous=false;senseSerial.reads=0;json_pins.clear();peer=Peer::Passive;drop_commit_ack=false;auto_abort=true;abort_text.clear();tick_ms+=1000;
 }
 static JsonDocument last_reply(){
   JsonDocument d;const size_t end=senseSerial.output.rfind('\n');
@@ -148,6 +165,7 @@ static bool retained(const halo_voice::Meta& m){halo_voice::Meta observed;return
 static unsigned count(const halo_voice::Meta& m){halo_voice::Meta first;halo_voice::Stats s;g_voice_store.list(m.owner_id,m.device_id,&first,&s);return s.count;}
 static std::string abort_json(const halo_voice::Meta& m){JsonDocument d;d["type"]="VOICE_XFER_ABORT";d["voice_schema"]=1;lcd_voice_echo(d,m);std::string out;serializeJson(d,out);return out;}
 static void fetch(const halo_voice::Meta& m){
+  abort_text=abort_json(m);
   JsonDocument d;d["type"]="VOICE_SPOOL_FETCH";d["voice_schema"]=1;
   d["owner_id"]=m.owner_id;d["device_id"]=m.device_id;d["request_id"]=m.request_id;
   check(lcd_voice_uart(d),"actual FETCH handler recognized");

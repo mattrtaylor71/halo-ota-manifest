@@ -1536,6 +1536,7 @@ static lv_obj_t *g_status_spinner = NULL;
 static unsigned long g_status_hide_at_ms = 0;
 static ship_menu_screen_t ship_menu_screen_state = SHIP_MENU_SCREEN_MAIN;
 static bool ship_ai_touch_active = false;
+static bool ship_ai_touch_blocked = false;
 static uint8_t ship_voice_end_resends_remaining = 0;
 static unsigned long ship_voice_end_resend_due_ms = 0;
 static char g_ship_voice_json_text[4096] = "";
@@ -3823,7 +3824,7 @@ static void lcd_force_wake_sense(const char* reason) {
 }
 
 static void deferred_awake_tx_service() {
-  if (!deferred_awake_tx_pending() || g_in_light_sleep) {
+  if (!deferred_awake_tx_pending() || g_in_light_sleep || g_suppress_uart_json_tx) {
     return;
   }
 
@@ -4845,12 +4846,16 @@ void loop() {
         const ship_menu_hitbox_t* hb = ship_menu_hit_test(check_x, check_y);
         if (hb != NULL) {
           if (ship_main_menu_is_ai_action(hb)) {
-            ship_ai_touch_active = true;
+            ship_ai_touch_active = false;
+            ship_ai_touch_blocked = false;
             long_press_sent = false;
             ship_voice_end_resends_remaining = 0;
             ship_voice_end_resend_due_ms = 0;
             if (!provisioning_input_locked()) {
-              ship_show_ai_listening_screen();
+              if(ship_voice_gesture_begin()) {
+                ship_ai_touch_active = true;
+                ship_show_ai_listening_screen();
+              } else ship_ai_touch_blocked = true;
             }
           } else {
             ship_main_menu_play_tap_animation(hb);
@@ -4874,11 +4879,18 @@ void loop() {
     if (ship_ai_touch_active && !long_press_sent && !provisioning_input_locked()) {
       unsigned long lp_dur = now - touch_press_time;
       if (lp_dur >= LONG_PRESS_THRESHOLD_MS) {
-        long_press_sent = true;
+        long_press_sent = ship_queue_voice_input("INPUT_LONG_PRESS_START", "voice_start");
+        if(!long_press_sent) {
+          lcd_media_voice_end();
+          ship_ai_touch_active=false;ship_ai_touch_blocked=true;
+          show_ship_main_menu();
+          show_auto_hiding_status_message("Finishing sync - try again",1800);
+          example_lvgl_unlock();
+          return;
+        }
         ship_ai_listening_countdown_start_ms = now;
         ship_update_ai_listening_countdown();
         Serial.printf("[AI] long_press_start duration_ms=%lu\n", lp_dur);
-        ship_queue_voice_input("INPUT_LONG_PRESS_START", "voice_start");
         ui_lvgl_tick();
         resetActivityTimer();
       }
@@ -4889,6 +4901,13 @@ void loop() {
     unsigned long press_duration = now - touch_press_time;
     bool was_long_press = long_press_sent;
     touch_pressed = false;
+    if(ship_ai_touch_blocked) {
+      ship_ai_touch_blocked=false;ship_ai_touch_active=false;long_press_sent=false;
+      lcd_media_voice_end();
+      resetActivityTimer();
+      example_lvgl_unlock();
+      return;
+    }
     if (touch_wake_only_pending) {
       touch_wake_only_pending = false;
       long_press_sent = false;
@@ -4902,7 +4921,8 @@ void loop() {
     #if SHIP_MENU_UI
     if (ship_ai_touch_active) {
       ship_ai_touch_active = false;
-      if (press_duration < LONG_PRESS_THRESHOLD_MS) {
+      if (press_duration < LONG_PRESS_THRESHOLD_MS || !was_long_press) {
+        lcd_media_voice_end();
         long_press_sent = false;
         ship_ai_listening_countdown_start_ms = 0;
         ship_update_ai_listening_countdown();
@@ -4923,7 +4943,13 @@ void loop() {
       voice_response_deadline_ms = 0;
       g_ship_voice_json_pending = false;
       g_ship_voice_json_text[0] = '\0';
-      ship_queue_voice_input("INPUT_LONG_PRESS_END", "voice_end");
+      const bool voice_end_queued=ship_queue_voice_input("INPUT_LONG_PRESS_END", "voice_end");
+      lcd_media_voice_end();
+      if(!voice_end_queued) {
+        show_ship_main_menu();
+        show_auto_hiding_status_message("Voice request failed - try again",1800);
+        resetActivityTimer();example_lvgl_unlock();return;
+      }
       ship_voice_end_resends_remaining = 2;          // 2 backup resends at 220ms intervals
       ship_voice_end_resend_due_ms = millis() + 220; // first resend in 220ms
       ship_set_processing_text("Processing");

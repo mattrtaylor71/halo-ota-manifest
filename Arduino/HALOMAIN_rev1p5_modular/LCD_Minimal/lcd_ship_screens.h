@@ -253,9 +253,17 @@ static void ship_show_ai_listening_screen() {
   lv_timer_handler();
 }
 
-static void ship_queue_voice_input(const char* type, const char* wake_reason) {
+static bool ship_voice_gesture_begin() {
+  if(lcd_media_voice_begin())return true;
+  show_auto_hiding_status_message("Finishing sync - try again",1800);
+  resetActivityTimer();
+  Serial.println("[MEDIA_BUSY] voice gesture rejected until release");
+  return false;
+}
+
+static bool ship_queue_voice_input(const char* type, const char* wake_reason) {
   if (!type || !type[0]) {
-    return;
+    return false;
   }
   if (strcmp(type, "INPUT_LONG_PRESS_START") == 0) {
     g_voice_fire_and_forget_ignore_ui = false;
@@ -270,12 +278,11 @@ static void ship_queue_voice_input(const char* type, const char* wake_reason) {
   }
   tx_msg_t tx_msg = {};
   strncpy(tx_msg.type, type, sizeof(tx_msg.type) - 1);
-  if (uart_tx_queue != NULL) {
-    uart_tx_enqueue(&tx_msg, "ship_screens");
-  }
+  if (!uart_tx_enqueue(&tx_msg, "ship_screens")) return false;
   Serial.printf("[AI] queued type=%s wake_reason=%s\n",
                 type,
                 wake_reason ? wake_reason : "");
+  return true;
 }
 
 static void ship_service_voice_end_resend(unsigned long now) {

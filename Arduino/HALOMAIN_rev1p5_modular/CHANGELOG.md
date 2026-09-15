@@ -2,7 +2,8 @@
 
 - Integrate corrected voice SD custody onto accepted162 and add a distinct checked photo queue with frozen request identity; preserve current OTA/camera/wake fixes.
 - Preserve UART input while transferring saved media; use full-length typed replies and verified backend custody before retirement.
-- Add bounded direct-USB offline diagnostics for device testing. Candidate only: build, installation and physical acceptance are not yet complete. See `docs/OFFLINE_MEDIA_BACKUP.md`.
+- Add bounded direct-USB offline diagnostics. The first private163 pair passed canonical builds,19 host groups and three physical offline-save/reboot/replay/cloud-retirement cases. Public OTA remains162.
+- Close foreground interaction races: protect actual voice gesture timing, yield background replay through the existing bound cleanup handshake, retain pending RAM media across LCD admission contention, and bound transfer sleep custody without pretending UART resynchronization succeeded. Follow-up installation and acceptance remain pending. See `docs/OFFLINE_MEDIA_BACKUP.md`.
 
 # September 15: camera input recovery162 accepted
 

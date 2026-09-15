@@ -643,7 +643,32 @@ static bool sense_voice_prepare_first_attempt(UploadJob& job) {
   return true;
 }
 
+// The worker may release the UART between a busy refusal and retry. Ordinary
+// sleep must still retain the RAM-owned capture; the store deadline bounds this
+// lease and the existing guardian remains the final limit.
+class UploadMediaCustodyLease {
+ public:
+  UploadMediaCustodyLease() { g_media_custody_waiters.fetch_add(1); }
+  ~UploadMediaCustodyLease() { g_media_custody_waiters.fetch_sub(1); }
+  UploadMediaCustodyLease(const UploadMediaCustodyLease&) = delete;
+  UploadMediaCustodyLease& operator=(const UploadMediaCustodyLease&) = delete;
+};
+
+// Called only after a typed busy refusal returned and released the raw UART
+// lease. Keep the frozen caller-owned job while servicing a gesture's END.
+static void upload_persist_busy_wait() {
+  if (g_sense_main_task_handle &&
+      xTaskGetCurrentTaskHandle() == g_sense_main_task_handle &&
+      uart_dispatch_depth.load() == 0) {
+    pump_uart_rx_once();
+  } else {
+    uart_collect_rx_once();
+  }
+  delay(250);
+}
+
 static bool upload_persist_handle_failure(const UploadJob& job, const char* reason) {
+  UploadMediaCustodyLease custody;
   if (job.is_voice) {
     bool saved = job.from_voice_sd;
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
@@ -654,14 +679,28 @@ static bool upload_persist_handle_failure(const UploadJob& job, const char* reas
     }
 #endif
     const uint32_t deadline = sense_voice_spool_operation_deadline();
-    // Bounded RAM retry; no loop survives indefinitely when both stores fail.
-    for (unsigned attempt = 0; !saved && attempt < 2 && sense_voice_spool_remaining(deadline); ++attempt) {
-      saved = sense_voice_spool_store(job, deadline);
+    // Foreground contention is not a failed storage attempt. Keep this exact
+    // RAM job while the LCD finishes an admitted gesture. Each store call has
+    // released its raw UART lease before the delay, so START/END can progress.
+    // The original transaction/guardian deadline is never renewed.
+    bool busy_reported = false;
+    unsigned attempt = 0;
+    while (!saved && attempt < 2 && sense_voice_spool_remaining(deadline)) {
+      bool busy_refused = false;
+      saved = sense_voice_spool_store(job, deadline, &busy_refused);
+      if (!saved && busy_refused) {
+        if (!busy_reported) Serial.printf("[MEDIA_BACKUP] kind=voice event=storage_busy job=%lu retained_ram=1\n", (unsigned long)job.job_id);
+        busy_reported = true;
+        if (sense_voice_spool_remaining(deadline) <= 250) break;
+        upload_persist_busy_wait();
+        continue;
+      }
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
       if (!saved && sense_voice_spool_remaining(deadline) > 1000)
         saved = upload_persist_save(job, job.retries < 255 ? job.retries + 1 : 255);
 #endif
       if (!saved && attempt == 0 && sense_voice_spool_remaining(deadline) > 500) delay(500);
+      ++attempt;
     }
 #if defined(HALO_SENSE_PROD_WRAPPER) && defined(HALO_SENSE_UPLOAD_PERSISTENCE)
     g_upload_persist_attempted_this_boot = true;
@@ -682,9 +721,20 @@ static bool upload_persist_handle_failure(const UploadJob& job, const char* reas
   // photo record cannot carry this frozen identity and is never overwritten.
   const uint32_t deadline = sense_image_spool_operation_deadline();
   bool saved = job.from_image_sd;
-  for (unsigned attempt = 0; !saved && attempt < 2 && sense_image_spool_remaining(deadline); ++attempt) {
-    saved = sense_image_spool_store(job, deadline);
+  unsigned attempt = 0;
+  bool busy_reported = false;
+  while (!saved && attempt < 2 && sense_image_spool_remaining(deadline)) {
+    bool busy_refused = false;
+    saved = sense_image_spool_store(job, deadline, &busy_refused);
+    if (!saved && busy_refused) {
+      if (!busy_reported) Serial.printf("[MEDIA_BACKUP] kind=image event=storage_busy job=%lu retained_ram=1\n", (unsigned long)job.job_id);
+      busy_reported = true;
+      if (sense_image_spool_remaining(deadline) <= 250) break;
+      upload_persist_busy_wait();
+      continue;
+    }
     if (!saved && attempt == 0 && sense_image_spool_remaining(deadline) > 500) delay(500);
+    ++attempt;
   }
   g_image_spool_replayed_this_boot = true;
   Serial.printf("[MEDIA_BACKUP] kind=image request=%s job=%lu bytes=%u crc=%08lx sha256=%s saved=%u from_sd=%u\n",

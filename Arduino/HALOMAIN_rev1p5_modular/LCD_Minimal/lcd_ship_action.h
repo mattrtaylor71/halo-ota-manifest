@@ -179,17 +179,19 @@ static void ship_menu_send_menu_select(const char* menu_item, int menu_index, co
     Serial.println("[PROVISION] menu_select ignored (provisioning_active)");
     return;
   }
-  request_sense_wake("menu_select");
-  ship_menu_begin_local_scan_request(menu_item);
   tx_msg_t tx_msg = {};
   strncpy(tx_msg.type, "INPUT_MENU_SELECT", sizeof(tx_msg.type) - 1);
   tx_msg.delta = menu_index;
   tx_msg.has_delta = true;
   strncpy(tx_msg.id, menu_item, sizeof(tx_msg.id) - 1);
   tx_msg.has_id = true;
-  if (uart_tx_queue != NULL) {
-    uart_tx_enqueue(&tx_msg, "ship_action");
+  if (!uart_tx_enqueue(&tx_msg, "ship_action")) {
+    show_auto_hiding_status_message("Finishing sync - try again", 1800);
+    resetActivityTimer();
+    return;
   }
+  request_sense_wake("menu_select");
+  ship_menu_begin_local_scan_request(menu_item);
   if (label && label[0]) {
     Serial.printf("[MENU] tap=%s\n", label);
   } else {

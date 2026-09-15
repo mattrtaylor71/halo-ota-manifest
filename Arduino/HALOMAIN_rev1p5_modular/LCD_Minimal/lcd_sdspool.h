@@ -116,6 +116,12 @@ static uint32_t g_sd_probe_ms = 0;
 static void lcd_sd_health_probe(const char* why) {
 #if !HALO_SD_HEALTH_PROBE
   (void)why; return;   // A/B: probe compiled out
+#elif !LCD_SD_SPOOL_ENABLED
+  if(!g_sd_probed_this_boot) {
+    g_sd_probed_this_boot=true;
+    Serial.printf("[SD_HEALTH] legacy_photo_enabled=0 typed_media_separate=1 why=%s\n",why?why:"?");
+  }
+  return; // A disabled legacy namespace does not diagnose typed media storage.
 #else
   // A busy storage owner defers the probe. Never wait for I/O while the main
   // loop is trying to report health, and never unmount somebody else's card.

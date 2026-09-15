@@ -152,19 +152,57 @@ static bool upload_worker_has_parked_job = false;
 static UploadJob upload_worker_parked_job = {};
 static const char* upload_worker_parked_stage = "idle";
 static unsigned long upload_worker_parked_at_ms = 0;
+static portMUX_TYPE upload_worker_parked_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static void upload_worker_park_job(const UploadJob& job, const char* stage, const char* reason) {
-  upload_worker_parked_job = job;
-  upload_worker_has_parked_job = true;
-  upload_worker_parked_stage = stage ? stage : "foreground";
-  upload_worker_parked_at_ms = millis();
+static bool upload_worker_parked_pending() {
+  portENTER_CRITICAL(&upload_worker_parked_mux);
+  const bool pending = upload_worker_has_parked_job;
+  portEXIT_CRITICAL(&upload_worker_parked_mux);
+  return pending;
+}
+
+// A worker resume and a main-task sleep rescue can race. Transfer the whole
+// descriptor exactly once; neither consumer may retain the shared reference.
+static bool upload_worker_take_parked_job(UploadJob& out,
+                                         const char** stage = nullptr,
+                                         unsigned long* parked_at_ms = nullptr) {
+  portENTER_CRITICAL(&upload_worker_parked_mux);
+  const bool claimed = upload_worker_has_parked_job;
+  if (claimed) {
+    out = upload_worker_parked_job;
+    if (stage) *stage = upload_worker_parked_stage;
+    if (parked_at_ms) *parked_at_ms = upload_worker_parked_at_ms;
+    upload_worker_parked_job = {};
+    upload_worker_has_parked_job = false;
+    upload_worker_parked_stage = "idle";
+    upload_worker_parked_at_ms = 0;
+  }
+  portEXIT_CRITICAL(&upload_worker_parked_mux);
+  return claimed;
+}
+
+static bool upload_worker_park_job(const UploadJob& job, const char* stage, const char* reason) {
+  const char* parked_stage = stage ? stage : "foreground";
+  const unsigned long parked_at_ms = millis();
+  portENTER_CRITICAL(&upload_worker_parked_mux);
+  const bool admitted = !upload_worker_has_parked_job;
+  if (admitted) {
+    upload_worker_parked_job = job;
+    upload_worker_parked_stage = parked_stage;
+    upload_worker_parked_at_ms = parked_at_ms;
+    upload_worker_has_parked_job = true;
+  }
+  portEXIT_CRITICAL(&upload_worker_parked_mux);
+  // Refusal leaves the caller's local job owned by that caller.
+  if (!admitted) return false;
   Serial.printf("[UPLOAD_QUEUE] parked job_id=%lu mode=%s voice=%d stage=%s reason=%s q=%lu\n",
                 (unsigned long)job.job_id,
                 job.mode,
                 job.is_voice ? 1 : 0,
-                upload_worker_parked_stage,
+                parked_stage,
                 reason ? reason : "foreground_priority",
                 (unsigned long)upload_queue_count());
+  return true;
 }
 
 static bool park_upload_job_if_foreground_active(const UploadJob& job, const char* stage) {
@@ -175,8 +213,7 @@ static bool park_upload_job_if_foreground_active(const UploadJob& job, const cha
   if (upload_wait_for_foreground_window(job, reason, 2200UL)) {
     return false;
   }
-  upload_worker_park_job(job, stage, reason);
-  return true;
+  return upload_worker_park_job(job, stage, reason);
 }
 
 static bool upload_wait_for_foreground_clear_in_place(const UploadJob& job,

@@ -123,11 +123,20 @@ static bool upload_inflight=false,dish_scan_inflight=false,scan_ui_inflight=fals
 static int g_boot_reset_reason=0;
 static const char* reset_reason_label(int){return "host";}
 static bool g_voice_spool_replayed_this_boot=false;
+static std::atomic<uint32_t> g_media_custody_waiters{0};
+using TaskHandle_t=uintptr_t;
+static TaskHandle_t g_sense_main_task_handle=1,current_task=2;
+static std::atomic<unsigned> uart_dispatch_depth{0};
+static unsigned busy_pumps=0,busy_collects=0;
+static TaskHandle_t xTaskGetCurrentTaskHandle(){return current_task;}
+static void pump_uart_rx_once(){assert(!lock_depth);++busy_pumps;}
+static void uart_collect_rx_once(){assert(!lock_depth);++busy_collects;}
+
 static unsigned sd_writes=0,sd_marks=0;
 static bool sd_save_ok=false;
 static uint32_t sense_voice_spool_operation_deadline(){return millis()+120000;}
 static uint32_t sense_voice_spool_remaining(uint32_t d){int32_t n=(int32_t)(d-millis());return n>0?n:0;}
-static bool sense_voice_spool_store(const UploadJob&,uint32_t){++sd_writes;return sd_save_ok;}
+static bool sense_voice_spool_store(const UploadJob&,uint32_t,bool* busy=nullptr){if(busy)*busy=false;++sd_writes;return sd_save_ok;}
 static bool sense_voice_spool_mark_attempt(UploadJob& j,uint32_t e){++sd_marks;j.created_epoch=e;return true;}
 static bool sense_spool_image_to_lcd(const UploadJob&,const uint8_t*,size_t){return false;}
 // The image branch is outside this voice/persisted-record suite; any accidental
@@ -135,7 +144,7 @@ static bool sense_spool_image_to_lcd(const UploadJob&,const uint8_t*,size_t){ret
 static bool g_image_spool_replayed_this_boot=false;
 static uint32_t sense_image_spool_operation_deadline(){return millis()+120000;}
 static uint32_t sense_image_spool_remaining(uint32_t d){return sense_voice_spool_remaining(d);}
-static bool sense_image_spool_store(const UploadJob& j,uint32_t){check(!j.is_voice,"voice never routes through image storage");return false;}
+static bool sense_image_spool_store(const UploadJob& j,uint32_t,bool* busy=nullptr){if(busy)*busy=false;check(!j.is_voice,"voice never routes through image storage");return false;}
 
 static int mbedtls_sha256(const uint8_t* p,size_t n,uint8_t* out,int is224){return is224?-1:(CC_SHA256(p,(CC_LONG)n,out)?0:-1);}
 ''' + functions + r'''

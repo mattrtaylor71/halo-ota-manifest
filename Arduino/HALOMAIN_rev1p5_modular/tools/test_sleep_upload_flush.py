@@ -23,6 +23,10 @@ def harness(source):
     signature = 'static bool sleep_upload_flush_yield_to_user('
     helper = definition(source, signature) if signature in source else ''
     activity = (ROOT / 'Sense_Minimal/sense_user_activity.h').read_text()
+    parked_source = (ROOT / 'Sense_Minimal/sense_op_queue.h').read_text()
+    parked = ''
+    if 'upload_worker_take_parked_job(' in source:
+        parked = '\n'.join(definition(parked_source, sig) for sig in ('static bool upload_worker_parked_pending(', 'static bool upload_worker_take_parked_job('))
     return r'''
 #include <algorithm>
 #include <cassert>
@@ -30,6 +34,7 @@ def harness(source):
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 #define HALO_SENSE_PROD_WRAPPER 1
@@ -51,6 +56,14 @@ static bool guardian_force_sleep=false,g_upload_flush_requested=false;
 static bool upload_inflight=false,upload_worker_has_parked_job=false;
 static bool upload_worker_holding_in_place=false;
 static UploadJob upload_worker_parked_job;
+static const char* upload_worker_parked_stage="host";
+static unsigned long upload_worker_parked_at_ms=0;
+using portMUX_TYPE=std::mutex;
+static portMUX_TYPE upload_worker_parked_mux;
+static void portENTER_CRITICAL(portMUX_TYPE* m){m->lock();}
+static void portEXIT_CRITICAL(portMUX_TYPE* m){m->unlock();}
+''' + parked + r'''
+
 static unsigned pumps=0,acks=0,spools=0,frees=0,denials=0,teardowns=0;
 static unsigned long ack_ms=0,first_spool_ms=0;
 static bool raw_lease_busy=false,spool_succeeds=false,in_spool=false;

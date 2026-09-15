@@ -620,7 +620,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     // budget has to cover it.
     const uint32_t pending_now = upload_queue_count() +
                                  (upload_inflight ? 1 : 0) +
-                                 (upload_worker_has_parked_job ? 1 : 0);
+                                 (upload_worker_parked_pending() ? 1 : 0);
     const unsigned long UPLOAD_FLUSH_TIMEOUT_MS =
         (pending_now <= 1) ? 30000UL
                            : (15000UL * (unsigned long)pending_now > 180000UL
@@ -630,7 +630,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     unsigned long flush_start = millis();
     unsigned long last_log = 0;
     uint32_t initial_count = upload_queue_count();
-    bool has_parked = upload_worker_has_parked_job;
+    bool has_parked = upload_worker_parked_pending();
     bool had_pending = (initial_count > 0 || upload_inflight || has_parked ||
                         upload_worker_holding_in_place);
 
@@ -650,7 +650,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     }
 
     while (had_pending &&
-           (upload_queue_count() > 0 || upload_inflight || upload_worker_has_parked_job ||
+           (upload_queue_count() > 0 || upload_inflight || upload_worker_parked_pending() ||
             upload_worker_holding_in_place) &&
            (millis() - flush_start) < UPLOAD_FLUSH_TIMEOUT_MS) {
       if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
@@ -661,7 +661,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
         Serial.printf("[SLEEP_UPLOAD_FLUSH] waiting queue=%lu inflight=%d parked=%d held=%d elapsed=%lums\n",
                       (unsigned long)upload_queue_count(),
                       upload_inflight ? 1 : 0,
-                      upload_worker_has_parked_job ? 1 : 0,
+                      upload_worker_parked_pending() ? 1 : 0,
                       upload_worker_holding_in_place ? 1 : 0,
                       millis() - flush_start);
       }
@@ -671,22 +671,22 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
                                         UPLOAD_FLUSH_TIMEOUT_MS)) return;
     // If parked job still exists after timeout, persist it before sleeping
-    if (upload_worker_has_parked_job) {
+    UploadJob parked_job = {};
+    if (upload_worker_take_parked_job(parked_job)) {
       Serial.printf("[SLEEP_UPLOAD_FLUSH] parked job exists: job_id=%lu mode=%s len=%u\n",
-                    (unsigned long)upload_worker_parked_job.job_id,
-                    upload_worker_parked_job.mode,
-                    (unsigned)upload_worker_parked_job.image_len);
-      const bool parked_saved = upload_persist_handle_failure(upload_worker_parked_job, "sleep_parked");
+                    (unsigned long)parked_job.job_id,
+                    parked_job.mode,
+                    (unsigned)parked_job.image_len);
+      const bool parked_saved = upload_persist_handle_failure(parked_job, "sleep_parked");
       if (!parked_saved) {
         Serial.println("[SLEEP_UPLOAD_FLUSH] WARNING: parked job could NOT be persisted");
-        uart_send_sense_diag("upload", "sleep_parked_drop", upload_worker_parked_job.mode,
-                             (int32_t)upload_worker_parked_job.job_id, "persist_failed");
+        uart_send_sense_diag("upload", "sleep_parked_drop", parked_job.mode,
+                             (int32_t)parked_job.job_id, "persist_failed");
       }
-      if (upload_worker_parked_job.image_buf) {
-        free(upload_worker_parked_job.image_buf);
-        upload_worker_parked_job.image_buf = nullptr;
+      if (parked_job.image_buf) {
+        free(parked_job.image_buf);
+        parked_job.image_buf = nullptr;
       }
-      upload_worker_has_parked_job = false;
     }
 
     if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,

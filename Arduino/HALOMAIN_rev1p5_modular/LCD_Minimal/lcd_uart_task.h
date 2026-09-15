@@ -33,6 +33,8 @@ static void uart_task(void *arg) {
 
   for (;;) {
     lcd_freeze_wdt_feed();
+    lcd_voice_quarantine_tick();
+    lcd_image_quarantine_tick();
     const int UART_TX_MAX_PER_LOOP = 16;
     const int UART_RX_MAX_BYTES_PER_LOOP = 512;
     bool yielded_early = false;
@@ -81,7 +83,7 @@ static void uart_task(void *arg) {
     // the drain below would happily interleave JSON into its own COBS stream —
     // the Sense saw exactly that as data_len=8818 (0x2272 = '"r').
     const bool binary_xfer_active = g_img_rx_binary_mode || g_lcd_ota_binary_mode ||
-                                    g_spool_tx_pending || g_spool_tx_active;
+                                    g_spool_tx_pending || g_spool_tx_active || g_suppress_uart_json_tx;
 
     // Retransmit any user-intent message the Sense has not acked. Skipped
     // during a binary transfer for the same reason the TX drain is: injecting
@@ -95,6 +97,7 @@ static void uart_task(void *arg) {
     // which need no awake-proof and would have gone out fine — sat behind it.
     if (!binary_xfer_active) {
       while (uart_tx_queue != NULL && xQueueReceive(uart_tx_queue, &tx_msg, 0) == pdTRUE) {
+        lcd_media_queue_end(tx_msg.type);
         if (tx_msg_requires_awake_proof(&tx_msg) && !sense_ready_for_control_tx()) {
           if (deferred_ring_count == DEFERRED_AWAKE_RING_SLOTS &&
               !strcmp(deferred_ring_oldest()->msg.type, "INPUT_DELETE")) {
