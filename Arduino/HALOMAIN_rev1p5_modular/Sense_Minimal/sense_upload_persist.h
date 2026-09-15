@@ -28,17 +28,6 @@
 // Forward declarations for sense_upload_queue.h (late include)
 static uint8_t* allocate_upload_buffer(size_t len, bool* used_psram);
 static uint32_t upload_queue_count();
-static bool queue_upload_job(uint32_t job_id,
-                             const char* mode,
-                             const char* expiry,
-                             uint16_t quantity,
-                             bool add_to_shopping_list,
-                             const UploadJob::CameraUploadMeta* camera_meta,
-                             uint8_t* image_buf,
-                             size_t image_len,
-                             uint8_t retries,
-                             bool from_persisted,
-                             uint32_t created_epoch);
 static bool queue_voice_upload_job(uint32_t job_id,
                                    uint8_t* audio_buf,
                                    size_t audio_len,
@@ -619,26 +608,9 @@ static void upload_persist_maybe_replay() {
     g_upload_persist_attempted_this_boot = true;
     return;
   }
-  bool queued = job.is_voice
-                  ? queue_voice_upload_job(job.job_id,
-                                           job.image_buf,
-                                           job.image_len,
-                                           job.retries,
-                                           true,
-                                           job.created_epoch,
-                                           &job.voice,
-                                           false)
-                  : queue_upload_job(job.job_id,
-                                     job.mode,
-                                     job.expiry_date,
-                                     job.quantity,
-                                     job.add_to_shopping_list,
-                                     &job.camera_meta,
-                                     job.image_buf,
-                                     job.image_len,
-                                     job.retries,
-                                     true,
-                                     job.created_epoch);
+  bool queued = job.is_voice && queue_voice_upload_job(job.job_id, job.image_buf,
+      job.image_len, job.retries, true, job.created_epoch, &job.voice, false);
+
   if (!queued) {
     Serial.println("[UPLOAD_PERSIST] replay_queue_failed");
     free(job.image_buf);

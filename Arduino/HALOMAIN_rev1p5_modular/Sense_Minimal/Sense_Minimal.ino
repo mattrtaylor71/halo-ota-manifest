@@ -2666,7 +2666,7 @@ static bool parse_input_message(const char* json_str) {
     uart_send_sense_diag("wifi", "scan_done", "complete", n, "scan_complete");
 
   } else if (strcmp(type, "INPUT_WIFI_TEST") == 0) {
-    SenseBackupWifiCall backup_call; if (!backup_call) return;
+    SenseBackupWifiCall backup_call; if (!backup_call) return false;
     // WiFi cold-start test — disconnect, scan, reconnect with detailed timing
     Serial.println("[UART] INPUT_WIFI_TEST received");
     uart_send_sense_diag("wifi", "test_start", "starting", 0, "cold_start_test");
