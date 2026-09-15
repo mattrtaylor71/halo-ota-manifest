@@ -6064,12 +6064,39 @@
   },
   "camera_input_recovery_candidate_162": {
     "version": "6.4.162",
-    "status": "SOURCE_CANDIDATE_HOST_REGRESSIONS_PHYSICAL_ACCEPTANCE_PENDING",
+    "status": "BUILT_CHECKED_SEALED_NOT_INSTALLED_OR_PUBLISHED",
     "runtime_base_commit": "f89a9efaae6413edc95713f73657d841e45ccb14",
     "handoff": "docs/CAMERA_INPUT_RECOVERY_162.md",
     "evidence_workspace": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915",
     "installed": false,
     "published": false,
-    "voice161_included": false
+    "voice161_included": false,
+    "artifact_source_commit": "b78efd38ed3ffc795a9fab086a04302c89f0c922",
+    "artifact_source_firmware_tree": "7b2586bee5f75b7cf1a5c94798ad60d8f8d5dd4a",
+    "build_id": "6.4.162-20260915T182022Z-b78efd38ed3f",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/RELEASE-PAIR.json",
+      "sha256": "52314e60a74b1ec4a44906d05294679bcc0580ed557fcaf0cee7f9ed2fa5034e"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/host-tests-final001/RESULT.json",
+      "sha256": "a0e71a0c31e83e0e661140f7643ab91863c4eb1a7db5bb4a7d470df2ce098575"
+    },
+    "negative_flush": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/negative-flush001/VERDICT.json",
+      "sha256": "0715e8a8bdf22cf3a2c90f6e6726b84523fd9564473fe180e691e13a1721072f"
+    },
+    "source_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/SOURCE-REVIEW.json",
+      "sha256": "a5576d1b71c9810ab37d36debf8d82a20785509700043b8c7f650e0005f55438"
+    },
+    "prepared_publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/publication/release.json",
+      "sha256": "0f84373d324f2e0fb7bf2fb3fdbfc3c5e58eeea41433fd1732bd8449caa24548"
+    },
+    "host_regression_groups": 17,
+    "negative_controls": 3,
+    "physical_candidate_runs": 0,
+    "installation_blocker": "Sense USB inaccessible and Wi-Fi provisioned for home while physically in garage; user asked to provision garage network."
   }
 }

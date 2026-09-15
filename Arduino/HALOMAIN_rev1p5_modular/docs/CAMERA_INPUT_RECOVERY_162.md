@@ -35,3 +35,11 @@ The legacy LCD photo SD fallback remains disabled. This patch does not make offl
 Sense USB is inaccessible in the enclosure. Installation requires restored Wi-Fi and genuine OTA eligibility, or temporary Sense USB access for a guarded application-only service. LCD USB forwards diagnostic/application commands but cannot install a Sense image. Record any assisted installation separately from OTA acceptance.
 
 Build, test and service-tool evidence workspace: `/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915`. No physical acceptance is claimed by this source document.
+
+## Built candidate checkpoint
+
+Source `b78efd38ed3ffc795a9fab086a04302c89f0c922`, firmware tree `7b2586bee5f75b7cf1a5c94798ad60d8f8d5dd4a`, build `6.4.162-20260915T182022Z-b78efd38ed3f`. Both canonical builds and actual artifact checks passed. Sealed pair SHA256 `52314e60a74b1ec4a44906d05294679bcc0580ed557fcaf0cee7f9ed2fa5034e`.17 regression groups and3 expected-failure controls passed; the old flush fails the compiled new-user starvation assertion. Source review and all runtime hashes are pinned in the evidence workspace.
+
+Sense image/link size grows3952bytes and static RAM112bytes; RTC is unchanged. LCD footprints are unchanged. Per-function compiler stack metadata is retained separately; it is not a physical high-water measurement. Publication preparation is local only. No staged or latest manifest was written, and no candidate firmware was installed.
+
+The user confirmed the Wi-Fi trigger: Halo was provisioned for the home network while physically in the garage. Two subsequent actuator wakes confirmed live old-firmware diagnostics with Wi-Fi disconnected. Garage reprovisioning was requested so genuine OTA installation and on-device fault acceptance can proceed. Do not label these old-firmware connectivity observations as candidate tests.
