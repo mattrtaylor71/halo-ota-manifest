@@ -1,6 +1,6 @@
 # Camera request recovery candidate, September 15
 
-This candidate repairs the reproduced pre-sleep input starvation on Sense158. It starts from the reviewed159 production runtime, retaining the158 OTA fixes and159 LCD wake handling. The separately preserved, uninstalled voice161 candidate is not included. Build162 is a candidate until exact artifact and physical acceptance receipts are recorded; published160 and frozen158 remain unchanged.
+This candidate repairs the reproduced pre-sleep input starvation on Sense158. It starts from the reviewed159 production runtime, retaining the158 OTA fixes and159 LCD wake handling. The separately preserved, uninstalled voice161 candidate is not included. Build162 is published; physical acceptance remains pending installation. Frozen158 remains the recovery and previous scheduled qualification reference.
 
 ## Reproduced failure
 
@@ -40,6 +40,14 @@ Build, test and service-tool evidence workspace: `/Users/MattTaylor/halo-device-
 
 Source `b78efd38ed3ffc795a9fab086a04302c89f0c922`, firmware tree `7b2586bee5f75b7cf1a5c94798ad60d8f8d5dd4a`, build `6.4.162-20260915T182022Z-b78efd38ed3f`. Both canonical builds and actual artifact checks passed. Sealed pair SHA256 `52314e60a74b1ec4a44906d05294679bcc0580ed557fcaf0cee7f9ed2fa5034e`.17 regression groups and3 expected-failure controls passed; the old flush fails the compiled new-user starvation assertion. Source review and all runtime hashes are pinned in the evidence workspace.
 
-Sense image/link size grows3952bytes and static RAM112bytes; RTC is unchanged. LCD footprints are unchanged. Per-function compiler stack metadata is retained separately; it is not a physical high-water measurement. Publication preparation is local only. No staged or latest manifest was written, and no candidate firmware was installed.
+Sense image/link size grows3952bytes and static RAM112bytes; RTC is unchanged. LCD footprints are unchanged. Per-function compiler stack metadata is retained separately; it is not a physical high-water measurement. Both exact images were staged and public latest pointers promoted to162 on September15 at18:35UTC, with full manifest and binary readbacks. Publication receipts are pinned in `PUBLISHED.json`; the immutable build-time `RELEASE-PAIR.json` retains its original checkpoint fields. No candidate firmware has been installed.
 
 The user confirmed the Wi-Fi trigger: Halo was provisioned for the home network while physically in the garage. Two subsequent actuator wakes confirmed live old-firmware diagnostics with Wi-Fi disconnected. Garage reprovisioning was requested so genuine OTA installation and on-device fault acceptance can proceed. Do not label these old-firmware connectivity observations as candidate tests.
+
+## Garage provisioning and installation attempt
+
+Garage reprovisioning restored actual Sense Wi-Fi connectivity, confirmed through LCD-forwarded RSSI/IP diagnostics and a fresh cloud boot report. Three native Manual Update requests reached Sense and ended with terminal OTA_UNLOCK before any image transfer. An earlier software attempt occurred under the initial boot lock and never queued a native request; it is not counted.
+
+The fresh cloud policy reports DISCOVERY with two discovery windows used, no target, no BEGIN/apply and no reserved work. Production manual discovery still enforces the two-window cap, consistent with the refusal. The exact manual terminal result string was not captured: USB output interleaved, and requested UI layout dumps executed after the terminal overlay expired. Do not substitute the background `not_due` report for that missing manual result.
+
+All six observation captures are closed. The actual installed pair remains Sense158/LCD159; zero162 hardware acceptance runs are claimed. No allowance/debt reset, schedule change, firmware-bank service or image transfer occurred. Installation now requires a genuine eligible maintenance window or temporary Sense USB access; the user has been asked which is available. See `INSTALLATION-OBSERVATION.json`, `STATUS.json`, and the individual capture closure records in the evidence workspace.

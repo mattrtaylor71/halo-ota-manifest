@@ -6064,12 +6064,12 @@
   },
   "camera_input_recovery_candidate_162": {
     "version": "6.4.162",
-    "status": "BUILT_CHECKED_SEALED_NOT_INSTALLED_OR_PUBLISHED",
+    "status": "PUBLISHED_INSTALLATION_BLOCKED",
     "runtime_base_commit": "f89a9efaae6413edc95713f73657d841e45ccb14",
     "handoff": "docs/CAMERA_INPUT_RECOVERY_162.md",
     "evidence_workspace": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915",
     "installed": false,
-    "published": false,
+    "published": true,
     "voice161_included": false,
     "artifact_source_commit": "b78efd38ed3ffc795a9fab086a04302c89f0c922",
     "artifact_source_firmware_tree": "7b2586bee5f75b7cf1a5c94798ad60d8f8d5dd4a",
@@ -6097,6 +6097,15 @@
     "host_regression_groups": 17,
     "negative_controls": 3,
     "physical_candidate_runs": 0,
-    "installation_blocker": "Sense USB inaccessible and Wi-Fi provisioned for home while physically in garage; user asked to provision garage network."
+    "installation_blocker": "Wi-Fi restored; native manual checks return terminal without downloading. Fresh durable ledger has used both discovery windows. Sense USB unavailable inside enclosure; user asked about temporary access or next eligible native OTA window.",
+    "processes_closed": true,
+    "publication": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/PUBLISHED.json",
+      "sha256": "3b7642b217a572cdf5a9338c770f4c4102f81aa77ce95e91e047a9466a251f6c"
+    },
+    "installation_observation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/INSTALLATION-OBSERVATION.json",
+      "sha256": "71938c7a0e254f9c6a3ae1bc3355a0d8223deeb742d68dc12aa7fdaa3d03f3e4"
+    }
   }
 }

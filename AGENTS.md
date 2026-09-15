@@ -1,6 +1,6 @@
 # HALO workspace baseline
 
-- Latest working code: use `RELEASE_BASELINE.json.current_working_source` (159 LCD wake fix) and read `docs/LCD_USER_WAKE_159.md`. Preserve frozen158 as the recovery/previous scheduled qualification reference; do not revert the159 wake fix for subsequent releases. Public latest160 (version-only bump); the assembled unit is LCD159/Sense158 until its next eligible OTA.
+- Latest working code: use `RELEASE_BASELINE.json.current_working_source` (159 LCD wake fix) and read `docs/LCD_USER_WAKE_159.md`. Preserve frozen158 as the recovery/previous scheduled qualification reference; do not revert the159 wake fix for subsequent releases. Public latest162 contains the camera input-recovery candidate; read `docs/CAMERA_INPUT_RECOVERY_162.md` in the production firmware directory. The assembled unit remains LCD159/Sense158;162 device acceptance is pending installation.
 
 - The authoritative production project is `Arduino/HALOMAIN_rev1p5_modular`; read its `AGENTS.md` and `docs/FROZEN_RELEASE_158.md` before changing firmware.
 - Use `RELEASE_BASELINE.json.current_working_source` for new changes and `current_baseline` for the retained frozen158 recovery artifacts. Work from this checkout or reviewed descendants preserving both158 OTA fixes and159 LCD wake handling. Historical records and `Arduino/HALOMAIN_rev1` are not alternative current baselines.
