@@ -632,6 +632,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     uint32_t initial_count = upload_queue_count();
     bool has_parked = upload_worker_parked_pending();
     bool had_pending = (initial_count > 0 || upload_inflight || has_parked ||
+                        upload_worker_claim_active.load() ||
                         upload_worker_holding_in_place);
 
     if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
@@ -651,6 +652,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
 
     while (had_pending &&
            (upload_queue_count() > 0 || upload_inflight || upload_worker_parked_pending() ||
+            upload_worker_claim_active.load() ||
             upload_worker_holding_in_place) &&
            (millis() - flush_start) < UPLOAD_FLUSH_TIMEOUT_MS) {
       if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
@@ -670,66 +672,32 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
 
     if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
                                         UPLOAD_FLUSH_TIMEOUT_MS)) return;
-    // If parked job still exists after timeout, persist it before sleeping
-    UploadJob parked_job = {};
-    if (upload_worker_take_parked_job(parked_job)) {
-      Serial.printf("[SLEEP_UPLOAD_FLUSH] parked job exists: job_id=%lu mode=%s len=%u\n",
-                    (unsigned long)parked_job.job_id,
-                    parked_job.mode,
-                    (unsigned)parked_job.image_len);
-      const bool parked_saved = upload_persist_handle_failure(parked_job, "sleep_parked");
-      if (!parked_saved) {
-        Serial.println("[SLEEP_UPLOAD_FLUSH] WARNING: parked job could NOT be persisted");
-        uart_send_sense_diag("upload", "sleep_parked_drop", parked_job.mode,
-                             (int32_t)parked_job.job_id, "persist_failed");
+    // The upload worker remains the only consumer of queued/parked media.
+    // A long SD save can outlive this flush window. Main-task rescue used to
+    // dequeue the next job while that save owned UART, count local admission
+    // refusal as a storage failure, and free the only RAM copy. Defer ordinary
+    // teardown instead; closing FlushGate preserves ownership, and the next
+    // normal sleep attempt reopens the same bounded worker drain.
+    const uint32_t remaining_after_flush = upload_queue_count();
+    const bool pending_after_flush = remaining_after_flush || upload_inflight ||
+        upload_worker_parked_pending() || upload_worker_holding_in_place ||
+        upload_worker_claim_active.load();
+    if (pending_after_flush) {
+      snprintf(flush_detail, sizeof(flush_detail),
+               "queued=%lu inflight=%u elapsed_ms=%lu budget_ms=%lu",
+               (unsigned long)remaining_after_flush, upload_inflight ? 1 : 0,
+               millis() - flush_start, UPLOAD_FLUSH_TIMEOUT_MS);
+      if (!guardian_force_sleep) {
+        Serial.printf("[SLEEP_UPLOAD_FLUSH] deferred pending_worker queued=%lu inflight=%u\n",
+                      (unsigned long)remaining_after_flush, upload_inflight ? 1 : 0);
+        uart_send_sense_diag("sleep", "flush_defer", "pending_worker", 0, flush_detail);
+        sleep_notify_late_block("upload_flush_pending");
+        return;
       }
-      if (parked_job.image_buf) {
-        free(parked_job.image_buf);
-        parked_job.image_buf = nullptr;
-      }
-    }
-
-    if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
-                                        UPLOAD_FLUSH_TIMEOUT_MS)) return;
-    // Rescue anything STILL QUEUED after the flush budget expired.
-    //
-    // The parked-job block above only ever handled ONE job, which was correct
-    // when uploads went out during the session and at most one could be pending
-    // here. Deferring them to sleep means a whole session can be queued, and on
-    // 2026-08-21 a flush timeout left one in flight and one queued — up_ok=4 of 5
-    // captures, spool=0, PSRAM does not survive deep sleep, photo GONE.
-    //
-    // Anything we cannot upload goes to the SD card instead of being dropped.
-    {
-      UploadJob leftover = {};
-      uint32_t rescued = 0, lost = 0;
-      while (upload_queue != NULL) {
-        // Dispatch only before taking ownership or after the previous item's
-        // existing save/drop decision. A spool READY reader preserves ordinary
-        // input for this boundary; it must not run application callbacks.
-        if (sleep_upload_flush_yield_to_user(sleep_user_generation, flush_start,
-                                            UPLOAD_FLUSH_TIMEOUT_MS)) return;
-        if (xQueueReceive(upload_queue, &leftover, 0) != pdTRUE) break;
-        bool saved = false;
-        if (leftover.image_buf && leftover.image_len > 0) {
-          Serial.printf("[SLEEP_UPLOAD_FLUSH] rescuing queued job_id=%lu mode=%s len=%u -> SD\n",
-                        (unsigned long)leftover.job_id, leftover.mode,
-                        (unsigned)leftover.image_len);
-          saved = upload_persist_handle_failure(leftover, "sleep_queued");
-          uart_send_sense_diag("upload", saved ? "sleep_queued_sd" : "sleep_queued_drop",
-                               leftover.mode, (int32_t)leftover.job_id,
-                               saved ? "spooled_to_sd" : "PHOTO_LOST");
-        }
-        if (saved) rescued++; else lost++;
-        if (leftover.image_buf) {
-          free(leftover.image_buf);
-          leftover.image_buf = nullptr;
-        }
-      }
-      if (rescued || lost) {
-        Serial.printf("[SLEEP_UPLOAD_FLUSH] leftover rescue: spooled=%lu lost=%lu\n",
-                      (unsigned long)rescued, (unsigned long)lost);
-      }
+      // Preserve the existing guardian hard stop. RAM-only work is not durable
+      // at that boundary; do not report it saved or claim lossless forced sleep.
+      Serial.println("[SLEEP_UPLOAD_FLUSH] guardian hard stop: pending RAM media at risk");
+      uart_send_sense_diag("sleep", "flush_forced", "guardian", 0, flush_detail);
     }
 
     if (had_pending) {

@@ -23,12 +23,19 @@ def harness(source):
     signature = 'static bool sleep_upload_flush_yield_to_user('
     helper = definition(source, signature) if signature in source else ''
     activity = (ROOT / 'Sense_Minimal/sense_user_activity.h').read_text()
+    ino = (ROOT / 'Sense_Minimal/Sense_Minimal.ino').read_text()
+    hold = definition(ino, 'static bool uploads_held_for_session(')
+    hold_state = ino[ino.index('static unsigned long g_upload_hold_since_ms ='):ino.index('static bool uploads_held_for_session(')]
     parked_source = (ROOT / 'Sense_Minimal/sense_op_queue.h').read_text()
     parked = ''
-    if 'upload_worker_take_parked_job(' in source:
-        parked = '\n'.join(definition(parked_source, sig) for sig in ('static bool upload_worker_parked_pending(', 'static bool upload_worker_take_parked_job('))
+    if 'upload_worker_parked_pending(' in source:
+        signatures = ['static bool upload_worker_parked_pending(']
+        if 'upload_worker_take_parked_job(' in source:
+            signatures.append('static bool upload_worker_take_parked_job(')
+        parked = '\n'.join(definition(parked_source, sig) for sig in signatures)
     return r'''
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -39,6 +46,7 @@ def harness(source):
 #include <vector>
 #define HALO_SENSE_PROD_WRAPPER 1
 #define HALO_SENSE_UPLOAD_PERSISTENCE 1
+#define HALO_DEFER_UPLOADS_TO_SLEEP 1
 ''' + activity + r'''
 static unsigned long clock_ms=1000;
 static unsigned long millis(){return clock_ms;}
@@ -55,6 +63,7 @@ static uint32_t upload_queue_count(){return queue.size();}
 static bool guardian_force_sleep=false,g_upload_flush_requested=false;
 static bool upload_inflight=false,upload_worker_has_parked_job=false;
 static bool upload_worker_holding_in_place=false;
+static std::atomic<bool> upload_worker_claim_active{false};
 static UploadJob upload_worker_parked_job;
 static const char* upload_worker_parked_stage="host";
 static unsigned long upload_worker_parked_at_ms=0;
@@ -62,7 +71,7 @@ using portMUX_TYPE=std::mutex;
 static portMUX_TYPE upload_worker_parked_mux;
 static void portENTER_CRITICAL(portMUX_TYPE* m){m->lock();}
 static void portEXIT_CRITICAL(portMUX_TYPE* m){m->unlock();}
-''' + parked + r'''
+''' + parked + '\n' + hold_state + '\n' + hold + r'''
 
 static unsigned pumps=0,acks=0,spools=0,frees=0,denials=0,teardowns=0;
 static unsigned long ack_ms=0,first_spool_ms=0;
@@ -119,7 +128,18 @@ static unsigned count_note(const char* name){return std::count_if(notes.begin(),
 int main(int argc,char**argv){
  assert(argc==2);std::string test=argv[1];queue={job(1),job(2),job(3)};
  const auto started=millis();
- if(test=="new_user"){
+ if(test=="hold_reopen"){
+   const char* why=nullptr;
+   assert(uploads_held_for_session(&why) && !strcmp(why,"session_active"));
+   g_upload_flush_requested=true;assert(!uploads_held_for_session(&why) && !strcmp(why,"flush_requested"));
+   g_upload_flush_requested=false;assert(uploads_held_for_session(&why));
+   g_upload_flush_requested=true;assert(!uploads_held_for_session(&why));
+   g_upload_flush_requested=false;queue.clear();upload_worker_has_parked_job=true;
+   assert(!uploads_held_for_session(&why) && !strcmp(why,"empty"));
+   queue.assign(8,job(1));assert(!uploads_held_for_session(&why) && !strcmp(why,"highwater"));
+   queue={job(1)};assert(uploads_held_for_session(&why));
+   delay(UPLOAD_HOLD_MAX_MS+1);assert(!uploads_held_for_session(&why) && !strcmp(why,"max_age"));
+ }else if(test=="new_user"){
    bool sent=false;on_pump=[&]{if(!sent && millis()-started>=2700){sent=true;deliver("INPUT_MENU_SELECT");}};
    run_flush();
    assert(sent && acks==1 && ack_ms-started<=2800);
@@ -129,14 +149,15 @@ int main(int argc,char**argv){
    on_pump=[] {deliver("INPUT_PING");deliver("LINK_HB");deliver("INPUT_SENSE_FW");deliver("INPUT_SLEEP");deliver("LCD_DIAG");};
    run_flush();
    assert(pumps>=450 && sense_user_action_generation()==0);
-   assert(first_spool_ms-started==45000 && millis()-started==45180);
-   assert(teardowns==1 && frees==3 && queue.empty() && !g_upload_flush_requested);
-   assert(count_note("flush_end")==1 && count_note("flush_cancel")==0);
+   assert(millis()-started==45000 && !spools && !frees);
+   assert(!teardowns && queue.size()==3 && !g_upload_flush_requested);
+   assert(count_note("flush_defer")==1 && count_note("flush_end")==0 && count_note("flush_cancel")==0);
  }else if(test=="duplicate"){
    sense_note_admitted_user_action();
    on_pump=[] {deliver("INPUT_MENU_SELECT",true);};run_flush();
-   assert(sense_user_action_generation()==1 && first_spool_ms-started==45000);
-   assert(teardowns==1 && !g_upload_flush_requested);
+   assert(sense_user_action_generation()==1 && millis()-started==45000);
+   assert(!spools && !frees && queue.size()==3 && !teardowns && !g_upload_flush_requested);
+   assert(count_note("flush_defer")==1 && count_note("flush_cancel")==0);
  }else if(test=="deadline_user"){
    bool sent=false;on_pump=[&]{if(!sent && millis()-started>=45000){sent=true;deliver("INPUT_DISCARD_OPTIONS");}};
    run_flush();assert(sent && millis()-started==45000);
@@ -149,28 +170,52 @@ int main(int argc,char**argv){
    run_flush();assert(ack_ms-started==900 && !spools && queue.size()==3);
    assert(!g_upload_flush_requested && !teardowns);
  }else if(test=="current_item"){
-   bool waiting=false;on_spool=[&]{waiting=true;};
-   on_pump=[&]{if(waiting){waiting=false;deliver("INPUT_MENU_SELECT");}};
+   // A worker already owns an item. The user is dispatched only after its
+   // raw transport lease releases; main never takes or frees another item.
+   upload_inflight=true;upload_worker_claim_active=true;
+   raw_lease_busy=true;raw_lease_release_ms=started+900;
+   on_pump=[&]{deliver("INPUT_MENU_SELECT");};
    run_flush();
-   assert(spools==1 && frees==1 && queue.size()==2 && queue.front().job_id==2);
+   assert(!spools && !frees && queue.size()==3 && queue.front().job_id==1);
+   assert(upload_worker_claim_active && upload_inflight && ack_ms-started==900);
    assert(!teardowns && !g_upload_flush_requested && count_note("flush_cancel")==1);
  }else if(test=="parked_item"){
    upload_worker_has_parked_job=true;upload_worker_parked_job=job(4);
-   bool waiting=false;on_spool=[&]{waiting=true;};
-   on_pump=[&]{if(waiting){waiting=false;deliver("INPUT_MENU_SELECT");}};
-   run_flush();assert(first_spool_ms-started==60000);
-   assert(spools==1 && frees==1 && queue.size()==3 && !upload_worker_has_parked_job);
+   bool sent=false;on_pump=[&]{if(!sent && millis()-started>=60000){sent=true;deliver("INPUT_MENU_SELECT");}};
+   run_flush();assert(sent && millis()-started==60000);
+   assert(!spools && !frees && queue.size()==3 && upload_worker_has_parked_job);
+   assert(upload_worker_parked_job.image_buf==job(4).image_buf);
    assert(!teardowns && !g_upload_flush_requested);
  }else if(test=="parked_saved"){
    queue.clear();upload_worker_has_parked_job=true;upload_worker_parked_job=job(4);
-   persist_succeeds=true;run_flush();
+   // Model the sole worker consuming the parked descriptor during the open
+   // flush. The storage action is a declared boundary double, not main rescue.
+   persist_succeeds=true;on_pump=[&]{if(millis()-started>=500 && upload_worker_has_parked_job){
+     assert(g_upload_flush_requested);upload_worker_claim_active=true;
+     auto local=upload_worker_parked_job;upload_worker_has_parked_job=false;
+     upload_worker_parked_job={};assert(upload_persist_handle_failure(local,"host_worker"));
+     record_free(local.image_buf);upload_worker_claim_active=false;
+   }};run_flush();
    assert(persist_calls==1 && !spools && frees==1 && !upload_worker_has_parked_job);
-   assert(millis()-started==30000);
+   assert(millis()-started<=600);
    assert(teardowns==1 && !g_upload_flush_requested);
  }else if(test=="guardian"){
    guardian_force_sleep=true;on_pump=[] {deliver("INPUT_MENU_SELECT");};run_flush();
-   assert(!pumps && !acks && first_spool_ms-started==45000 && teardowns==1);
-   assert(!g_upload_flush_requested);
+   assert(!pumps && !acks && millis()-started==45000 && teardowns==1);
+   assert(!spools && !frees && queue.size()==3 && !g_upload_flush_requested);
+   assert(count_note("flush_forced")==1); // Explicit RAM-at-risk hard stop.
+ }else if(test=="later_flush"){
+   run_flush();assert(!teardowns && queue.size()==3 && !g_upload_flush_requested);
+   assert(count_note("flush_defer")==1 && millis()-started==45000);
+   delay(10000);unsigned worker_completed=0;
+   on_pump=[&]{if(g_upload_flush_requested && !queue.empty()){
+     // Same pointer/id order survived the first window and RAII gate closure.
+     assert(queue.front().job_id==worker_completed+1);
+     assert(queue.front().image_buf==job(worker_completed+1).image_buf);
+     queue.erase(queue.begin());++worker_completed;
+   }};run_flush();
+   assert(worker_completed==3 && queue.empty() && teardowns==1);
+   assert(!spools && !frees && !g_upload_flush_requested && count_note("flush_end")==1);
  }else if(test=="empty"){
    queue.clear();run_flush();assert(millis()==started && !spools && !frees);
    assert(teardowns==1 && !g_upload_flush_requested && count_note("flush_end")==1);
@@ -211,7 +256,7 @@ def case(name):
 
 
 for name in ('new_user', 'background', 'duplicate', 'deadline_user', 'busy_rx',
-             'current_item', 'parked_item', 'parked_saved', 'guardian', 'empty', 'drained'):
+             'current_item', 'parked_item', 'parked_saved', 'guardian', 'empty', 'drained', 'later_flush', 'hold_reopen'):
     setattr(SleepFlushTest, 'test_' + name, case(name))
 
 if __name__ == '__main__':

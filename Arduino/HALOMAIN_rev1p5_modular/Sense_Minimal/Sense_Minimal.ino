@@ -707,6 +707,23 @@ static TaskHandle_t upload_worker_task_handle = NULL;
 static bool scan_ui_inflight = false;
 static volatile bool dish_scan_inflight = false;
 static volatile bool upload_inflight = false;
+// Publish before either dequeue, including the gap before upload_inflight.
+// Only the upload worker owns this token; no lock spans processing/callbacks.
+static std::atomic<bool> upload_worker_claim_active{false};
+class UploadWorkerClaim {
+ public:
+  bool before_take() {
+    held_ = true;
+    upload_worker_claim_active.store(true);
+    return true;
+  }
+  void release() {
+    if (held_) { upload_worker_claim_active.store(false); held_ = false; }
+  }
+  ~UploadWorkerClaim() { release(); }
+ private:
+  bool held_ = false;
+};
 static SemaphoreHandle_t http_mutex = NULL;
 static volatile bool http_inflight = false;
 static bool wifi_recover_requested = false;
@@ -1305,6 +1322,10 @@ static bool sense_can_sleep_now(const char** reason) {
     if (reason) *reason = "media_custody";
     return false;
   }
+  if (upload_worker_claim_active.load()) {
+    if (reason) *reason = "upload_worker_claim";
+    return false;
+  }
   if (g_spool_owns_uart || g_img_spool_tx_active) {
     if (reason) *reason = "spool_transfer";
     return false;
@@ -1497,7 +1518,11 @@ static bool sleep_background_force_ready(unsigned long now_ms, const char* reaso
                   upload_inflight ? 1 : 0,
                   (unsigned long)upload_queue_count(),
                   http_inflight ? 1 : 0);
+#if !HALO_DEFER_UPLOADS_TO_SLEEP
     sleep_defer_queued_background_uploads();
+#endif
+    // Production deferral keeps queue custody with the worker. The ordinary
+    // pre-sleep flush opens that worker's gate after this background bypass.
     background_sleep_bypass_active = true;
   }
   return true;
@@ -1847,11 +1872,13 @@ static bool uploads_held_for_session(const char** why_out) {
 static void upload_worker_task(void *arg) {
   Serial.println("[UPLOAD] Background upload task started");
   for (;;) {
+    UploadWorkerClaim worker_claim;
     UploadJob job = {};
     bool got_job = false;
     const char* parked_stage = "idle";
     unsigned long parked_at_ms = 0;
     if (!uploads_held_for_session(NULL) &&
+        worker_claim.before_take() &&
         upload_worker_take_parked_job(job, &parked_stage, &parked_at_ms)) {
       Serial.printf("[UPLOAD_QUEUE] resume_parked job_id=%lu mode=%s voice=%d stage=%s parked_ms=%lu q=%lu\n",
                     (unsigned long)job.job_id,
@@ -1862,6 +1889,7 @@ static void upload_worker_task(void *arg) {
                     (unsigned long)upload_queue_count());
       got_job = true;
     } else if (!uploads_held_for_session(NULL) && upload_queue != NULL &&
+               worker_claim.before_take() &&
                // NON-BLOCKING on purpose. This used to wait 200ms, which raced the
                // hold gate above it: the gate is evaluated while the queue is still
                // empty (so it opens), and then the blocking receive picks up the job
@@ -1872,6 +1900,7 @@ static void upload_worker_task(void *arg) {
                xQueueReceive(upload_queue, &job, 0) == pdTRUE) {
       got_job = true;
     } else if (uploads_held_for_session(NULL)) {
+      worker_claim.release();
       static unsigned long last_defer_log_ms = 0;
       const unsigned long now_ms = millis();
       if (now_ms - last_defer_log_ms > 5000) {
@@ -1884,6 +1913,7 @@ static void upload_worker_task(void *arg) {
       }
       vTaskDelay(pdMS_TO_TICKS(100));
     } else if (!got_job) {
+      worker_claim.release();
       // The normal-queue receive no longer blocks, so pace the loop here.
       vTaskDelay(pdMS_TO_TICKS(50));
     }
