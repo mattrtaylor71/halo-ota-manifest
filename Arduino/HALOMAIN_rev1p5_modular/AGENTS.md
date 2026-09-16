@@ -1,6 +1,6 @@
 # HALO Firmware Agent Guide
 
-- Current development source is private167 from committed source3955e6c. Read `docs/OFFLINE_MEDIA_STRESS_167.md` in the production firmware directory. Both canonical builds, artifact checks and all17 host suites pass. The September16 RTC observation verified LCD167/app0 and Sense166/app0 SDK VALID; Sense167 installation and the physical three-capture regression remain pending. The host missed the short post-OTA maintenance window. Both observers are closed, the one-shot follow-up is paused, and the actuator remains unresponsive. Preserve failed165/166 captures and frozen158; public OTA is last-verified162. No167 publication or paired physical acceptance is claimed. Durable image rollout remains restricted to the test owner.
+- Current development source is private167 from commit3955e6c. Both boards are installed/running SDK VALID (Sense app1, LCD app0). Read `docs/OFFLINE_MEDIA_STRESS_167.md`: one physical long-voice/Dish/Discard offline burst saved all3, all3 later reached cloud and retired from SD; final pending counts0. The burst had a malformed sleep acknowledgment and recoverable LCD fallback; five other observed episodes slept normally. Preserve known incomplete image residue and historical failed165/166 evidence. Further sleep-fix build is blocked by host disk space; no168 runtime fix exists yet. Public OTA is last-verified162, no167 publication/full shipping acceptance. All owners closed; follow-up paused. Durable image backend remains test-owner only.
 
 ## Release Baseline
 

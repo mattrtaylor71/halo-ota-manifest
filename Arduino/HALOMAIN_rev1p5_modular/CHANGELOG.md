@@ -1,3 +1,7 @@
+# September16:167 installed; offline media custody verified
+
+Actuator reset allowed Sense167 service. Both boards report SDK VALID. One10.5s voice/Dish/Discard offline burst saved all3 payloads; three replay wakes delivered exact cloud records and acknowledged SD deletion. Final pending counts0; known incomplete image residue remains1. Five episodes slept normally; the offline burst lost a complete sleep acknowledgment and used a recoverable LCD fallback. Preserve this limitation: the next sleep fix is unimplemented and its build needs disk space. No public release. See [the current closure](docs/OFFLINE_MEDIA_STRESS_167.md).
+
 # September16 RTC follow-up: wake observed, Sense service pending
 
 The existing timer woke LCD at01:59:46 Pacific. Both USB identities appeared; LCD167/app0 and Sense166/app0 reported SDK VALID. The host missed the short idle window after OTA coordination unlocked, so no service or media regression ran. Both captures are closed and the one-shot follow-up is paused. No new firmware write or publication. See [the episode handoff](docs/OFFLINE_MEDIA_STRESS_167.md).

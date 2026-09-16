@@ -4871,44 +4871,29 @@
     }
   },
   "current_validation_blocker": {
-    "status": "RTC_WAKE_OBSERVED_HOST_SERVICE_WINDOW_MISSED_SENSE167_PENDING",
+    "status": "OFFLINE_MEDIA_CUSTODY_PASS_SLEEP_HANDSHAKE_FIX_PENDING_DISK_SPACE",
     "candidate": "6.4.167",
-    "installation_blocked": true,
-    "lcd_service": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/lcd167-service001/install/result.json",
-      "sha256": "e9d1fc97b55e9e476a1de7e5e78804f2e43fa4a45cc6439609b1b32488548b50"
+    "installation_blocked": false,
+    "closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS167-CLOSURE.json",
+      "sha256": "fc3cd2842b99b52cd8f3abff037c1e17a072e18537f14a61b2520bf3053a7ea1"
     },
-    "sense_attempt": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sense167-service001/RUNNER-RESULT.json",
-      "sha256": "e50a77028867959e66954f3c0944f90b964230d942595f7d163052ba8e455405"
-    },
-    "actuator_cycle": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-recovery167-001/result.json",
-      "sha256": "15c4fed5280c3c04aaf1b9edd1e815aad3626f2d7940ef30f9db0f1da5e7796b"
-    },
-    "actuator_status_after_cycle": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr167-002/RESULT.json",
-      "sha256": "e3cbde7faa3928e347884812412df1f8d2ee65da44a2e91b75c6c91f4e7d4dd2"
+    "next_build_disk_space": {
+      "blocked": true,
+      "available_bytes": 1556979712,
+      "default_required_bytes": 8589934592,
+      "reason": "Insufficient host disk; user asked to free roughly10GB"
     },
     "next_steps": [
-      "Obtain a reliable wake; actuator remains unresponsive and the user is away. September16 RTC episode is closed; no observer or recurring follow-up remains active.",
-      "Prepare the service handoff before waking. Require fresh mixed LCD167/Sense166 SDK VALID idle identity, close/reap capture, then use the unchanged Sense-only installer. Do not repeat LCD service.",
-      "Verify both167 SDK VALID, typed inventory and exact normal retirement of retained166 voice before the finite media burst.",
-      "Complete longvoice/Dish/Discard SD/cloud/retirement and final health/sleep regression. No physical167 acceptance or publication yet."
+      "Preserve installed167 and its exact tested pair. Confirm malformed sleep-frame cause and implement a bounded acknowledgment barrier without losing queued user input or changing OTA policy.",
+      "Obtain required build disk space, commit scoped source, use unused168+, run targeted controls and canonical builds, then finite physical regression.",
+      "Retain all historical captures and residue; no public firmware promotion without explicit scope and receipts."
     ],
-    "no_OTA_allowance_schedule_credentials_or_debt_reset": true,
-    "installation_review": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION167-PARTIAL-REVIEW.json",
-      "sha256": "fead5f6da61971577aec141228afbd2aa743fc60a4ffbb03fb0bcd5263bda57a"
+    "sleep_fix_plan": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sleep-ack167-review001/PLAN.md",
+      "sha256": "2877f410e69778ded5c2304f050ae50535bdb84c277dd9c424144d896b8cedee"
     },
-    "remote_wake_checkpoint": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/remote-wake167-001/WAKE-CHECKPOINT.json",
-      "sha256": "18d3aae2c4c58ce4214ec4ec785ae798db3dca4238015860a3f2732740c00337"
-    },
-    "remote_wake_episode": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/remote-wake167-001/EPISODE-RESULT.json",
-      "sha256": "2537a42afa0d2b83faa917ec32c2b93c1e0fe00a49f07ad9e224a8e1aa9acb7d"
-    }
+    "no_OTA_allowance_schedule_credentials_or_debt_reset": true
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6032,7 +6017,7 @@
   },
   "current_working_source": {
     "version": "6.4.167",
-    "status": "HOST_BUILD_PASS_LCD_SERVICED_SENSE_AND_PHYSICAL_RETEST_PENDING",
+    "status": "INSTALLED_PAIRED_VALID_OFFLINE_CUSTODY_PASS_SLEEP_HANDSHAKE_DEFECT",
     "artifact_source_commit": "3955e6cde8569e59ee2e30c8fd4082512b8e40d8",
     "artifact_source_firmware_tree": "f90d05e335bb92e25ae2079e55f6752c4d9bb609",
     "runtime_fix_commit": "143fc11706a345fd35d6c7f3a7540f5de0e2c65f",
@@ -6052,12 +6037,12 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate167-002/SOURCE-SCOPE.json",
       "sha256": "588ed3e6a757aca4380614088281c0e409e07f4b548b3d632fd59dfb34baef5b"
     },
-    "installed": false,
+    "installed": true,
     "published": false,
     "physical_acceptance": false,
     "installed_firmware_last_observed": {
-      "sense": "6.4.166 app0 SDK VALID observed through LCD at September16 RTC wake",
-      "lcd": "6.4.167 app0 SDK VALID observed at September16 RTC wake; Sense remains166"
+      "sense": "6.4.167 app1 SDK VALID",
+      "lcd": "6.4.167 app0 SDK VALID"
     },
     "current_public_ota_version": "6.4.162",
     "public_manifest_readback": {
@@ -6071,7 +6056,7 @@
     "backend_rollout": "verified_test_owner_only",
     "handoff": "docs/OFFLINE_MEDIA_STRESS_167.md",
     "limits": [
-      "167 physical three-capture stress regression and full-pair SDK health are pending. LCD service completed; Sense attempt stopped before installation when actuator stopped replying.",
+      "167 installed and one physical three-capture offline burst plus3replays passed custody/cloud/retirement; burst LCD malformed sleep ACK required fallback, so full acceptance is withheld.",
       "165 long burst confirmed one lost Discard;166 long burst saved voice but two image terminal outcomes were not captured.166 voice reached cloud custody with SD retirement pending at last observed replay.",
       "One incomplete image record remained after165; pending0/incomplete1 must not be reported as clean SD or recovered lost media.",
       "Guardian hard stop and abrupt power loss can lose RAM-only captures. RF-loss, USB-free, new OTA and full-product operation remain unqualified.",
@@ -6098,6 +6083,18 @@
     "stress_status": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS167-CHECKPOINT.json",
       "sha256": "e2a3cf88faf995db35315e6471d6885cb8add9a6bf85edfa945f23df96b302f2"
+    },
+    "latest_scoped_stress_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS167-CLOSURE.json",
+      "sha256": "fc3cd2842b99b52cd8f3abff037c1e17a072e18537f14a61b2520bf3053a7ea1"
+    },
+    "sense_service_completed": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sense167-service002/install/result.json",
+      "sha256": "244169c502f9314f44209c3df2c85d1ce2fba80ff03ba7dd10e9683c669acafd"
+    },
+    "paired_installed_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION167-AND-HEALTH-REVIEW.json",
+      "sha256": "694ba2d2d6b732a180083f8a10a8f5d560f0020235c420a353bf2128ea949a21"
     }
   },
   "previous_verified_paired_health_158": {
@@ -6650,5 +6647,45 @@
       "Verify empty typed queues, responsive UI, SDK VALID on both boards and natural paired sleep."
     ],
     "no_OTA_allowance_schedule_credentials_or_debt_reset": true
+  },
+  "previous_current_validation_blocker_167_rtc": {
+    "status": "RTC_WAKE_OBSERVED_HOST_SERVICE_WINDOW_MISSED_SENSE167_PENDING",
+    "candidate": "6.4.167",
+    "installation_blocked": true,
+    "lcd_service": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/lcd167-service001/install/result.json",
+      "sha256": "e9d1fc97b55e9e476a1de7e5e78804f2e43fa4a45cc6439609b1b32488548b50"
+    },
+    "sense_attempt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sense167-service001/RUNNER-RESULT.json",
+      "sha256": "e50a77028867959e66954f3c0944f90b964230d942595f7d163052ba8e455405"
+    },
+    "actuator_cycle": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-recovery167-001/result.json",
+      "sha256": "15c4fed5280c3c04aaf1b9edd1e815aad3626f2d7940ef30f9db0f1da5e7796b"
+    },
+    "actuator_status_after_cycle": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr167-002/RESULT.json",
+      "sha256": "e3cbde7faa3928e347884812412df1f8d2ee65da44a2e91b75c6c91f4e7d4dd2"
+    },
+    "next_steps": [
+      "Obtain a reliable wake; actuator remains unresponsive and the user is away. September16 RTC episode is closed; no observer or recurring follow-up remains active.",
+      "Prepare the service handoff before waking. Require fresh mixed LCD167/Sense166 SDK VALID idle identity, close/reap capture, then use the unchanged Sense-only installer. Do not repeat LCD service.",
+      "Verify both167 SDK VALID, typed inventory and exact normal retirement of retained166 voice before the finite media burst.",
+      "Complete longvoice/Dish/Discard SD/cloud/retirement and final health/sleep regression. No physical167 acceptance or publication yet."
+    ],
+    "no_OTA_allowance_schedule_credentials_or_debt_reset": true,
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION167-PARTIAL-REVIEW.json",
+      "sha256": "fead5f6da61971577aec141228afbd2aa743fc60a4ffbb03fb0bcd5263bda57a"
+    },
+    "remote_wake_checkpoint": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/remote-wake167-001/WAKE-CHECKPOINT.json",
+      "sha256": "18d3aae2c4c58ce4214ec4ec785ae798db3dca4238015860a3f2732740c00337"
+    },
+    "remote_wake_episode": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/remote-wake167-001/EPISODE-RESULT.json",
+      "sha256": "2537a42afa0d2b83faa917ec32c2b93c1e0fe00a49f07ad9e224a8e1aa9acb7d"
+    }
   }
 }
