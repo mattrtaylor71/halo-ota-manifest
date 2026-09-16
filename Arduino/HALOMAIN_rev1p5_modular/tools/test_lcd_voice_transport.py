@@ -52,6 +52,11 @@ static bool g_img_rx_active=false,g_img_rx_binary_mode=false;
 static bool g_spool_tx_pending=false,g_spool_tx_active=false,g_suppress_uart_json_tx=false;
 static bool g_sleep_transition=false,ota_busy=false,image_valid=true;
 static std::atomic<bool> g_lcd_sleep_commit_gate{false};
+static unsigned accepted_binary_proofs=0;
+static void note_sense_binary_media_rx(const char*){
+  check(g_img_rx_active||g_spool_tx_active||(!g_img_rx_binary_mode&&!g_suppress_uart_json_tx),"typed proof never follows foreign binary owner");
+  ++accepted_binary_proofs;
+}
 static bool lcd_nvs_image_valid(){return image_valid;}
 static bool lcd_ota_in_progress_for_sd_guard(){return ota_busy;}
 static void lcd_freeze_wdt_feed(){++tick_ms;}

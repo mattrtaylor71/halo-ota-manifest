@@ -159,6 +159,7 @@ static void release_wake_line(const char*){
  ++line_releases;
 }
 static void lcd_errlog_store_with_context(const char*,const char*,const char*,int,const char*){++miss_logs;}
+static const char* sense_state_name(SenseState);
 static void send_sense_ping();
 static void request_sense_wake(const char*);
 static void start_sense_wake_handshake();

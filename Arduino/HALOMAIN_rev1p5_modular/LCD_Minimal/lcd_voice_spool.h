@@ -146,6 +146,8 @@ static bool lcd_voice_abort(JsonObjectConst d) {
     !strcmp(request,g_voice_last_meta.request_id)&&lcd_voice_u32(d["job_id"],&job)&&job==g_voice_last_meta.job_id&&
     lcd_voice_u32(d["len"],&len)&&len==g_voice_last_meta.len&&lcd_voice_u32(d["crc32"],&crc)&&crc==g_voice_last_meta.crc32;
   if(!match)return false;
+  if(!g_voice_waiting_abort&&!g_voice_tx_pending&&!g_voice_rx&&!lcd_voice_link_idle())return false;
+  note_sense_binary_media_rx("voice_bound_abort");
   // A foreground yield has already closed its FILE. Keep ordinary TX and UI
   // admission quarantined until this exact terminal proof is serialized.
   if(g_voice_waiting_abort) {
@@ -245,6 +247,7 @@ static bool lcd_voice_receive_loop() {
   const bool ok=result==halo_voice::Result::Ok||result==halo_voice::Result::DuplicateChunk;
   if(!ok){g_voice_proto->send_frame(MSG_IMG_NACK,seq,nullptr,0);lcd_voice_release(halo_voice::result_name(result),true);return false;}
   if(lcd_voice_expired()){g_voice_proto->send_frame(MSG_IMG_NACK,seq,nullptr,0);lcd_voice_release("receive_deadline",true);return false;}
+  note_sense_binary_media_rx("voice_accepted_frame");
   g_voice_last_frame_ms=millis();
   if(type==MSG_IMG_END){uint8_t proof[40];uint8_t* p=proof;halo_voice::put32(p,g_voice_transfer_meta.len);halo_voice::put32(p,g_voice_transfer_meta.crc32);memcpy(p,g_voice_transfer_meta.request_id,32);
     g_voice_sd_committed++;g_voice_proto->send_frame(MSG_IMG_ACK,seq,proof,sizeof(proof));lcd_voice_release("committed",false);return false;}
@@ -304,9 +307,10 @@ static void lcd_voice_send_file() {
       lcd_freeze_wdt_feed();
       if(event==UartOtaProtocol::TIMEOUT)continue;
       if(event==UartOtaProtocol::JSON){StaticJsonDocument<512>d;if(!deserializeJson(d,json)&&!strcmp(d["type"]|"","VOICE_XFER_ABORT"))lcd_voice_abort(d.as<JsonObjectConst>());break;}
-      ack=type==MSG_IMG_ACK&&rseq==seq&&rn==0;break;
+      ack=type==MSG_IMG_ACK&&rseq==seq&&rn==0&&!lcd_voice_expired();break;
     }
     if(!ack||!g_voice_tx_pending){ok=false;break;}
+    note_sense_binary_media_rx("voice_chunk_ack");
     sent+=(uint32_t)n;seq++;g_voice_last_frame_ms=millis();
   }
   if(f&&sd_close_file(f)!=ESP_OK)ok=false;
@@ -321,10 +325,11 @@ static void lcd_voice_send_file() {
       uint8_t type=0;uint16_t rseq=0;size_t rn=sizeof(reply);
       auto event=g_voice_proto->recv_event(&type,&rseq,reply,&rn,json,sizeof(json),100);lcd_freeze_wdt_feed();
       if(event==UartOtaProtocol::TIMEOUT)continue;
-      if(event==UartOtaProtocol::FRAME)ack=type==MSG_IMG_ACK&&rseq==seq&&rn==0;
+      if(event==UartOtaProtocol::FRAME)ack=type==MSG_IMG_ACK&&rseq==seq&&rn==0&&!lcd_voice_expired();
       else{StaticJsonDocument<512>d;if(!deserializeJson(d,json)&&!strcmp(d["type"]|"","VOICE_XFER_ABORT"))lcd_voice_abort(d.as<JsonObjectConst>());}
       break;
     }ok=ok&&ack;
+    if(ok)note_sense_binary_media_rx("voice_end_ack");
   }
   if(g_voice_tx_abort_pending){
     g_voice_tx_abort_pending=false;lcd_voice_finish_replay(seq,"peer_abort",true,false,true);return;

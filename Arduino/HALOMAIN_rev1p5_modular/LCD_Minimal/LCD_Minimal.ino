@@ -2823,15 +2823,56 @@ static void sense_pong_arm(unsigned long now_ms) {
 }
 
 static bool sense_pong_take_expired(unsigned long now_ms) {
+  SenseState expired_state = SENSE_UNKNOWN;
+  uint8_t missed = 0;
+  bool changed = false;
   portENTER_CRITICAL(&s_sense_pong_mux);
   const bool expired = sense_pong_pending &&
       (int32_t)((uint32_t)now_ms - (uint32_t)sense_pong_deadline_ms) >= 0;
   if (expired) {
     sense_pong_deadline_ms = 0;
     sense_pong_pending = false;
+    if (sense_missed_pongs < 255) ++sense_missed_pongs;
+    missed = sense_missed_pongs;
+    expired_state = (sleep_ready_received || missed >= SENSE_MISSED_PONGS_FOR_ASLEEP)
+                        ? SENSE_ASLEEP : SENSE_UNKNOWN;
+    changed = sense_state != expired_state;
+    sense_awake_confirmed = false;
+    sense_state = expired_state;
+    sense_awake_estimate = false;
   }
   portEXIT_CRITICAL(&s_sense_pong_mux);
+  // Commit the timeout before unlocking: a subsequent accepted binary proof
+  // must win, even when it arrives before these diagnostic calls complete.
+  if (expired) {
+    if (changed) Serial.printf("[SENSE_STATE] state=%s reason=missed_pongs missed=%u\n",
+                              sense_state_name(expired_state), (unsigned)missed);
+    if (expired_state != SENSE_ASLEEP)
+      lcd_errlog_store_with_context("lcd", "sense_wake", "MISSED_PONGS", (int)missed, "sense unresponsive");
+  }
   return expired;
+}
+
+// Only accepted typed media frames/receipts call this. Do not refresh user
+// activity, coordinator identity, media deadlines, or manufacture link sync.
+static void note_sense_binary_media_rx(const char* source) {
+  const unsigned long now_ms = millis();
+  portENTER_CRITICAL(&s_sense_pong_mux);
+  const bool changed = sense_state != SENSE_AWAKE;
+  last_sense_rx_ms = now_ms;
+  last_sense_any_rx_ms = now_ms;
+  last_sense_msg_ms = now_ms;
+  last_proof_of_life_ms = now_ms;
+  sense_rx_stale_logged = false;
+  sense_missed_pongs = 0;
+  sense_pong_deadline_ms = 0;
+  sense_pong_pending = false;
+  last_sense_sleep_ready_ms = 0;
+  sleep_ready_received = false;
+  sense_state = SENSE_AWAKE;
+  sense_awake_estimate = true;
+  portEXIT_CRITICAL(&s_sense_pong_mux);
+  if (changed) Serial.printf("[SENSE_STATE] state=AWAKE reason=%s missed=0\n", source);
 }
 
 static void sense_state_set(SenseState next, const char* reason) {
@@ -2910,26 +2951,33 @@ static void maybe_extend_sense_awake_grace(const char* reason) {
 }
 
 static void refresh_sense_awake_estimate(unsigned long now_ms) {
-  if (sense_state == SENSE_AWAKE) {
-    if (refresh_state == REFRESH_WAKE_PENDING || refresh_state == REFRESH_INFLIGHT) {
-      return;
-    }
-    uint32_t pol_age = last_proof_of_life_ms > 0
-                           ? safe_age_ms((uint32_t)now_ms, (uint32_t)last_proof_of_life_ms)
-                           : 0;
-    uint32_t stale_threshold_ms = (last_proof_of_life_ms > 0)
-                                    ? SENSE_UNKNOWN_STALE_EXTENDED_MS
-                                    : SENSE_UNKNOWN_STALE_MS;
+  bool stale = false, log_stale = false;
+  uint32_t pol_age = 0, stale_threshold_ms = 0;
+  uint8_t missed = 0;
+  portENTER_CRITICAL(&s_sense_pong_mux);
+  if (sense_state == SENSE_AWAKE && refresh_state != REFRESH_WAKE_PENDING &&
+      refresh_state != REFRESH_INFLIGHT) {
+    pol_age = last_proof_of_life_ms > 0
+                  ? safe_age_ms((uint32_t)now_ms, (uint32_t)last_proof_of_life_ms) : 0;
+    stale_threshold_ms = last_proof_of_life_ms > 0
+                             ? SENSE_UNKNOWN_STALE_EXTENDED_MS : SENSE_UNKNOWN_STALE_MS;
     if (pol_age >= stale_threshold_ms) {
-      if (!sense_rx_stale_logged) {
-        Serial.printf("[SENSE_LINK] rx_stale age_ms=%lu threshold_ms=%lu\n",
-                      (unsigned long)pol_age,
-                      (unsigned long)stale_threshold_ms);
-        sense_rx_stale_logged = true;
-      }
-      sense_state_set(SENSE_UNKNOWN, "rx_stale");
+      stale = true;
+      log_stale = !sense_rx_stale_logged;
+      sense_rx_stale_logged = true;
+      sense_awake_confirmed = false;
+      sense_state = SENSE_UNKNOWN;
+      sense_awake_estimate = false;
+      missed = sense_missed_pongs;
     }
   }
+  portEXIT_CRITICAL(&s_sense_pong_mux);
+  // A later accepted media proof may already have restored AWAKE. These are
+  // snapshots of this decision; never write peer state after releasing its lock.
+  if (log_stale) Serial.printf("[SENSE_LINK] rx_stale age_ms=%lu threshold_ms=%lu\n",
+                              (unsigned long)pol_age, (unsigned long)stale_threshold_ms);
+  if (stale) Serial.printf("[SENSE_STATE] state=UNKNOWN reason=rx_stale missed=%u\n",
+                          (unsigned)missed);
 }
 
 // Forward declarations (used by refresh state machine)
@@ -5579,16 +5627,8 @@ void loop() {
     unsigned long now_ms = millis();
     log_lcd_wake_pin_tick();
     if (sense_pong_take_expired(now_ms)) {
-      if (sense_missed_pongs < 255) {
-        sense_missed_pongs++;
-      }
-      // A missed ping cannot contradict the peer's explicit sleep notice.
-      if (sleep_ready_received || sense_missed_pongs >= SENSE_MISSED_PONGS_FOR_ASLEEP) {
-        sense_state_set(SENSE_ASLEEP, "missed_pongs");
-      } else {
-        sense_state_set(SENSE_UNKNOWN, "missed_pongs");
-        lcd_errlog_store_with_context("lcd", "sense_wake", "MISSED_PONGS", (int)sense_missed_pongs, "sense unresponsive");
-      }
+      // Timeout state was committed under the same mux as typed media proof.
+      // No state write here may overwrite a newer accepted receive/ACK.
     }
     bool need_probe = (sense_state != SENSE_AWAKE) && !(sleep_deny_active && g_idle_screen_dark);
     if (need_probe && (now_ms - last_sense_ping_ms) >= SENSE_PROBE_INTERVAL_MS) {

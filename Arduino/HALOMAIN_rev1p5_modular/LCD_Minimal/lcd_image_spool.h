@@ -162,6 +162,8 @@ static bool lcd_image_abort(JsonObjectConst d) {
     !strcmp(request,g_image_last_meta.request_id)&&lcd_image_u32(d["job_id"],&job)&&job==g_image_last_meta.job_id&&
     lcd_image_u32(d["len"],&len)&&len==g_image_last_meta.len&&lcd_image_u32(d["crc32"],&crc)&&crc==g_image_last_meta.crc32;
   if(!match)return false;
+  if(!g_image_waiting_abort&&!g_image_tx_pending&&!g_image_rx&&!lcd_image_link_idle())return false;
+  note_sense_binary_media_rx("image_bound_abort");
   // A foreground yield has already closed its FILE. Keep ordinary TX and UI
   // admission quarantined until this exact terminal proof is serialized.
   if(g_image_waiting_abort) {
@@ -261,6 +263,7 @@ static bool lcd_image_receive_loop() {
   const bool ok=result==halo_image::Result::Ok||result==halo_image::Result::DuplicateChunk;
   if(!ok){g_image_proto->send_frame(MSG_IMG_NACK,seq,nullptr,0);lcd_image_release(halo_image::result_name(result),true);return false;}
   if(lcd_image_expired()){g_image_proto->send_frame(MSG_IMG_NACK,seq,nullptr,0);lcd_image_release("receive_deadline",true);return false;}
+  note_sense_binary_media_rx("image_accepted_frame");
   g_image_last_frame_ms=millis();
   if(type==MSG_IMG_END){uint8_t proof[40];uint8_t* p=proof;halo_image::put32(p,g_image_transfer_meta.len);halo_image::put32(p,g_image_transfer_meta.crc32);memcpy(p,g_image_transfer_meta.request_id,32);
     g_image_sd_committed++;g_image_proto->send_frame(MSG_IMG_ACK,seq,proof,sizeof(proof));lcd_image_release("committed",false);return false;}
@@ -320,9 +323,10 @@ static void lcd_image_send_file() {
       lcd_freeze_wdt_feed();
       if(event==UartOtaProtocol::TIMEOUT)continue;
       if(event==UartOtaProtocol::JSON){StaticJsonDocument<512>d;if(!deserializeJson(d,json)&&!strcmp(d["type"]|"","IMAGE_XFER_ABORT"))lcd_image_abort(d.as<JsonObjectConst>());break;}
-      ack=type==MSG_IMG_ACK&&rseq==seq&&rn==0;break;
+      ack=type==MSG_IMG_ACK&&rseq==seq&&rn==0&&!lcd_image_expired();break;
     }
     if(!ack||!g_image_tx_pending){ok=false;break;}
+    note_sense_binary_media_rx("image_chunk_ack");
     sent+=(uint32_t)n;seq++;g_image_last_frame_ms=millis();
   }
   if(f&&sd_close_file(f)!=ESP_OK)ok=false;
@@ -337,10 +341,11 @@ static void lcd_image_send_file() {
       uint8_t type=0;uint16_t rseq=0;size_t rn=sizeof(reply);
       auto event=g_image_proto->recv_event(&type,&rseq,reply,&rn,json,sizeof(json),100);lcd_freeze_wdt_feed();
       if(event==UartOtaProtocol::TIMEOUT)continue;
-      if(event==UartOtaProtocol::FRAME)ack=type==MSG_IMG_ACK&&rseq==seq&&rn==0;
+      if(event==UartOtaProtocol::FRAME)ack=type==MSG_IMG_ACK&&rseq==seq&&rn==0&&!lcd_image_expired();
       else{StaticJsonDocument<512>d;if(!deserializeJson(d,json)&&!strcmp(d["type"]|"","IMAGE_XFER_ABORT"))lcd_image_abort(d.as<JsonObjectConst>());}
       break;
     }ok=ok&&ack;
+    if(ok)note_sense_binary_media_rx("image_end_ack");
   }
   if(g_image_tx_abort_pending){
     g_image_tx_abort_pending=false;lcd_image_finish_replay(seq,"peer_abort",true,false,true);return;
