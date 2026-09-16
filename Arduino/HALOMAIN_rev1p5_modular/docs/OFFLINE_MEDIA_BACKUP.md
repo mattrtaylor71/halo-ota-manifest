@@ -1,4 +1,4 @@
-> Current follow-up: [OFFLINE_MEDIA_STRESS.md](OFFLINE_MEDIA_STRESS.md) records a reproduced164 queued-photo loss and the built165 correction.165 hardware retest is pending. The163 acceptance below is historical scoped evidence.
+> Current follow-up: [OFFLINE_MEDIA_STRESS_167.md](OFFLINE_MEDIA_STRESS_167.md). Continue development from the committed167 source; its physical stress acceptance is pending. The163 acceptance below is historical scoped evidence.
 
 # Offline media backup163 — scoped accepted working source
 

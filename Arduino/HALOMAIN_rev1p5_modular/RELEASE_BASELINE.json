@@ -4871,30 +4871,36 @@
     }
   },
   "current_validation_blocker": {
-    "status": "ACTUATOR_NO_RESPONSE_165_INSTALL_AND_RETEST_PENDING",
+    "status": "ACTUATOR_NO_STATUS_AFTER_USB_RECOVERY_167_PHYSICAL_RETEST_PENDING",
+    "candidate": "6.4.167",
     "installation_blocked": true,
-    "candidate": "6.4.165",
-    "installed_pair_last_observed": "6.4.164",
+    "lcd_service": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/lcd167-service001/install/result.json",
+      "sha256": "e9d1fc97b55e9e476a1de7e5e78804f2e43fa4a45cc6439609b1b32488548b50"
+    },
+    "sense_attempt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sense167-service001/RUNNER-RESULT.json",
+      "sha256": "e50a77028867959e66954f3c0944f90b964230d942595f7d163052ba8e455405"
+    },
     "actuator_cycle": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-recovery001/CLOSURE.json",
-      "sha256": "c456bc4374326677532c472189093c69293d2f0450b0786b23f86db0304340bd"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-recovery167-001/result.json",
+      "sha256": "15c4fed5280c3c04aaf1b9edd1e815aad3626f2d7940ef30f9db0f1da5e7796b"
     },
-    "actuator_DTR": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr001/RESULT.json",
-      "sha256": "85bf018486f37af885f0f7cb89bc2d93f6b8a10b678157af22894ec26d500c37"
-    },
-    "actuator_DTR_closure": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr001/CLOSURE.json",
-      "sha256": "035365aa6c475c1d914c52da55a923873285dfeb1f986ebafd9214b222d55109"
+    "actuator_status_after_cycle": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr167-002/RESULT.json",
+      "sha256": "e3cbde7faa3928e347884812412df1f8d2ee65da44a2e91b75c6c91f4e7d4dd2"
     },
     "next_steps": [
-      "Restore actuator response or manually wake the boards; keep both USB cables connected.",
-      "Drain/reconcile retained Dish through idempotent cloud acknowledgment; do not manually delete SD data.",
-      "Use the bound165 packet: LCD first, Sense second, then fresh SDK identity.",
-      "Repeat ten-second voice plus Dish plus Discard with the bounded Wi-Fi diagnostic disconnect; verify three SD saves and three cloud custody records.",
-      "Verify empty typed queues, responsive UI, SDK VALID on both boards and natural paired sleep."
+      "Fully power-cycle actuator or manually wake both boards; leave bothUSBconnected.",
+      "Use bound167-002 runner for Sense with closed LCD167service001 result and fresh mixed identity; do not reflash LCD.",
+      "Verify paired167 SDKVALID, typedinventory and normal replay/retirement of retained166voice.",
+      "Run R5 longvoice10.5/Dish/Discard offline burst, then exactcloud/retirement and finalinventory/sleep checks."
     ],
-    "no_OTA_allowance_schedule_credentials_or_debt_reset": true
+    "no_OTA_allowance_schedule_credentials_or_debt_reset": true,
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION167-PARTIAL-REVIEW.json",
+      "sha256": "fead5f6da61971577aec141228afbd2aa743fc60a4ffbb03fb0bcd5263bda57a"
+    }
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6017,45 +6023,33 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.165",
-    "status": "HOST_BUILD_PASS_PHYSICAL_RETEST_BLOCKED",
-    "artifact_source_commit": "6bf8ff8654c09e438750a9ceecf2e98a49c09d3f",
-    "artifact_source_firmware_tree": "efdb82ab93d5e036a6de6ec4fafea44ee3fe19e0",
-    "runtime_fix_commit": "7f7dc06ceedd2694061f938b0e678a4cfdb015e8",
-    "build_id": "6.4.165-20260916T012255Z-6bf8ff8654c0",
+    "version": "6.4.167",
+    "status": "HOST_BUILD_PASS_LCD_SERVICED_SENSE_AND_PHYSICAL_RETEST_PENDING",
+    "artifact_source_commit": "3955e6cde8569e59ee2e30c8fd4082512b8e40d8",
+    "artifact_source_firmware_tree": "f90d05e335bb92e25ae2079e55f6752c4d9bb609",
+    "runtime_fix_commit": "143fc11706a345fd35d6c7f3a7540f5de0e2c65f",
+    "build_id": "6.4.167-20260916T041213Z-3955e6cde856",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from this165 source or reviewed descendants. Do not revert to163/164 queue ownership; preserve prior records and frozen158. Complete the lost-photo regression on165 hardware before acceptance or publication.",
+    "source_selection": "Continue from3955e6cde8569e59ee2e30c8fd4082512b8e40d8 or reviewed descendants. Preserve164 directory handling,165 worker custody,166 active-transfer sleep guard and167 binary liveness. Frozen158 and public162 remain separate.",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/RELEASE-PAIR.json",
-      "sha256": "906bb438f664bc9ca87c8247906e1e77f8c8f7065d976f516138d1b0b38ab2a9"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate167-002/RELEASE-PAIR.json",
+      "sha256": "ffe0f6e7a72ee1121ee7b5a91781834e90b6eeb241ac01045250aa3c895d4972"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/host-final001/RESULT.json",
-      "sha256": "fbd8f8879055f14249bb6e3b80a297cc7a2885670faa5e1960e82131d4856c22"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate167-002/host-final001/RESULT.json",
+      "sha256": "8fcde4e4b66ad706f96fce7d2c04feeabb0333b90237d614a5342f2d09fea47c"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/SOURCE-SCOPE.json",
-      "sha256": "8b3d4d7f90a61311e2395ef9edbeccadcbd79dc102c64f0573c1257289c943cf"
-    },
-    "stress_status": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS-STATUS.json",
-      "sha256": "eda1f0feea8b7134fd26bc46b4a67d673e408d82df72b09affaba70cae9eca77"
-    },
-    "independent_review": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/custody165-peer001/RESULT.json",
-      "sha256": "52e69648d66ea4475e97b9b024739a513636b4d40042d532b9aa655bae445b41"
-    },
-    "ready_install_packet": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/installer165-bound001/PACKET.json",
-      "sha256": "41322174680220a511b044957a0f4c4f278d7bd964bed5be0aa5992ae34fdce9"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate167-002/SOURCE-SCOPE.json",
+      "sha256": "588ed3e6a757aca4380614088281c0e409e07f4b548b3d632fd59dfb34baef5b"
     },
     "installed": false,
     "published": false,
     "physical_acceptance": false,
     "installed_firmware_last_observed": {
-      "sense": "6.4.164",
-      "lcd": "6.4.164"
+      "sense": "6.4.166 (last paired live identity before LCD service)",
+      "lcd": "6.4.167 written/verified/released; fresh SDK health pending"
     },
     "current_public_ota_version": "6.4.162",
     "public_manifest_readback": {
@@ -6067,14 +6061,36 @@
       "sha256": "3835b7d829a239de2d5ffd1a77e663dca5a63f8d475d98ce2164aa76b3c5923e"
     },
     "backend_rollout": "verified_test_owner_only",
-    "handoff": "docs/OFFLINE_MEDIA_STRESS.md",
+    "handoff": "docs/OFFLINE_MEDIA_STRESS_167.md",
     "limits": [
-      "Physical165 long-voice/Dish/Discard retest and final empty-queue health are pending; actuator fails STATUS after a targeted USB cycle and DTR attempt.",
-      "Actual164 long burst lost one queued Discard; two other captures reached the cloud. Dish SD deletion acknowledgment remains pending.",
-      "Guardian hard stop and abrupt power loss can lose RAM-only captures; USB-free, RF-loss, new OTA and full-product operation remain unqualified.",
-      "Full40 maximum-payload LIST latency is unqualified; the timing model can exhaust its budget.",
-      "Cloud custody does not prove completion of the requested user action; ambiguous dead workers are held for review."
-    ]
+      "167 physical three-capture stress regression and full-pair SDK health are pending. LCD service completed; Sense attempt stopped before installation when actuator stopped replying.",
+      "165 long burst confirmed one lost Discard;166 long burst saved voice but two image terminal outcomes were not captured.166 voice reached cloud custody with SD retirement pending at last observed replay.",
+      "One incomplete image record remained after165; pending0/incomplete1 must not be reported as clean SD or recovered lost media.",
+      "Guardian hard stop and abrupt power loss can lose RAM-only captures. RF-loss, USB-free, new OTA and full-product operation remain unqualified.",
+      "Full40 maximum-payload LIST latency remains unqualified; modeled slow scans exceed existing budgets.",
+      "Durable photo backend remains restricted to verified test owner. Cloud custody alone does not prove product semantics."
+    ],
+    "independent_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst167-001/SEALED-PAIR-REVIEW.json",
+      "sha256": "be38aca6363366e354cf63cfe5c80164da6915da4700d4317376f5d3405e8241"
+    },
+    "lcd_service": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/lcd167-service001/install/result.json",
+      "sha256": "e9d1fc97b55e9e476a1de7e5e78804f2e43fa4a45cc6439609b1b32488548b50"
+    },
+    "sense_service_attempt": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sense167-service001/RUNNER-RESULT.json",
+      "sha256": "e50a77028867959e66954f3c0944f90b964230d942595f7d163052ba8e455405"
+    },
+    "next_unused_version": "6.4.168",
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION167-PARTIAL-REVIEW.json",
+      "sha256": "fead5f6da61971577aec141228afbd2aa743fc60a4ffbb03fb0bcd5263bda57a"
+    },
+    "stress_status": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS167-CHECKPOINT.json",
+      "sha256": "e2a3cf88faf995db35315e6471d6885cb8add9a6bf85edfa945f23df96b302f2"
+    }
   },
   "previous_verified_paired_health_158": {
     "version": "6.4.158",
@@ -6540,5 +6556,91 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/ACCEPTANCE.json",
       "sha256": "f6a7bc58d8e6bace35632ae201ff656eab008cdf1c2f00427a85c73aa33af52f"
     }
+  },
+  "previous_working_source_165": {
+    "version": "6.4.165",
+    "status": "HOST_BUILD_PASS_PHYSICAL_RETEST_BLOCKED",
+    "artifact_source_commit": "6bf8ff8654c09e438750a9ceecf2e98a49c09d3f",
+    "artifact_source_firmware_tree": "efdb82ab93d5e036a6de6ec4fafea44ee3fe19e0",
+    "runtime_fix_commit": "7f7dc06ceedd2694061f938b0e678a4cfdb015e8",
+    "build_id": "6.4.165-20260916T012255Z-6bf8ff8654c0",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from this165 source or reviewed descendants. Do not revert to163/164 queue ownership; preserve prior records and frozen158. Complete the lost-photo regression on165 hardware before acceptance or publication.",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/RELEASE-PAIR.json",
+      "sha256": "906bb438f664bc9ca87c8247906e1e77f8c8f7065d976f516138d1b0b38ab2a9"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/host-final001/RESULT.json",
+      "sha256": "fbd8f8879055f14249bb6e3b80a297cc7a2885670faa5e1960e82131d4856c22"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/SOURCE-SCOPE.json",
+      "sha256": "8b3d4d7f90a61311e2395ef9edbeccadcbd79dc102c64f0573c1257289c943cf"
+    },
+    "stress_status": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS-STATUS.json",
+      "sha256": "eda1f0feea8b7134fd26bc46b4a67d673e408d82df72b09affaba70cae9eca77"
+    },
+    "independent_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/custody165-peer001/RESULT.json",
+      "sha256": "52e69648d66ea4475e97b9b024739a513636b4d40042d532b9aa655bae445b41"
+    },
+    "ready_install_packet": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/installer165-bound001/PACKET.json",
+      "sha256": "41322174680220a511b044957a0f4c4f278d7bd964bed5be0aa5992ae34fdce9"
+    },
+    "installed": false,
+    "published": false,
+    "physical_acceptance": false,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.164",
+      "lcd": "6.4.164"
+    },
+    "current_public_ota_version": "6.4.162",
+    "public_manifest_readback": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst164-001/PUBLIC-MANIFESTS.json",
+      "sha256": "26877a35a7bb622c736d8c1ba61e23c4f09d91d40c10c9477302d7b4818cd765"
+    },
+    "backend_claim_fix": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/backend-host/voice-claim-candidate001/deploy/DEPLOYMENT.json",
+      "sha256": "3835b7d829a239de2d5ffd1a77e663dca5a63f8d475d98ce2164aa76b3c5923e"
+    },
+    "backend_rollout": "verified_test_owner_only",
+    "handoff": "docs/OFFLINE_MEDIA_STRESS.md",
+    "limits": [
+      "Physical165 long-voice/Dish/Discard retest and final empty-queue health are pending; actuator fails STATUS after a targeted USB cycle and DTR attempt.",
+      "Actual164 long burst lost one queued Discard; two other captures reached the cloud. Dish SD deletion acknowledgment remains pending.",
+      "Guardian hard stop and abrupt power loss can lose RAM-only captures; USB-free, RF-loss, new OTA and full-product operation remain unqualified.",
+      "Full40 maximum-payload LIST latency is unqualified; the timing model can exhaust its budget.",
+      "Cloud custody does not prove completion of the requested user action; ambiguous dead workers are held for review."
+    ]
+  },
+  "previous_validation_blocker_165": {
+    "status": "ACTUATOR_NO_RESPONSE_165_INSTALL_AND_RETEST_PENDING",
+    "installation_blocked": true,
+    "candidate": "6.4.165",
+    "installed_pair_last_observed": "6.4.164",
+    "actuator_cycle": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-recovery001/CLOSURE.json",
+      "sha256": "c456bc4374326677532c472189093c69293d2f0450b0786b23f86db0304340bd"
+    },
+    "actuator_DTR": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr001/RESULT.json",
+      "sha256": "85bf018486f37af885f0f7cb89bc2d93f6b8a10b678157af22894ec26d500c37"
+    },
+    "actuator_DTR_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr001/CLOSURE.json",
+      "sha256": "035365aa6c475c1d914c52da55a923873285dfeb1f986ebafd9214b222d55109"
+    },
+    "next_steps": [
+      "Restore actuator response or manually wake the boards; keep both USB cables connected.",
+      "Drain/reconcile retained Dish through idempotent cloud acknowledgment; do not manually delete SD data.",
+      "Use the bound165 packet: LCD first, Sense second, then fresh SDK identity.",
+      "Repeat ten-second voice plus Dish plus Discard with the bounded Wi-Fi diagnostic disconnect; verify three SD saves and three cloud custody records.",
+      "Verify empty typed queues, responsive UI, SDK VALID on both boards and natural paired sleep."
+    ],
+    "no_OTA_allowance_schedule_credentials_or_debt_reset": true
   }
 }

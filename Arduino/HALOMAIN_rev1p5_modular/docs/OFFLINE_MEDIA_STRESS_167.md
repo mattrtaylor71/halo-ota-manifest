@@ -1,0 +1,64 @@
+# Offline media stress 167 — current checkpoint
+
+Version 167 is committed as `3955e6cde8569e59ee2e30c8fd4082512b8e40d8`, build `6.4.167-20260916T041213Z-3955e6cde856`. Both shipping binaries, artifact checks and 17 host suites pass. The LCD was written, verified and released into 167; fresh SDK health is pending. Sense remains last-observed 166: its service stopped before installation when the actuator failed to respond. A USB-port cycle fixed the serial-open hang, but a subsequent explicit reset/STATUS still received no controller reply. The user has been asked to power-cycle the actuator. No 167 publication or full-pair physical acceptance is claimed.
+
+## What the physical stress tests found
+
+| Candidate | Observed outcome | Evidence boundary |
+| --- | --- | --- |
+| 165 | The worker retained sole capture ownership beyond the 45 s flush window, but LCD exhausted its three 25 s sleep waits and slept during the third SD transfer. Voice and Dish saved and later reached cloud custody. Discard job 61 reported `saved=0` for 117,605 bytes during bounded recovery. | Two saved captures do not qualify the three-capture burst. The lost Discard was not recovered by a later empty queue. |
+| 166 | The new media sleep guard held LCD awake throughout the 320,000-byte voice save. Binary traffic did not refresh peer liveness; JSON silence caused UNKNOWN, then ASLEEP. Immediately after voice commit released custody, LCD took the `sense_asleep -> local sleep` path. | Voice request `f264a12205dab21c14013fc2fed66e5d` has an exact durable-save receipt. Dish started next and Discard had been queued, but their terminal outcomes are absent from the capture. Preserve both image outcomes as gaps. |
+| 166 recovery | The retained voice reached cloud custody and its worker completed once. LCD slept before the deletion request; Sense reported `sd_delete_pending` / `original_slot_kept`. | Cloud delivery is proven for this voice; SD retirement is not. The recovery controller failed paired readiness, so this episode is not a passing health/replay run. |
+
+The actuator was recovered and both 165 and 166 were installed and tested. Repository wording that still names actuator failure as the current 165 blocker is stale. Preserve that historical blocker separately rather than overwriting the subsequent failed stress outcomes.
+
+166 timing, UTC September 16: LCD active-custody defer at 03:48:28.854596; its BEGIN log at 03:48:28.893366; stale JSON diagnosis at 03:48:58.841926; missed-PONG ASLEEP at 03:49:05.346716; voice commit at 03:49:05.561328; local-sleep decision at 03:49:05.563501; deep sleep at 03:49:05.714498. Later cloud acceptance was 03:52:19.379 and worker completion 03:52:22.055; SD deletion remained pending at 03:52:23.842253.
+
+## Intended 167 correction
+
+Runtime commit `143fc11706a345fd35d6c7f3a7540f5de0e2c65f` treats accepted typed media frames, exact replay acknowledgments and bound cleanup as peer liveness before releasing transfer custody. Missed-PONG and stale-RX state decisions commit under the same existing mutex, so an older main-loop decision cannot overwrite newer binary proof. Clock reads and logging remain outside that mutex. Invalid or expired frames do not supply proof. Media deadlines, user-activity timeout, OTA policy, UI and wire schemas are unchanged.
+
+Commit `3955e6c` changes only the two host transport fixtures to recognize retained same-media cleanup ownership after the existing 90 s active-custody retirement; the frozen-source conditional returns false where that state does not exist. It does not change device behavior. Bind the actual sealed 167 build to its full source commit rather than assuming a draft output directory is selected.
+
+Retain the 164 directory-enumeration fix, 165 worker-custody fix and 166 active-transfer sleep guard. The existing **7,363 host stress cases** are 2,755 storage cases plus 4,608 UART/custody cases; they are not physical device runs. Additional overlapping focused assertions must not be added to that count as independent scenarios.
+
+## Finite acceptance still required
+
+1. Verify the exact sealed 167 pair installed and both boards selected/running SDKVALID. Capture a typed pre-burst inventory and recover the previously accepted 166 voice through its normal replay/delete acknowledgment before adding new work.
+2. Run the same bounded diagnostic disconnect and long voice, Dish, Discard sequence. Require three distinct exact request identities, all three durable saves, no rescue/loss markers, and continued custody through the 45 s flush boundary and inter-transfer gaps. A runner counting three `saved=1` lines alone is insufficient.
+3. On subsequent normal wakes, correlate each original request and payload length/hash to cloud custody, worker state and its device delivery/deletion evidence. No assumed transcription or shopping-list semantic effect.
+4. Capture final typed inventories, live UI, fresh paired SDKVALID and explicit paired sleep. Record fallback or guardian events separately from clean handshake success. All capture owners must close and be reaped.
+
+Pre-burst 166 health proved voice pending/incomplete/corrupt 0/0/0 and image 0/1/0. The image incomplete count of one was already present after the failed 165 save. Pending 0 with incomplete 1 means committed deliverables empty with held residue, not clean SD and not recovery of the lost photo. Matching counts alone do not prove the same incomplete filename. Do not erase evidence to obtain an empty result.
+
+The saved-evidence summarizer accepts 167 with explicit `--version 6.4.167`; its default is 166. Its current `lcd_defer_proof()` incorrectly requires the BEGIN log to precede the active-custody defer log. The observed 38.77 ms reversal above is possible because admission sets custody before printing BEGIN. Review a separate revision before relying on its component verdict; do not alter raw timestamps or claim an unobserved admission instant.
+
+Public OTA was last verified at 162; obtain fresh manifest evidence before documenting its current state. This draft authorizes no publication. Preserve frozen 158 baseline values and all previous candidate receipts. Existing repository `last_verified_device_health` must not be relabeled as 165/166/167 without the actual corresponding closed evidence.
+
+This is a finite USB-connected diagnostic-disconnect regression. Physical RF/enclosure behavior, USB-free operation, arbitrary power cuts, guardian loss of RAM-only work, full-capacity LIST latency, new OTA transfers and all product effects remain outside this acceptance.
+
+## Closed evidence references
+
+- [INSTALLATION165-AND-HEALTH-REVIEW.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION165-AND-HEALTH-REVIEW.json) — SHA-256 `42d57b5e5214aa94e9f02e274f1e162792871a06ad82dc4022fb941463f287e9`.
+- [hardware165-burst001/CUSTODY-OBSERVATIONS.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware165-burst001/CUSTODY-OBSERVATIONS.json) — SHA-256 `394b9737471cc0c74eb98cc3067ecf5e6f31b6b2f8a0aeadfaf2c52600ebfac9`.
+- [hardware165-recovery001/SOURCE-REVIEW.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware165-recovery001/SOURCE-REVIEW.json) — SHA-256 `0590195da4fb6a183418f4d33f12e2e9d94981deb86a6a8731d499a5527dde0e`.
+- [hardware165-final001/RESULT.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware165-final001/RESULT.json) — SHA-256 `b4378a9f4a01ac973fd1bfe02d764242d8be5a7d37b2d150e0708d2eca424087`.
+- [cloud-burst165-001/voice/RESULT.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst165-001/voice/RESULT.json) — SHA-256 `97c4e41abddde4983edc397e53ffe7c41fdf32b5b4148197c242931d2b8220b5`.
+- [cloud-burst165-001/dish/RESULT.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst165-001/dish/RESULT.json) — SHA-256 `a04b08bb659c25c9c5a2515ea1d4496e942636b5cebb9f41e96f8375284f05bb`.
+- [INSTALLATION166-AND-HEALTH-REVIEW.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION166-AND-HEALTH-REVIEW.json) — SHA-256 `57087416bfe661f75ac531d5ec420997ce18ed42ec0b1461e15bef7beb13cf7e`.
+- [hardware166-burst001/RESULT.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware166-burst001/RESULT.json) — SHA-256 `bd922bce0a81c883ed5081489fc383e4fe49209afa457d71bee9189e33cd8356`.
+- [hardware166-recovery001/RESULT.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware166-recovery001/RESULT.json) — SHA-256 `f86590c2016fcd24e5b8e5f1c7bb18498582a99ef08be2beab10b10f65571056`.
+- [cloud-burst166-001/voice/RESULT.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst166-001/voice/RESULT.json) — SHA-256 `7fc2a8ae2634783f9477b97d61e8e78969d6685ea8ee0e611f62978b8614dfb3`.
+- [r5-passive-tail-review001/RESULT.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/r5-passive-tail-review001/RESULT.json) — SHA-256 `57ebde675ad8129cceb4099b4ef6d6f908613f073edf18d064bae6181ce633c7`.
+
+## Exact 167 continuation
+
+- Pair: `/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate167-002/RELEASE-PAIR.json` (SHA256 `ffe0f6e7a72ee1121ee7b5a91781834e90b6eeb241ac01045250aa3c895d4972`).
+- LCD completed service: `/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/lcd167-service001/install/result.json`. Do not repeat this completed write.
+- Sense failed-before-install attempt: `/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sense167-service001/RUNNER-RESULT.json`. Start a new output directory after actuator response is restored; retain failed evidence.
+- Use `tools/install167_timed_identity.py --board sense`, exact167-002 pair/hash, and the completed LCD result. It obtains a new mixed-pair identity before writing.
+- Capture with `run_hardware_r5.py` and `CAPTURE-BINDING.167.json`; use `tools/summarize_media_regression_r2.py --version 6.4.167` for reviewed defer-log correlation. Original summarizer is retained.
+- Both target binaries fit existing slots; static RAM/RTC deltas are 0. LCD binary grows 752 bytes versus 166; Sense size is unchanged. Compiler source-frame totals are not measured hardware stack headroom.
+- Candidate167-001 was never installed: its newly added test stub rejected legitimate late cleanup.3955e6c fixes only two fixtures;167-002 reran all 17 suites successfully. Preserve001 partial hostlogs and follow-up receipt.
+
+Closed partial installation review: [INSTALLATION167-PARTIAL-REVIEW.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION167-PARTIAL-REVIEW.json). The LCD readback and unchanged NVS/table bytes are verified; no Sense flash operation occurred. All captured service/recovery processes are closed or confirmed absent. [STRESS167-CHECKPOINT.json](/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS167-CHECKPOINT.json) records the remaining actuator dependency and continuation.

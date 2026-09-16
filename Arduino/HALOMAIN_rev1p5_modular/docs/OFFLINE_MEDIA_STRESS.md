@@ -1,6 +1,6 @@
 # Offline media stress — September 15, 2026
 
-This records stress testing of the private163 offline image/voice implementation described in [OFFLINE_MEDIA_BACKUP.md](OFFLINE_MEDIA_BACKUP.md). Testing found and corrected SD directory-error handling in164, then exposed a real queued-photo loss on the unit. The follow-up165 source correction is committed and its canonical pair is built and checked. Its device retest is blocked by the unresponsive actuator. Neither164 nor165 is publicly published. Public manifests were freshly verified as162. This is a finite engineering campaign, not exhaustive product qualification.
+Current follow-up: [167 stress and installation checkpoint](OFFLINE_MEDIA_STRESS_167.md). Tests on165 and166 exposed additional LCD sleep/liveness defects.167 fixes are committed, built and host-tested; LCD is serviced, while Sense installation and physical retesting await actuator recovery. Earlier sections below preserve historical checkpoints. Public OTA remains162; no167 publication or full physical acceptance is claimed.
 
 Private evidence below contains exact source pins, commands, logs, seeds, and closed results. It is local evidence, not a public download.
 
