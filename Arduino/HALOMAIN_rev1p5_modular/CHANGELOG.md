@@ -1,6 +1,8 @@
-# September16: minimal168 sleep-tail correction prepared
+# September16: private168 built, installed and scoped media recovery verified
 
-Remove the optional final Wi-Fi summary UART frame while preserving local timing, so the critical sleep acknowledgment has a small receive footprint while the LCD persists its maintenance arm. Disk space is available again. Source implemented; canonical build and device validation pending. Installed167 and its recovery bytes remain intact. See [the scoped change](docs/SLEEP_TAIL_168.md).
+Omit the final optional Wi-Fi diagnostic frame while preserving local finalization, leaving only the small sleep acknowledgment after the maintenance notice. Both canonical builds/artifact checks and19 host suites passed. Both boards run168 SDK VALID;167 fallback banks, NVS and partition tables are preserved. One10.5s voice/Dish/Discard outage burst saved all3, all3 reached exact cloud custody and were retired from SD; its sleep handshake and all3 replay sleeps passed.
+
+Two further setups captured no media after SNTP timeouts. One exposed a separate pre-existing race: LCD declares the link stale at120s coordination expiry just before OTA_UNLOCK, then sleeps before Sense READY. Full stress acceptance is withheld; no public168 release. See [the exact scope and remaining issue](docs/SLEEP_TAIL_168.md).
 
 # September16:167 installed; offline media custody verified
 

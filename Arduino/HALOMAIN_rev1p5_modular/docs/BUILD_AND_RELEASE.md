@@ -1,4 +1,4 @@
-> Latest scoped follow-up: **159 LCD wake fix**, published and installed on the LCD; Sense remains158. Start future source changes from `RELEASE_BASELINE.json.current_working_source` and read [the159 handoff](LCD_USER_WAKE_159.md). Frozen158 below remains the immutable recovery/previous scheduled qualification anchor. Allocate an unused160 or later.
+> Latest private working source: **168**, installed on both boards. Read [the168 handoff](SLEEP_TAIL_168.md) and `RELEASE_BASELINE.json.current_working_source`. Offline media custody passed one complete cycle; the separate clock-timeout LCD fallback race remains unqualified. Frozen158 below is the immutable recovery/previous scheduled qualification anchor. Allocate unused169 or later.
 
 # Build and release from the frozen 6.4.158 baseline
 
