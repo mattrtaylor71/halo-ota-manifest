@@ -1,4 +1,4 @@
-> Latest private working source: **168**, installed on both boards. Read [the168 handoff](SLEEP_TAIL_168.md) and `RELEASE_BASELINE.json.current_working_source`. Offline media custody passed one complete cycle; the separate clock-timeout LCD fallback race remains unqualified. Frozen158 below is the immutable recovery/previous scheduled qualification anchor. Allocate unused169 or later.
+> Latest private working source: **169**, installed SDK VALID on both boards. Read [the169 handoff](PROVISIONING_GUIDE_169.md) and `RELEASE_BASELINE.json.current_working_source`. Real guide steps1–3 passed; phone-driven completion remains pending. The inherited168 clock-timeout sleep limitation remains. Frozen158 is the immutable recovery/previous scheduled qualification anchor. Allocate unused170 or later.
 
 # Build and release from the frozen 6.4.158 baseline
 

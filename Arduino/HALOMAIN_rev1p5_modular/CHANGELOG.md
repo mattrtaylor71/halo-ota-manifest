@@ -1,6 +1,6 @@
-# September16: candidate169 guided provisioning
+# September16: private169 guided provisioning installed
 
-Implement the approved six-screen setup guide, centered content, real app-download QR, yellow “On Trepo App” pills and automatic app/Wi-Fi/account progression. Preserve existing menu artwork. The Sense presentation bridge recognizes app contact, repeats setup progress and requires owner confirmation before success; it also accepts the existing failure contract. Build/install evidence is pending. See [the scoped design and state contract](docs/PROVISIONING_GUIDE_169.md).
+Implement the approved six-screen setup guide, centered content, real app-download QR, yellow “On Trepo App” pills and automatic app/Wi-Fi/account progression. Preserve existing menu artwork. The Sense presentation bridge recognizes app contact, repeats setup progress and requires owner confirmation before success; it also accepts the existing failure contract. Canonical builds/artifact checks and nine host suites passed. Both boards run169 SDK VALID with168 fallback banks retained and NVS/partitions unchanged. Real guide steps1–3, scroll bounds, three page cycles, stable heap and panel flush passed; unit is left at its real step3 QR. Phone-driven steps4–6 remain pending. No public OTA promotion. See [the scoped design and state contract](docs/PROVISIONING_GUIDE_169.md).
 
 # September16: private168 built, installed and scoped media recovery verified
 

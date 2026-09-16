@@ -1759,34 +1759,26 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.168",
-    "status": "PAIRED_SDK_VALID_WITH_DOCUMENTED_CLOCK_TIMEOUT_SLEEP_LIMITATION",
+    "version": "6.4.169",
+    "status": "PAIRED_SDK_VALID_REAL_SETUP_GUIDE_STEPS1_TO3_PASS",
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware168-health001/RESULT.json",
-      "sha256": "8d5366eeb2a6e82cabcb9511671581cf5c4ace62c7f8ab0bbe880caf7c6e0a5f"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/HEALTH169-OBSERVED001.json",
+      "sha256": "36616cb6dbafb99a9d730a08780e4c72fe44cd3a4ec1856f2326e2985da44f55"
     },
-    "latest_typed_inventory": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware168-middle001/RESULT.json",
-      "sha256": "15629bf899cb35b401ab892f47a4e5639d46d9d1e8f93e07ce02fa7e1ab14c66"
+    "guide_validation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/hardware169-realguide001/RESULT.json",
+      "sha256": "94a47fddd1fd41ed1cefa780dd9fa0c2da2170de96c00616556af84672aee3d0"
     },
     "installed": {
-      "sense": "6.4.168 app0 SDK VALID",
-      "lcd": "6.4.168 app1 SDK VALID"
+      "sense": "6.4.169 app1 SDK VALID",
+      "lcd": "6.4.169 app0 SDK VALID"
     },
-    "later_setup_failures": [
-      {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware168-burst002/RESULT.json",
-        "sha256": "6c1c17a09abdd055169871823ac510969160160adb56af1d920d67b0fbce9f2a"
-      },
-      {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware168-burst003/RESULT.json",
-        "sha256": "e2ef7553dc83324e50bd460346dbd3c5d64a226782a4aa76892c9b37d71bc649"
-      }
-    ],
-    "closure": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS168-CLOSURE.json",
-      "sha256": "7742cce1cfc61e1b434682bf97763ec43fc2e5a5c30101a328dc21fc9e06ef43"
-    }
+    "current_screen": "Real provisioning QR step3; awaiting user phone setup",
+    "limits": [
+      "Actual steps1-3, scroll clamps/backward navigation, three repeated real QR-page cycles, stable heap and panel flush passed. Unit left at real step3 QR; real setup was already active on168 before either installation.",
+      "Steps4-6 transition logic passed host tests; actual phone Wi-Fi/account setup, success animation and completion timer remain unverified on hardware. The isolated preview correctly refused real provisioning. Shopping refresh and sleep smoke were not run while setup was active.",
+      "Existing168 clock-timeout LCD stale-link fallback race remains. No new OTA transfer, USB-free, abrupt power-cut, RF-loss or full-product acceptance. Prior media evidence and known incomplete image remain unchanged."
+    ]
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -4844,7 +4836,7 @@
   },
   "current_validation_blocker": {
     "status": "CLOCK_TIMEOUT_LCD_STALE_LINK_FALLBACK_RACE_REMAINS",
-    "candidate": "6.4.168",
+    "candidate": "6.4.169",
     "installation_blocked": false,
     "disk_blocked": false,
     "closure": {
@@ -4859,7 +4851,9 @@
       "Validate incoming coordinator/query traffic as peer-liveness without extending user idle, OTA lease or policy debt.",
       "Test both orderings of coordinator expiry and arriving OTA_UNLOCK under missing fresh clock; repeat scoped media test after that separate fix."
     ],
-    "no_OTA_allowance_schedule_credentials_or_debt_reset": true
+    "no_OTA_allowance_schedule_credentials_or_debt_reset": true,
+    "inherited_from": "6.4.168",
+    "provisioning_phone_completion_pending": true
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -5982,38 +5976,54 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.168",
-    "status": "BUILT_INSTALLED168_OFFLINE_CUSTODY_PASS_CLOCK_TIMEOUT_SLEEP_RACE_REMAINS",
-    "artifact_source_commit": "e388f8866a8bb8450ce86610814151771457a6fe",
-    "artifact_source_firmware_tree": "8811262d89f06e56da0846c293d76e1cb827b3ba",
-    "runtime_fix_commit": "e388f8866a8bb8450ce86610814151771457a6fe",
-    "build_id": "6.4.168-20260916T154426Z-e388f8866a8b",
+    "version": "6.4.169",
+    "status": "INSTALLED_PAIRED_SDK_VALID_REAL_GUIDE_STEPS1_TO3_PASS_PHONE_COMPLETION_PENDING",
+    "artifact_source_commit": "ba5012421ce48397ddf53f5203f7925c4f860513",
+    "artifact_source_firmware_tree": "3fee9aaa919843287706c458e9d87b0921e7a3c9",
+    "runtime_fix_commit": "00a7b4d59ed12a8f21d5419ddbc081ef9fdc19c3",
+    "build_id": "6.4.169-20260916T215419Z-ba5012421ce4",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from e388f8866a8bb8450ce86610814151771457a6fe or reviewed descendants; retain164-167 media fixes and168 final sleep-tail reduction. Frozen158/public162 and tested167 remain separate recovery references.",
+    "source_selection": "Continue from ba5012421ce48397ddf53f5203f7925c4f860513 or reviewed descendants, retaining168 and all prior media/OTA fixes. Frozen158 and public162 remain separate recovery/publication references.",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate168-001/RELEASE-PAIR.json",
-      "sha256": "568169fc3f1b709a553546d7c1b55e9757c548817962a7b5b330c23e96e88745"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/candidate169-003/RELEASE-PAIR.json",
+      "sha256": "51c4e5b5e3a550ea36e8f3a84b1bada90480850d1a1365da93692cb20a4894e5"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate168-001/host-final001/RESULT.json",
-      "sha256": "c1fee689c79114242a38fb77ea893d89720e4f7c15f6e4b8525838686cbeda8d"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/candidate169-003/host-final001/RESULT.json",
+      "sha256": "e88e5bf1514ea2f7a8d9495b057192edf0c90e081b544e5bb8df3bcd29feac09"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate168-001/SOURCE-SCOPE.json",
-      "sha256": "51b03080d45861e4bcb09985a31406b2e46d83de339575601b6c5a85efd7cab5"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/candidate169-003/SOURCE-SCOPE.json",
+      "sha256": "4df4a917609c6e0fbe99d56fa0d317dd10baaef86ff49f8a23ef71c99bc2a1de"
     },
-    "independent_review": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate168-001/INDEPENDENT-PAIR-REVIEW.json",
-      "sha256": "27817ad509b2c494c805a14313dd0e67cd4807e3177e01137c2f4272d59ece9f"
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/INSTALLATION169-PAIR-SERVICE-REVIEW.json",
+      "sha256": "fa4e31e50c4e0fe5922a63d640a3ea32c515e9fb5d5442e828976638457410c2"
+    },
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/HEALTH169-OBSERVED001.json",
+      "sha256": "36616cb6dbafb99a9d730a08780e4c72fe44cd3a4ec1856f2326e2985da44f55"
+    },
+    "guide_validation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/hardware169-realguide001/RESULT.json",
+      "sha256": "94a47fddd1fd41ed1cefa780dd9fa0c2da2170de96c00616556af84672aee3d0"
+    },
+    "lcd_service": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/lcd169-service001/install/result.json",
+      "sha256": "de6bf6fbd547d4cb4cb15ebc58fda934cb098c58b2a66256f9152ecbd5593bd4"
+    },
+    "sense_service_completed": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/sense169-service001/install/result.json",
+      "sha256": "bc181d7d6704534e27333e0370d34998972e537c3fa7286f63b1b6872fb552ce"
     },
     "installed": true,
     "published": false,
     "physical_acceptance": false,
-    "scoped_offline_custody_pass": true,
+    "scoped_guide_validation_pass": true,
     "installed_firmware_last_observed": {
-      "sense": "6.4.168 app0 SDK VALID",
-      "lcd": "6.4.168 app1 SDK VALID"
+      "sense": "6.4.169 app1 SDK VALID",
+      "lcd": "6.4.169 app0 SDK VALID"
     },
     "current_public_ota_version": "6.4.162",
     "public_manifest_readback": {
@@ -6021,29 +6031,12 @@
       "sha256": "26877a35a7bb622c736d8c1ba61e23c4f09d91d40c10c9477302d7b4818cd765"
     },
     "backend_rollout": "verified_test_owner_only",
-    "handoff": "docs/SLEEP_TAIL_168.md",
-    "latest_scoped_stress_closure": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS168-CLOSURE.json",
-      "sha256": "7742cce1cfc61e1b434682bf97763ec43fc2e5a5c30101a328dc21fc9e06ef43"
-    },
-    "installation_review": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION168-PAIR-SERVICE-REVIEW.json",
-      "sha256": "3e0ae30e83a1127db384d984a5554e881f03bf2d31679b0efd11081861d056d1"
-    },
-    "lcd_service": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/lcd168-service001/install/result.json",
-      "sha256": "2347c3a41c343f5be9c63ef76073eeb53c14cbbb5bf1542fe4745f512d094a12"
-    },
-    "sense_service_completed": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sense168-service001/install/result.json",
-      "sha256": "c8e0a01b0c3ab46a6197070fd553a4887b0c00a45b1856307839993511746273"
-    },
-    "next_unused_version": "6.4.169",
+    "handoff": "docs/PROVISIONING_GUIDE_169.md",
+    "next_unused_version": "6.4.170",
     "limits": [
-      "One complete offline voice/Dish/Discard burst plus three replays passed exact device/cloud custody and SD retirement. Seven of eight observed episodes slept normally; two setups ran no captures and one exposed the separate clock-timeout stale-link fallback race.",
-      "LCD can select fallback sleep at120s coordination expiry just before OTA_UNLOCK after SNTP timeout. Full stress acceptance withheld; no fix for this path in168.",
-      "Known incomplete image count remains1; matching counts do not prove filename identity or historical165 lost-media recovery.",
-      "No new OTA transfer, RF-loss, USB-free, abrupt power-cut, product-semantics or full-product qualification. Durable image backend remains test-owner only."
+      "Actual steps1-3, scroll clamps/backward navigation, three repeated real QR-page cycles, stable heap and panel flush passed. Unit left at real step3 QR; real setup was already active on168 before either installation.",
+      "Steps4-6 transition logic passed host tests; actual phone Wi-Fi/account setup, success animation and completion timer remain unverified on hardware. The isolated preview correctly refused real provisioning. Shopping refresh and sleep smoke were not run while setup was active.",
+      "Existing168 clock-timeout LCD stale-link fallback race remains. No new OTA transfer, USB-free, abrupt power-cut, RF-loss or full-product acceptance. Prior media evidence and known incomplete image remain unchanged."
     ]
   },
   "previous_verified_paired_health_158": {
@@ -6818,5 +6811,100 @@
     "paired_sleep_observed": true,
     "all_hardware_owners_reaped": true,
     "scope": "Actual164 SDK identity and paired sleep only. One queued photo was lost in the long burst. The165 fix is not installed."
+  },
+  "previous_working_source_168": {
+    "version": "6.4.168",
+    "status": "BUILT_INSTALLED168_OFFLINE_CUSTODY_PASS_CLOCK_TIMEOUT_SLEEP_RACE_REMAINS",
+    "artifact_source_commit": "e388f8866a8bb8450ce86610814151771457a6fe",
+    "artifact_source_firmware_tree": "8811262d89f06e56da0846c293d76e1cb827b3ba",
+    "runtime_fix_commit": "e388f8866a8bb8450ce86610814151771457a6fe",
+    "build_id": "6.4.168-20260916T154426Z-e388f8866a8b",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from e388f8866a8bb8450ce86610814151771457a6fe or reviewed descendants; retain164-167 media fixes and168 final sleep-tail reduction. Frozen158/public162 and tested167 remain separate recovery references.",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate168-001/RELEASE-PAIR.json",
+      "sha256": "568169fc3f1b709a553546d7c1b55e9757c548817962a7b5b330c23e96e88745"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate168-001/host-final001/RESULT.json",
+      "sha256": "c1fee689c79114242a38fb77ea893d89720e4f7c15f6e4b8525838686cbeda8d"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate168-001/SOURCE-SCOPE.json",
+      "sha256": "51b03080d45861e4bcb09985a31406b2e46d83de339575601b6c5a85efd7cab5"
+    },
+    "independent_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate168-001/INDEPENDENT-PAIR-REVIEW.json",
+      "sha256": "27817ad509b2c494c805a14313dd0e67cd4807e3177e01137c2f4272d59ece9f"
+    },
+    "installed": true,
+    "published": false,
+    "physical_acceptance": false,
+    "scoped_offline_custody_pass": true,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.168 app0 SDK VALID",
+      "lcd": "6.4.168 app1 SDK VALID"
+    },
+    "current_public_ota_version": "6.4.162",
+    "public_manifest_readback": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst164-001/PUBLIC-MANIFESTS.json",
+      "sha256": "26877a35a7bb622c736d8c1ba61e23c4f09d91d40c10c9477302d7b4818cd765"
+    },
+    "backend_rollout": "verified_test_owner_only",
+    "handoff": "docs/SLEEP_TAIL_168.md",
+    "latest_scoped_stress_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS168-CLOSURE.json",
+      "sha256": "7742cce1cfc61e1b434682bf97763ec43fc2e5a5c30101a328dc21fc9e06ef43"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION168-PAIR-SERVICE-REVIEW.json",
+      "sha256": "3e0ae30e83a1127db384d984a5554e881f03bf2d31679b0efd11081861d056d1"
+    },
+    "lcd_service": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/lcd168-service001/install/result.json",
+      "sha256": "2347c3a41c343f5be9c63ef76073eeb53c14cbbb5bf1542fe4745f512d094a12"
+    },
+    "sense_service_completed": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sense168-service001/install/result.json",
+      "sha256": "c8e0a01b0c3ab46a6197070fd553a4887b0c00a45b1856307839993511746273"
+    },
+    "next_unused_version": "6.4.169",
+    "limits": [
+      "One complete offline voice/Dish/Discard burst plus three replays passed exact device/cloud custody and SD retirement. Seven of eight observed episodes slept normally; two setups ran no captures and one exposed the separate clock-timeout stale-link fallback race.",
+      "LCD can select fallback sleep at120s coordination expiry just before OTA_UNLOCK after SNTP timeout. Full stress acceptance withheld; no fix for this path in168.",
+      "Known incomplete image count remains1; matching counts do not prove filename identity or historical165 lost-media recovery.",
+      "No new OTA transfer, RF-loss, USB-free, abrupt power-cut, product-semantics or full-product qualification. Durable image backend remains test-owner only."
+    ]
+  },
+  "previous_device_health_168": {
+    "version": "6.4.168",
+    "status": "PAIRED_SDK_VALID_WITH_DOCUMENTED_CLOCK_TIMEOUT_SLEEP_LIMITATION",
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware168-health001/RESULT.json",
+      "sha256": "8d5366eeb2a6e82cabcb9511671581cf5c4ace62c7f8ab0bbe880caf7c6e0a5f"
+    },
+    "latest_typed_inventory": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware168-middle001/RESULT.json",
+      "sha256": "15629bf899cb35b401ab892f47a4e5639d46d9d1e8f93e07ce02fa7e1ab14c66"
+    },
+    "installed": {
+      "sense": "6.4.168 app0 SDK VALID",
+      "lcd": "6.4.168 app1 SDK VALID"
+    },
+    "later_setup_failures": [
+      {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware168-burst002/RESULT.json",
+        "sha256": "6c1c17a09abdd055169871823ac510969160160adb56af1d920d67b0fbce9f2a"
+      },
+      {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware168-burst003/RESULT.json",
+        "sha256": "e2ef7553dc83324e50bd460346dbd3c5d64a226782a4aa76892c9b37d71bc649"
+      }
+    ],
+    "closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS168-CLOSURE.json",
+      "sha256": "7742cce1cfc61e1b434682bf97763ec43fc2e5a5c30101a328dc21fc9e06ef43"
+    }
   }
 }
