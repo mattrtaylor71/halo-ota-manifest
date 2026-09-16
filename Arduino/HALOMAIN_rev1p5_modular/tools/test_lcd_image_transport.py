@@ -53,8 +53,9 @@ static bool g_spool_tx_pending=false,g_spool_tx_active=false,g_suppress_uart_jso
 static bool g_sleep_transition=false,ota_busy=false,image_valid=true;
 static std::atomic<bool> g_lcd_sleep_commit_gate{false};
 static unsigned accepted_binary_proofs=0;
+static bool test_media_owns_cleanup();
 static void note_sense_binary_media_rx(const char*){
-  check(g_img_rx_active||g_spool_tx_active||(!g_img_rx_binary_mode&&!g_suppress_uart_json_tx),"typed proof never follows foreign binary owner");
+  check(g_img_rx_active||g_spool_tx_active||test_media_owns_cleanup()||(!g_img_rx_binary_mode&&!g_suppress_uart_json_tx),"typed proof never follows foreign binary owner");
   ++accepted_binary_proofs;
 }
 static bool lcd_nvs_image_valid(){return image_valid;}
@@ -128,6 +129,12 @@ static bool lcd_media_deferred_intent_pending(){return false;}
 #endif
 #define LCD_IMAGE_SPOOL_DIR "image-default"
 #include "LCD_Minimal/lcd_image_spool.h"
+// Original timeout retires active sleep custody but retains exact typed cleanup ownership.
+#ifdef HAS_MEDIA_FOREGROUND
+static bool test_media_owns_cleanup(){return g_image_waiting_abort&&g_lcd_media_mode==LCD_MEDIA_REPLAY&&g_suppress_uart_json_tx&&!g_img_rx_active&&!g_img_rx_binary_mode;}
+#else
+static bool test_media_owns_cleanup(){return false;}
+#endif
 static const std::vector<uint8_t> jpeg{1,2,3,4,5,6,7,8};
 static halo_image::Meta fixture(unsigned id=1){
   halo_image::Meta m;m.len=jpeg.size();m.crc32=halo_image::crc32(jpeg.data(),jpeg.size());
