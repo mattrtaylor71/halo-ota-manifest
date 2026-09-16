@@ -1,3 +1,7 @@
+# September16 RTC follow-up: wake observed, Sense service pending
+
+The existing timer woke LCD at01:59:46 Pacific. Both USB identities appeared; LCD167/app0 and Sense166/app0 reported SDK VALID. The host missed the short idle window after OTA coordination unlocked, so no service or media regression ran. Both captures are closed and the one-shot follow-up is paused. No new firmware write or publication. See [the episode handoff](docs/OFFLINE_MEDIA_STRESS_167.md).
+
 # September 16: private167 binary-media liveness correction
 
 Physical stress on165 showed the LCD sleeping during the third offline save;166 added an active-transfer guard but still slept between saves because binary traffic did not refresh peer liveness.167 counts validated media frames and exact replay/cleanup acknowledgments as live Sense traffic, with timeout/stale-state decisions serialized against newer proof. Existing deadlines and stored data formats are preserved.
