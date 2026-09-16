@@ -6056,7 +6056,7 @@
     "published": false,
     "physical_acceptance": false,
     "installed_firmware_last_observed": {
-      "sense": "6.4.166 (last paired live identity before LCD service)",
+      "sense": "6.4.166 app0 SDK VALID observed through LCD at September16 RTC wake",
       "lcd": "6.4.167 app0 SDK VALID observed at September16 RTC wake; Sense remains166"
     },
     "current_public_ota_version": "6.4.162",
