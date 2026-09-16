@@ -243,8 +243,8 @@ class Store {
       else missing_cursor=true;
     }
     *stats=Stats{};DIR* d=opendir(root_);if(!d)return errno==ENOENT?Result::Empty:Result::Io;
-    bool have=false;struct dirent* e;
-    while((e=readdir(d))) {
+    bool have=false;struct dirent* e;Result scan=Result::Ok;
+    while((scan=next_entry(d,&e))==Result::Ok&&e) {
       if(budget_&&!budget_()){closedir(d);return Result::Io;}
       char request[33];const char* suffix=nullptr;
       if(!file_request(e->d_name,request,&suffix))continue;
@@ -259,7 +259,7 @@ class Store {
       if(!have||m.ordinal<oldest->ordinal||(m.ordinal==oldest->ordinal&&strcmp(m.request_id,oldest->request_id)<0)){*oldest=m;have=true;}
       tick();
     }
-    const bool ok=closedir(d)==0;if(!ok)return Result::Io;
+    const bool ok=closedir(d)==0;if(!ok||scan!=Result::Ok)return Result::Io;
     return have?Result::Ok:Result::Empty;
   }
   // A image made without a trusted clock cannot be POSTed until this
@@ -286,7 +286,7 @@ class Store {
     if(!stats)return Result::Invalid;*stats=Stats{};
     DIR* d=opendir(root_);if(!d)return errno==ENOENT?Result::Empty:Result::Io;
     struct dirent* e;Result result=Result::Ok;
-    while((e=readdir(d))){
+    while((result=next_entry(d,&e))==Result::Ok&&e){
       if(budget_&&!budget_()){result=Result::Io;break;}
       char request[33];const char* suffix;if(!file_request(e->d_name,request,&suffix))continue;
       if(!strcmp(suffix,".meta.part")||!strcmp(suffix,".attempt.part")){stats->incomplete++;continue;}
@@ -332,6 +332,12 @@ class Store {
     const int n=snprintf(out,cap,"%s/%s%s",root_,request,suffix);return n>0&&(size_t)n<cap;
   }
   static bool exists(const char* p) { struct stat st;return stat(p,&st)==0; }
+  // A null directory entry is EOF only when readdir leaves errno clear.
+  // Reset immediately before each call: metadata/payload I/O inside a scan
+  // may set errno even when the next directory entry is read successfully.
+  static Result next_entry(DIR* d,struct dirent** out) {
+    errno=0;*out=readdir(d);return *out||errno==0?Result::Ok:Result::Io;
+  }
   static bool file_request(const char* name,char request[33],const char** suffix) {
     if(!name||strlen(name)<33)return false;memcpy(request,name,32);request[32]=0;
     if(!request_valid(request))return false;*suffix=name+32;
@@ -342,7 +348,7 @@ class Store {
     // Count one stem, including invalid/uncommitted data. Bound memory to the
     // admission cap; exceeding it rejects new records, never deletes old ones.
     char seen[40][33]={};uint32_t n=0;struct dirent* e;Result r=Result::Ok;
-    while((e=readdir(d))) {
+    while((r=next_entry(d,&e))==Result::Ok&&e) {
       if(budget_&&!budget_()){r=Result::Io;break;}
       char req[33];const char* suffix;if(!file_request(e->d_name,req,&suffix))continue;
       bool found=false;for(uint32_t i=0;i<n;++i)if(!strcmp(seen[i],req)){found=true;break;}
@@ -366,7 +372,7 @@ class Store {
   Result assign_ordinal(Meta* m) const {
     DIR* d=opendir(root_);if(!d)return Result::Io;uint64_t largest=0;Result result=Result::Ok;
     struct dirent* e;
-    while((e=readdir(d))){
+    while((result=next_entry(d,&e))==Result::Ok&&e){
       if(budget_&&!budget_()){result=Result::Io;break;}
       char request[33];const char* suffix;if(!file_request(e->d_name,request,&suffix)||strcmp(suffix,".meta"))continue;
       char p[kPathBytes];path(request,".meta",p,sizeof(p));Meta v;Result r=read_meta(p,&v);
