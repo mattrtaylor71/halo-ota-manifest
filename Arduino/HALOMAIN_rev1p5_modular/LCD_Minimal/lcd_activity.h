@@ -472,18 +472,17 @@ static void ui_reset_lvgl_objects() {
   provision_status_label = NULL;
   provision_intro_screen = NULL;
   // Presentation-owned pointers must not survive lv_deinit()/OTA UI recovery.
-  provision_ui_qr_card = NULL;
-  provision_ui_spinner = NULL;
-  provision_ui_badge = NULL;
-  provision_ui_failure_seal = NULL;
   provision_ui_back_btn = NULL;
   provision_ui_retry_btn = NULL;
   provision_ui_intro_title = NULL;
   provision_ui_intro_copy = NULL;
   provision_ui_intro_cancel = NULL;
   provision_ui_intro_start = NULL;
-  provision_ui_view = PROVISION_UI_PREPARING;
-  provision_ui_deferred_view = -1;
+  provision_flow.close();
+  provision_ui_can_scroll = false;
+  provision_ui_deferred = false;
+  provision_ui_preview_active = false;
+  provision_ui_preview_at_ms = 0;
   provision_ui_reset_confirmation = false;
   provision_ui_reset_confirmation_pending = false;
   provision_ui_qr_failed = false;

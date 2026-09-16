@@ -359,6 +359,8 @@ static void show_provisioning_screen(const char* ssid, const char* password, con
 static void hide_provisioning_screen() {
   provision_ui_deferred = false;
   provision_ui_can_scroll = false;
+  provision_ui_preview_active = false;
+  provision_ui_preview_at_ms = 0;
   provision_flow.close();
   if (provision_screen) {
     lv_obj_add_flag(provision_screen, LV_OBJ_FLAG_HIDDEN);
@@ -369,6 +371,21 @@ static void hide_provisioning_screen() {
   provision_ui_back_btn = provision_ui_retry_btn = NULL;
   provision_screen_visible = false;
   provision_qr_wait_clear("qr_hidden");
+}
+static void provision_ui_suspend_for_ota() {
+  if (!provision_flow.active()) return;
+  // Keep logical progress but release presentation and every owned animation.
+  // The UI owner redraws the same step after the OTA overlay is removed.
+  provision_ui_deferred = true;
+  provision_ui_can_scroll = false;
+  if (provision_screen) {
+    lv_obj_clean(provision_screen);
+    lv_obj_add_flag(provision_screen, LV_OBJ_FLAG_HIDDEN);
+  }
+  provision_qr = provision_status_label = provision_title_label = NULL;
+  provision_ssid_label = provision_url_label = NULL;
+  provision_ui_back_btn = provision_ui_retry_btn = NULL;
+  provision_screen_visible = false;
 }
 static void provision_ui_preview(int step) {
 #if defined(HALO_UI_REVIEW) && HALO_UI_REVIEW

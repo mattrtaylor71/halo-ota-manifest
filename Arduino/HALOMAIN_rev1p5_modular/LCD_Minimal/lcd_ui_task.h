@@ -183,10 +183,7 @@ static void ui_task(void *arg) {
       if (!ota_overlay) {
         // Covered presentation must not keep animating behind this overlay.
         halo_ui_motion_stop(lv_scr_act());
-        if (provision_ui_spinner) {
-          provision_ui_deferred_view = (int)provision_ui_view;
-          provision_ui_stop_spinner();
-        }
+        provision_ui_suspend_for_ota();
         // Create overlay on first entry
         ota_overlay = lv_obj_create(lv_layer_top());
         lv_obj_remove_style_all(ota_overlay);
@@ -1119,11 +1116,7 @@ static void ui_task(void *arg) {
         }
         expiry_screen_visible = false;
         expiry_screen_shown_time = 0;
-        provision_ui_stop_spinner();
-        if (provision_screen != NULL) {
-          lv_obj_add_flag(provision_screen, LV_OBJ_FLAG_HIDDEN);
-        }
-        provision_screen_visible = false;
+        hide_provisioning_screen();
         if (menu_screen != NULL) {
           lv_obj_add_flag(menu_screen, LV_OBJ_FLAG_HIDDEN);
         }
