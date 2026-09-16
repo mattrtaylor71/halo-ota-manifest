@@ -1759,41 +1759,62 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "recorded_at": "2026-09-15T22:17:59.075179+00:00",
-    "build_id": "6.4.163-20260915T215252Z-4cdefb2b4139",
+    "status": "PAIRED164_SDK_VALID_WITH_FAILED_STRESS_AND_PENDING_SD_RETIREMENT",
+    "build_id": "6.4.164-20260916T003610Z-85136db0e4c2",
     "versions": {
-      "sense": "6.4.163",
-      "lcd": "6.4.163"
+      "sense": "6.4.164",
+      "lcd": "6.4.164"
     },
     "boards": {
       "sense": {
-        "version": "6.4.163",
-        "state": "VALID",
-        "running": "app1",
-        "boot": "app1"
-      },
-      "lcd": {
-        "version": "6.4.163",
+        "version": "6.4.164",
         "state": "VALID",
         "running": "app0",
         "boot": "app0"
+      },
+      "lcd": {
+        "version": "6.4.164",
+        "state": "VALID",
+        "running": "app1",
+        "boot": "app1"
       }
     },
-    "status": "PASS_SCOPED_OFFLINE_MEDIA_BACKUP_163",
-    "acceptance": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/ACCEPTANCE.json",
-      "sha256": "13156739178aeee20d4c506cd451513c94c7f4433c18fd0deddd1d6f5112d926"
+    "identity": {
+      "lcd_capture": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware164-replay003/lcd/wake-repro-20260916T011545Z",
+      "nonce": "a813b49670eb44fe",
+      "binding_sha256": "34199ffacd3306c6432a910a90aada9d1bc24e52ce022c90222c1159f4a1a133",
+      "checked_epoch": 1789521362.163658,
+      "maximum_age_seconds": 15,
+      "observations": {
+        "sense": {
+          "line": 123,
+          "observed_epoch": 1789521359.254824,
+          "text": "[UART] FW_INFO sense_build=6.4.164-20260916T003610Z-85136db0e4c2 running=app0 state=VALID boot=app0 wake=2 reset=8"
+        },
+        "lcd": {
+          "line": 153,
+          "observed_epoch": 1789521361.208544,
+          "text": "[ID1] q=a813b49670eb44fe p=d4cdb897 t=00001d78 f=6.4.164 h=5f33c5b6cb3585996a0dc06fb2e01a38 r=1 b=1 n=0 s=V d=1 w=0 o=0 l=00000000 a=0 u=0 z=00280000 x=c0c00000000000000000 bytes=172 crc=17a5"
+        }
+      },
+      "scope": "Live prefix observations; not a closed-capture hash or OTA claim"
     },
-    "installation_health": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/INSTALLATION-r2.json",
-      "sha256": "9276bcf13aa54abdaaccf4e2a14a65ec9e939cd44b63eadea3bb6736a26e4637"
+    "closed_capture": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware164-replay003/RESULT.json",
+      "sha256": "a43b519afedc360e55086f93820dd4d5e6ed080d355af8259a763c5c23c17a47"
     },
-    "paired_live_health": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/FINAL-HEALTH.json",
-      "sha256": "7d9f3bb05e0a7ac7fd66d710da1a35050dd91ee76803a364a63a3ba0c6581ccb"
+    "closed_campaign": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/HARDWARE164-CLOSED-REVIEW.json",
+      "sha256": "a4a7ecd7f949a0bac61fe80e017437e04351edf4320e9232a820d35e8b2440d0"
     },
+    "actual_loss": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/hardware164-burst002/FAILURE-ANALYSIS.json",
+      "sha256": "659149b1863bda6cc8b33f1e7f0530e97aaf60dd5a91432371ce770a5de5f3f3"
+    },
+    "final_queue_empty_proven": false,
+    "paired_sleep_observed": true,
     "all_hardware_owners_reaped": true,
-    "scope": "Private paired163 SDK VALID and scoped offline-media/foreground acceptance; public OTA162 unchanged. See pinned acceptance for actual observations and limitations."
+    "scope": "Actual164 SDK identity and paired sleep only. One queued photo was lost in the long burst. The165 fix is not installed."
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -4850,22 +4871,30 @@
     }
   },
   "current_validation_blocker": {
-    "status": "SCOPED_CAMERA162_ACCEPTANCE_COMPLETE_BROADER_LIMITS_RETAINED",
-    "installation_blocked": false,
-    "Sense_USB_accessible_at_installation": true,
-    "sense_version": "6.4.162",
-    "LCD_version": "6.4.162",
-    "installed_checkpoint": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/INSTALLED.json",
-      "sha256": "395782cfefd007bccf72a43fa3a5e8ef368ce5011a98667bbe2fb4b5f5e3ca19"
+    "status": "ACTUATOR_NO_RESPONSE_165_INSTALL_AND_RETEST_PENDING",
+    "installation_blocked": true,
+    "candidate": "6.4.165",
+    "installed_pair_last_observed": "6.4.164",
+    "actuator_cycle": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-recovery001/CLOSURE.json",
+      "sha256": "c456bc4374326677532c472189093c69293d2f0450b0786b23f86db0304340bd"
     },
-    "allowance_reset_performed": false,
-    "ota_pass_claimed": false,
-    "scope": "No remaining blocker for the scoped camera/input/upload recovery acceptance. Native OTA allowance/debt was not reset; allowance service is not implemented. USB-free, power-loss, new OTA and full-product qualification remain outside this acceptance.",
-    "acceptance": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/ACCEPTANCE.json",
-      "sha256": "f6a7bc58d8e6bace35632ae201ff656eab008cdf1c2f00427a85c73aa33af52f"
-    }
+    "actuator_DTR": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr001/RESULT.json",
+      "sha256": "85bf018486f37af885f0f7cb89bc2d93f6b8a10b678157af22894ec26d500c37"
+    },
+    "actuator_DTR_closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/actuator-dtr001/CLOSURE.json",
+      "sha256": "035365aa6c475c1d914c52da55a923873285dfeb1f986ebafd9214b222d55109"
+    },
+    "next_steps": [
+      "Restore actuator response or manually wake the boards; keep both USB cables connected.",
+      "Drain/reconcile retained Dish through idempotent cloud acknowledgment; do not manually delete SD data.",
+      "Use the bound165 packet: LCD first, Sense second, then fresh SDK identity.",
+      "Repeat ten-second voice plus Dish plus Discard with the bounded Wi-Fi diagnostic disconnect; verify three SD saves and three cloud custody records.",
+      "Verify empty typed queues, responsive UI, SDK VALID on both boards and natural paired sleep."
+    ],
+    "no_OTA_allowance_schedule_credentials_or_debt_reset": true
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -5988,71 +6017,63 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.163",
-    "status": "PASS_SCOPED_OFFLINE_MEDIA_BACKUP_163",
-    "artifact_source_commit": "4cdefb2b413930dfb68624640272154aeaf0b2fc",
-    "artifact_source_firmware_tree": "8c37b4873700e8d6dff36d840e7870dc670d1332",
-    "build_id": "6.4.163-20260915T215252Z-4cdefb2b4139",
+    "version": "6.4.165",
+    "status": "HOST_BUILD_PASS_PHYSICAL_RETEST_BLOCKED",
+    "artifact_source_commit": "6bf8ff8654c09e438750a9ceecf2e98a49c09d3f",
+    "artifact_source_firmware_tree": "efdb82ab93d5e036a6de6ec4fafea44ee3fe19e0",
+    "runtime_fix_commit": "7f7dc06ceedd2694061f938b0e678a4cfdb015e8",
+    "build_id": "6.4.165-20260916T012255Z-6bf8ff8654c0",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Use this exact163 source or reviewed descendants for future development. Preserve previous_working_source_162, previous_working_source_159 and immutable current_baseline158. Public OTA remains162.",
+    "source_selection": "Continue from this165 source or reviewed descendants. Do not revert to163/164 queue ownership; preserve prior records and frozen158. Complete the lost-photo regression on165 hardware before acceptance or publication.",
     "release_pair": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/RELEASE-PAIR.json",
-      "sha256": "ee9122a56b7d04f10ee9cae5060d5c9eb7076d8422f94e4d54219211d1287524"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/RELEASE-PAIR.json",
+      "sha256": "906bb438f664bc9ca87c8247906e1e77f8c8f7065d976f516138d1b0b38ab2a9"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/host-final001/RESULT.json",
-      "sha256": "83f480c7dba85d0a46a1cd2ae86641ce81028c02cf991ca6c5ec423f83e686b8"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/host-final001/RESULT.json",
+      "sha256": "fbd8f8879055f14249bb6e3b80a297cc7a2885670faa5e1960e82131d4856c22"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/SOURCE-SCOPE.json",
-      "sha256": "e1c7c3062802949dc3995f4f6975cf02e9a067dd928c6491db3c21ee5a4b22e9"
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate165-001/SOURCE-SCOPE.json",
+      "sha256": "8b3d4d7f90a61311e2395ef9edbeccadcbd79dc102c64f0573c1257289c943cf"
     },
-    "installation": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/INSTALLATION-r2.json",
-      "sha256": "9276bcf13aa54abdaaccf4e2a14a65ec9e939cd44b63eadea3bb6736a26e4637"
+    "stress_status": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS-STATUS.json",
+      "sha256": "eda1f0feea8b7134fd26bc46b4a67d673e408d82df72b09affaba70cae9eca77"
     },
-    "acceptance": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/ACCEPTANCE.json",
-      "sha256": "13156739178aeee20d4c506cd451513c94c7f4433c18fd0deddd1d6f5112d926"
+    "independent_review": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/custody165-peer001/RESULT.json",
+      "sha256": "52e69648d66ea4475e97b9b024739a513636b4d40042d532b9aa655bae445b41"
     },
-    "final_health": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/FINAL-HEALTH.json",
-      "sha256": "7d9f3bb05e0a7ac7fd66d710da1a35050dd91ee76803a364a63a3ba0c6581ccb"
+    "ready_install_packet": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/installer165-bound001/PACKET.json",
+      "sha256": "41322174680220a511b044957a0f4c4f278d7bd964bed5be0aa5992ae34fdce9"
     },
-    "physical_receipts": [
-      {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/physical-candidate003/RESULT.json",
-        "sha256": "373eaa0c43dbb0b1cb036b3f7b23c09f807d9c4342c0c8ee9b3ec73db61b6883"
-      }
-    ],
-    "cloud_receipts": [
-      {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/CLOUD-VOICE003/RESULT.json",
-        "sha256": "c72a7b7cd84df2de12dd32c7235a548bb71172b6bd959911defbdae3f489c67e"
-      },
-      {
-        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/CLOUD-IMAGE002/RESULT.json",
-        "sha256": "e8fcb334a992957a5fd7f9b2ae835f7300596054a47cb3f693ec70a1a5d23a36"
-      }
-    ],
-    "installed_firmware": {
-      "sense": "6.4.163",
-      "lcd": "6.4.163"
-    },
+    "installed": false,
     "published": false,
+    "physical_acceptance": false,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.164",
+      "lcd": "6.4.164"
+    },
     "current_public_ota_version": "6.4.162",
+    "public_manifest_readback": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst164-001/PUBLIC-MANIFESTS.json",
+      "sha256": "26877a35a7bb622c736d8c1ba61e23c4f09d91d40c10c9477302d7b4818cd765"
+    },
+    "backend_claim_fix": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/backend-host/voice-claim-candidate001/deploy/DEPLOYMENT.json",
+      "sha256": "3835b7d829a239de2d5ffd1a77e663dca5a63f8d475d98ce2164aa76b3c5923e"
+    },
     "backend_rollout": "verified_test_owner_only",
-    "ota_transfer_tested": false,
-    "power_cut_tested": false,
-    "full_product_qualification": false,
-    "handoff": "docs/OFFLINE_MEDIA_BACKUP.md",
-    "limitations": [
-      "Private assisted installation and scoped offline-media/foreground acceptance only; public OTA remains6.4.162.",
-      "Durable image backend rollout is restricted to the verified test owner; other owners retain backups on retriable503. Broader rollout requires separate validation.",
-      "USB-instrumented local Wi-Fi disconnection and ordinary sleep/reboot are not RF-loss, abrupt power-cut, USB-free, OTA-transfer, or full-product qualification.",
-      "Backend custody permits retirement; it does not by itself prove recognition, transcription, or list mutation.",
-      "Legacy /spool files remain untouched and legacy photo replay stays disabled."
+    "handoff": "docs/OFFLINE_MEDIA_STRESS.md",
+    "limits": [
+      "Physical165 long-voice/Dish/Discard retest and final empty-queue health are pending; actuator fails STATUS after a targeted USB cycle and DTR attempt.",
+      "Actual164 long burst lost one queued Discard; two other captures reached the cloud. Dish SD deletion acknowledgment remains pending.",
+      "Guardian hard stop and abrupt power loss can lose RAM-only captures; USB-free, RF-loss, new OTA and full-product operation remain unqualified.",
+      "Full40 maximum-payload LIST latency is unqualified; the timing model can exhaust its budget.",
+      "Cloud custody does not prove completion of the requested user action; ambiguous dead workers are held for review."
     ]
   },
   "previous_verified_paired_health_158": {
@@ -6396,5 +6417,128 @@
     "devices_left_asleep": true,
     "camera_actions_at_installed_checkpoint": 0,
     "installation_checkpoint_at": "2026-09-15T19:42:01.005878+00:00"
+  },
+  "previous_working_source_163": {
+    "version": "6.4.163",
+    "status": "PASS_SCOPED_OFFLINE_MEDIA_BACKUP_163",
+    "artifact_source_commit": "4cdefb2b413930dfb68624640272154aeaf0b2fc",
+    "artifact_source_firmware_tree": "8c37b4873700e8d6dff36d840e7870dc670d1332",
+    "build_id": "6.4.163-20260915T215252Z-4cdefb2b4139",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Use this exact163 source or reviewed descendants for future development. Preserve previous_working_source_162, previous_working_source_159 and immutable current_baseline158. Public OTA remains162.",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/RELEASE-PAIR.json",
+      "sha256": "ee9122a56b7d04f10ee9cae5060d5c9eb7076d8422f94e4d54219211d1287524"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/host-final001/RESULT.json",
+      "sha256": "83f480c7dba85d0a46a1cd2ae86641ce81028c02cf991ca6c5ec423f83e686b8"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-003/SOURCE-SCOPE.json",
+      "sha256": "e1c7c3062802949dc3995f4f6975cf02e9a067dd928c6491db3c21ee5a4b22e9"
+    },
+    "installation": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/INSTALLATION-r2.json",
+      "sha256": "9276bcf13aa54abdaaccf4e2a14a65ec9e939cd44b63eadea3bb6736a26e4637"
+    },
+    "acceptance": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/ACCEPTANCE.json",
+      "sha256": "13156739178aeee20d4c506cd451513c94c7f4433c18fd0deddd1d6f5112d926"
+    },
+    "final_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/FINAL-HEALTH.json",
+      "sha256": "7d9f3bb05e0a7ac7fd66d710da1a35050dd91ee76803a364a63a3ba0c6581ccb"
+    },
+    "physical_receipts": [
+      {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/physical-candidate003/RESULT.json",
+        "sha256": "373eaa0c43dbb0b1cb036b3f7b23c09f807d9c4342c0c8ee9b3ec73db61b6883"
+      }
+    ],
+    "cloud_receipts": [
+      {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/CLOUD-VOICE003/RESULT.json",
+        "sha256": "c72a7b7cd84df2de12dd32c7235a548bb71172b6bd959911defbdae3f489c67e"
+      },
+      {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/CLOUD-IMAGE002/RESULT.json",
+        "sha256": "e8fcb334a992957a5fd7f9b2ae835f7300596054a47cb3f693ec70a1a5d23a36"
+      }
+    ],
+    "installed_firmware": {
+      "sense": "6.4.163",
+      "lcd": "6.4.163"
+    },
+    "published": false,
+    "current_public_ota_version": "6.4.162",
+    "backend_rollout": "verified_test_owner_only",
+    "ota_transfer_tested": false,
+    "power_cut_tested": false,
+    "full_product_qualification": false,
+    "handoff": "docs/OFFLINE_MEDIA_BACKUP.md",
+    "limitations": [
+      "Private assisted installation and scoped offline-media/foreground acceptance only; public OTA remains6.4.162.",
+      "Durable image backend rollout is restricted to the verified test owner; other owners retain backups on retriable503. Broader rollout requires separate validation.",
+      "USB-instrumented local Wi-Fi disconnection and ordinary sleep/reboot are not RF-loss, abrupt power-cut, USB-free, OTA-transfer, or full-product qualification.",
+      "Backend custody permits retirement; it does not by itself prove recognition, transcription, or list mutation.",
+      "Legacy /spool files remain untouched and legacy photo replay stays disabled."
+    ]
+  },
+  "previous_device_health_163": {
+    "recorded_at": "2026-09-15T22:17:59.075179+00:00",
+    "build_id": "6.4.163-20260915T215252Z-4cdefb2b4139",
+    "versions": {
+      "sense": "6.4.163",
+      "lcd": "6.4.163"
+    },
+    "boards": {
+      "sense": {
+        "version": "6.4.163",
+        "state": "VALID",
+        "running": "app1",
+        "boot": "app1"
+      },
+      "lcd": {
+        "version": "6.4.163",
+        "state": "VALID",
+        "running": "app0",
+        "boot": "app0"
+      }
+    },
+    "status": "PASS_SCOPED_OFFLINE_MEDIA_BACKUP_163",
+    "acceptance": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/ACCEPTANCE.json",
+      "sha256": "13156739178aeee20d4c506cd451513c94c7f4433c18fd0deddd1d6f5112d926"
+    },
+    "installation_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/INSTALLATION-r2.json",
+      "sha256": "9276bcf13aa54abdaaccf4e2a14a65ec9e939cd44b63eadea3bb6736a26e4637"
+    },
+    "paired_live_health": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-backup-20260915/FINAL-HEALTH.json",
+      "sha256": "7d9f3bb05e0a7ac7fd66d710da1a35050dd91ee76803a364a63a3ba0c6581ccb"
+    },
+    "all_hardware_owners_reaped": true,
+    "scope": "Private paired163 SDK VALID and scoped offline-media/foreground acceptance; public OTA162 unchanged. See pinned acceptance for actual observations and limitations."
+  },
+  "previous_validation_blocker_162": {
+    "status": "SCOPED_CAMERA162_ACCEPTANCE_COMPLETE_BROADER_LIMITS_RETAINED",
+    "installation_blocked": false,
+    "Sense_USB_accessible_at_installation": true,
+    "sense_version": "6.4.162",
+    "LCD_version": "6.4.162",
+    "installed_checkpoint": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/INSTALLED.json",
+      "sha256": "395782cfefd007bccf72a43fa3a5e8ef368ce5011a98667bbe2fb4b5f5e3ca19"
+    },
+    "allowance_reset_performed": false,
+    "ota_pass_claimed": false,
+    "scope": "No remaining blocker for the scoped camera/input/upload recovery acceptance. Native OTA allowance/debt was not reset; allowance service is not implemented. USB-free, power-loss, new OTA and full-product qualification remain outside this acceptance.",
+    "acceptance": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/camera-fix162-20260915/ACCEPTANCE.json",
+      "sha256": "f6a7bc58d8e6bace35632ae201ff656eab008cdf1c2f00427a85c73aa33af52f"
+    }
   }
 }

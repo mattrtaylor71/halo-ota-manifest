@@ -1,3 +1,11 @@
+# September15: offline media stress fixes;165 physical retest pending
+
+Fault injection found SD directory-error handling that could report false empty/partial queues;164 now propagates the error.7,363 storage/transport stress cases passed, with backend admission/claim tests separately recorded. The same live cloud worker can now recover its own lost claim reply using an exact attempt token; ambiguous dead workers remain held.
+
+A real ten-second voice→Dish→Discard offline burst on164 lost the queued Discard: the sleep timeout dequeued and freed it while the upload worker owned the SD transport.165 removes that competing consumer and covers the dequeue/inflight gap with a worker claim. Original deadlines and guardian policy remain;13 focused snapshot groups and both canonical builds/artifact checks passed. Runtime fix7f7dc06, exact build source6bf8ff8.165 is built, committed, **not installed or published**. Installed164 is SDK VALID but failed that stress case. The actuator is unresponsive after bounded recovery, blocking the exact physical retest and final empty-queue check. Public OTA remains162.
+
+See [the stress record](docs/OFFLINE_MEDIA_STRESS.md) and `RELEASE_BASELINE.json.current_working_source` for pinned evidence and the ready165 service packet. Continue development from165; retain the failed case and all prior recovery builds.
+
 # September15: private163 offline media backup accepted within scope
 
 Select candidate003 `4cdefb2b4139` as the future development source; preserve prior162 and frozen158. Separate checked SD voice/photo queues retain original identity through sleep/reboot and delete only after verified backend custody. Foreground arbitration rejects busy voice gestures before false feedback, yields replay for queued camera intent through bound cleanup, and retains busy-refused RAM media.

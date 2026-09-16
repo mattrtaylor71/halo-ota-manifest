@@ -1,3 +1,5 @@
+> Current follow-up: [OFFLINE_MEDIA_STRESS.md](OFFLINE_MEDIA_STRESS.md) records a reproduced164 queued-photo loss and the built165 correction.165 hardware retest is pending. The163 acceptance below is historical scoped evidence.
+
 # Offline media backup163 — scoped accepted working source
 
 The accepted working source is exact private candidate003, commit `4cdefb2b413930dfb68624640272154aeaf0b2fc`, build `6.4.163-20260915T215252Z-4cdefb2b4139`. It retains162 camera recovery,159 LCD wake handling and158 OTA safeguards. Canonical artifacts and22 host regression groups passed; scoped physical/cloud acceptance and final paired SDK VALID health are pinned below. Start future development here or from reviewed descendants. Public OTA remains162; no163 publication is claimed.
