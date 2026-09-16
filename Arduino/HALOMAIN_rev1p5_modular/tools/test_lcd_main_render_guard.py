@@ -35,10 +35,21 @@ def run(baseline=False):
     overlay_signature = ('if (!g_lcd_ota_binary_mode || !s_ota_overlay_pushed)' if baseline
                          else 'if (!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode)')
     overlay = definition(ui, overlay_signature)
-    # All actual overlay creation/phase/label/progress code remains unchanged.
-    visual_start = '        halo_ui_motion_stop(lv_scr_act());'
+    # Provisioning owns its suspension implementation; keep that scoped change
+    # separate from the exact OTA creation/phase/label/progress preservation.
+    visual_start = '        // Create overlay on first entry'
     visual_end = '      if (ota_overlay) {\n        lv_obj_move_foreground(ota_overlay);\n      }'
     assert ui[ui.index(visual_start):ui.index(visual_end)] == old_ui[old_ui.index(visual_start):old_ui.index(visual_end)]
+    entry = definition(ui, 'if (!ota_overlay)')
+    motion_stop = '        halo_ui_motion_stop(lv_scr_act());'
+    suspension = entry[entry.index(motion_stop):entry.index(visual_start)]
+    expected_suspension = motion_stop + '\n' + (
+        '        if (provision_ui_spinner) {\n'
+        '          provision_ui_deferred_view = (int)provision_ui_view;\n'
+        '          provision_ui_stop_spinner();\n'
+        '        }\n' if baseline else
+        '        provision_ui_suspend_for_ota();\n')
+    assert suspension == expected_suspension
     direct_calls = loop.count('lv_timer_handler();')
     wrapped_calls = loop.count('lcd_main_lvgl_service();')
     assert (direct_calls, wrapped_calls) == ((15, 0) if baseline else (0, 15))
