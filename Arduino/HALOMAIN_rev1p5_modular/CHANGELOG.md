@@ -1,3 +1,7 @@
+# September16: minimal168 sleep-tail correction prepared
+
+Remove the optional final Wi-Fi summary UART frame while preserving local timing, so the critical sleep acknowledgment has a small receive footprint while the LCD persists its maintenance arm. Disk space is available again. Source implemented; canonical build and device validation pending. Installed167 and its recovery bytes remain intact. See [the scoped change](docs/SLEEP_TAIL_168.md).
+
 # September16:167 installed; offline media custody verified
 
 Actuator reset allowed Sense167 service. Both boards report SDK VALID. One10.5s voice/Dish/Discard offline burst saved all3 payloads; three replay wakes delivered exact cloud records and acknowledged SD deletion. Final pending counts0; known incomplete image residue remains1. Five episodes slept normally; the offline burst lost a complete sleep acknowledgment and used a recoverable LCD fallback. Preserve this limitation: the next sleep fix is unimplemented and its build needs disk space. No public release. See [the current closure](docs/OFFLINE_MEDIA_STRESS_167.md).

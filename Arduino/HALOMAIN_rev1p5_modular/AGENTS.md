@@ -1,6 +1,6 @@
 # HALO Firmware Agent Guide
 
-- Current development source is private167 from commit3955e6c. Both boards are installed/running SDK VALID (Sense app1, LCD app0). Read `docs/OFFLINE_MEDIA_STRESS_167.md`: one physical long-voice/Dish/Discard offline burst saved all3, all3 later reached cloud and retired from SD; final pending counts0. The burst had a malformed sleep acknowledgment and recoverable LCD fallback; five other observed episodes slept normally. Preserve known incomplete image residue and historical failed165/166 evidence. Further sleep-fix build is blocked by host disk space; no168 runtime fix exists yet. Public OTA is last-verified162, no167 publication/full shipping acceptance. All owners closed; follow-up paused. Durable image backend remains test-owner only.
+- Current installed development baseline is private167 (Sense app1, LCD app0, SDK VALID). A minimal168 candidate removes the optional final Wi-Fi diagnostic UART frame; read `docs/SLEEP_TAIL_168.md` and `docs/OFFLINE_MEDIA_STRESS_167.md`. Disk space is available; new build/device validation is pending. Preserve the tested167 pair, known incomplete image residue, and historical165/166 evidence. Public OTA is last-verified162; no168 installation or publication yet. Durable image backend remains test-owner only.
 
 ## Release Baseline
 

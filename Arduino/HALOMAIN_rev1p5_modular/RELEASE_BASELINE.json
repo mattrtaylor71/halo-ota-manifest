@@ -4871,28 +4871,20 @@
     }
   },
   "current_validation_blocker": {
-    "status": "OFFLINE_MEDIA_CUSTODY_PASS_SLEEP_HANDSHAKE_FIX_PENDING_DISK_SPACE",
-    "candidate": "6.4.167",
-    "installation_blocked": false,
-    "closure": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS167-CLOSURE.json",
-      "sha256": "fc3cd2842b99b52cd8f3abff037c1e17a072e18537f14a61b2520bf3053a7ea1"
-    },
+    "status": "SLEEP_TAIL_168_BUILD_AND_DEVICE_VALIDATION_PENDING",
+    "candidate": "6.4.168",
+    "installed_version": "6.4.167",
     "next_build_disk_space": {
-      "blocked": true,
-      "available_bytes": 1556979712,
-      "default_required_bytes": 8589934592,
-      "reason": "Insufficient host disk; user asked to free roughly10GB"
+      "blocked": false,
+      "available_bytes": 38162415616,
+      "default_required_bytes": 8589934592
     },
+    "scope": "Remove only optional final Wi-Fi summary UART transmission; preserve local finalization and all existing sleep/OTA sequencing.",
+    "handoff": "docs/SLEEP_TAIL_168.md",
     "next_steps": [
-      "Preserve installed167 and its exact tested pair. Confirm malformed sleep-frame cause and implement a bounded acknowledgment barrier without losing queued user input or changing OTA policy.",
-      "Obtain required build disk space, commit scoped source, use unused168+, run targeted controls and canonical builds, then finite physical regression.",
-      "Retain all historical captures and residue; no public firmware promotion without explicit scope and receipts."
+      "Commit tested source and build the canonical production profile from an immutable snapshot.",
+      "Verify exact private168 artifacts, then two finite offline burst/replay cycles with normal sleep handshakes."
     ],
-    "sleep_fix_plan": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sleep-ack167-review001/PLAN.md",
-      "sha256": "2877f410e69778ded5c2304f050ae50535bdb84c277dd9c424144d896b8cedee"
-    },
     "no_OTA_allowance_schedule_credentials_or_debt_reset": true
   },
   "diagnostic_candidate151": {
@@ -6024,7 +6016,7 @@
     "build_id": "6.4.167-20260916T041213Z-3955e6cde856",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from3955e6cde8569e59ee2e30c8fd4082512b8e40d8 or reviewed descendants. Preserve164 directory handling,165 worker custody,166 active-transfer sleep guard and167 binary liveness. Frozen158 and public162 remain separate.",
+    "source_selection": "Continue from the tested167 source or reviewed descendants; the current168 sleep-tail change is described in docs/SLEEP_TAIL_168.md and has not yet been built/installed. Preserve164-167 media fixes, frozen158 and public162.",
     "release_pair": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/candidate167-002/RELEASE-PAIR.json",
       "sha256": "ffe0f6e7a72ee1121ee7b5a91781834e90b6eeb241ac01045250aa3c895d4972"
@@ -6687,5 +6679,30 @@
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/remote-wake167-001/EPISODE-RESULT.json",
       "sha256": "2537a42afa0d2b83faa917ec32c2b93c1e0fe00a49f07ad9e224a8e1aa9acb7d"
     }
+  },
+  "previous_validation_blocker_167_disk": {
+    "status": "OFFLINE_MEDIA_CUSTODY_PASS_SLEEP_HANDSHAKE_FIX_PENDING_DISK_SPACE",
+    "candidate": "6.4.167",
+    "installation_blocked": false,
+    "closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS167-CLOSURE.json",
+      "sha256": "fc3cd2842b99b52cd8f3abff037c1e17a072e18537f14a61b2520bf3053a7ea1"
+    },
+    "next_build_disk_space": {
+      "blocked": true,
+      "available_bytes": 1556979712,
+      "default_required_bytes": 8589934592,
+      "reason": "Insufficient host disk; user asked to free roughly10GB"
+    },
+    "next_steps": [
+      "Preserve installed167 and its exact tested pair. Confirm malformed sleep-frame cause and implement a bounded acknowledgment barrier without losing queued user input or changing OTA policy.",
+      "Obtain required build disk space, commit scoped source, use unused168+, run targeted controls and canonical builds, then finite physical regression.",
+      "Retain all historical captures and residue; no public firmware promotion without explicit scope and receipts."
+    ],
+    "sleep_fix_plan": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sleep-ack167-review001/PLAN.md",
+      "sha256": "2877f410e69778ded5c2304f050ae50535bdb84c277dd9c424144d896b8cedee"
+    },
+    "no_OTA_allowance_schedule_credentials_or_debt_reset": true
   }
 }
