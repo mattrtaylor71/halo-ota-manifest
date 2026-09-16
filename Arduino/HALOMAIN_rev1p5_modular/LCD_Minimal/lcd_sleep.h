@@ -154,6 +154,18 @@ static bool input_wake_sources_idle(const char* reason) {
   return !touch_active;
 }
 
+// Active transfer custody is distinct from JSON quarantine: a closed replay
+// retires its sleep custody at the original transfer deadline, while retaining
+// JSON suppression until bound cleanup or reboot. Never renew that deadline.
+static bool s_sleep_media_deferred = false;
+static bool sleep_defer_for_media() {
+  if (!g_img_rx_active && !g_img_rx_binary_mode &&
+      !g_spool_tx_pending && !g_spool_tx_active) return false;
+  s_sleep_media_deferred = true;
+  Serial.println("[SLEEP] defer active_media_custody");
+  return true;
+}
+
 static void enterLightSleep() {
 #if HALO_DEV_NO_SLEEP
   // Bench builds never idle-sleep, so USB-CDC stays up and reflashing is instant.
@@ -175,6 +187,8 @@ static void enterLightSleep() {
     resetActivityTimer();
     return;
   }
+  s_sleep_media_deferred = false;
+  if (sleep_defer_for_media()) return;
   sleep_cancelled_by_user_input = false;
 
   bool force_sleep = false;
@@ -190,6 +204,8 @@ static void enterLightSleep() {
   Serial.println("========================================");
   uint16_t dummy_x = 0, dummy_y = 0;
   if (!force_sleep && !notify_sense_sleep()) {
+    // Media admission is not a failed handshake or Sense denial.
+    if (s_sleep_media_deferred) return;
     if (sleep_cancelled_by_user_input) {
       Serial.println("[SLEEP] user_input cancelled pre_sleep");
       resetActivityTimer();
@@ -232,6 +248,13 @@ static void enterLightSleep() {
     }
     return;
   }
+
+  // BEGIN admission uses the same storage guard and publishes its custody
+  // flags before releasing it. Recheck while serialized, before any UI reset,
+  // and retain this guard through the existing final sleep commit below.
+  LcdMaintenanceStorageGuard sleep_arm_guard;
+  if (sleep_defer_for_media()) return;
+  if (sleep_blocked_for_ota()) { resetActivityTimer(); return; }
 
   sleep_handshake_fail_count = 0;
   sleep_deny_count = 0;
@@ -283,7 +306,6 @@ static void enterLightSleep() {
   // Serialize timer selection through final sleep against arm commits and
   // BEGIN startup. Every return destroys this guard; deep sleep resets it.
   // No NVS operation occurs under the short coordinator critical section.
-  LcdMaintenanceStorageGuard sleep_arm_guard;
   if (sleep_blocked_for_ota()) { resetActivityTimer(); return; }
   struct SleepCommitGate {
     SleepCommitGate() {
@@ -667,6 +689,8 @@ struct LcdSleepHandshakeScope {
 // Send sleep signal to Sense board before LCD goes to sleep
 static bool notify_sense_sleep() {
   LcdSleepHandshakeScope handshake_scope;
+  s_sleep_media_deferred = false;
+  if (sleep_defer_for_media()) return false;
   Serial.println("[LCD] Notifying Sense board to sleep...");
   // Send diagnostics BEFORE the sleep handshake. After SLEEP_READY the Sense is
   // already asleep and anything sent then is lost (measured: 1 of 19 delivered).
@@ -713,11 +737,11 @@ static bool notify_sense_sleep() {
 
   if (sleep_ready_recent) {
     Serial.printf("[SLEEP] sense_ready_recent -> local sleep age_ms=%lu\n", age_ms);
-    return true;
+    return !sleep_defer_for_media();
   }
   if (sense_state == SENSE_ASLEEP) {
     Serial.printf("[SLEEP] sense_asleep -> local sleep rx_age=%lu\n", age_ms);
-    return true;
+    return !sleep_defer_for_media();
   }
 
   bool sense_probably_awake = (sense_state == SENSE_AWAKE) || sense_awake_estimate || sense_recent || grace_active;
@@ -726,7 +750,7 @@ static bool notify_sense_sleep() {
       sleep_fallback_timer_sec = SLEEP_FALLBACK_TIMER_SEC;
       Serial.printf("[SLEEP_PROTO] link_unsynced_stale rx_age=%lu -> fallback_timer_sleep\n",
                     age_ms);
-      return true;
+      return !sleep_defer_for_media();
     }
     if (!link_synced) {
       link_sync_pending = true;
@@ -751,9 +775,10 @@ static bool notify_sense_sleep() {
 
   const unsigned long ready_timeout_ms = 25000;
   for (uint8_t attempt = 1; attempt <= SLEEP_HANDSHAKE_MAX_ATTEMPTS; ++attempt) {
+    if (sleep_defer_for_media()) return false;
     if (sleep_ready_received) {
       Serial.println("[SLEEP_PROTO] got SLEEP_READY while waiting_for_sleep_result -> success");
-      return true;
+      return !sleep_defer_for_media();
     }
     sleep_ready_received = false;
     sleep_deny_received = false;
@@ -774,6 +799,7 @@ static bool notify_sense_sleep() {
                   grace_active ? 1 : 0,
                   (unsigned)ready_timeout_ms);
     while (millis() < deadline_ms) {
+      if (sleep_defer_for_media()) return false;
       if (sleep_blocked_for_ota()) {
         Serial.println("[SLEEP] abort wait (ota_pending)");
         return false;
@@ -828,7 +854,7 @@ static bool notify_sense_sleep() {
         Serial.println("[SLEEP_PROTO] got SLEEP_READY while waiting_for_sleep_result -> success");
         Serial.println("[SLEEP] got_ready -> sleeping");
         Serial.println("[SLEEP_PROTO] decision coordinated reason=ready");
-        return true;
+        return !sleep_defer_for_media();
       }
       if (ota_stay_awake_until_ms > deadline_ms) {
         deadline_ms = ota_stay_awake_until_ms;
@@ -853,7 +879,7 @@ static bool notify_sense_sleep() {
                     rx_age_ms,
                     sense_state_name(sense_state),
                     (unsigned)SLEEP_HANDSHAKE_MAX_ATTEMPTS);
-      return true;
+      return !sleep_defer_for_media();
     }
   }
   return false;

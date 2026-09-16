@@ -39,12 +39,13 @@ def harness(root):
     arm = 'static void receive_future_arm(uint32_t remaining_s, uint32_t wake_in_s){\n' + uart[arm_start:arm_end] + '\n}\n'
     scope_anchor = 'struct LcdSleepHandshakeScope {'
     scope = definition(sleep, scope_anchor) + ';\n' if scope_anchor in sleep else ''
+    media = ('static bool s_sleep_media_deferred=false;\n' + definition(sleep, 'static bool sleep_defer_for_media() {')) if 'static bool sleep_defer_for_media() {' in sleep else ''
     actual = '\n'.join((
         definition(activity, 'static void resetActivityTimer() {'),
         definition(main, 'static bool sleep_blocked_for_ota() {'),
         definition(main, 'static void cancel_pending_sleep_for_user_input(const char* reason) {'),
         definition(animation, 'static void abort_sleep_transition(const char* reason, bool user_input = true) {'),
-        arm, scope,
+        arm, scope, media,
         definition(sleep, 'static bool notify_sense_sleep() {'),
     ))
     return r'''
@@ -90,6 +91,7 @@ static unsigned long last_sense_rx_ms=9500,last_sense_sleep_ready_ms,sense_awake
 static constexpr unsigned long SENSE_RX_STALE_MS=8000,SENSE_SLEEP_READY_GRACE_MS=15000,SENSE_RECENT_RX_FOR_SLEEP_MS=10000,SENSE_UNKNOWN_STALE_EXTENDED_MS=30000;
 static bool sleep_ready_received,sleep_deny_received,sleep_deny_active,sleep_handshake_fail_link,sleep_wait_for_sense_idle,sleep_retry_requires_user,sleep_cancelled_by_user_input;
 static bool sense_sleep_intent_pending=true,g_sleep_transition,g_in_light_sleep;
+static bool g_img_rx_active=false,g_img_rx_binary_mode=false,g_spool_tx_pending=false,g_spool_tx_active=false;
 static unsigned long sleep_deny_retry_ms,sleep_deny_received_ms,sleep_retry_allowed_ms;
 static unsigned sleep_handshake_fail_count,sleep_fallback_timer_sec;
 static constexpr uint32_t SLEEP_DENY_RETRY_DEFAULT_MS=5000,SLEEP_FALLBACK_TIMER_SEC=15,SLEEP_HANDSHAKE_RETRY_DELAY_MS=800;
