@@ -458,7 +458,13 @@ static void knob_left_cb(void *arg, void *data) {
     return;
   }
   if (provisioning_input_locked()) {
-    return;
+    if (provision_ui_can_scroll && app_event_queue) {
+      app_event_t evt = {EVT_SCROLL_DELTA, {.scroll_delta = -1}};
+      BaseType_t wake = pdFALSE;
+      xQueueSendFromISR(app_event_queue, &evt, &wake);
+      if (wake) portYIELD_FROM_ISR(wake);
+    }
+    return; // Setup scroll never sends INPUT_SCROLL to Sense.
   }
   // Ignore scrolls during brief wake-up period (150ms)
   if (millis() < scroll_ignore_until) {
@@ -504,7 +510,13 @@ static void knob_right_cb(void *arg, void *data) {
     return;
   }
   if (provisioning_input_locked()) {
-    return;
+    if (provision_ui_can_scroll && app_event_queue) {
+      app_event_t evt = {EVT_SCROLL_DELTA, {.scroll_delta = 1}};
+      BaseType_t wake = pdFALSE;
+      xQueueSendFromISR(app_event_queue, &evt, &wake);
+      if (wake) portYIELD_FROM_ISR(wake);
+    }
+    return; // Setup scroll never sends INPUT_SCROLL to Sense.
   }
   // Ignore scrolls during brief wake-up period (150ms)
   if (millis() < scroll_ignore_until) {

@@ -649,7 +649,10 @@ static void ui_task(void *arg) {
       
       if (evt.type == EVT_SCROLL_DELTA) {
         if (provisioning_input_locked()) {
+          provision_ui_handle_scroll(evt.data.scroll_delta);
           resetActivityTimer();
+          lv_timer_handler();
+          example_lvgl_unlock();
           continue;
         }
         user_activity_bump("scroll");
@@ -1306,6 +1309,9 @@ static void ui_task(void *arg) {
         } else {
           Serial.println("[USB] refresh/pull ignored (not on shopping list screen)");
         }
+        processed_anything = true;
+      } else if (evt.type == EVT_USB_PROVISION_PREVIEW) {
+        provision_ui_preview(evt.data.usb_index);
         processed_anything = true;
       } else if (evt.type == EVT_USB_UI_REVIEW) {
         lcd_ui_review_dump("usb_uilayout");

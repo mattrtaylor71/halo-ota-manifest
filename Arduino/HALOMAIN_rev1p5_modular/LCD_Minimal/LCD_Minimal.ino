@@ -1971,6 +1971,7 @@ typedef enum {
   EVT_USB_PULL,       // emulate the touch pull-to-refresh path ("usb_pull" reason)
   EVT_USB_DELETE,     // emulate delete-touch on N-th visible item (data.usb_index)
   EVT_USB_DELTOUCH,   // full touch-path delete: open overlay, then tap the real Delete button
+  EVT_USB_PROVISION_PREVIEW, // Optional USB-only visual review; no peer/network changes.
   EVT_USB_UI_REVIEW,  // optional, read-only current LVGL tree/heap inspection
   EVT_USB_HOME,       // emulate returning to the main menu
   EVT_USB_LISTSTATE,  // print one [LISTSTATE] JSON line from the UI task (e2e harness)
@@ -5571,7 +5572,7 @@ void loop() {
   }
 
   // If reset Wi-Fi was requested but QR never arrived, show error after timeout.
-  if (provision_qr_waiting && !provision_screen_visible) {
+  if (provision_qr_waiting) {
     unsigned long wait_ms = millis() - provision_qr_wait_start_ms;
     if (wait_ms > PROVISION_QR_WAIT_TIMEOUT_MS) {
       provision_qr_waiting = false;

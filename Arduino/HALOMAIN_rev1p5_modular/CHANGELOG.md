@@ -1,3 +1,7 @@
+# September16: candidate169 guided provisioning
+
+Implement the approved six-screen setup guide, centered content, real app-download QR, yellow “On Trepo App” pills and automatic app/Wi-Fi/account progression. Preserve existing menu artwork. The Sense presentation bridge recognizes app contact, repeats setup progress and requires owner confirmation before success; it also accepts the existing failure contract. Build/install evidence is pending. See [the scoped design and state contract](docs/PROVISIONING_GUIDE_169.md).
+
 # September16: private168 built, installed and scoped media recovery verified
 
 Omit the final optional Wi-Fi diagnostic frame while preserving local finalization, leaving only the small sleep acknowledgment after the maintenance notice. Both canonical builds/artifact checks and19 host suites passed. Both boards run168 SDK VALID;167 fallback banks, NVS and partition tables are preserved. One10.5s voice/Dish/Discard outage burst saved all3, all3 reached exact cloud custody and were retired from SD; its sleep handshake and all3 replay sleeps passed.

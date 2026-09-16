@@ -47,6 +47,9 @@ static inline void lcd_ui_review_dump(const char* reason) {
   // Keep the existing layout_audit.py record format and actual object metrics.
   Serial.println("[LAYSTART] UI_REVIEW");
   audit_dump_tree(screen, "UI_REVIEW", 0);
+  // Provisioning is an overlay on lv_layer_top(), not lv_scr_act().
+  lv_obj_update_layout(lv_layer_top());
+  audit_dump_tree(lv_layer_top(), "UI_REVIEW_OVERLAY", 0);
   Serial.println("[LAYEND] UI_REVIEW");
 #else
   Serial.println("[UI_REVIEW] layout_dump=disabled");

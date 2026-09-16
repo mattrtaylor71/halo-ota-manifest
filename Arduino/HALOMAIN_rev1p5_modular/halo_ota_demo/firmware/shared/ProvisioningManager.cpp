@@ -620,6 +620,7 @@ bool ProvisioningManager::startSetupMode() {
   
   // Clear any stale failure state and set to AP_SETUP
   setLastError("");  // Clear any previous error
+  last_app_request_ms = 0;  // A new setup must detect its own phone session.
   sta_failure_count = 0;  // Reset failure count
   target_home_ssid[0] = '\0';  // Clear target SSID when entering Setup Mode
   ProvisioningState::setState(ProvisioningState::STATE_AP_SETUP);
@@ -905,7 +906,7 @@ bool ProvisioningManager::tryClaimOwnerId() {
   }
   
   static const unsigned long kBackoffMs[] = { 2000, 5000, 10000 };
-  const unsigned int kMaxAttempts = 4;
+  const unsigned int kMaxAttempts = OWNER_CLAIM_MAX_ATTEMPTS;
   unsigned long now = millis();
   if (claim_attempts > 0) {
     unsigned int backoff_idx = (claim_attempts - 1 < (sizeof(kBackoffMs) / sizeof(kBackoffMs[0])))

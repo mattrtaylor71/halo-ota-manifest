@@ -376,6 +376,17 @@ static void uart_task(void *arg) {
                 }
               }
 #if defined(HALO_UI_REVIEW) && HALO_UI_REVIEW
+            } else if (strncmp(usb_buf, "provpreview ", 12) == 0) {
+              const char* value = usb_buf + 12;
+              const bool off = strcmp(value, "off") == 0;
+              const bool valid = off || (value[0] >= '1' && value[0] <= '6' && value[1] == '\0');
+              if (!valid) Serial.println("[USB] usage: provpreview <1..6|off>");
+              else if (app_event_queue) {
+                app_event_t evt = {};
+                evt.type = EVT_USB_PROVISION_PREVIEW;
+                evt.data.usb_index = off ? 0 : value[0] - '0';
+                xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(20));
+              }
             } else if (strcmp(usb_buf, "uilayout") == 0) {
               if (app_event_queue) {
                 app_event_t evt = {};

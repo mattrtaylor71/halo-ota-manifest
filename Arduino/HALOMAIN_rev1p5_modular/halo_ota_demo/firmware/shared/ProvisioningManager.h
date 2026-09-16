@@ -70,6 +70,11 @@ public:
   // Reset claim state to allow retry (e.g., after SoftAP shutdown frees memory)
   void resetClaimForRetry();
 
+  // Presentation only. Owner presence takes precedence over this flag.
+  bool ownerClaimExhausted() const {
+    return !claim_in_progress && (claim_completed || claim_attempts >= OWNER_CLAIM_MAX_ATTEMPTS);
+  }
+
   // App-driven provisioning session tracking
   void noteProvisionClientRequest(const char* client_type,
                                   const char* app_version,
@@ -132,6 +137,7 @@ private:
   unsigned int claim_attempts;
   bool claim_in_progress;
   bool claim_completed;
+  static const unsigned int OWNER_CLAIM_MAX_ATTEMPTS = 4;
   
   // Internal helpers
   bool startSoftAP();

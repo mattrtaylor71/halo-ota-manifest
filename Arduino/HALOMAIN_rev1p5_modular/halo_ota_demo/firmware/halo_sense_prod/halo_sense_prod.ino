@@ -55,6 +55,7 @@ static int32_t halo_policy_arm_timer(uint32_t&,uint32_t);
 static bool halo_policy_one_shot_ack(uint32_t,uint32_t,bool,const char*,const char*,bool,uint64_t,uint32_t,uint32_t,uint32_t,const char*,uint32_t);
 #endif
 #include "../shared/OtaHeapTrace.h"
+#include "../shared/ProvisioningDisplayStatus.h"
 #if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
 static void sense_diag_note_timer_sdk(uint64_t timer_us,int32_t sdk_result);
 static void sense_diag_presleep();
@@ -497,6 +498,10 @@ static bool g_pending_provision_qr = false;
 static unsigned long g_last_provision_qr_ms = 0;
 static const unsigned long PROVISION_QR_RESEND_MS = 3000;
 static ProvisioningState::State g_last_prov_state = ProvisioningState::STATE_UNPROVISIONED;
+static ProvisioningDisplayStatus g_provision_display_status;
+static char g_last_provision_display_status[24] = "";
+static uint32_t g_provision_display_poll_ms = 0;
+static uint32_t g_provision_display_send_ms = 0;
 static bool g_defer_ota_post_provision = false;
 static bool g_post_provision_list_refresh_pending = false;
 static bool g_lcd_wifi_creds_sent = false;
@@ -2606,6 +2611,35 @@ static void send_provision_status(const char* state) {
   uart_send_json(output.c_str());
 }
 
+static void service_provision_display(ProvisioningState::State state, bool changed) {
+  const bool setup = g_provisioning_manager.isSetupModeActive();
+  if (!setup && !g_provision_display_status.tracking() && !changed) return;
+  const uint32_t now = millis();
+  if (!changed && g_provision_display_poll_ms &&
+      (uint32_t)(now - g_provision_display_poll_ms) < 500) return;
+  g_provision_display_poll_ms = now;
+  char owner[64] = {0};
+  const bool needs_owner = state == ProvisioningState::STATE_CONNECTED &&
+                           (setup || g_provision_display_status.tracking());
+  const bool owner_set = needs_owner &&
+      ProvisioningState::loadOwnerId(owner, sizeof(owner)) && owner[0];
+  const bool claim_failed = !s_post_ap_claim_retry_pending &&
+      (g_provisioning_manager.ownerClaimExhausted() || (!setup && s_post_ap_shutdown_ms));
+  const char* display = g_provision_display_status.observe(
+      ProvisioningState::getStateString(state), setup,
+      g_provisioning_manager.isAppSessionActive(now), owner_set,
+      claim_failed);
+  // Repeat while setup is in progress so a missed UART frame cannot strand
+  // the guide on an earlier page. LCD treats these messages idempotently.
+  if (strcmp(display, g_last_provision_display_status) != 0 ||
+      (uint32_t)(now - g_provision_display_send_ms) >= 3000) {
+    send_provision_status(display);
+    strlcpy(g_last_provision_display_status, display, sizeof(g_last_provision_display_status));
+    g_provision_display_send_ms = now;
+    LOG_INFO("[PROVISION_UI] state=%s", display);
+  }
+}
+
 static void maybe_send_lcd_wifi_creds(ProvisioningState::State prov_state) {
   if (!ProvisioningState::isProvisioned() || prov_state != ProvisioningState::STATE_CONNECTED) {
     return;
@@ -4615,6 +4649,13 @@ void halo_prod_pre_setup() {
 
 void halo_prod_reset_wifi() {
   LOG_INFO("[PROVISION] Reset Wi-Fi requested");
+  // Explicit retry owns a fresh setup session. startSetupMode() is otherwise
+  // idempotent while the failed session's AP is still running, leaving the
+  // state unprovisioned and preventing the periodic QR from being sent.
+  if (g_provisioning_manager.isSetupModeActive()) g_provisioning_manager.stopSetupMode();
+  g_provision_display_status.reset();
+  g_last_provision_display_status[0] = 0;
+  g_provision_display_poll_ms = 0;
   ProvisioningState::clearHomeWifiCreds();
   ProvisioningState::clearApCreds();
   ProvisioningState::clearOwnerId();
@@ -6131,8 +6172,8 @@ void halo_prod_loop() {
 
   g_provisioning_manager.update();
   ProvisioningState::State prov_state = ProvisioningState::getState();
-  if (prov_state != g_last_prov_state) {
-    send_provision_status(ProvisioningState::getStateString(prov_state));
+  const bool prov_state_changed = prov_state != g_last_prov_state;
+  if (prov_state_changed) {
     g_last_prov_state = prov_state;
     if (prov_state == ProvisioningState::STATE_AP_SETUP) {
       g_pending_provision_qr = true;
@@ -6184,6 +6225,9 @@ void halo_prod_loop() {
     }
   }
 
+  // Evaluate after post-AP recovery establishes its retry window. A transient
+  // claim failure at AP teardown must not suppress the later success update.
+  service_provision_display(prov_state, prov_state_changed);
   if (g_provisioning_manager.isSetupModeActive() && prov_state == ProvisioningState::STATE_AP_SETUP) {
     unsigned long now = millis();
     unsigned long qr_resend_ms = g_provisioning_manager.isAppSessionActive(now) ? 15000UL : PROVISION_QR_RESEND_MS;

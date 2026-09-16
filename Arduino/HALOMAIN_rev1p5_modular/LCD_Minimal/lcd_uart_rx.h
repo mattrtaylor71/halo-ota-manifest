@@ -1158,10 +1158,14 @@ static void uart_process_received_message(const char* json_str) {
       }
       if (strcmp(state, "connected") == 0 || strcmp(state, "idle") == 0) {
         provision_qr_wait_clear("status_complete");
-        provision_user_requested = false;
-        provision_intro_tapped = false;
-        provision_qr_cached = false;
-        provision_return_home_pending = true;
+        // The UI owner retains the guide through its success screen. Ordinary
+        // already-provisioned wake heartbeats must not open a new success page.
+        if (strcmp(state, "idle") == 0) {
+          provision_user_requested = false;
+          provision_intro_tapped = false;
+          provision_qr_cached = false;
+          provision_return_home_pending = true;
+        }
         sleep_retry_requires_user = false;
         sleep_retry_allowed_ms = 0;
         sleep_handshake_fail_count = 0;
@@ -1185,13 +1189,9 @@ static void uart_process_received_message(const char* json_str) {
     }
     if (app_event_queue != NULL) {
       app_event_t evt = {};
-      if (strcmp(state, "connected") == 0) {
-        evt.type = EVT_HIDE_PROVISION_QR;
-      } else {
-        evt.type = EVT_UPDATE_PROVISION_STATUS;
-        strncpy(evt.data.provision_status.state, state, sizeof(evt.data.provision_status.state) - 1);
-        evt.data.provision_status.state[sizeof(evt.data.provision_status.state) - 1] = '\0';
-      }
+      evt.type = EVT_UPDATE_PROVISION_STATUS;
+      strncpy(evt.data.provision_status.state, state, sizeof(evt.data.provision_status.state) - 1);
+      evt.data.provision_status.state[sizeof(evt.data.provision_status.state) - 1] = '\0';
       xQueueSend(app_event_queue, &evt, pdMS_TO_TICKS(50));
       Serial.printf("[UART] PROVISION_STATUS received: %s\n", state);
     }
