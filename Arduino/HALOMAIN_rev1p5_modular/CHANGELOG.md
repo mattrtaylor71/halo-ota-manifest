@@ -1,3 +1,9 @@
+# September 16: private167 binary-media liveness correction
+
+Physical stress on165 showed the LCD sleeping during the third offline save;166 added an active-transfer guard but still slept between saves because binary traffic did not refresh peer liveness.167 counts validated media frames and exact replay/cleanup acknowledgments as live Sense traffic, with timeout/stale-state decisions serialized against newer proof. Existing deadlines and stored data formats are preserved.
+
+Runtime143fc11 and fixture correction3955e6c are committed. Both canonical167-002 binaries and17 host suites pass. LCD167 was written, verified and released; Sense service stopped before installation when the actuator failed. Fresh paired SDK health and the full physical burst/replay test remain pending. Remote bootloader and one fixed-stroke diagnostics also produced no wake. A one-shot01:57Pacific follow-up will observe the existing02:00 hardware wake on September16. No public167 release is claimed. Continue from167 or reviewed descendants; see [the current handoff](docs/OFFLINE_MEDIA_STRESS_167.md).
+
 # September15: offline media stress fixes;165 physical retest pending
 
 Fault injection found SD directory-error handling that could report false empty/partial queues;164 now propagates the error.7,363 storage/transport stress cases passed, with backend admission/claim tests separately recorded. The same live cloud worker can now recover its own lost claim reply using an exact attempt token; ambiguous dead workers remain held.

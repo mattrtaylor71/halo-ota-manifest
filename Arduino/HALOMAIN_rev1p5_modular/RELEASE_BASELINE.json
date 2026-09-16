@@ -4871,7 +4871,7 @@
     }
   },
   "current_validation_blocker": {
-    "status": "ACTUATOR_NO_STATUS_AFTER_USB_RECOVERY_167_PHYSICAL_RETEST_PENDING",
+    "status": "REMOTE_WAKE_UNOBSERVED_RTC_OBSERVER_ACTIVE_167_RETEST_PENDING",
     "candidate": "6.4.167",
     "installation_blocked": true,
     "lcd_service": {
@@ -4891,15 +4891,19 @@
       "sha256": "e3cbde7faa3928e347884812412df1f8d2ee65da44a2e91b75c6c91f4e7d4dd2"
     },
     "next_steps": [
-      "Fully power-cycle actuator or manually wake both boards; leave bothUSBconnected.",
-      "Use bound167-002 runner for Sense with closed LCD167service001 result and fresh mixed identity; do not reflash LCD.",
-      "Verify paired167 SDKVALID, typedinventory and normal replay/retirement of retained166voice.",
-      "Run R5 longvoice10.5/Dish/Discard offline burst, then exactcloud/retirement and finalinventory/sleep checks."
+      "Read the RTC handoff and live observer state; user is away. One-shot follow-up is September16 01:57 Pacific; expected LCD timer wake approximately01:59:46, deadline02:10. No wake is yet observed.",
+      "Reuse the sole original capture. Close/reap it before service and require fresh mixed identity; ordinary installer actuator wake is currently unavailable. Preserve all idle/SDK/artifact guards and do not repeat LCD service.",
+      "If Sense service is possible, verify paired167 SDKVALID, typed inventory and normal replay/retirement of retained166 voice.",
+      "Run the finite longvoice/Dish/Discard offline burst, exact cloud/retirement and final inventory/sleep checks only with a working wake path; otherwise preserve the blocker."
     ],
     "no_OTA_allowance_schedule_credentials_or_debt_reset": true,
     "installation_review": {
       "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/INSTALLATION167-PARTIAL-REVIEW.json",
       "sha256": "fead5f6da61971577aec141228afbd2aa743fc60a4ffbb03fb0bcd5263bda57a"
+    },
+    "remote_wake_checkpoint": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/remote-wake167-001/WAKE-CHECKPOINT.json",
+      "sha256": "18d3aae2c4c58ce4214ec4ec785ae798db3dca4238015860a3f2732740c00337"
     }
   },
   "diagnostic_candidate151": {
