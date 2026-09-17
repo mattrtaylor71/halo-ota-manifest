@@ -345,6 +345,14 @@ struct WifiMaintenanceHttpLease {
 static void wifi_guard_poll() {
   SenseBackupWifiCall backup_call;
   if(!backup_call)return;
+#ifdef HALO_SENSE_PROD_WRAPPER
+  if (halo_provisioning_active()) {
+    // Setup owns AP+STA. Retire an earlier normal STA attempt without
+    // scanning or tearing down the provisioning AP when its deadline expires.
+    wifi_guard_set_inflight(false);
+    return;
+  }
+#endif
   if (!wifi_connect_inflight) {
     return;
   }

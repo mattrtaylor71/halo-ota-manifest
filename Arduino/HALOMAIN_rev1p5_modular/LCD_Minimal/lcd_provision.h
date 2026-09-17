@@ -123,6 +123,23 @@ static void provision_ui_phone() {
   lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
   halo_ui_icon(phone, HALO_ICON_WIFI, 7, 17, 20, COL_TEAL);
 }
+static void provision_ui_profile_draw(lv_event_t* e) {
+  // Draw into the existing badge, using the same ink as the other vector icons.
+  // No symbol font, extra object or image buffer is needed for this small avatar.
+  lv_area_t a;
+  lv_obj_get_coords(lv_event_get_target(e), &a);
+  lv_draw_rect_dsc_t ink;
+  lv_draw_rect_dsc_init(&ink);
+  ink.bg_color = lv_color_hex(COL_DARK);
+  ink.bg_opa = LV_OPA_COVER;
+  ink.radius = LV_RADIUS_CIRCLE;
+  lv_area_t head = {(lv_coord_t)(a.x1 + 9), (lv_coord_t)(a.y1 + 5),
+                    (lv_coord_t)(a.x1 + 15), (lv_coord_t)(a.y1 + 11)};
+  lv_area_t shoulders = {(lv_coord_t)(a.x1 + 6), (lv_coord_t)(a.y1 + 13),
+                         (lv_coord_t)(a.x1 + 18), (lv_coord_t)(a.y1 + 19)};
+  lv_draw_rect(lv_event_get_draw_ctx(e), &ink, &head);
+  lv_draw_rect(lv_event_get_draw_ctx(e), &ink, &shoulders);
+}
 static void provision_ui_render() {
   if (g_ota_screen_active) { provision_ui_deferred = true; return; }
   if (!provision_flow.active()) return;
@@ -164,6 +181,7 @@ static void provision_ui_render() {
     // A simple profile emblem is restricted to setup; main-menu art is untouched.
     lv_obj_t* avatar = halo_ui_card(profile, 16, 14, 25, 25, COL_GOLD, 13);
     lv_obj_set_style_shadow_width(avatar, 0, 0);
+    lv_obj_add_event_cb(avatar, provision_ui_profile_draw, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_t* title = halo_ui_label(profile, "Profile", &nunito_22, COL_DARK, 48, 13, 131);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
     halo_ui_icon(provision_screen, HALO_ICON_CHEVRON_DOWN, 169, 182, 22, COL_TEAL);
