@@ -1,3 +1,7 @@
+# 6.4.185 candidate manual OTA handoff correction — September 17, 2026
+
+Reacquire the display preflight lease when an explicit Manual Update joins an unentered automatic readiness episode after menu navigation released the earlier lease. Require a newer sequence and fresh owner echo while preserving the original timeout, touch priority, allowance, debt and production schedule. The captured183/LCD180 failure had working Wi-Fi and fresh SNTP; stale ownership prevented manifest discovery until the two-minute deadline. Candidate build and hardware validation are pending. [Cause and validation scope](docs/MANUAL_OTA_HANDOFF_185_20260917.md).
+
 # 6.4.184 published manual-test bump — September 17, 2026
 
 Publish the sealed production pair from `fd3fd3947242`, with unchanged 183 runtime. Both canonical builds and artifact checks passed; 28 host suites passed with the documented external calendar-fixture boundary correction and the original failed receipt retained. Latest manifests and both complete public binaries match the sealed 184 bytes. No firmware installation, daily-allowance reset or schedule change was performed for publication. The last verified unit remains Sense183/LCD180; user manual testing is pending and the stored allowance remains a known blocker. Frozen158 scheduled qualification is unchanged. Local tag `halo-v6.4.184` identifies the artifact source; no Git remote push. [Publication evidence](/Users/MattTaylor/halo-scheduled184-20260917/PUBLISHED184.json).

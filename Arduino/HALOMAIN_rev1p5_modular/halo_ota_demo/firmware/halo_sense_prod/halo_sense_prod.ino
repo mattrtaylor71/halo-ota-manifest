@@ -2187,6 +2187,15 @@ static bool manual_ota_join_readiness(const char* reason) {
   if (left <= 0) return false;
   // A repeated tap joins the same request; it cannot renew even its RAM latch.
   if (g_manual_ota_override) return manual_ota_joined_readiness_active();
+  // Navigation touch can release the LCD's automatic preflight lease. This
+  // explicit request needs a newer lock and fresh owner echo, within the same
+  // original readiness deadline. Drain any outstanding query normally.
+  if (g_peer_gate.active) {
+    g_peer_gate.locked = false;
+    g_peer_gate.ready = false;
+    g_peer_gate.sequence = ++g_coord_sequence;
+    if (!g_peer_gate.sequence) g_peer_gate.sequence = ++g_coord_sequence;
+  }
   manual_ota_override_set(reason ? reason : "manual");
   g_manual_ota_override_until_ms = now + (uint32_t)left;
   g_manual_ota_joined_readiness = true;
@@ -4267,7 +4276,8 @@ static void ota_peer_service() {
     if (snapshot.correlated && !snapshot.peer_boot_id) return;
     if (g_boot_ota_pending && strcmp(g_boot_ota_reason, "lcd_timer") == 0 &&
         (!snapshot.correlated || snapshot.peer_boot_id != g_lcd_timer_seen_boot ||
-         (!snapshot.coord_waiting && !g_peer_gate.locked))) return;
+         (!snapshot.coord_waiting && !g_peer_gate.locked &&
+          !manual_ota_joined_readiness_active()))) return;
     if (g_peer_gate.peer_boot && snapshot.correlated && snapshot.peer_boot_id != g_peer_gate.peer_boot) {
       g_peer_gate.peer_boot = 0; g_peer_gate.locked = false;
       g_peer_gate.sequence = ++g_coord_sequence;

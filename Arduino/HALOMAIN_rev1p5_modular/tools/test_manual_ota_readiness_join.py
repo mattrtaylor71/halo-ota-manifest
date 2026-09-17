@@ -106,6 +106,10 @@ static bool bench_deferred_request(const durable_ota::Record&,char(&)[64]){retur
     assert common.index(owner_gate) < common.index('coord_credit_prepare_work(reason)') < common.index(recheck) < common.index('g_peer_gate.entered = true;')
     source += r'''
 static unsigned prep_calls=0,entered_calls=0;static bool become_busy_during_prepare=false;
+// This suite doubles completed UART readiness while testing owner/accounting
+// composition. Actual touch -> replacement lock -> fresh echo is exercised by
+// test_manual_ota_touch_handoff.py; joining no longer keeps the old proof.
+static void confirm_peer(){g_peer_gate.locked=g_peer_gate.ready=true;g_peer_gate.proof_ms=now_ms;}
 static void manual_pipeline(){
  if(!ota_peer_ready())return;
 ''' + owner_gate + r'''
@@ -242,7 +246,7 @@ int main(){using namespace sense_policy;using namespace durable_ota;
  CHECK(g_manual_ota_override_until_ms==attached_dead&&OtaIntent::updates==1&&OtaIntent::clears==0);
  reset_join();begin_list();const auto bytes=store.bytes;const auto original=state_record;
  const uint32_t boot_dead=g_boot_ota_deadline_ms,peer_dead=g_peer_gate.deadline_ms;
- halo_prod_request_manual_ota("manual");CHECK(g_manual_ota_joined_readiness&&g_manual_ota_override&&OtaIntent::updates==1);
+ halo_prod_request_manual_ota("manual");CHECK(g_manual_ota_joined_readiness&&g_manual_ota_override&&OtaIntent::updates==1);confirm_peer();
  const auto latch_dead=g_manual_ota_override_until_ms;
  for(unsigned i=0;i<5;++i){++now_ms;halo_prod_request_manual_ota("manual");}
  CHECK(g_boot_ota_deadline_ms==boot_dead&&g_peer_gate.deadline_ms==peer_dead&&g_manual_ota_override_until_ms==latch_dead&&OtaIntent::updates==1);
@@ -252,7 +256,7 @@ int main(){using namespace sense_policy;using namespace durable_ota;
  CHECK(state_record.network_windows==1&&state_record.day_attempts==0&&!memcmp(original.campaign,state_record.campaign,16));
  CHECK(g_boot_ota_deadline_ms==boot_dead&&g_peer_gate.deadline_ms==peer_dead&&!g_manual_ota_joined_readiness);
  // Busy arrival during coordinator persistence cannot enter a transaction.
- reset_join();halo_prod_request_manual_ota("manual");become_busy_during_prepare=true;
+ reset_join();halo_prod_request_manual_ota("manual");confirm_peer();become_busy_during_prepare=true;
  manual_pipeline();CHECK(prep_calls==1&&entered_calls==0&&!g_peer_gate.entered&&state_record.network_windows==2);
  // Fresh wake-list concurrency also waits on a clean independent manual.
  reset_join();g_boot_ota_pending=false;g_peer_gate.active=false;begin_list();
@@ -262,11 +266,11 @@ int main(){using namespace sense_policy;using namespace durable_ota;
  // Actual defer-until-sleep predicate makes one fresh queue item dependent on
  // session drain; readiness must promptly release without forcing that drain.
  reset_join();upload_count=1;g_upload_flush_requested=false;g_upload_hold_since_ms=0;
- CHECK(uploads_held_for_session(nullptr));halo_prod_request_manual_ota("manual");
+ CHECK(uploads_held_for_session(nullptr));halo_prod_request_manual_ota("manual");confirm_peer();
  const auto held_bytes=store.bytes;manual_pipeline();
  CHECK(wire_result=="policy_deferred"&&upload_count==1&&!g_upload_flush_requested&&store.bytes==held_bytes&&!g_peer_gate.active);
  // Actual owner predicate covers every admitted user/HTTP/parked owner.
- for(unsigned i=0;i<9;++i){reset_join();halo_prod_request_manual_ota("manual");
+ for(unsigned i=0;i<9;++i){reset_join();halo_prod_request_manual_ota("manual");confirm_peer();
   switch(i){case 0:upload_inflight=true;break;case 1:voice_recording_active=true;break;
    case 2:scan_ui_inflight=true;break;case 3:dish_scan_inflight=true;break;case 4:foreground_active=true;break;
    case 5:upload_worker_has_parked_job=true;break;case 6:upload_count=1;break;
@@ -277,7 +281,7 @@ int main(){using namespace sense_policy;using namespace durable_ota;
 
  }
  // Both real readiness timeout branches send truthful failure before unlock.
- for(unsigned peer=0;peer<2;++peer){reset_join();begin_list();halo_prod_request_manual_ota("manual");
+ for(unsigned peer=0;peer<2;++peer){reset_join();begin_list();halo_prod_request_manual_ota("manual");confirm_peer();
   const auto before=store.bytes;now_ms=peer?g_peer_gate.deadline_ms:g_boot_ota_deadline_ms;
   if(peer)peer_deadline();else boot_deadline();
   CHECK(wire_result=="peer_unavailable"&&!g_manual_ota_override&&!g_manual_ota_joined_readiness&&!OtaIntent::force&&!g_ota_check_requested);
@@ -285,7 +289,7 @@ int main(){using namespace sense_policy;using namespace durable_ota;
   CHECK(at("result:peer_unavailable")<at("terminal_unlock"));
  }
  // Future-calendar terminal refusal clears attached input without early credit.
- reset_join();halo_prod_request_manual_ota("manual");const auto future_bytes=store.bytes;
+ reset_join();halo_prod_request_manual_ota("manual");confirm_peer();const auto future_bytes=store.bytes;
  ota_peer_cancel("calendar_future_rearm");boot_ota_finish("calendar_future_rearm");
  CHECK(wire_result=="policy_deferred"&&!g_manual_ota_override&&!OtaIntent::force&&store.bytes==future_bytes);
  // Wrap and repeated taps retain the original interval, including deadline0.
@@ -301,13 +305,13 @@ int main(){using namespace sense_policy;using namespace durable_ota;
   halo_prod_request_manual_ota("manual");CHECK(!g_manual_ota_override&&OtaIntent::updates==0);
  }
  // Fresh readiness cannot waive exhausted allowance or unresolved target due.
- reset_join();halo_prod_request_manual_ota("manual");state_record.budget_day=epoch/86400;state_record.budget_granted=state_record.high_water=epoch;strcpy(state_record.origin,g_coord_pending);
+ reset_join();halo_prod_request_manual_ota("manual");confirm_peer();state_record.budget_day=epoch/86400;state_record.budget_granted=state_record.high_water=epoch;strcpy(state_record.origin,g_coord_pending);
  uint8_t raw[kRecordBytes];CHECK(encode(state_record,raw));store.bytes.assign(raw,raw+sizeof(raw));
  CHECK(halo_policy_boot_ready());manual_pipeline();CHECK(wire_result=="policy_daily_limit"&&!OtaIntent::force&&!g_manual_ota_joined_readiness);
  reset_join();Record target_fixture;reset();target_fixture=state_record;reset_join();
  Record deferred;CHECK(finish(target_fixture,{epoch,true,false},target_fixture.reserved_work_ms,true,Failure::TEMPORARY,0,0,epoch+86400,nullptr,deferred));state_record=deferred;
  CHECK(encode(state_record,raw));store.bytes.assign(raw,raw+sizeof(raw));const auto target_before=state_record.target;
- halo_prod_request_manual_ota("manual");CHECK(halo_policy_boot_ready());manual_pipeline();
+ halo_prod_request_manual_ota("manual");confirm_peer();CHECK(halo_policy_boot_ready());manual_pipeline();
  CHECK(!work.live&&wire_result=="policy_deferred"&&!OtaIntent::force);
  CHECK(!memcmp(&target_before,&state_record.target,sizeof(target_before))&&state_record.phase==Phase::DEFERRED);
  // Named missing proof reports actual busy owner; success stays mask0.

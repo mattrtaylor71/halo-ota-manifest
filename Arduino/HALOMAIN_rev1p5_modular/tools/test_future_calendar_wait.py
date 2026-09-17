@@ -60,6 +60,8 @@ static bool ota_peer_schedule_completed(const char*){return false;}
 static void ensure_timezone_pt(const char*){}
 static bool halo_policy_short_due(){return false;}
 static bool nvs_capacity_image_valid(){return image_valid;}
+// Independent media admission is covered by the manual/readiness suite.
+static bool ota_yield_automatic_readiness_to_fresh_media(){return false;}
 static bool coord_credit_save(const CoordinatorCreditState&next){
  ++commits;g_coord_credit=next;strcpy(g_coord_pending,next.pending.id);return true;
 }
