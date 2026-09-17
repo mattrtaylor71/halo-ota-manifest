@@ -16,6 +16,7 @@
 #include "NtpDnsGuard.h"
 #include <WiFiClientSecure.h>
 #include <esp_wifi.h>
+#include <esp_event.h>
 #include <esp_netif.h>
 #include <esp_heap_caps.h>
 #include <string.h>
@@ -25,6 +26,51 @@ static WebServer* server = nullptr;
 static DNSServer* dns_server = nullptr;
 static const uint16_t DNS_PORT = 53;
 static ProvisioningManager* g_provisioning_manager = nullptr;
+
+// Arduino AP.cpp does not forward WIFI_EVENT_AP_WRONG_PASSWORD. Observe this
+// one SDK event directly; payload/MAC/key material is intentionally ignored.
+static esp_event_handler_instance_t g_provision_ap_auth_observer = nullptr;
+static portMUX_TYPE g_provision_ap_auth_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t g_provision_ap_auth_total = 0;
+static uint32_t g_provision_ap_auth_pending = 0;
+static uint32_t g_provision_ap_auth_last_ms = 0;
+
+static void onProvisionApWrongPassword(void*, esp_event_base_t base,
+                                     int32_t event_id, void*) {
+  if (base != WIFI_EVENT || event_id != WIFI_EVENT_AP_WRONG_PASSWORD) return;
+  const uint32_t now = (uint32_t)millis();
+  portENTER_CRITICAL(&g_provision_ap_auth_mux);
+  if (g_provision_ap_auth_total != UINT32_MAX) ++g_provision_ap_auth_total;
+  if (g_provision_ap_auth_pending != UINT32_MAX) ++g_provision_ap_auth_pending;
+  g_provision_ap_auth_last_ms = now;
+  portEXIT_CRITICAL(&g_provision_ap_auth_mux);
+}
+
+static void registerProvisionApAuthObserver() {
+  if (g_provision_ap_auth_observer) return;
+  esp_event_handler_instance_t instance = nullptr;
+  const esp_err_t err = esp_event_handler_instance_register(
+      WIFI_EVENT, WIFI_EVENT_AP_WRONG_PASSWORD, onProvisionApWrongPassword,
+      nullptr, &instance);
+  if (err == ESP_OK) g_provision_ap_auth_observer = instance;
+  Serial.printf("[PROVISION_AUTH] observer_registered=%d rc=%d event=%d\n",
+                g_provision_ap_auth_observer ? 1 : 0, (int)err,
+                (int)WIFI_EVENT_AP_WRONG_PASSWORD);
+}
+
+static void serviceProvisionApAuthEvents() {
+  portENTER_CRITICAL(&g_provision_ap_auth_mux);
+  const uint32_t pending = g_provision_ap_auth_pending;
+  const uint32_t total = g_provision_ap_auth_total;
+  const uint32_t last_ms = g_provision_ap_auth_last_ms;
+  g_provision_ap_auth_pending = 0;
+  portEXIT_CRITICAL(&g_provision_ap_auth_mux);
+  if (pending) {
+    Serial.printf("[PROVISION_AUTH] event=ap_wrong_password count=%lu total=%lu last_ms=%lu serviced_ms=%lu\n",
+                  (unsigned long)pending, (unsigned long)total,
+                  (unsigned long)last_ms, millis());
+  }
+}
 
 static bool g_scan_inflight = false;
 static unsigned long g_scan_started_ms = 0;
@@ -350,6 +396,7 @@ void ProvisioningManager::update() {
   if (halo_rebooting()) {
     return;
   }
+  serviceProvisionApAuthEvents();
   if (!setup_mode_active) {
     return;
   }
@@ -685,6 +732,9 @@ void ProvisioningManager::stopSetupMode() {
 bool ProvisioningManager::startSoftAP() {
   // Set WiFi mode to AP+STA (allows both SoftAP and STA)
   WiFi.mode(WIFI_AP_STA);
+  // The SDK event loop exists after mode initialization. Register before the
+  // fresh AP profile/QR is exposed, and retain the observer across AP restarts.
+  registerProvisionApAuthObserver();
   WiFi.setSleep(false);
   esp_wifi_set_ps(WIFI_PS_NONE);
   
