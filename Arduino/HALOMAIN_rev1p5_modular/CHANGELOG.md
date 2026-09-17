@@ -1,3 +1,9 @@
+# 6.4.186 published version-only manual-test bump — September 17, 2026
+
+Publish the canonical pair from `62c6864b4c15`, build `6.4.186-20260917T224600Z-62c6864b4c15`. All 1,138 non-generated production runtime files match sealed 185; only the three generated version headers differ. Both builds/artifact checks, all seven focused snapshot suites and exact paired public readback passed. Local tag `halo-v6.4.186` selects the artifact source; no Git remote push.
+
+Both boards remain last verified185 app1 SDK VALID. The user will perform the physical manual OTA;186 installation and acceptance are pending. The separate one-test allowance is still in preparation at this publication checkpoint; no grant or schedule change is claimed. Preserve185 acceptance and frozen158 recovery. [Receipts and scope](docs/MANUAL_OTA_186_20260917.md).
+
 # 6.4.185 published manual OTA handoff correction — September 17, 2026
 
 Reacquire the display preflight lease when an explicit Manual Update joins an unentered automatic readiness episode after navigation released the earlier lease. Require a newer sequence and fresh owner echo within the original timeout; retain touch priority, allowance, debt and schedule. The captured183/LCD180 failure had working Wi-Fi and fresh SNTP but stale ownership prevented manifest discovery. Both canonical builds/artifact checks and seven exact-snapshot suites pass for `5ce4b9615c8f`; public manifests and complete binaries match sealed185. Controlled Sense185 USB service preserved183 app0/NVS and initially retained LCD180. `manual003` then completed LCD180→185 OTA on the first transfer attempt, with exact image hash, fresh SDK VALID, completion bookkeeping, Home restoration and paired sleep plus15seconds quiet. Both boards now run185 app1 SDK VALID; Sense was not OTA-updated in this test.

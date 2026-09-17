@@ -1,6 +1,6 @@
-> September 17 release update: **6.4.185 is public and both boards now run185 app1 SDK VALID**, build `6.4.185-20260917T213753Z-5ce4b9615c8f`. Both canonical builds/artifact checks and seven exact-snapshot suites passed. Sense185 was installed by controlled USB service; `manual003` then completed the actual **LCD180→185 manual OTA on its first transfer attempt**. The exact LCD hash, reboot/SDK validation, completion bookkeeping, return to Home and paired sleep plus15seconds quiet were independently verified. This is not a Sense OTA or new scheduled-OTA qualification. Continue from185 or reviewed descendants and use an unused version **186 or later** after fresh inventory. Frozen158 remains unchanged.
+> September 17 release update: **6.4.186 is public; the last verified installed pair remains185 app1 SDK VALID.**186 is a version-only bump from `62c6864b4c15`, build `6.4.186-20260917T224600Z-62c6864b4c15`. All 1,138 non-generated runtime files match sealed 185; both canonical builds/artifact checks and seven exact-snapshot suites passed. Public paired readback passed. The user will perform the physical manual OTA;186 installation and acceptance are pending. One external test allowance is granted and verified; the schedule is unchanged. Continue from186 or reviewed descendants; use unused **187 or later** after fresh inventory. Frozen158 remains unchanged.
 
-> Current source and acceptance: retain the complete183 predecessor record and immutable158 recovery reference. The captured183 stale-lease failure is fixed in the tested185 manual handoff. One real manual request after the scroll handler reached both manifests and completed the LCD update; setup-only parser failures remain distinct from firmware outcomes. Cloud received at22:00:59UTC corroborates **phase8 RESOLVED**, generation14, network_windows2, apply_attempts1, LCDbegins1, Sensebegins0 and reserved_ms0; retry due/expiry are zero. The next normal02:00 Pacific wake remains unchanged (September18, epoch1789722000). Fresh SDK state and `lcd_ota_due=0`/`done_ids` verification come from direct device logs; the cloud receipt does not establish absence of hidden NVS keys. See [independent device review](/Users/MattTaylor/halo-manual-handoff185-20260917/manual003/INDEPENDENT-DEVICE-REVIEW.json) and [cloud ledger correlation](/Users/MattTaylor/halo-device-analytics-2026-09-10/manual184-20260917/cloud-manual185-final001/CORRELATION.json).
+> Current source:186 retains185 runtime unchanged. Preserve the full185 acceptance under `previous_working_source_185`; the installed pair is still185. See [186 publication and pending manual test](MANUAL_OTA_186_20260917.md). Preparing a separate external allowance is not evidence that a grant or OTA has occurred.
 
 # Build and release from the frozen 6.4.158 baseline
 
@@ -20,13 +20,13 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run relevant host regressions, and commit the reviewed source before preparing release artifacts. The baseline guard verifies identity; it does not establish device acceptance of new code.
 
-Allocate an unused version **6.4.186 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.187 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.184>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.187>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"
