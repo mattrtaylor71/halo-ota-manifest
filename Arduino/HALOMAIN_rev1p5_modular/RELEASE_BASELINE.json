@@ -5974,89 +5974,167 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.180",
-    "status": "PRIVATE_LCD180_INSTALLED_SENSE179_RETAINED_COSMETIC_ONLY",
-    "artifact_source_commit": "f42dad1462122325d14ec40724be049f42d51cb2",
-    "artifact_source_firmware_tree": "1e51a36ac63919fd245b969a0911943b049f0838",
-    "build_id": "6.4.180-20260917T173817Z-f42dad146212",
+    "version": "6.4.182",
+    "status": "PRIVATE_SENSE182_SDK_VALID_LCD180_RETAINED_FUNCTIONAL_TESTS_BLOCKED_BEFORE_CAPTURE",
+    "artifact_source_commit": "ab87b6341a9732ea088639672da6ff7bd85965a1",
+    "artifact_source_firmware_tree": "2d3df8998536284bea091d468754060ae5dfa8a1",
+    "build_id": "6.4.182-20260917T185821Z-ab87b6341a97",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from f42dad146212 or reviewed descendants.180 removes only the upper provisioning scroll arrow; all179 runtime fixes retained. Actual unit is mixed Sense179/LCD180.",
+    "source_selection": "Continue from ab87b6341a97 or reviewed descendants.182 retains181 upload-readiness, fresh-transfer cancellation/parking and PUT-completion changes, and corrects the secondary clock admission boundary at sleep. Actual service configuration is mixed Sense182/LCD180.",
     "candidate_receipt": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/RELEASE-PAIR.json",
-      "sha256": "a46bf82a068373ba2debd08e9a425a43b8127a4cbf68cd97a5ec6b4d0e9d2453"
+      "path": "/Users/MattTaylor/halo-upload181-20260917/candidate182-001/RELEASE-PAIR.json",
+      "sha256": "715c83b431800e41d353ed9c1c224851ac27091be942f1233ee5209f2842b2e0"
     },
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "8619aa06a35405ff027bb52a6e800eb46aad4bd5f36553f437338ebbc4005964"
+      "path": "/Users/MattTaylor/halo-upload181-20260917/candidate182-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "766559cee803d2e50c624dd00e2b82d90e2675835e208a5c0245160bb1eb0f69"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/SOURCE-SCOPE.json",
-      "sha256": "6813eaf43d40370048633c4a7847094bae90e382cda5d892078ad99730f604a4"
-    },
-    "pixel_comparison": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/visual-validation001/RESULT.json",
-      "sha256": "b14445547d3f3017246dd681e04fd39d13ce47156c8ca046e24c5069d54202ec"
+      "path": "/Users/MattTaylor/halo-upload181-20260917/candidate182-001/SOURCE-SCOPE.json",
+      "sha256": "875c95146c2f9cef28065faf179c59ebb35dd14da4e55045d8722dd60ebf808a"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/host-final001/RESULT.json",
-      "sha256": "d40a3323fd82ca7baf3cdf0fea87c538b738fd44ab1f763f1c6b1a2851690df7"
+      "path": "/Users/MattTaylor/halo-upload181-20260917/candidate182-001/host-final001/RESULT.json",
+      "sha256": "6f497b2e329491bd1822554bcd94b608fec00cf8a037ce89c1b5928af70d77db"
     },
-    "host_suite_count": 0,
-    "host_validation_scope": "Fresh snapshot pixel comparison; unrelated runtime suites not repeated.17930-suite receipt remains predecessor evidence.",
-    "predecessor_host_tests": {
-      "path": "/Users/MattTaylor/halo-recovery179-20260917/candidate179-001/host-final001/RESULT.json",
-      "sha256": "b398ac2f46e7df0a9555e297183b70349c9f4ddb7f8bdc3f1fb9bf4e9640ea70"
+    "host_suite_count": 23,
+    "host_validation_scope": "23 focused suites ran against the exact182 canonical snapshot and passed. Host results do not establish physical latency, user interruption, SDK health or backend acceptance.",
+    "stack_assessment": {
+      "path": "/Users/MattTaylor/halo-upload181-20260917/candidate182-001/STACK-REVIEW.json",
+      "sha256": "ea5fef2440ab09126cc92fe3e2fde9024bf6e5d043e5b089edd74bfbfa4d2a7f"
     },
-    "resource_delta_vs179": {
+    "resource_delta_vs180": {
       "sense": {
-        "size": 16,
-        "static_ram_bytes": 0,
+        "size": 2544,
+        "static_ram_bytes": 8,
         "rtc_slow_bytes": 0,
-        "linked_program_bytes": 16
+        "linked_program_bytes": 2536
       },
       "lcd": {
-        "size": -2464,
+        "size": -80,
         "static_ram_bytes": 0,
         "rtc_slow_bytes": 0,
-        "linked_program_bytes": -2464
+        "linked_program_bytes": -80
       }
     },
+    "predecessor181_candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-upload181-20260917/candidate181-001/RELEASE-PAIR.json",
+      "sha256": "3b2fe4f97e58a98c665396afb2a6c41c7e12608dd9c3704d8058f348f89d271d"
+    },
     "installed": true,
-    "installation_scope": "OnlyLCD180 app0 installed;LCD179 app1 fallback retained. Sense179 app1 andSense178 app0 unchanged. NVS/partition table preserved.",
+    "installation_scope": "Controlled Sense-only application and alternate selector service installed182 app1, preserving181 app0 fallback, NVS, partition table and bootloader. LCD180 app0 and179 app1 fallback were not written. Service readback/release and descriptor/lock closure passed; the released Sense boot log records SDK VALID with current-state readback. No fresh paired LCD health check was performed.",
     "installed_boards": [
-      "lcd"
+      "sense"
     ],
-    "full180_pair_installed": false,
+    "full182_pair_installed": false,
+    "installation_receipt": {
+      "path": "/Users/MattTaylor/halo-upload181-20260917/service-sense182-001/result.json",
+      "sha256": "d17bd152b0cee1000e6aaefa06ff32b0b9a6ba3be30186a8ba8ec4fd0fcf9a62"
+    },
+    "installed_configuration": {
+      "sense": "6.4.182 app1 observed; SDK VALID with current-state readback in released boot log",
+      "sense_fallback": "6.4.181 app0 preserved",
+      "lcd": "6.4.180 app0 retained; not rewritten",
+      "lcd_fallback": "6.4.179 app1 preserved"
+    },
+    "postinstall_sdk_health_status": "SENSE_SDK_VALID_READBACK_OBSERVED_NO_FRESH_PAIRED_LCD_CHECK",
+    "functional_acceptance_status": "BLOCKED_BEFORE_CAPTURE_ACTUATOR_SERIAL_OPEN",
     "published": false,
     "physical_acceptance": false,
-    "installed_firmware_last_observed": {
-      "sense": "6.4.179 app1 SDK VALID",
-      "lcd": "6.4.180 app0 SDK VALID"
-    },
-    "installation_review": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/INSTALLATION-REVIEW.json",
-      "sha256": "8b6b9831de90b10cc1eae4dfa16c8131bd83fa356f69fa846d839499a286458d"
-    },
-    "paired_health": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/postinstall001/REVIEW.json",
-      "sha256": "c37290ed7c9cea95d92d75978a545ab2c17bb62e71af0ded500ac57cf7ec9137"
-    },
-    "paired_sdk_health_passed": true,
     "current_public_ota_version": "6.4.162",
-    "next_unused_version": "6.4.181",
-    "handoff": "docs/PROVISION_SCROLL_180_20260917.md",
-    "voice_investigation": {
-      "path": "/Users/MattTaylor/halo-chocolate-20260917/VOICE-CLOUD-REVIEW.json",
-      "sha256": "44ea0b7d504aa69bcbcd18db9ccc535ab5602b659a8736c81e2def64d6a1d530"
-    },
+    "next_unused_version": "6.4.183",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/UPLOAD_LATENCY_181_20260917.md",
     "limits": [
-      "Cosmetic asset change only; no voice runtime fix or new voice recording in this campaign.",
-      "USB-connected console list smoke; physical provisioning arrow was verified by exact pixel comparison and installed-image identity, not panel photography.",
-      "No new OTA transfer, scheduled execution, phone provisioning, power-cut, USB-free or full-product qualification.",
-      "Prior179 and earlier runtime/acceptance limitations remain in previous_working_source_179 and linked reports.",
-      "Cloud confirms Chocolate insertion; original recording time and screen state were not captured, so exact delay/absence cause remains unproved."
-    ]
+      "Only Sense182 was installed; canonical LCD182 exists but remains uninstalled. No182 paired OTA or publication occurred.",
+      "Sense182 SDK VALID was observed locally with current-state readback; no fresh paired LCD health check or182 functional result is claimed. Three actuator-open failures occurred before stroke/capture; they do not establish a firmware capture/upload failure.",
+      "181 voice timing/cloud evidence and the failed181 immediate image-delivery case remain predecessor observations, not182 acceptance.",
+      "Normal active-session upload holding remains; synchronous SDK calls yield only at safe owner-task boundaries, not instantaneously.",
+      "No new scheduled OTA, equal-version UpToDate UI, phone provisioning, power-cut, USB-free or full-product qualification is claimed.",
+      "Public162 remains older than the private unit; previous downgrade-refusal UI and other recorded qualification limits remain."
+    ],
+    "sense_sdk_health_observation": {
+      "raw": {
+        "path": "/Users/MattTaylor/halo-upload181-20260917/service-sense182-001/sense-released.raw",
+        "sha256": "41547ece45123fddc8629ccdfbeb75c0c6ba88c7d6ed08b4ccf45be21ceab4d1"
+      },
+      "build_identity_line": 79,
+      "running_part_line": 63,
+      "boot_part_line": 64,
+      "marked_valid_success_line": 125,
+      "marked_valid_success_uptime_ms": 10088,
+      "later_marked_valid_lines": [
+        145,
+        157,
+        176
+      ],
+      "scope": "Exact182 build/app1 followed by Firmware marked valid with current readback - SUCCESS and later marked_valid=1. Local Sense evidence only; the latest prior paired identity is Sense181/LCD180, historical for182."
+    },
+    "functional_attempts": [
+      {
+        "case": "image182-001",
+        "controller": {
+          "path": "/Users/MattTaylor/halo-upload181-20260917/image182-001/controller-result.json",
+          "sha256": "5823a63c9bd24d604ef23216126ea09ba92d86eb094ab8fd6ac18b6e4b64a159"
+        },
+        "capture_closure": {
+          "path": "/Users/MattTaylor/halo-upload181-20260917/image182-001/RESULT.json",
+          "sha256": "c5cbbf2aee3411b19e453ec7a78582aad3dc3b2b974df6b69ba8ec713356b288"
+        },
+        "status": "STOPPED_FOR_REVIEW",
+        "device_commands": 0,
+        "actuator_stroke_observed": false,
+        "capture_started": false
+      },
+      {
+        "case": "image182-002",
+        "controller": {
+          "path": "/Users/MattTaylor/halo-upload181-20260917/image182-002/controller-result.json",
+          "sha256": "3c10075097801d075190d60601f7f207edd18b5e3f6d7a6d09dbef060f26e0c8"
+        },
+        "capture_closure": {
+          "path": "/Users/MattTaylor/halo-upload181-20260917/image182-002/RESULT.json",
+          "sha256": "4e06b4e134307b00bcb24ba4570db650108217bd9645e322cd745ae37aed1dd2"
+        },
+        "status": "STOPPED_FOR_REVIEW",
+        "device_commands": 0,
+        "actuator_stroke_observed": false,
+        "capture_started": false
+      },
+      {
+        "case": "image182-003",
+        "controller": {
+          "path": "/Users/MattTaylor/halo-upload181-20260917/image182-003/controller-result.json",
+          "sha256": "4e559fe639aa44e7da6b03485b23a76d1798d501f4f34d3f0f91b0d2fb39504e"
+        },
+        "capture_closure": {
+          "path": "/Users/MattTaylor/halo-upload181-20260917/image182-003/RESULT.json",
+          "sha256": "7f71b001074f2c3db654a55ae0ff680d1ae2b36fd8d31a13a4a40a73b4ce19b4"
+        },
+        "status": "STOPPED_FOR_REVIEW",
+        "device_commands": 0,
+        "actuator_stroke_observed": false,
+        "capture_started": false
+      }
+    ],
+    "functional_blocker": {
+      "reason": "Actuator serial open hung before a stroke; all three finite controllers stopped without device action commands or media capture. Collectors closed cleanly.",
+      "opening_stage_receipt": {
+        "path": "/Users/MattTaylor/halo-upload181-20260917/image182-003/wake.json",
+        "sha256": "adffa34c5a67ac8505c61f03f9263b5918e9fcb59b678722aa411439f312e112"
+      },
+      "next_step": "User actuator USB reset/recovery requested; actual182 capture, latency and interruption retests remain pending."
+    },
+    "latest_prior_paired_sdk_health": {
+      "receipt": {
+        "path": "/Users/MattTaylor/halo-upload181-20260917/postinstall-identity001/identity.json",
+        "sha256": "2b2660214045a16ec254ac507a44a45b8c9c0cad2ce8be4cb49e7d5d196520b4"
+      },
+      "sense": "6.4.181 app0 running/boot SDK VALID",
+      "lcd": "6.4.180 app0 running/boot SDK VALID",
+      "scope": "Latest paired identity before Sense182 service; retained historical evidence, not a fresh paired182 health check."
+    }
   },
   "previous_verified_paired_health_158": {
     "version": "6.4.158",
@@ -8291,5 +8369,90 @@
       "Exact final durable origin/counter bytes were not independently reread; no claim that all historical obligations are gone."
     ],
     "no_public_promotion": true
+  },
+  "previous_working_source_180": {
+    "version": "6.4.180",
+    "status": "PRIVATE_LCD180_INSTALLED_SENSE179_RETAINED_COSMETIC_ONLY",
+    "artifact_source_commit": "f42dad1462122325d14ec40724be049f42d51cb2",
+    "artifact_source_firmware_tree": "1e51a36ac63919fd245b969a0911943b049f0838",
+    "build_id": "6.4.180-20260917T173817Z-f42dad146212",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from f42dad146212 or reviewed descendants.180 removes only the upper provisioning scroll arrow; all179 runtime fixes retained. Actual unit is mixed Sense179/LCD180.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/RELEASE-PAIR.json",
+      "sha256": "a46bf82a068373ba2debd08e9a425a43b8127a4cbf68cd97a5ec6b4d0e9d2453"
+    },
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "8619aa06a35405ff027bb52a6e800eb46aad4bd5f36553f437338ebbc4005964"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/SOURCE-SCOPE.json",
+      "sha256": "6813eaf43d40370048633c4a7847094bae90e382cda5d892078ad99730f604a4"
+    },
+    "pixel_comparison": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/visual-validation001/RESULT.json",
+      "sha256": "b14445547d3f3017246dd681e04fd39d13ce47156c8ca046e24c5069d54202ec"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/candidate180-001/host-final001/RESULT.json",
+      "sha256": "d40a3323fd82ca7baf3cdf0fea87c538b738fd44ab1f763f1c6b1a2851690df7"
+    },
+    "host_suite_count": 0,
+    "host_validation_scope": "Fresh snapshot pixel comparison; unrelated runtime suites not repeated.17930-suite receipt remains predecessor evidence.",
+    "predecessor_host_tests": {
+      "path": "/Users/MattTaylor/halo-recovery179-20260917/candidate179-001/host-final001/RESULT.json",
+      "sha256": "b398ac2f46e7df0a9555e297183b70349c9f4ddb7f8bdc3f1fb9bf4e9640ea70"
+    },
+    "resource_delta_vs179": {
+      "sense": {
+        "size": 16,
+        "static_ram_bytes": 0,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": 16
+      },
+      "lcd": {
+        "size": -2464,
+        "static_ram_bytes": 0,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": -2464
+      }
+    },
+    "installed": true,
+    "installation_scope": "OnlyLCD180 app0 installed;LCD179 app1 fallback retained. Sense179 app1 andSense178 app0 unchanged. NVS/partition table preserved.",
+    "installed_boards": [
+      "lcd"
+    ],
+    "full180_pair_installed": false,
+    "published": false,
+    "physical_acceptance": false,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.179 app1 SDK VALID",
+      "lcd": "6.4.180 app0 SDK VALID"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/INSTALLATION-REVIEW.json",
+      "sha256": "8b6b9831de90b10cc1eae4dfa16c8131bd83fa356f69fa846d839499a286458d"
+    },
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/postinstall001/REVIEW.json",
+      "sha256": "c37290ed7c9cea95d92d75978a545ab2c17bb62e71af0ded500ac57cf7ec9137"
+    },
+    "paired_sdk_health_passed": true,
+    "current_public_ota_version": "6.4.162",
+    "next_unused_version": "6.4.181",
+    "handoff": "docs/PROVISION_SCROLL_180_20260917.md",
+    "voice_investigation": {
+      "path": "/Users/MattTaylor/halo-chocolate-20260917/VOICE-CLOUD-REVIEW.json",
+      "sha256": "44ea0b7d504aa69bcbcd18db9ccc535ab5602b659a8736c81e2def64d6a1d530"
+    },
+    "limits": [
+      "Cosmetic asset change only; no voice runtime fix or new voice recording in this campaign.",
+      "USB-connected console list smoke; physical provisioning arrow was verified by exact pixel comparison and installed-image identity, not panel photography.",
+      "No new OTA transfer, scheduled execution, phone provisioning, power-cut, USB-free or full-product qualification.",
+      "Prior179 and earlier runtime/acceptance limitations remain in previous_working_source_179 and linked reports.",
+      "Cloud confirms Chocolate insertion; original recording time and screen state were not captured, so exact delay/absence cause remains unproved."
+    ]
   }
 }

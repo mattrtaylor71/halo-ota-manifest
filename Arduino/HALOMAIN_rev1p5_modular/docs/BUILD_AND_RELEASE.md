@@ -1,4 +1,4 @@
-> Current source: **180**, `f42dad146212`; actual installed unit: **Sense179 / LCD180**, both SDK VALID.180 changes only provisioning scroll artwork. Both canonical builds, exact pixel comparison, live list refresh and sleep passed within the [recorded scope](PROVISION_SCROLL_180_20260917.md). Public OTA remains162. Use `RELEASE_BASELINE.json.current_working_source` for future changes; preserve earlier qualification limits.
+> Current source: **182**, `ab87b6341a97`; controlled service selected **Sense182 app1**, retaining 181 app0 and leaving **LCD180 app0** untouched. Both canonical 182 builds/artifact checks and 23 snapshot host suites pass. Sense182 locally reached SDK VALID with current-state readback at 10,088 ms; no fresh paired LCD check was performed. Three functional attempts stopped at actuator serial open before any stroke or capture, so 182 functional acceptance awaits actuator USB recovery; see [the measured scope](UPLOAD_LATENCY_181_20260917.md). Public OTA remains162. Use `RELEASE_BASELINE.json.current_working_source`; preserve 180 and earlier historical evidence. The next candidate is 183 or later only after a fresh version inventory check.
 
 # Build and release from the frozen 6.4.158 baseline
 
@@ -18,13 +18,13 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run relevant host regressions, and commit the reviewed source before preparing release artifacts. The baseline guard verifies identity; it does not establish device acceptance of new code.
 
-Allocate an unused version **6.4.159 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.183 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.159>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.183>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"
