@@ -1,6 +1,6 @@
 # September16:170 saved-media retry candidate
 
-Independent paired retry timers keep the LCD dark while saved voice/photo work recovers. Real user input pauses recovery; saved originals remain until bound cloud receipts. Wi-Fi callbacks/backoff, transient voice HTTP retry, fair SD replay and late voice errors are covered by executable host fault tests. Canonical build and device acceptance remain pending at this source commit;169 remains installed. No public release. See [the behavior, tests and limits](docs/WIFI_MEDIA_RECOVERY_170.md).
+Independent paired retry timers keep the LCD dark while saved voice/photo work recovers. Real user input pauses recovery; saved originals remain until bound cloud receipts. Wi-Fi callbacks/backoff and shared radio ownership, transient voice HTTP retry, fair SD replay and late errors are covered by executable fault tests. Source `bf2e5e2`, all40 exact-snapshot host suites, both canonical production builds and artifact checks pass. Both boards remain169: real Wi-Fi setup is still active, so170 installation and physical media/retry qualification remain pending. No public release. See [the behavior, receipts and limits](docs/WIFI_MEDIA_RECOVERY_170.md).
 
 # September16: private169 guided provisioning installed
 

@@ -1,4 +1,4 @@
-> Latest private working source: **169**, installed SDK VALID on both boards. Read [the169 handoff](PROVISIONING_GUIDE_169.md) and `RELEASE_BASELINE.json.current_working_source`. Real guide steps1–3 passed; phone-driven completion remains pending. The inherited168 clock-timeout sleep limitation remains. Frozen158 is the immutable recovery/previous scheduled qualification anchor. Allocate unused170 or later.
+> Latest private working candidate: **170**, committed, canonical paired builds/artifact checks and40 snapshot host suites passed; **not installed or published**. Both boards remain169 and real Wi-Fi setup is still active. Read [the170 handoff](WIFI_MEDIA_RECOVERY_170.md) and `RELEASE_BASELINE.json.current_working_source`. Retain169 for local fallback and frozen158 as the immutable recovery/previous scheduled anchor. Allocate unused171 or later.
 
 # Build and release from the frozen 6.4.158 baseline
 
