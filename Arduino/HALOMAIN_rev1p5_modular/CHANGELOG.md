@@ -1,3 +1,7 @@
+# 6.4.175 private setup-memory fix — September17,2026
+
+Release the camera DMA reserve while provisioning owns the AP, and restore it only after setup exits and the actual AP is off. Full 175 pair builds/artifact checks and ten focused suites pass. Sense175/app1 alone was installed, retaining LCD174/app1; both are SDK VALID. Three Galaxy AP joins passed association/DHCP/HTTP 200 without captured AES errors. The app flow eventually persisted provisioned/owner state, but a 121-second Sense response gap caused unresponsive setup and LCD fallback sleep. Responsive full provisioning failed acceptance. Reserve restoration failed after warm reset and final AP shutdown; same-boot camera recovery remains unqualified. No public release. [Evidence and limits](docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md).
+
 # 6.4.174 private authentication diagnostics — September17,2026
 
 Installed exact174 on Sense/app0 and LCD/app1, both SDK VALID, preserving173 fallback banks and protected data. Both canonical builds and nine focused suites pass. Two exact-password Galaxy attempts fail; the deliberate wrong-password control logs the sole raw SDK auth event. Manual public HMAC/PBKDF checks pass, while197 SDK AES allocation failures were captured in the first correct-password attempt. The175 camera DMA reserve fix is pending; no proved message-stage cause, successful phone setup or public release. [Evidence and limits](docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md).

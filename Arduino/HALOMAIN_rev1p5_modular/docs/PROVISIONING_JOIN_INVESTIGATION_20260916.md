@@ -1,6 +1,6 @@
 # Provisioning join investigation — September 16, 2026
 
-Current installed diagnostic is private174, source `75debe873675ed1519c455e23275f3aefd1642db`, build `6.4.174-20260917T050100Z-75debe873675`. Both canonical builds/artifact checks and nine focused suites pass, retaining173/172 test lineage. Sense/app0 and LCD/app1 are SDK VALID;173 fallback banks and NVS are preserved. Two exact-password Galaxy joins fail; only the wrong-password control logs the SDK auth event. Public HMAC/PBKDF checks pass, but197 SDK AES allocation errors were captured during the first correct attempt. A camera DMA reserve fix is being prepared for175; its effectiveness is unproved. No authentication fix or publication is claimed. Continue from174 or reviewed descendants. Read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`; keep known setup sleep/ownership limits recorded.
+Current private source is 175, `e303bb1cbec1ff4efefdc3232566b387921ad00c`, build `6.4.175-20260917T052511Z-e303bb1cbec1`. The full 175 pair passed canonical builds/artifact checks and ten focused suites; only Sense175/app1 was installed, retaining LCD174/app1. Both report SDK VALID. Three Galaxy joins across cold and warm setup passed association, DHCP and local HTTP 200 with no captured AES errors. The later app flow eventually persisted provisioned=1/owner=1 and stopped the AP, but a 121-second Sense response gap left setup unresponsive and drove LCD fallback sleep. Responsive full provisioning is not accepted. Camera reserve restoration also failed; same-boot camera recovery remains unqualified. No publication. Continue from reviewed 175 descendants, retaining all media/OTA fixes and known setup sleep/ownership limits. Read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`.
 
 ## Confirmed icon defect and source fix
 
@@ -233,10 +233,91 @@ implemented; no175 build, install or successful phone outcome is claimed here.
 Known late/revived setup sleep and blocking STA ownership limits remain separate.
 
 Evidence root: `/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174`.
-`RELEASE_BASELINE.json.current_working_source` pins the exact sealed pair,
+`RELEASE_BASELINE.json.previous_working_source_174` pins the exact sealed pair,
 source/host/artifact receipts, `INSTALLATION174-REVIEW.json`,
 `health174-observed001/RESULT.json`, `ap-auth174-experiment001/RESULT.json` and
 its immutable `AES-ADDENDUM.json`. All captures are closed and Android log owners
 reaped. Root reports final test-network cleanup and restoration to Garage Member,
 preserving original networks0/1; neither Mac Wi-Fi changed. No public OTA,
 complete provisioning, media recovery or full-product acceptance is claimed.
+
+
+## Private175: setup AP joins recover; full app flow remains unaccepted
+
+Source `e303bb1cbec1ff4efefdc3232566b387921ad00c`, build
+`6.4.175-20260917T052511Z-e303bb1cbec1`, releases the16KiB camera DMA reserve
+before provisioning scan/AP startup and suppresses reacquisition while the
+actual AP remains active. Both canonical images, artifact checks and ten focused
+snapshot suites pass, retaining174/172 host lineage. All unrelated runtime,
+including LCD, is unchanged from174. Sense image grows512bytes/static RAM16bytes;
+LCD footprints are unchanged. The new reserve hook compiler frame is64bytes;
+runtime stack high-water was not measured.
+
+Physical service installed **Sense175/app1 only**, preserving Sense174/app0 and
+protected data. LCD remains174/app1. The full175 pair is a build artifact, not an
+installed paired175 claim. Fresh mixed-board SDK VALID health includes a bound
+LCD nonce/CRC. The first post-service capture failed because the LCD USB port was
+absent; an actuator wake preceded the successful health capture. This is assisted
+bench evidence, not a scheduled or USB-free wake pass.
+
+The Galaxy joined cold setup sessionC5E7 twice, then warm reset session667C once.
+All three reached target BSSID9a:a3:16:f8:1a:6c, COMPLETED, a192.168.4.x address,
+and HTTP200 from GET /info. Response SSID/password matched the exact private
+startup input. No SDK AES allocation error was captured in retained startup,
+phone-join002 or phone-warm001. These are two joins on one fresh setup boot and
+one after an existing setup reset, not three device cold boots. They establish
+that the previous AP join failure no longer reproduces in this bounded test;
+they do not establish a precise PMK/MIC/M3-stage cause or complete provisioning.
+
+Warm setup exit logged reserve reacquisition failure: largest contiguous block
+16,372bytes, required16,384. The next AP started with reserve held=0 and still
+passed its phone trial. Existing camera recovery after completed setup has not
+yet been physically qualified. The later closed app capture verifies eventual provisioned=1/owner=1, but
+responsive full setup failed as described below.
+
+Evidence root: `/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175`.
+- `candidate175-001/RELEASE-PAIR.json`: sealed full pair, SHA256
+  `58764abb34c52feb30b52ac3c1bf174e443143bff8bb0efcd7d87540e4951191`.
+- `INSTALLATION175-REVIEW.json`: Sense-only service, SHA256
+  `fc05005f0f38c231189010b016df815a102c6e063be075a407a99749912d3fb6`.
+- `health175-observed001/RESULT.json`: mixed SDK health, SHA256
+  `292a83e99286b8f81b2d58f05ebfc3dac8fe39935375aae6754a78a49c8959be`.
+- `ap-join175-cold001/RESULT.json`: two closed cold-session trials, SHA256
+  `ea95698268c1576f3578cee36c9eed96aba8f1d3050ce69c5309e503d26b4f9b`.
+- `ap-join175-warm001/RESULT.json`: warm trial and reserve warning, SHA256
+  `38ed4b278d345f5afcfcb036ccf78d409f6732ac295c614cc32a808e279eee28`.
+
+- `app-flow175-observed001/RESULT.json`: eventual claim with responsiveness failure,
+  SHA256 `6c0fb90be24e2aae1a21ac75b68fbc6e730cdb8865db70ec29fae29770ca7101`.
+
+All three Android capture owners closed/reaped. Temporary IDs9/10/11 were
+forgotten and the retained final network list contains original IDs0/1 only.
+The recorded final status says not connected; later Garage Member restoration
+was reported but is not established by that file. Neither Mac Wi-Fi changed.
+Known setup sleep/STA ownership limits remain; no publication, full-product,
+new media retry, OTA, scheduled-wake or camera recovery acceptance is claimed.
+
+
+### App flow: eventual ownership, failed responsiveness
+
+The closed app-provision001 capture records halo_app 1.16 POST /wifi. The first
+home-station attempt reported reason202; the existing retry connected and marked
+provisioned=1. Sense last logged PONG at391206ms, then logged a claim HTTP-1
+response at512540ms: a121,334ms response gap. This is the observed log interval,
+not a measured TLS function start/end. The next claim returned HTTP200 with
+owner present at514691ms. AP shutdown completed at529820ms; firmware then reported
+provisioned=1/owner=1 and eventually entered deep sleep at545792ms.
+
+During the gap, LCD entered its sleep sequence and exhausted three25-second
+Sense handshakes, then took the15-second fallback timer sleep. The user's
+finishing-setup screen appeared frozen while the app reconnected. This was not
+a permanent deadlock: owner persistence and shutdown eventually completed.
+The long blocking interval nevertheless fails a responsive full setup flow.
+A176 claim-liveness/LCD progress-lease fix is being prepared; no176 artifact or
+successful retest is claimed here.
+
+Final AP shutdown again failed to reacquire the16KiB reserve (largest14,836),
+with later recovery warnings also captured. No same-boot camera capture was
+performed before sleep. The immutable closed receipt preserves those warnings,
+the actual claim response sequence and both sleep tails. Owner state persistence
+is observed; full functional acceptance remains false.
