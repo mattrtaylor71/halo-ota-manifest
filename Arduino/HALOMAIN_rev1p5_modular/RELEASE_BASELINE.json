@@ -5965,14 +5965,14 @@
   },
   "current_working_source": {
     "version": "6.4.171",
-    "status": "PASS_HOST_AND_CANONICAL_BUILDS_NOT_INSTALLED",
+    "status": "PASS_171_BUILDS_WITH_UNBUILT_PROVISIONING_DESCENDANT",
     "artifact_source_commit": "aa221c2ef8871e428747c32ac61216993dae58bc",
     "artifact_source_firmware_tree": "d71dc475d14e05148bb153251ad857380605d713",
     "runtime_fix_commit": "aa221c2ef8871e428747c32ac61216993dae58bc",
     "build_id": "6.4.171-20260917T014934Z-aa221c2ef887",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from aa221c2ef8871e428747c32ac61216993dae58bc or reviewed descendants preserving all prior fixes. 171 is built/host-tested, not installed or published.",
+    "source_selection": "Continue from e58a4fb95ecfc408c867434e261f35c84308291f or reviewed descendants. Preserve all171 fixes.171 artifacts remain unchanged and uninstalled; newer provisioning source is host-tested but unbuilt.",
     "candidate_receipt": {
       "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/CANDIDATE171.json",
       "sha256": "00f523745b4751e13ecd9108c8c5be1d93cb1e56ff5edd533767cebaa24cd524"
@@ -6014,7 +6014,19 @@
       "Cancellation waits for the next safe storage/network checkpoint; current SDK/filesystem calls cannot be interrupted instantly.",
       "Compiler stack review is not measured runtime free stack.",
       "170 service scripts remain bound to170; rebind/review171 artifacts before application-only installation, preserve169 fallback banks and all provisioning/NVS/SD."
-    ]
+    ],
+    "unbuilt_provisioning_descendant": {
+      "source_commit": "e58a4fb95ecfc408c867434e261f35c84308291f",
+      "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
+      "built": false,
+      "installed": false,
+      "published": false,
+      "phone_join_root_cause_confirmed": false,
+      "fixes": [
+        "Draw missing profile silhouette in existing setup badge",
+        "Retire stale normal STA guard while provisioning owns radio"
+      ]
+    }
   },
   "previous_verified_paired_health_158": {
     "version": "6.4.158",

@@ -1,5 +1,8 @@
 # HALO Firmware Agent Guide
 
+Current source includes unbuilt provisioning fixes in `e58a4fb` (profile emblem and stale STA guard). Read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md`.171 artifacts are unchanged; both boards still169. The phone join failure is unresolved. Do not substitute171 artifacts for this newer source; allocate172+ when built.
+
+
 - Current development candidate is private171, artifact source `aa221c2`. 45 host suites and both canonical production builds/artifact checks pass. **Not installed or published**; both boards remain169 SDK VALID and LCD is at real provisioning step3, app_connected=0. Read `docs/WIFI_MEDIA_CORNER_TESTING_171.md` and `RELEASE_BASELINE.json.current_working_source`. Three corner fixes cover Wi-Fi clock zero, accepted-delete recovery and SD replay yielding to input. Complete real setup before physical media/sleep/retry qualification; rebind171 installation tooling and preserve169 fallback banks. Frozen158/public162 remain separate references. Continue from171 or reviewed descendants; allocate unused172+.
 
 ## Release Baseline

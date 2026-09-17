@@ -1,3 +1,7 @@
+# September16: provisioning follow-up source, not installed
+
+Source `e58a4fb` completes the missing profile icon and prevents an obsolete normal Wi-Fi guard from disrupting active setup. Actual rendering and ownership regressions pass;32 generated QR codes roundtrip exactly through Apple Vision and the iOS parser. Phone association still needs diagnosis; a fresh setup-session recovery experiment is pending.171 builds remain unchanged, and installed pair remains169. [Evidence and limits](docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md).
+
 # 6.4.171 candidate — September16,2026
 
 Fixed Wi-Fi zero-clock timeout, interrupted accepted-upload deletion/slot recovery, and SD replay preemption after user input. 45 host suites and both canonical builds/artifact checks pass. Source `aa221c2`; not installed/published. Both boards169 remain in real provisioning. [Evidence and limits](docs/WIFI_MEDIA_CORNER_TESTING_171.md).
