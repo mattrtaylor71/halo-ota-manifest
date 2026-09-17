@@ -73,6 +73,7 @@ void dump_system_truth(const char* reason);
 #include "../halo_ota_demo/firmware/shared/ProvisioningState.h"
 #include "../halo_ota_demo/firmware/shared/OtaIntent.h"
 bool halo_provisioning_active();
+extern "C" bool halo_provisioning_claim_worker_poll();
 bool halo_get_provisioned_wifi(char* ssid, size_t ssid_sz, char* pass, size_t pass_sz);
 void halo_prod_pre_setup();
 void halo_prod_setup();
@@ -1919,6 +1920,11 @@ static bool uploads_held_for_session(const char** why_out) {
 static void upload_worker_task(void *arg) {
   Serial.println("[UPLOAD] Background upload task started");
   for (;;) {
+#ifdef HALO_SENSE_PROD_WRAPPER
+    // Claim transport borrows this existing stack, ahead of media ownership
+    // gates. It never enters the upload queue or takes custody of media.
+    if (halo_provisioning_claim_worker_poll()) continue;
+#endif
     UploadWorkerClaim worker_claim;
     UploadJob job = {};
     bool got_job = false;

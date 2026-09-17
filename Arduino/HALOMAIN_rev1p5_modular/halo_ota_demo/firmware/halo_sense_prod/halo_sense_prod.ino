@@ -1758,8 +1758,11 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay);
 void maybeRunOtaCheck(const char* reason);
 static void handle_mqtt_commands();
 
+static std::atomic<bool> g_provision_reset_pending{false};
+
 bool halo_provisioning_active() {
-  return g_provisioning_manager.isSetupModeActive();
+  return g_provisioning_manager.isSetupModeActive() ||
+         g_provisioning_manager.claimTransportBusy() || g_provision_reset_pending.load();
 }
 
 void halo_prod_provision_diag() {
@@ -4689,6 +4692,14 @@ void halo_prod_pre_setup() {
 }
 
 void halo_prod_reset_wifi() {
+  if (g_provisioning_manager.claimTransportBusy()) {
+    if (!g_provision_reset_pending.exchange(true)) {
+      g_provisioning_manager.cancelOwnerClaim();
+      LOG_INFO("[PROVISION] Reset deferred until claim transport closes");
+    }
+    return;
+  }
+  g_provision_reset_pending.store(false);
   LOG_INFO("[PROVISION] Reset Wi-Fi requested");
   // Explicit retry owns a fresh setup session. startSetupMode() is otherwise
   // idempotent while the failed session's AP is still running, leaving the
@@ -6211,6 +6222,10 @@ void halo_prod_loop() {
   service_provision_ap_restart();
   service_provision_crypto_diag();
   g_provisioning_manager.update();
+  if (g_provision_reset_pending.load() && !g_provisioning_manager.claimTransportBusy()) {
+    halo_prod_reset_wifi();
+    return;
+  }
   ProvisioningState::State prov_state = ProvisioningState::getState();
   const bool prov_state_changed = prov_state != g_last_prov_state;
   if (prov_state_changed) {

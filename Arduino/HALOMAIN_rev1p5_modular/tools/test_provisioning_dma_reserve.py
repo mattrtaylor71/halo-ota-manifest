@@ -80,6 +80,8 @@ static bool ap_start_ok=true,http_start_ok=true,ap_stop_ok=true;
 static int start_mode=3;
 class ProvisioningManager {public:
  bool setup_mode_active=false;char ap_ssid[64]={},ap_password[16]={},target_home_ssid[64]={};
+ bool claim_busy=false;
+ bool claimTransportBusy()const{return claim_busy;}
  unsigned sta_failure_count=0,last_app_request_ms=0,connected_state_set_ms=0;
  bool startSetupMode();void stopSetupMode();
  bool startSoftAP(){check(g_camera_dma_provisioning&&!g_camera_dma_reserve,"reserve released before AP");radio_mode=start_mode;return ap_start_ok;}
@@ -106,7 +108,9 @@ int main(){
  check(!g_camera_dma_reserve&&allocations==0,"nested/repeated TLS restores cannot rehold during AP");
  check(!camera_dma_reserve_acquire("camera_deinit"),"camera deinit cannot rehold during AP");
  check(output.find("provisioning=1 held=0 free_before=")!=std::string::npos,"memory proof logged");
- manager.stopSetupMode();check(!g_camera_dma_provisioning&&g_camera_dma_reserve&&allocations==1,"exit reacquires after AP down");
+ manager.claim_busy=true;manager.stopSetupMode();
+ check(manager.setup_mode_active&&g_camera_dma_provisioning&&!g_camera_dma_reserve,"claim cleanup blocks AP teardown and reserve restore");
+ manager.claim_busy=false;manager.stopSetupMode();check(!g_camera_dma_provisioning&&g_camera_dma_reserve&&allocations==1,"exit reacquires after AP down");
  auto ptr=g_camera_dma_reserve.load();check(camera_dma_reserve_acquire("normal")&&ptr==g_camera_dma_reserve,"normal acquire idempotent");
  camera_dma_reserve_release("camera_init");check(!g_camera_dma_reserve,"actual camera can consume reserve");
  check(camera_dma_reserve_acquire("camera_deinit"),"normal camera deinit restores reserve");

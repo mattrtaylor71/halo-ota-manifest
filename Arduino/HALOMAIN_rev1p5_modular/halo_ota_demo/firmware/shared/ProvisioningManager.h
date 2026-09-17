@@ -77,6 +77,8 @@ public:
 
   // Reset claim state to allow retry (e.g., after SoftAP shutdown frees memory)
   void resetClaimForRetry();
+  bool claimTransportBusy() const;
+  void cancelOwnerClaim();
 
   // Presentation only. Owner presence takes precedence over this flag.
   bool ownerClaimExhausted() const {
@@ -156,6 +158,7 @@ private:
   void sendProvisionStatus(const char* state_str);
   void resetOwnerClaimState();
   bool tryClaimOwnerId();
+  bool applyClaimResult();
 };
 
 #endif // PROVISIONING_MANAGER_H

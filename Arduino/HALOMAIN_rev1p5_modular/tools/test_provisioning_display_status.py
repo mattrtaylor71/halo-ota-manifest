@@ -45,6 +45,7 @@ def definition(text, signature):
 
 PREFIX = r'''
 #include <cstdint>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -91,6 +92,8 @@ struct FakeProvisioningManager {
     return true;
   }
   bool ownerClaimExhausted() const { return exhausted; }
+  bool claimTransportBusy() const { return false; }
+  void cancelOwnerClaim() {}
   void resetClaimForRetry() { if (owner_id.empty()) exhausted=false; }
   bool isAppSessionActive(uint32_t now) const {
     ++app_queries;
@@ -98,6 +101,7 @@ struct FakeProvisioningManager {
   }
 } g_provisioning_manager;
 static ProvisioningDisplayStatus g_provision_display_status;
+static std::atomic<bool> g_provision_reset_pending{false};
 static char g_last_provision_display_status[24] = "";
 static uint32_t g_provision_display_poll_ms = 0;
 static uint32_t g_provision_display_send_ms = 0;

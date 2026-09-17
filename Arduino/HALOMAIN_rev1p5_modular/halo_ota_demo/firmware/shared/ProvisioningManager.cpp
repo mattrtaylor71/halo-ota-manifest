@@ -14,6 +14,8 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include "NtpDnsGuard.h"
+#include "ProvisioningClaimJob.h"
+#include "ProvisioningClaimTransport.h"
 #include <WiFiClientSecure.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -26,6 +28,7 @@ static WebServer* server = nullptr;
 static DNSServer* dns_server = nullptr;
 static const uint16_t DNS_PORT = 53;
 static ProvisioningManager* g_provisioning_manager = nullptr;
+static provision_claim::Job g_owner_claim_job;
 
 // Arduino AP.cpp does not forward WIFI_EVENT_AP_WRONG_PASSWORD. Observe this
 // one SDK event directly; payload/MAC/key material is intentionally ignored.
@@ -397,6 +400,7 @@ void ProvisioningManager::update() {
     return;
   }
   serviceProvisionApAuthEvents();
+  applyClaimResult();
   if (!setup_mode_active) {
     return;
   }
@@ -688,6 +692,9 @@ bool ProvisioningManager::startSetupMode() {
 }
 
 void ProvisioningManager::stopSetupMode() {
+  // The owner loop keeps HTTP/UART alive until the worker has closed its socket.
+  // Explicit reset requests cancel first and are deferred by the wrapper.
+  if (claimTransportBusy()) return;
   if (!setup_mode_active) {
     return;
   }
@@ -980,10 +987,21 @@ void ProvisioningManager::setLastError(const char* error) {
 }
 
 void ProvisioningManager::resetOwnerClaimState() {
+  g_owner_claim_job.cancel();
   last_claim_attempt_ms = 0;
   claim_attempts = 0;
   claim_in_progress = false;
   claim_completed = false;
+}
+
+bool ProvisioningManager::claimTransportBusy() const {
+  return g_owner_claim_job.busy();
+}
+
+void ProvisioningManager::cancelOwnerClaim() {
+  g_owner_claim_job.cancel();
+  claim_in_progress = false;
+  claim_completed = true;
 }
 
 void ProvisioningManager::resetClaimForRetry() {
@@ -1054,8 +1072,28 @@ void ProvisioningManager::startHomeWifiConnect(const char* ssid, const char* pas
 extern "C" void halo_tls_free_dma_reserve();
 extern "C" void halo_tls_restore_dma_reserve();
 
+// Reuses the existing upload worker stack; called before its media gates.
+// All network locals and guards are destroyed before Ready is published.
+extern "C" bool halo_provisioning_claim_worker_poll() {
+  const provision_claim::Request* request = g_owner_claim_job.take();
+  if (!request) return false;
+  provision_claim::Result result;
+  {
+    HaloNtpDnsGuard ntp_dns_guard;
+    struct DmaGuard {
+      DmaGuard() { halo_tls_free_dma_reserve(); }
+      ~DmaGuard() { halo_tls_restore_dma_reserve(); }
+    } dma;
+    const String url = String(PROVISIONING_CLAIM_BASE_URL) + kProvisioningClaimPath;
+    result = provision_claim::transport(g_owner_claim_job, *request, url.c_str(),
+                                        kAmazonRootCa1, OTA_TLS_INSECURE_DEBUG);
+  }
+  g_owner_claim_job.finish(result);
+  return true;
+}
+
 bool ProvisioningManager::tryClaimOwnerId() {
-  if (claim_completed || claim_in_progress) {
+  if (claim_completed || claim_in_progress || claimTransportBusy()) {
     return false;
   }
   
@@ -1084,7 +1122,6 @@ bool ProvisioningManager::tryClaimOwnerId() {
   // Connected-state service started a bounded, nonblocking SNTP attempt. Let
   // it receive a reply or expire before the first claim DNS/TLS operation.
   if (halo_sntp_sync_pending && halo_sntp_sync_pending()) return false;
-  HaloNtpDnsGuard ntp_dns_guard;
   if (owner_id_set) {
     LOG_WARN("[PROVISION] Owner code present; clearing existing owner_id to re-claim");
     ProvisioningState::clearOwnerId();
@@ -1112,60 +1149,61 @@ bool ProvisioningManager::tryClaimOwnerId() {
     return false;
   }
   
-  String url = String(PROVISIONING_CLAIM_BASE_URL) + kProvisioningClaimPath;
-  claim_in_progress = true;
-  claim_attempts++;
-  last_claim_attempt_ms = now;
-  
+  provision_claim::Request request;
+  request.queued_ms = now;
+  strncpy(request.owner_code, owner_code, sizeof(request.owner_code) - 1);
+  request.previous_owner_set = prev_owner_id_set;
+  strncpy(request.previous_owner, prev_owner_id, sizeof(request.previous_owner) - 1);
   DynamicJsonDocument payload(256);
   payload["code"] = owner_code;
   payload["device_id"] = device_id[0] ? device_id : "";
   payload["firmware"] = kFirmwareVersion ? kFirmwareVersion : "";
-  String body;
-  serializeJson(payload, body);
-
-  // Free the 16KB camera DMA reserve so the TLS handshake below has enough
-  // CONTIGUOUS internal RAM (the owner-claim runs during provisioning when the
-  // internal heap is fragmented by AP_STA). The RAII guard re-acquires it on
-  // EVERY exit path so the camera still has its reserve for later captures.
-  // Hooks are implemented in halo_sense_prod.ino (external "C" linkage); this is
-  // the same free+reacquire pattern the upload/voice TLS paths already use.
-  struct DmaReserveTlsGuard {
-    DmaReserveTlsGuard() { halo_tls_free_dma_reserve(); }
-    ~DmaReserveTlsGuard() { halo_tls_restore_dma_reserve(); }
-  } _dma_tls_guard;
-
-  HTTPClient http;
-  WiFiClientSecure secure_client;
-  // The owner claim binds this device to a user account and has no integrity
-  // backstop the way the OTA path does (no manifest SHA to fall back on), so
-  // the peer must be validated.
-#if OTA_TLS_INSECURE_DEBUG
-  secure_client.setInsecure();
-#else
-  secure_client.setCACert(kAmazonRootCa1);
-#endif
-
-  if (!http.begin(secure_client, url)) {
-    claim_in_progress = false;
-    setLastError("Claim failed (HTTP begin)");
+  if (payload.overflowed() || measureJson(payload) >= sizeof(request.body)) {
+    setLastError("Claim request too large");
     return false;
   }
-  http.setConnectTimeout(15000);
-  http.setReuse(false);
-  http.addHeader("Content-Type", "application/json");
-  
-  int http_code = http.POST(body);
-  String response = http.getString();
-  http.end();
+  serializeJson(payload, request.body, sizeof(request.body));
+  if (!g_owner_claim_job.submit(request)) return false;
+  claim_in_progress = true;
+  claim_attempts++;
+  last_claim_attempt_ms = now;
+  LOG_INFO("[PROVISION] Claim queued attempt=%u budget_ms=%lu", claim_attempts,
+           (unsigned long)provision_claim::kAttemptMs);
+  return false;
+}
+
+bool ProvisioningManager::applyClaimResult() {
+  provision_claim::Request request;
+  provision_claim::Result result;
+  bool current = false;
+  if (!g_owner_claim_job.consume(request, result, current)) return false;
   claim_in_progress = false;
+  char current_code_raw[32] = {}, current_code[32] = {};
+  const bool same_code = ProvisioningState::loadOwnerCode(current_code_raw, sizeof(current_code_raw)) &&
+                         normalize_owner_code(current_code_raw, current_code, sizeof(current_code)) &&
+                         !strcmp(current_code, request.owner_code);
+  if (!current || !same_code ||
+      ProvisioningState::getState() != ProvisioningState::STATE_CONNECTED) {
+    LOG_INFO("[PROVISION] Claim result discarded stale=1 elapsed_ms=%lu", (unsigned long)result.elapsed_ms);
+    return false;
+  }
+  LOG_INFO("[PROVISION] Claim transport http=%d complete=%u overflow=%u elapsed_ms=%lu",
+           result.http_code, result.complete ? 1u : 0u, result.overflow ? 1u : 0u,
+           (unsigned long)result.elapsed_ms);
+  if (!result.complete) {
+    setLastError(result.overflow ? "Claim response too large" : "Claim connection failed, retrying");
+    return false;
+  }
+  const int http_code = result.http_code;
+  const bool prev_owner_id_set = request.previous_owner_set;
+  const char* prev_owner_id = request.previous_owner;
   
   // 384, not 256: the response now carries an optional POSIX TZ string alongside
   // owner_id, and a truncated parse would silently drop it.
   DynamicJsonDocument resp_doc(384);
   bool resp_ok = false;
-  if (response.length() > 0) {
-    DeserializationError err = deserializeJson(resp_doc, response);
+  if (result.response[0]) {
+    DeserializationError err = deserializeJson(resp_doc, result.response);
     resp_ok = (!err);
   }
   const char* owner_id_str = "";
@@ -1307,6 +1345,15 @@ void handleInfo() {
 void handleScan() {
   noteProvisionRequestContext("GET /scan");
 
+  // A scan changes radio scheduling. Leave the active claim alone, including
+  // force-refresh requests now serviced concurrently with its worker.
+  if (g_provisioning_manager && g_provisioning_manager->claimTransportBusy()) {
+    server->sendHeader("Retry-After", "2");
+    if (g_scan_cached_response.length()) server->send(200, "application/json", g_scan_cached_response);
+    else server->send(202, "application/json", "{\"api_version\":1,\"status\":\"busy\",\"networks\":[]}");
+    return;
+  }
+
   updateProvisionScanState();
   unsigned long now = millis();
   bool force_refresh = requestArgIsTrue("force") || requestArgIsTrue("refresh");
@@ -1382,6 +1429,14 @@ void handleScan() {
   server->send(202, "application/json", "{\"api_version\":1,\"status\":\"scanning\",\"networks\":[]}");
 }
 
+static bool rejectClaimMutationWhileBusy() {
+  if (!g_provisioning_manager || !g_provisioning_manager->claimTransportBusy()) return false;
+  server->sendHeader("Retry-After", "2");
+  server->send(409, "application/json",
+               "{\"error\":\"claim_busy\",\"retryable\":true,\"retry_after_ms\":2000}");
+  return true;
+}
+
 void handleWifiPost() {
   if (!g_provisioning_manager) {
     server->send(500, "application/json", "{\"error\":\"server_error\"}");
@@ -1389,6 +1444,7 @@ void handleWifiPost() {
   }
 
   noteProvisionRequestContext("POST /wifi");
+  if (rejectClaimMutationWhileBusy()) return;
   
   if (!server->hasArg("plain")) {
     g_provisioning_manager->setLastError("Missing request body");
@@ -1607,6 +1663,7 @@ void handleUserIdPost() {
   }
 
   noteProvisionRequestContext("POST /user-id");
+  if (rejectClaimMutationWhileBusy()) return;
   
   if (!server->hasArg("plain")) {
     server->send(400, "application/json", "{\"error\":\"invalid_payload\"}");
@@ -1636,6 +1693,7 @@ void handleUserIdPost() {
   
   LOG_INFO("[HTTP] Received owner_id: %s", owner_id.c_str());
   
+  g_provisioning_manager->cancelOwnerClaim();
   ProvisioningState::saveOwnerId(owner_id.c_str());
   
   // Record when owner_id was set (extends SoftAP grace period)
