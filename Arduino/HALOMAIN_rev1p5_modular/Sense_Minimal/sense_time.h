@@ -213,9 +213,19 @@ static void sense_ntp_stop_locked() {
 
 static bool sense_ntp_attempt_pending() {
   std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
-  return g_ntp_attempt_started && !g_ntp_attempt_finished &&
-         !g_ntp_sleep_quiesced && g_ntp_received_epoch.load() == 0 &&
-         ((uint32_t)millis() - g_ntp_attempt_start_ms) < g_ntp_attempt_budget_ms;
+  if (!g_ntp_attempt_started || g_ntp_sleep_quiesced ||
+      g_ntp_fresh_this_boot.load() || g_ntp_received_epoch.load() != 0) return false;
+  const uint32_t elapsed = (uint32_t)millis() - g_ntp_attempt_start_ms;
+  if (!g_ntp_attempt_finished && elapsed < g_ntp_attempt_budget_ms) return true;
+  // Sleep-path work can cross the primary deadline after this iteration's
+  // owner service. Allow one bounded handoff to close it and start the already
+  // requested media retry. This does NOT extend DNS/SNTP acceptance or create
+  // another generation; if the owner cannot reconnect, the sleep hold ends one
+  // second after the ORIGINAL deadline, regardless of repeated queries.
+  return g_ntp_media_retry_requested && !g_ntp_manual_retry_used.load() &&
+         g_ntp_attempt_budget_ms == SENSE_NTP_ATTEMPT_MS &&
+         elapsed >= SENSE_NTP_ATTEMPT_MS &&
+         elapsed - SENSE_NTP_ATTEMPT_MS < 1000;
 }
 
 static bool sense_time_has_fresh_sync() {

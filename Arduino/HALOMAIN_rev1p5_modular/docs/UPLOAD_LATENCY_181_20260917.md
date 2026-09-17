@@ -51,3 +51,27 @@ boundary tests do not replace actual device timing and interruption checks.
 
 Record final source, canonical artifact identity, host results, installation and
 measured after-results here after they exist. Preserve all failed test receipts.
+
+## Private181 measurement and182 boundary correction
+
+Private181 source `53b8e56cb72789a43093032a2eee71bacb8b8533` passed23
+canonical-snapshot suites and both artifact checks. Controlled Sense-only service
+selected181 app0 and preserved179 app1; LCD180 remained unchanged. Both observed
+boards were SDK VALID. This is a controlled service, not an OTA transfer.
+
+`voice181-001` uploaded100352 bytes. Recording completion to observed HTTP202
+was13.286s: queue to sleep flush7.26s, HTTP POST to2025.91s. Exact cloud session
+correlation confirmed durable custody and backend completion2.749s after server
+acceptance. Fresh time arrived on the primary attempt; this is not a measurement
+of the secondary-clock path or a guarantee of that latency under weak Wi-Fi.
+
+`image181-001` caught a real missing boundary: sleep-path work crossed the
+primary15s deadline after owner service, so the pending predicate became false
+before the requested secondary generation could start. The image was saved to
+SD with a300s retry; the strict immediate-delivery test failed. Retain that
+failure.182 gives the owner at most one second after the original primary
+deadline to admit the already-requested opportunity. This does not extend
+DNS/SNTP acceptance, create another generation, or hold sleep indefinitely if
+Wi-Fi is unavailable. The actual sleep guard with time advancing between owner
+service and sleep admission reproduces the failure on frozen181 and passes the
+bounded correction.

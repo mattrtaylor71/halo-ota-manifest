@@ -59,6 +59,36 @@ static void scenario(uint32_t budget=15000){reset(budget);queue_head={};queued=t
 static void service(){service_boot_wifi_connect(now_ms);}
 int main(){
  timeval tv{};tv.tv_sec=1800000000;
+ // Physical181 reproducer: the owner services a still-live primary, then
+ // ordinary sleep-path work advances past its deadline before the next owner
+ // iteration. The requested secondary must get a short handoff opportunity.
+ scenario();service();now_ms+=14900;service();
+ const auto before_sleep_accept=g_ntp_accept_until_ms.load();
+ const auto before_sleep_dns=g_ntp_resolve_until_ms.load();
+ now_ms+=200;const char* boundary_reason=nullptr;
+ CHECK(!sense_can_sleep_now(&boundary_reason)&&!strcmp(boundary_reason,"clock_sync_pending"));
+ CHECK(starts==1&&!g_ntp_manual_retry_used&&!sense_time_has_fresh_sync());
+ CHECK(g_ntp_accept_until_ms==before_sleep_accept&&g_ntp_resolve_until_ms==before_sleep_dns);
+ sense_ntp_on_sync(&tv);CHECK(g_ntp_received_epoch==0); // grace cannot accept a late primary reply
+ service();CHECK(starts==2&&g_ntp_manual_retry_used&&g_ntp_attempt_budget_ms==20000);
+ CHECK(!sense_can_sleep_now(nullptr));sync_callback(&tv);service();
+ CHECK(sense_time_has_fresh_sync()&&sense_can_sleep_now(nullptr));
+ // Disconnection/owner starvation cannot turn the handoff into an endless
+ // sleep hold. Its end is tied to the original primary deadline, not polling.
+ scenario();service();wifi=false;now_ms+=15000;service();
+ CHECK(g_ntp_attempt_finished&&sense_ntp_attempt_pending()&&starts==1);
+ now_ms+=999;CHECK(sense_ntp_attempt_pending());++now_ms;
+ CHECK(!sense_ntp_attempt_pending()&&sense_can_sleep_now(nullptr));
+ for(unsigned n=0;n<8;++n){sense_ntp_request_media_retry();service();CHECK(!sense_ntp_attempt_pending()&&starts==1);}
+ // No request, an extended campaign, sleep quiescence, or a ready mailbox
+ // cannot borrow the grace. Existing SDK receive/DNS deadlines stay closed.
+ scenario();queued=false;service();now_ms+=15000;CHECK(!sense_ntp_attempt_pending());
+ scenario(55000);service();now_ms+=55000;CHECK(!sense_ntp_attempt_pending());
+ scenario();service();now_ms+=15000;sense_ntp_quiesce_for_sleep();CHECK(!sense_ntp_attempt_pending());
+ scenario();service();now_ms+=14999;sync_callback(&tv);now_ms+=2;CHECK(!sense_ntp_attempt_pending());
+ service();CHECK(sense_time_has_fresh_sync()&&starts==1);
+ scenario();now_ms=UINT32_MAX-5000;service();now_ms+=15100;
+ CHECK(sense_ntp_attempt_pending());service();CHECK(starts==2&&g_ntp_attempt_budget_ms==20000);
  // Actual owner sees fresh FIFO before begin, preserves primary, then starts
  // secondary in the SAME expiry iteration before an ordinary sleep decision.
  scenario();service();CHECK(starts==1&&g_ntp_attempt_budget_ms==15000);
