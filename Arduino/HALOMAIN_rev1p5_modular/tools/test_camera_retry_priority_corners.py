@@ -20,10 +20,12 @@ def harness():
     main = (ROOT / "Sense_Minimal/Sense_Minimal.ino").read_text()
     init = definition(camera, "static bool init_camera()")
     drain = definition(init, "  if (http_inflight) {")
+    quiesce = definition(camera, "static bool camera_quiesce_wifi_for_dma(")
     limit = re.search(r"static const uint32_t CAMERA_HTTP_DRAIN_MAX_MS = (\d+);", main)
     assert limit, "Camera drain limit must come from the actual firmware"
     return r'''
 #include <cassert>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
@@ -31,6 +33,12 @@ def harness():
 static uint32_t now_ms, started_ms, release_ms;
 static bool http_inflight, foreground_active;
 static unsigned waits, disconnects, modes, diagnostics;
+static std::atomic<bool> g_camera_radio_off_owned{false};
+namespace sense_backup_diag {static std::atomic<unsigned> wifi_calls{0};}
+static void* http_mutex=nullptr;
+static constexpr int pdTRUE=1;
+static int xSemaphoreTake(void*,unsigned){return pdTRUE;}
+static void xSemaphoreGive(void*){}
 static constexpr unsigned WIFI_OFF=0, WIFI_STA=1;
 static uint32_t millis(){return now_ms;}
 static uint32_t pdMS_TO_TICKS(uint32_t value){return value;}
@@ -39,16 +47,18 @@ static void vTaskDelay(uint32_t value){
   now_ms+=value;
   if(release_ms!=UINT32_MAX && uint32_t(now_ms-started_ms)>=release_ms)http_inflight=false;
 }
+static void delay(uint32_t value){vTaskDelay(value);}
 static struct {
+  unsigned getMode(){return modes?WIFI_OFF:WIFI_STA;}
   void disconnect(bool wifioff){assert(wifioff&&!http_inflight);++disconnects;}
-  void mode(unsigned mode){assert(!http_inflight);assert(mode==(modes?WIFI_STA:WIFI_OFF));++modes;}
+  bool mode(unsigned mode){assert(!http_inflight);assert(mode==WIFI_OFF);++modes;return true;}
 } WiFi;
 static struct {
   template<class... A> void printf(const char*,A...){}
   void println(const char*){}
 } Serial;
 static void uart_send_sense_diag(const char*,const char*,const char*,int32_t,const char*){++diagnostics;}
-''' + f"static constexpr uint32_t CAMERA_HTTP_DRAIN_MAX_MS={limit.group(1)};\n" + r'''
+''' + f"static constexpr uint32_t CAMERA_HTTP_DRAIN_MAX_MS={limit.group(1)};\n" + quiesce + r'''
 static void actual_camera_drain(){
 ''' + drain + r'''
 }
@@ -60,6 +70,7 @@ int main(){
   for(uint32_t release:{1U,19U,20U,21U,1499U,1500U,1501U,8000U,UINT32_MAX}){
     now_ms=started_ms=start;release_ms=release;http_inflight=true;
     foreground_active=prior_foreground;waits=disconnects=modes=diagnostics=0;
+    g_camera_radio_off_owned.store(false);
     actual_camera_drain();
     assert(foreground_active==prior_foreground);
     const bool drained=release<=1500;
@@ -67,7 +78,8 @@ int main(){
     assert(waits==waited/20);
     assert(uint32_t(now_ms-started_ms)==waited+(drained?100:0));
     assert(disconnects==(drained?1U:0U));
-    assert(modes==(drained?2U:0U));
+    assert(modes==(drained?1U:0U));
+    assert(g_camera_radio_off_owned.load()==drained);
     assert(diagnostics==(drained?0U:1U));
     ++cases;
   }

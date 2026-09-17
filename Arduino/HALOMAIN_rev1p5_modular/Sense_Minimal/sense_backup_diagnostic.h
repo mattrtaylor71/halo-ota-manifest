@@ -11,6 +11,10 @@
 
 // Implemented by the sketch: OTA/provisioning/HTTP/upload/binary/sleep commit.
 static bool sense_backup_diagnostic_busy();
+// Camera DMA recovery shares the connection-call admission gate. It keeps
+// background/list-entry reconnects out until camera teardown restores its
+// contiguous reserve; no credential or retry-policy state is changed.
+static std::atomic<bool> g_camera_radio_off_owned{false};
 namespace sense_backup_diag {
 enum Phase : uint8_t { Idle=0, Arming=1, Offline=2, Restoring=3 };
 static std::atomic<uint8_t> phase{Idle};
@@ -49,9 +53,11 @@ static bool sense_backup_offline_active() {
 class SenseBackupWifiCall {
  public:
   SenseBackupWifiCall() {
+    if(g_camera_radio_off_owned.load())return;
     if(sense_backup_offline_active())return;
     sense_backup_diag::wifi_calls.fetch_add(1);
-    if(sense_backup_diag::phase.load()!=sense_backup_diag::Idle) {
+    if(sense_backup_diag::phase.load()!=sense_backup_diag::Idle ||
+       g_camera_radio_off_owned.load()) {
       sense_backup_diag::wifi_calls.fetch_sub(1);return;
     }
     admitted_=true;

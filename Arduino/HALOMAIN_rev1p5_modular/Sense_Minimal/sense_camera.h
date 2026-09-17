@@ -571,12 +571,12 @@ static void deinit_camera() {
   camera_power_disable();
   Serial.printf("[CAMERA] Free heap after camera deinit: %d bytes\n", ESP.getFreeHeap());
   Serial.println("[CAMERA] Camera de-initialized successfully");
+  g_camera_radio_off_owned.store(false);
 
-  // Kick off WiFi reconnection (non-blocking) after camera freed the radio.
-  // Camera init kills WiFi (WiFi.disconnect + WIFI_OFF) to free DMA.
-  // Without this, uploads discover WiFi is down 5-15s later and must
-  // hard-reset. Calling service_wifi_maintenance() starts a background
-  // WiFi.begin() so it reconnects while the upload is being queued.
+  // Reconnect only after the camera/worker allocations have been released and
+  // the DMA reserve has been restored. Maintenance keeps its existing busy
+  // gate: if this capture still owns the foreground, the main loop retries
+  // after the operation releases ownership.
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[CAMERA] WiFi down after deinit — kick background reconnect");
     service_wifi_maintenance(millis());
@@ -584,6 +584,39 @@ static void deinit_camera() {
 }
 
 // ── Camera init ─────────────────────────────────────────────────────
+
+static bool camera_quiesce_wifi_for_dma(const char* reason) {
+  // A drain timeout must not fall through into the low-memory/retry teardown.
+  // The mutex closes the check-to-disconnect race with a new HTTP request.
+  if (http_inflight) return false;
+  const bool locked = http_mutex && xSemaphoreTake(http_mutex, 0) == pdTRUE;
+  if (http_mutex && !locked) return false;
+  const bool already_owned = g_camera_radio_off_owned.exchange(true);
+  // Entrants publish their complete call before rechecking our owner flag.
+  // Do not interrupt an admitted connect/recovery operation already in SDK I/O.
+  if (sense_backup_diag::wifi_calls.load() != 0) {
+    if (!already_owned) g_camera_radio_off_owned.store(false);
+    if (locked) xSemaphoreGive(http_mutex);
+    return false;
+  }
+  bool radio_off = false;
+  if (!http_inflight) {
+    radio_off = WiFi.getMode() == WIFI_OFF;
+    if (!radio_off) {
+      Serial.printf("[CAMERA] WiFi off for DMA reason=%s\n", reason ? reason : "unknown");
+      WiFi.disconnect(true);
+      delay(50);
+      radio_off = WiFi.mode(WIFI_OFF);
+      delay(50);
+    }
+  }
+  if (!radio_off && !already_owned) g_camera_radio_off_owned.store(false);
+  if (locked) xSemaphoreGive(http_mutex);
+  // Keep the driver off: restarting STA here reclaims the contiguous memory
+  // before esp_camera_init() can use it. deinit_camera() restores the reserve
+  // before normal Wi-Fi maintenance may reconnect.
+  return radio_off;
+}
 
 static bool init_camera() {
 #if HALO_CAMERA_KEEP_INIT
@@ -661,11 +694,7 @@ static bool init_camera() {
                            (int32_t)CAMERA_HTTP_DRAIN_MAX_MS, "skipped_wifi_kill");
     } else {
       Serial.println("[CAMERA] HTTP drained — safe to free DMA via WiFi teardown");
-      WiFi.disconnect(true);
-      vTaskDelay(pdMS_TO_TICKS(50));
-      WiFi.mode(WIFI_OFF);
-      vTaskDelay(pdMS_TO_TICKS(50));
-      WiFi.mode(WIFI_STA);
+      camera_quiesce_wifi_for_dma("http_drained");
     }
   } else {
     // No HTTP inflight. Do NOT pre-emptively tear WiFi down.
@@ -694,19 +723,15 @@ static bool init_camera() {
     if (dma_check < CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES) {
       Serial.printf("[CAMERA] DMA low (%u < %u) — killing WiFi\n",
                     (unsigned)dma_check, (unsigned)CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES);
-      if (WiFi.getMode() != WIFI_OFF) {
-        WiFi.disconnect(true);
-        vTaskDelay(pdMS_TO_TICKS(50));
-        WiFi.mode(WIFI_OFF);
-        vTaskDelay(pdMS_TO_TICKS(50));
-        WiFi.mode(WIFI_STA);
-      }
+      camera_quiesce_wifi_for_dma("preemptive");
     } else {
       Serial.printf("[CAMERA] DMA OK (%u) — WiFi stays up\n", (unsigned)dma_check);
     }
 #else
-    Serial.printf("[CAMERA] DMA %u (reserve still held, +%u on release) — keeping WiFi up\n",
-                  (unsigned)dma_check, (unsigned)CAMERA_DMA_RESERVE_BYTES);
+    const bool reserve_held = g_camera_dma_reserve.load() != nullptr;
+    Serial.printf("[CAMERA] DMA %u reserve_held=%u releasable=%u — keeping WiFi up\n",
+                  (unsigned)dma_check, reserve_held ? 1u : 0u,
+                  reserve_held ? (unsigned)CAMERA_DMA_RESERVE_BYTES : 0u);
 #endif
   }
 
@@ -721,20 +746,12 @@ static bool init_camera() {
                   (unsigned)ESP.getPsramSize());
   };
   auto quiesce_network_for_camera = [&](const char* reason) {
-    bool changed = false;
     Serial.printf("[CAMERA] quiesce_network reason=%s wifi_mode=%d\n",
                   reason ? reason : "unknown", (int)WiFi.getMode());
-    if (WiFi.getMode() != WIFI_OFF) {
-      Serial.println("[CAMERA] WiFi off to free DMA buffers");
-      WiFi.disconnect(true);
-      delay(50);
-      WiFi.mode(WIFI_OFF);
-      delay(100);
-      WiFi.mode(WIFI_STA);
-      changed = true;
-    }
-    if (changed || reason != nullptr) {
+    if (camera_quiesce_wifi_for_dma(reason)) {
       delay(CAMERA_NETWORK_QUIESCE_DELAY_MS);
+    } else {
+      Serial.println("[CAMERA] WiFi teardown deferred (HTTP busy or driver stop failed)");
     }
     log_camera_init_memory(reason ? reason : "post_quiesce");
   };
@@ -829,9 +846,9 @@ static bool init_camera() {
       //     quiesce_network -> WiFi off to free DMA buffers
       //     Memory retry_after_init_fail dma_largest=15860   <- UNCHANGED
       //     attempt=2                                         FAIL
-      // Killing WiFi frees nothing here; the block is held by a background
-      // upload parked mid-PUT. It comes back on its own — so wait for it rather
-      // than burning the retry on a number we can already see is too small.
+      // Keep WiFi off while waiting. Restarting STA before this check can
+      // consume the freed block again; a still-live HTTP owner also prevents
+      // teardown, so recovery is not assumed merely because it was requested.
       {
         const size_t need = CAMERA_DMA_RESERVE_BYTES;
         const uint32_t t0 = millis();
@@ -851,9 +868,9 @@ static bool init_camera() {
     }
 
     diag_record_error_persistent("camera_init", (int32_t)err, esp_err_to_name(err));
-    camera_stop_xclk();
-    camera_set_pins_high_z();
-    camera_power_disable();
+    // Some diagnostic callers return immediately on init failure. Release the
+    // radio owner here as well as on their ordinary capture cleanup path.
+    deinit_camera();
     return false;
   }
 
@@ -990,6 +1007,12 @@ static bool init_camera() {
     camera_timeline_event("lowlight_settle", 2);
   }
   camera_timeline_event("init_fullres", (int32_t)CAPTURE_SIZE);
+#if HALO_CAMERA_KEEP_INIT
+  // This optional mode retains the allocated camera buffers across uploads.
+  // They now own the DMA region, so the radio admission hold is no longer
+  // needed; normal foreground gates still defer background reconnect.
+  g_camera_radio_off_owned.store(false);
+#endif
   return true;
 }
 
