@@ -1,12 +1,6 @@
 # Provisioning join investigation — September 16, 2026
 
-Private172 is built and sealed from `c90050f3a415327144d118ed5a4a4c056f02522d`,
-build `6.4.172-20260917T040727Z-c90050f3a415`. Both canonical production builds,
-artifact checks and49 exact-snapshot host suites pass. Application-only service and fresh
-paired SDK VALID health passed: Sense172/app0 and LCD172/app1.169 fallback banks,
-NVS and partitions are preserved. iPhone/Samsung target joins fail despite matching driver credentials;
-authentication cause and functional acceptance remain unresolved. No public release or confirmed authentication fix. Continue from172 or reviewed
-descendants, preserving171 fixes and169 fallback banks; allocate unused173+.
+Current installed diagnostic is private173, source `0a9576b5ff56d0120407df1f2848ba298cb40d7a`, build `6.4.173-20260917T043640Z-0a9576b5ff56`. Both canonical builds/artifact checks and seven focused suites pass with172's49-suite lineage retained. Sense/app1 and LCD/app0 are SDK VALID;172 fallback banks/NVS are preserved. Samsung authentication fails before and after an explicit same-credential AP restart. No authentication fix or publication is claimed. Continue from173 or reviewed descendants, preserving171/172 fixes; unused174 diagnostics are in development. Read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`. Keep the separately recorded late-arrival setup sleep race unresolved.
 
 ## Confirmed icon defect and source fix
 
@@ -175,3 +169,28 @@ Separately, setup-sleep172-observed001/RESULT.json (SHA256
 confirms live setup stayed awake beyond330seconds. This is one USB-connected
 live-peer run with read-only diagnostic queries every15seconds and no touch or
 scroll input; it does not cover the known late/revived-session teardown race.
+
+
+## Private173: independent Galaxy same-credential A/B
+
+The Samsung SM_A366U (USB serial RFCY322W52W) is controlled through SSH to the
+Mac mini and USB ADB. Neither Mac's network was changed. The Galaxy joined using
+exact startup credentials entered automatically, bypassing QR and manual typing.
+On173, the target BSSID9a:a3:16:f8:1a:6c sent M1; the phone sent M2; the attempt
+ended with reason15/WRONG_KEY after4.094seconds, without target M3. A manual
+AP-only disable/re-enable then verified config_same=1 and ip_same=1. The exact
+same credentials failed again after4.049seconds. Later successful handshakes in
+those captures belong to Garage Member and are not Halo passes.
+
+This disproves that particular AP-only restart as a sufficient recovery. It does
+not prove a wrong PMK, crypto fault or receipt of M2 by Halo.173 is diagnostic-only
+and does not automatically restart the AP during ordinary startup. Raw SDK
+WIFI_EVENT_AP_WRONG_PASSWORD is not forwarded by Arduino;174 diagnostics are
+being prepared to observe that event and manually test public SHA1/HMAC/PBKDF2
+vectors without exposing keys or changing global allocators.
+
+Closed evidence: device173/INSTALLATION173-REVIEW.json,
+health173-observed001/RESULT.json, and ap-restart173-ab001/RESULT.json under
+`/Users/MattTaylor/halo-provisioning-review-2026-09-16`. Both original USB capture
+owners and both Android log children were closed/reaped; only the two temporary
+Galaxy test network entries were forgotten. It returned to Garage Member.

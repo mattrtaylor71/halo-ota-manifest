@@ -165,6 +165,7 @@ enum SchedRevalidate { REVAL_VALID, REVAL_CANCELLED, REVAL_REPLACED, REVAL_FETCH
 
 #include "../shared/ProvisioningState.h"
 #include "../shared/ProvisioningManager.h"
+#include "../shared/ProvisioningCryptoDiagnostic.h"
 #include "../shared/Truth.h"
 #include "../shared/SenseOtaPolicy.h"
 #include "../shared/MaintenanceWindow.h"
@@ -353,6 +354,7 @@ static SenseOtaApplier g_ota_applier;
 static HealthGate g_health_gate;
 static ProvisioningManager g_provisioning_manager;
 static std::atomic<bool> g_provision_ap_restart_requested{false};
+static std::atomic<bool> g_provision_crypto_diag_requested{false};
 
 static bool g_ota_check_done = false;
 static bool g_ota_check_requested = false;
@@ -1762,6 +1764,20 @@ static void service_provision_ap_restart() {
   if (g_provision_ap_restart_requested.exchange(false)) {
     g_provisioning_manager.restartSetupAp();
   }
+}
+
+void halo_prod_provision_crypto_diag() {
+  g_provision_crypto_diag_requested.store(true);
+}
+
+static void service_provision_crypto_diag() {
+  if (!g_provision_crypto_diag_requested.exchange(false)) return;
+  if (!g_provisioning_manager.isSetupModeActive() || ProvisioningState::isProvisioned() ||
+      ProvisioningState::getState() != ProvisioningState::STATE_AP_SETUP) {
+    Serial.println("[PROVISION_CRYPTO] skipped=setup_guard");
+    return;
+  }
+  provision_crypto_diag::run_and_log(Serial);
 }
 
 bool halo_get_provisioned_wifi(char* ssid, size_t ssid_sz, char* pass, size_t pass_sz) {
@@ -6188,6 +6204,7 @@ void halo_prod_loop() {
   // The UART task only queues the experiment; radio mutation and manager HTTP
   // servicing stay serialized on this provisioning owner loop.
   service_provision_ap_restart();
+  service_provision_crypto_diag();
   g_provisioning_manager.update();
   ProvisioningState::State prov_state = ProvisioningState::getState();
   const bool prov_state_changed = prov_state != g_last_prov_state;

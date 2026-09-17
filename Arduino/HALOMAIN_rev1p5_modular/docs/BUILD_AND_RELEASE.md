@@ -1,4 +1,4 @@
-> Latest private working candidate: **172**, source `c90050f`, sealed canonical pair and49 host suites passed. Exact172 is installed, Sense/app0 and LCD/app1 SDK VALID; not published. iPhone/Samsung target joins fail despite matching driver credentials; authentication cause and a separate late-arrival setup sleep race remain unresolved. One live setup run stayed awake past330seconds. Read [the172 handoff](PROVISIONING_JOIN_INVESTIGATION_20260916.md) and `RELEASE_BASELINE.json.current_working_source`. Preserve169 fallback and frozen158 recovery; allocate unused173+.
+> Latest installed private diagnostic: **173**, source `0a9576b`, Sense/app1 and LCD/app0 SDK VALID with172 fallback banks. Seven focused suites and canonical builds pass; Samsung authentication still fails before and after same-credential AP restart. No public release. Continue from reviewed173 descendants; unused174 diagnostics are in development. Read [the handoff](PROVISIONING_JOIN_INVESTIGATION_20260916.md) and `RELEASE_BASELINE.json.current_working_source`.
 
 # Build and release from the frozen 6.4.158 baseline
 
