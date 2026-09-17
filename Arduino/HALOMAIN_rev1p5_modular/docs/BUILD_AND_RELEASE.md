@@ -1,4 +1,4 @@
-> Current private source: **175**, `e303bb1`. Full pair builds and ten focused suites pass; physical service installed only Sense175/app1 and retained LCD174/app1, both SDK VALID. Three Galaxy AP/DHCP/HTTP checks pass; the app eventually claimed ownership, but a 121-second response gap failed setup responsiveness and led to LCD fallback sleep. Camera recovery remains unqualified after reserve warnings. No public release. Continue from reviewed175 descendants. Read [the handoff](PROVISIONING_JOIN_INVESTIGATION_20260916.md) and `RELEASE_BASELINE.json.current_working_source`.
+> Current installed private pair: **176**, source `770c60a`, both app0 SDK VALID with Sense175/LCD174 app1 fallbacks. Both canonical builds and 15 snapshot suites pass. Assisted health and one console capture/upload/sleep smoke passed within scope; fresh phone provisioning and same-boot camera recovery after setup remain pending. No public release. Continue from reviewed 176 descendants. Read [the handoff](PROVISIONING_JOIN_INVESTIGATION_20260916.md) and `RELEASE_BASELINE.json.current_working_source`.
 
 # Build and release from the frozen 6.4.158 baseline
 

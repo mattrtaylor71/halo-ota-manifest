@@ -1759,41 +1759,34 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.175 Sense / 6.4.174 LCD",
-    "status": "PASS_CLOSED_CAPTURE_MIXED_SENSE175_LCD174_SDK_VALID",
+    "version": "6.4.176",
+    "status": "PASS_PAIRED_SDK_VALID_ASSISTED_HEALTH_AND_SCOPED_ORDINARY_CAMERA_SMOKE",
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/health175-observed001/RESULT.json",
-      "sha256": "292a83e99286b8f81b2d58f05ebfc3dac8fe39935375aae6754a78a49c8959be"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
+      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
     },
     "installation_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/INSTALLATION175-REVIEW.json",
-      "sha256": "fc05005f0f38c231189010b016df815a102c6e063be075a407a99749912d3fb6"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/INSTALLATION176-REVIEW.json",
+      "sha256": "dadd8ab56ed76e7a682a1dc959583ba41ad22fa8e8fd433cec7d716ebba65002"
     },
     "installed": {
-      "sense": "6.4.175 app1 SDK VALID",
-      "lcd": "6.4.174 app1 SDK VALID"
+      "sense": "6.4.176 app0 SDK VALID",
+      "lcd": "6.4.176 app0 SDK VALID"
     },
-    "setup_status": "Three Galaxy AP association/DHCP/HTTP trials pass. App eventually persisted provisioned/owner state and stopped AP, but the121-second response gap and LCD fallback sleep fail responsive setup acceptance.",
-    "ap_join_cold_experiment": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-cold001/RESULT.json",
-      "sha256": "ea95698268c1576f3578cee36c9eed96aba8f1d3050ce69c5309e503d26b4f9b"
-    },
-    "ap_join_warm_experiment": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-warm001/RESULT.json",
-      "sha256": "38ed4b278d345f5afcfcb036ccf78d409f6732ac295c614cc32a808e279eee28"
+    "setup_status": "Previously provisioned state retained; new intended-owner phone reprovisioning on176 is pending.",
+    "ordinary_camera_smoke": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
+      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
     },
     "limits": [
-      "Full175 pair is built and sealed; physical service installed only Sense175, retaining LCD174. No full175 paired hardware or public release acceptance.",
-      "Three Galaxy trials across one cold setup session and one warm reset passed association/DHCP/GET /info with zero captured AES allocation errors; no exact PMK/MIC/M3 causal claim.",
-      "Reserve restoration failed after warm reset (largest16,372 <16,384 bytes) and final AP shutdown (14,836 <16,384). Same-boot camera recovery remains unqualified.",
-      "The app eventually persisted provisioned=1/owner=1, but Sense had a 121,334ms logged PONG-to-claim-response gap. First claim returned HTTP-1, next HTTP200; LCD exhausted three sleep handshakes and entered fallback sleep. Full setup responsiveness failed.",
-      "Known late/revived setup sleep race and blocking STA ownership limitation remain recorded. No new media/OTA/scheduled-wake/power-cut/full-product acceptance.",
-      "Sense-only service preserved174 VALID app0 fallback, NVS and partitions; LCD174/app1 was not flashed. Initial health capture found LCD absent; actuator wake preceded verified mixed-board health."
-    ],
-    "app_provisioning_experiment": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/app-flow175-observed001/RESULT.json",
-      "sha256": "6c0fb90be24e2aae1a21ac75b68fbc6e730cdb8865db70ec29fae29770ca7101"
-    }
+      "Fresh intended-owner phone reprovisioning on176 is pending. Host tests and normal camera smoke do not prove the175 full-flow responsiveness defect is physically fixed.",
+      "The20s claim request age is a logical cancellation/result-admission limit, not an asserted20s wall-clock bound on synchronous SDK DNS/TCP/TLS. No measured whole-call-chain or runtime stack high-water pass.",
+      "Initial SDK-health capture was assisted and began about10s after the stroke, already idle-dark/backlight0; no coldboot, full awake UI or scheduled-wake pass.",
+      "One ordinary console Check-in bypassed touch and passed camera/client HTTP upload/coordinated sleep. It was not the same boot after fresh provisioning; camera recovery in that condition remains unqualified.",
+      "Reserve warning after smoke presign (largest9716<16384) is retained alongside175 warm/final-AP-exit warnings. No new regression cause is inferred.",
+      "Application-only LCD-first service preserved LCD174/app1 and Sense175/app1 VALID fallbacks, NVS, partition layouts and SD. No OTA/publication, abrupt power-cut, broad media or full-product acceptance.",
+      "Known late/revived setup arrival during LCD teardown and blocking STA ownership limits remain separately recorded."
+    ]
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -4850,26 +4843,26 @@
     }
   },
   "current_validation_blocker": {
-    "status": "175_AP_JOIN_PASS_CLAIM_RESPONSIVENESS_FAILED_CAMERA_RECOVERY_UNQUALIFIED",
-    "detail": "Three closed Galaxy AP trials passed with no captured AES errors. Full app flow eventually persisted provisioned=1/owner=1 after first claim HTTP-1 and next HTTP200, but a121,334ms response gap caused unresponsive setup and LCD fallback sleep. Camera reserve reacquisition failed after warm reset and final AP shutdown. Responsive setup and same-boot camera recovery remain unaccepted;176 liveness fixes are being prepared, not yet built.",
+    "status": "176_INSTALLED_PHONE_REPROVISION_AND_POST_PROVISION_CAMERA_PENDING",
+    "detail": "Both176 boards are SDK VALID and one ordinary console Check-in capture/client HTTP upload/sleep smoke passed. Fresh intended-owner phone setup has not retested the175 claim/UI delay; same-boot camera recovery after provisioning remains unqualified. Reserve warnings are retained. No full functional acceptance.",
     "candidate_installed": true,
-    "installed_scope": "Sense175/app1 only; LCD174/app1 retained",
+    "installed_scope": "LCD176/app0 first from174/app1; Sense176/app0 from175/app1",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-cold001/RESULT.json",
-      "sha256": "ea95698268c1576f3578cee36c9eed96aba8f1d3050ce69c5309e503d26b4f9b"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
+      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
     },
-    "warm_evidence": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-warm001/RESULT.json",
-      "sha256": "38ed4b278d345f5afcfcb036ccf78d409f6732ac295c614cc32a808e279eee28"
+    "ordinary_camera_smoke": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
+      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
+    },
+    "qualification_limits": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/QUALIFICATION-LIMITS176.json",
+      "sha256": "c4b95e368df6cc853b6c55dd773c9595d3047ef7865a5f0b052d5827005d108f"
     },
     "known_separate_limits": [
       "Late/revived setup during LCD teardown can still race sleep.",
       "Blocking STA attempt ownership gap remains separately recorded."
-    ],
-    "app_flow_evidence": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/app-flow175-observed001/RESULT.json",
-      "sha256": "6c0fb90be24e2aae1a21ac75b68fbc6e730cdb8865db70ec29fae29770ca7101"
-    }
+    ]
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -5992,94 +5985,85 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.175",
-    "status": "PRIVATE_MIXED_SENSE175_LCD174_AP_JOINS_PASS_CLAIM_RESPONSIVENESS_FAILED",
-    "artifact_source_commit": "e303bb1cbec1ff4efefdc3232566b387921ad00c",
-    "artifact_source_firmware_tree": "0b6ae030537bd289ed95d1a83f5934f4a4d5b6c0",
-    "build_id": "6.4.175-20260917T052511Z-e303bb1cbec1",
+    "version": "6.4.176",
+    "status": "PRIVATE_PAIRED_176_SDK_VALID_SCOPED_CAMERA_SMOKE_PASS_PHONE_REPROVISION_PENDING",
+    "artifact_source_commit": "770c60aa99e9bb1e498419faebf8d7ca66156fdb",
+    "artifact_source_firmware_tree": "cf90608313357a5e76188bfd3ca2366e6c134f7c",
+    "build_id": "6.4.176-20260917T055849Z-770c60aa99e9",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from e303bb1 or reviewed descendants. 175 relinquishes the 16KiB camera reserve while setup owns AP, with suppression retained until actual AP shutdown. Preserve all 171/172 media/setup and frozen OTA fixes. AP joining passes scoped trials; ownership eventually completed, but setup responsiveness failed and camera recovery remains unqualified.",
+    "source_selection": "Continue from770c60a or reviewed descendants.176 moves claim transport to the existing upload worker with fixed snapshots/generation-bound owner-loop application and a finite LCD setup-progress sleep lease. Retain175 provisioning DMA reserve ownership and prior media/OTA fixes. Physical phone reprovisioning and post-provision same-boot camera recovery remain pending.",
     "candidate_receipt": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/RELEASE-PAIR.json",
-      "sha256": "58764abb34c52feb30b52ac3c1bf174e443143bff8bb0efcd7d87540e4951191"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/RELEASE-PAIR.json",
+      "sha256": "85c60af88cbe8f2bcbc7eb75caac08f996475d5ffbc08184d9a89bbf234bd793"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/host-final001/RESULT.json",
-      "sha256": "185aaa7a648761947f9576a955b565c5fdcd7da6e81dd65fa469db696d2f70a5"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/host-final001/RESULT.json",
+      "sha256": "f0943b27d323459c950f31dfbb973b8874f093a4a7ce1b2524bc4c856d416429"
     },
-    "host_suite_count": 10,
-    "retained_host_lineage": "174 nine-suite and17249-suite receipts/logs retained and reverified; all runtime outside the three reviewed Sense/provisioning files, including LCD, is byte-identical174 apart from generated identities.",
+    "host_suite_count": 15,
+    "retained_host_lineage": "17510-suite and17249-suite receipts/logs retained and reverified. Exactly nine reviewed runtime paths differ from175; unrelated runtime is unchanged apart from generated version identities.",
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "fc8f04f93b39e61c9766ff11c36ec6c77b627a4b06d126f9cc89496061acb6b3"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "e73a4687537164c362dd2871d9d5e80cba49c4b60a572a696e7b07a50b54dd56"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/SOURCE-SCOPE.json",
-      "sha256": "874400fc1a79eb25e19d2a58ae4679f461f6208e6872a7db9d82dec110be11bd"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/SOURCE-SCOPE.json",
+      "sha256": "f4487a377aa3e3f03dbf14a4da7214b4d0315681f1d6ff4f309083e6444bb553"
     },
     "stack_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/STACK-REVIEW.json",
-      "sha256": "f0f4fbab4006b71f71fd7478895f0176b17b09bb2982cab9d73015e1f1a70a3d"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/STACK-REVIEW.json",
+      "sha256": "eae6e803aaf3d95ac6f6fc10e650d7470092e89bd8263df7c206bc9296f946b6"
     },
     "installer_binding": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/tools/BINDING175.json",
-      "sha256": "e201f0c700dd8dda490f378016e3941dc3b30beaa416d012c5d5cef39ec7742f"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/BINDING176.json",
+      "sha256": "e253e942bd1e44dbc602c7aa4c717e47813544939e94984945dd4c2a987d298e"
     },
     "installed": true,
     "published": false,
     "physical_acceptance": false,
     "phone_join_root_cause_confirmed": false,
     "installed_firmware_last_observed": {
-      "sense": "6.4.175 app1 SDK VALID",
-      "lcd": "6.4.174 app1 SDK VALID"
+      "sense": "6.4.176 app0 SDK VALID",
+      "lcd": "6.4.176 app0 SDK VALID"
     },
     "installation_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/INSTALLATION175-REVIEW.json",
-      "sha256": "fc05005f0f38c231189010b016df815a102c6e063be075a407a99749912d3fb6"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/INSTALLATION176-REVIEW.json",
+      "sha256": "dadd8ab56ed76e7a682a1dc959583ba41ad22fa8e8fd433cec7d716ebba65002"
     },
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/health175-observed001/RESULT.json",
-      "sha256": "292a83e99286b8f81b2d58f05ebfc3dac8fe39935375aae6754a78a49c8959be"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
+      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
     },
     "paired_sdk_health_passed": true,
     "current_public_ota_version": "6.4.162",
-    "next_unused_version": "6.4.176",
+    "next_unused_version": "6.4.177",
     "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
     "limits": [
-      "Full175 pair is built and sealed; physical service installed only Sense175, retaining LCD174. No full175 paired hardware or public release acceptance.",
-      "Three Galaxy trials across one cold setup session and one warm reset passed association/DHCP/GET /info with zero captured AES allocation errors; no exact PMK/MIC/M3 causal claim.",
-      "Reserve restoration failed after warm reset (largest16,372 <16,384 bytes) and final AP shutdown (14,836 <16,384). Same-boot camera recovery remains unqualified.",
-      "The app eventually persisted provisioned=1/owner=1, but Sense had a 121,334ms logged PONG-to-claim-response gap. First claim returned HTTP-1, next HTTP200; LCD exhausted three sleep handshakes and entered fallback sleep. Full setup responsiveness failed.",
-      "Known late/revived setup sleep race and blocking STA ownership limitation remain recorded. No new media/OTA/scheduled-wake/power-cut/full-product acceptance.",
-      "Sense-only service preserved174 VALID app0 fallback, NVS and partitions; LCD174/app1 was not flashed. Initial health capture found LCD absent; actuator wake preceded verified mixed-board health."
+      "Fresh intended-owner phone reprovisioning on176 is pending. Host tests and normal camera smoke do not prove the175 full-flow responsiveness defect is physically fixed.",
+      "The20s claim request age is a logical cancellation/result-admission limit, not an asserted20s wall-clock bound on synchronous SDK DNS/TCP/TLS. No measured whole-call-chain or runtime stack high-water pass.",
+      "Initial SDK-health capture was assisted and began about10s after the stroke, already idle-dark/backlight0; no coldboot, full awake UI or scheduled-wake pass.",
+      "One ordinary console Check-in bypassed touch and passed camera/client HTTP upload/coordinated sleep. It was not the same boot after fresh provisioning; camera recovery in that condition remains unqualified.",
+      "Reserve warning after smoke presign (largest9716<16384) is retained alongside175 warm/final-AP-exit warnings. No new regression cause is inferred.",
+      "Application-only LCD-first service preserved LCD174/app1 and Sense175/app1 VALID fallbacks, NVS, partition layouts and SD. No OTA/publication, abrupt power-cut, broad media or full-product acceptance.",
+      "Known late/revived setup arrival during LCD teardown and blocking STA ownership limits remain separately recorded."
     ],
     "qualification_limits": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/tools/QUALIFICATION-LIMITS175.json",
-      "sha256": "383880e6c41d524446633235b641f80ddd4bd75fad79eada45e709317899ac2b"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/QUALIFICATION-LIMITS176.json",
+      "sha256": "c4b95e368df6cc853b6c55dd773c9595d3047ef7865a5f0b052d5827005d108f"
     },
-    "full175_pair_installed": false,
-    "installation_scope": "Sense175/app1 only; LCD174/app1 retained",
-    "phone_ap_join_scoped_trials_passed": true,
+    "installation_scope": "LCD176/app0 first from174/app1; Sense176/app0 from175/app1",
     "paired_sdk_health_versions": {
-      "sense": "6.4.175",
-      "lcd": "6.4.174"
+      "sense": "6.4.176",
+      "lcd": "6.4.176"
     },
-    "ap_join_cold_experiment": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-cold001/RESULT.json",
-      "sha256": "ea95698268c1576f3578cee36c9eed96aba8f1d3050ce69c5309e503d26b4f9b"
-    },
-    "ap_join_warm_experiment": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-warm001/RESULT.json",
-      "sha256": "38ed4b278d345f5afcfcb036ccf78d409f6732ac295c614cc32a808e279eee28"
-    },
-    "app_provisioning_status": "EVENTUAL_PROVISIONED_OWNER_PRESENT_BUT_RESPONSIVE_SETUP_ACCEPTANCE_FAILED",
-    "camera_recovery_status": "NOT_YET_PHYSICALLY_QUALIFIED",
-    "app_provisioning_experiment": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/app-flow175-observed001/RESULT.json",
-      "sha256": "6c0fb90be24e2aae1a21ac75b68fbc6e730cdb8865db70ec29fae29770ca7101"
-    },
-    "provisioned_owner_state_observed": true
+    "app_provisioning_status": "PENDING_FRESH_INTENDED_OWNER_PHONE_REPROVISIONING",
+    "camera_recovery_status": "ORDINARY_WAKE_SMOKE_PASS_SAME_BOOT_AFTER_PROVISION_UNQUALIFIED",
+    "full176_pair_installed": true,
+    "ordinary_camera_smoke": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
+      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
+    }
   },
   "previous_verified_paired_health_158": {
     "version": "6.4.158",
@@ -7575,5 +7559,154 @@
       "Late/revived setup during LCD teardown can still race sleep.",
       "Blocking STA attempt ownership gap remains separately recorded."
     ]
+  },
+  "previous_working_source_175": {
+    "version": "6.4.175",
+    "status": "PRIVATE_MIXED_SENSE175_LCD174_AP_JOINS_PASS_CLAIM_RESPONSIVENESS_FAILED",
+    "artifact_source_commit": "e303bb1cbec1ff4efefdc3232566b387921ad00c",
+    "artifact_source_firmware_tree": "0b6ae030537bd289ed95d1a83f5934f4a4d5b6c0",
+    "build_id": "6.4.175-20260917T052511Z-e303bb1cbec1",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from e303bb1 or reviewed descendants. 175 relinquishes the 16KiB camera reserve while setup owns AP, with suppression retained until actual AP shutdown. Preserve all 171/172 media/setup and frozen OTA fixes. AP joining passes scoped trials; ownership eventually completed, but setup responsiveness failed and camera recovery remains unqualified.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/RELEASE-PAIR.json",
+      "sha256": "58764abb34c52feb30b52ac3c1bf174e443143bff8bb0efcd7d87540e4951191"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/host-final001/RESULT.json",
+      "sha256": "185aaa7a648761947f9576a955b565c5fdcd7da6e81dd65fa469db696d2f70a5"
+    },
+    "host_suite_count": 10,
+    "retained_host_lineage": "174 nine-suite and17249-suite receipts/logs retained and reverified; all runtime outside the three reviewed Sense/provisioning files, including LCD, is byte-identical174 apart from generated identities.",
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "fc8f04f93b39e61c9766ff11c36ec6c77b627a4b06d126f9cc89496061acb6b3"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/SOURCE-SCOPE.json",
+      "sha256": "874400fc1a79eb25e19d2a58ae4679f461f6208e6872a7db9d82dec110be11bd"
+    },
+    "stack_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/candidate175-001/STACK-REVIEW.json",
+      "sha256": "f0f4fbab4006b71f71fd7478895f0176b17b09bb2982cab9d73015e1f1a70a3d"
+    },
+    "installer_binding": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/tools/BINDING175.json",
+      "sha256": "e201f0c700dd8dda490f378016e3941dc3b30beaa416d012c5d5cef39ec7742f"
+    },
+    "installed": true,
+    "published": false,
+    "physical_acceptance": false,
+    "phone_join_root_cause_confirmed": false,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.175 app1 SDK VALID",
+      "lcd": "6.4.174 app1 SDK VALID"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/INSTALLATION175-REVIEW.json",
+      "sha256": "fc05005f0f38c231189010b016df815a102c6e063be075a407a99749912d3fb6"
+    },
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/health175-observed001/RESULT.json",
+      "sha256": "292a83e99286b8f81b2d58f05ebfc3dac8fe39935375aae6754a78a49c8959be"
+    },
+    "paired_sdk_health_passed": true,
+    "current_public_ota_version": "6.4.162",
+    "next_unused_version": "6.4.176",
+    "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
+    "limits": [
+      "Full175 pair is built and sealed; physical service installed only Sense175, retaining LCD174. No full175 paired hardware or public release acceptance.",
+      "Three Galaxy trials across one cold setup session and one warm reset passed association/DHCP/GET /info with zero captured AES allocation errors; no exact PMK/MIC/M3 causal claim.",
+      "Reserve restoration failed after warm reset (largest16,372 <16,384 bytes) and final AP shutdown (14,836 <16,384). Same-boot camera recovery remains unqualified.",
+      "The app eventually persisted provisioned=1/owner=1, but Sense had a 121,334ms logged PONG-to-claim-response gap. First claim returned HTTP-1, next HTTP200; LCD exhausted three sleep handshakes and entered fallback sleep. Full setup responsiveness failed.",
+      "Known late/revived setup sleep race and blocking STA ownership limitation remain recorded. No new media/OTA/scheduled-wake/power-cut/full-product acceptance.",
+      "Sense-only service preserved174 VALID app0 fallback, NVS and partitions; LCD174/app1 was not flashed. Initial health capture found LCD absent; actuator wake preceded verified mixed-board health."
+    ],
+    "qualification_limits": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/tools/QUALIFICATION-LIMITS175.json",
+      "sha256": "383880e6c41d524446633235b641f80ddd4bd75fad79eada45e709317899ac2b"
+    },
+    "full175_pair_installed": false,
+    "installation_scope": "Sense175/app1 only; LCD174/app1 retained",
+    "phone_ap_join_scoped_trials_passed": true,
+    "paired_sdk_health_versions": {
+      "sense": "6.4.175",
+      "lcd": "6.4.174"
+    },
+    "ap_join_cold_experiment": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-cold001/RESULT.json",
+      "sha256": "ea95698268c1576f3578cee36c9eed96aba8f1d3050ce69c5309e503d26b4f9b"
+    },
+    "ap_join_warm_experiment": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-warm001/RESULT.json",
+      "sha256": "38ed4b278d345f5afcfcb036ccf78d409f6732ac295c614cc32a808e279eee28"
+    },
+    "app_provisioning_status": "EVENTUAL_PROVISIONED_OWNER_PRESENT_BUT_RESPONSIVE_SETUP_ACCEPTANCE_FAILED",
+    "camera_recovery_status": "NOT_YET_PHYSICALLY_QUALIFIED",
+    "app_provisioning_experiment": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/app-flow175-observed001/RESULT.json",
+      "sha256": "6c0fb90be24e2aae1a21ac75b68fbc6e730cdb8865db70ec29fae29770ca7101"
+    },
+    "provisioned_owner_state_observed": true
+  },
+  "previous_device_health_175": {
+    "version": "6.4.175 Sense / 6.4.174 LCD",
+    "status": "PASS_CLOSED_CAPTURE_MIXED_SENSE175_LCD174_SDK_VALID",
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/health175-observed001/RESULT.json",
+      "sha256": "292a83e99286b8f81b2d58f05ebfc3dac8fe39935375aae6754a78a49c8959be"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/INSTALLATION175-REVIEW.json",
+      "sha256": "fc05005f0f38c231189010b016df815a102c6e063be075a407a99749912d3fb6"
+    },
+    "installed": {
+      "sense": "6.4.175 app1 SDK VALID",
+      "lcd": "6.4.174 app1 SDK VALID"
+    },
+    "setup_status": "Three Galaxy AP association/DHCP/HTTP trials pass. App eventually persisted provisioned/owner state and stopped AP, but the121-second response gap and LCD fallback sleep fail responsive setup acceptance.",
+    "ap_join_cold_experiment": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-cold001/RESULT.json",
+      "sha256": "ea95698268c1576f3578cee36c9eed96aba8f1d3050ce69c5309e503d26b4f9b"
+    },
+    "ap_join_warm_experiment": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-warm001/RESULT.json",
+      "sha256": "38ed4b278d345f5afcfcb036ccf78d409f6732ac295c614cc32a808e279eee28"
+    },
+    "limits": [
+      "Full175 pair is built and sealed; physical service installed only Sense175, retaining LCD174. No full175 paired hardware or public release acceptance.",
+      "Three Galaxy trials across one cold setup session and one warm reset passed association/DHCP/GET /info with zero captured AES allocation errors; no exact PMK/MIC/M3 causal claim.",
+      "Reserve restoration failed after warm reset (largest16,372 <16,384 bytes) and final AP shutdown (14,836 <16,384). Same-boot camera recovery remains unqualified.",
+      "The app eventually persisted provisioned=1/owner=1, but Sense had a 121,334ms logged PONG-to-claim-response gap. First claim returned HTTP-1, next HTTP200; LCD exhausted three sleep handshakes and entered fallback sleep. Full setup responsiveness failed.",
+      "Known late/revived setup sleep race and blocking STA ownership limitation remain recorded. No new media/OTA/scheduled-wake/power-cut/full-product acceptance.",
+      "Sense-only service preserved174 VALID app0 fallback, NVS and partitions; LCD174/app1 was not flashed. Initial health capture found LCD absent; actuator wake preceded verified mixed-board health."
+    ],
+    "app_provisioning_experiment": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/app-flow175-observed001/RESULT.json",
+      "sha256": "6c0fb90be24e2aae1a21ac75b68fbc6e730cdb8865db70ec29fae29770ca7101"
+    }
+  },
+  "previous_current_validation_blocker_175": {
+    "status": "175_AP_JOIN_PASS_CLAIM_RESPONSIVENESS_FAILED_CAMERA_RECOVERY_UNQUALIFIED",
+    "detail": "Three closed Galaxy AP trials passed with no captured AES errors. Full app flow eventually persisted provisioned=1/owner=1 after first claim HTTP-1 and next HTTP200, but a121,334ms response gap caused unresponsive setup and LCD fallback sleep. Camera reserve reacquisition failed after warm reset and final AP shutdown. Responsive setup and same-boot camera recovery remain unaccepted;176 liveness fixes are being prepared, not yet built.",
+    "candidate_installed": true,
+    "installed_scope": "Sense175/app1 only; LCD174/app1 retained",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-cold001/RESULT.json",
+      "sha256": "ea95698268c1576f3578cee36c9eed96aba8f1d3050ce69c5309e503d26b4f9b"
+    },
+    "warm_evidence": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/ap-join175-warm001/RESULT.json",
+      "sha256": "38ed4b278d345f5afcfcb036ccf78d409f6732ac295c614cc32a808e279eee28"
+    },
+    "known_separate_limits": [
+      "Late/revived setup during LCD teardown can still race sleep.",
+      "Blocking STA attempt ownership gap remains separately recorded."
+    ],
+    "app_flow_evidence": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/app-flow175-observed001/RESULT.json",
+      "sha256": "6c0fb90be24e2aae1a21ac75b68fbc6e730cdb8865db70ec29fae29770ca7101"
+    }
   }
 }
