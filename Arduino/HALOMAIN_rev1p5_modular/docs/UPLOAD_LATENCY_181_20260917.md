@@ -132,7 +132,7 @@ was sent by that attempt. Collectors closed cleanly and processes were reaped.
 An actuator USB reconnect was requested. These are unavailable bench tests,
 not evidence of an 182 image failure or an 182 upload success.
 
-Still pending on 182: fresh first-wake image delivery, actual secondary-clock
+At that blocked checkpoint, the pending182 tests were fresh first-wake image delivery, actual secondary-clock
 success following a primary miss, and interruption of an in-flight voice upload
 by a live shopping-list refresh and by a camera capture. Require the exact job
 to park, the foreground operation to complete, and the same job to resume and
@@ -183,3 +183,113 @@ HTTP unlock alone. Retain the accepted capture while waiting at safe task
 boundaries, exclude new network entrants during camera ownership, and never
 allocate camera DMA after a drain timeout. No OTA ownership/policy change is
 needed for this correction. Final build and device results follow separately.
+
+
+## Private183 camera ownership correction
+
+Source `ad9eae59596131f501520c06cad7f3b4d98e9bfb`, firmware tree
+`4a3d346feb41cd80d75ab9ea27b0f03b63b79617`, closes the reproduced182 handoff gap.
+Camera claims network/DMA ownership before waiting for both HTTP release and the
+complete upload Wi-Fi-call lease to end. That lease outlives transport-local DMA
+cleanup. New network entrants remain excluded; a20-second drain timeout releases
+the claim and fails before allocating camera DMA. Cleanup does not reacquire the
+camera reserve while a transport lease is still alive. Existing media custody,
+foreground cancellation, reconnect ownership and OTA policy remain intact.
+
+All25 exact-snapshot host suites pass. The focused handoff test exercises20
+scenarios/6794 checks using the actual camera and upload guard destructors; the
+frozen182 negative control reproduces the failure. These are host ownership and
+cleanup proofs; the separate device case is recorded below.
+
+Sense183 compiled from the unchanged canonical snapshot. The explicitly approved
+external adapter called canonical `run()` with a2.5GiB free-space reserve; its
+next-board check correctly stopped before LCD at2.486GiB. A separate approved
+LCD-only2.0GiB build passed, based on the measured186MiB LCD footprint.
+The original failure receipt is retained. Source, SDK, shipping flags, timeout
+and process cleanup are unchanged; this exception is not the ordinary builder
+CLI. Both artifact checks passed and the shipping pair is sealed at
+`candidate183-001/RELEASE-PAIR.json`, SHA256
+`ca4060d1627cbe38456538bac0aaa2e3f72bfef0fa5d0f4f7d5277a7f01c84ab`.
+Sense183 is208 binary bytes larger than182, with unchanged static RAM/RTC; LCD
+size/RAM/RTC are unchanged. Controlled Sense-only service installed183 app0,
+preserving182 app1 and unchanged LCD180 app0/LCD179 app1 fallback. Both full-bank
+backups and named protected ranges were verified; no NVS, bootloader, current-bank
+or LCD writes occurred. `install183-001/result.json` closed/reaped successfully;
+its historical status precedes the released boot log's SDK VALID/current-readback
+success at10,077ms (`sense-released.raw`, line126). The later183 camera case
+confirmed fresh paired183/LCD180 SDK health. Prior182 passed image/list
+results and failed camera result above remain separate. Public manifests remain162. Any next candidate184 requires a fresh
+version inventory check.
+
+
+##183 camera overlap and visible list observed
+
+`interrupt-camera183-001` stopped before media capture. Boot readiness relocked
+and then unlocked with `policy_not_due`, but the controller retained a single
+older UI reply. Its timeout and clean collector closure remain recorded. The
+next controller added read-only `id1`/`ui` queries within the unchanged3-second
+admission bound; firmware and admission conditions were unchanged.
+
+`interrupt-camera183-002` passed the scoped device test. Fresh exact identities
+show Sense183 app0 and LCD180 app0 SDK VALID. The camera request interrupted an
+actual voice POST: voice job22/102400bytes parked with the same identity; complete
+transport cleanup drained before camera DMA allocation. Check-in job48 captured
+127193bytes in1825ms according to `CAMERA_TIMING`. Both fresh uploads obtained
+their device-validated acceptance before the first paired sleep, followed by
+15seconds of quiet; no camera error was observed. The controller and collector
+closed/reaped cleanly. Camera input and quantity were console commands through
+real handlers after `WAITING_INPUT`, not physical menu gestures.
+
+Device acceptance is not backend processing completion. Independent cloud
+metadata checks and the separate183 list cases are recorded below. Evidence
+under the campaign directory: `interrupt-camera183-002/controller-result.json`
+SHA256 `d7981f3b76cec76cf351b491c9f0cf4854d7e42b96812b2537d4780367dac9db`,
+collector `RESULT.json` SHA256
+`1119a12540cb8837f70054b604d5d43ca559455e1d55b3d1f6b42f39ccba61ba`.
+
+
+The first183 list-overlap case, `interrupt183-001`, proved voice park/resume and
+a live HTTP200 list fetch, but the direct `list` console command bypassed the
+LCD wake path: `UI_STATE` showed screen16 with `idle_dark=1` and backlight0.
+This is transport-priority evidence only, not a visible-list responsiveness pass.
+The corrected `interrupt-ui183-001` uses the real local encoder `scroll1` path
+before list and requires a fresh screen16, running LVGL, `idle_dark=0` and positive
+backlight before returning Home. Its completed result follows; the earlier
+dark-list limitation remains recorded.
+
+
+`interrupt-ui183-001` passed the corrected visible-list test. It injected the
+real local encoder event before the list command, then received live HTTP200
+(780ms) and `UI_LIST`0.879s after the actual encoder event on serial timestamps. At0.960s, fresh
+`UI_STATE` confirmed screen16, unlocked OTA, running LVGL, `idle_dark=0`, backlight255
+and a live UI task. Controller-observed intervals were0.952s/1.061s; these use
+different observation points and include polling/buffering. Voice21/98304bytes parked and resumed the same identity,
+obtaining HTTP202 before the first paired sleep plus15seconds quiet. Collector
+and controller closed/reaped. This proves the injected wake-handler/list flow,
+not physical finger geometry or every possible concurrent input.
+
+Independent metadata-only checks now confirm camera-case voice102400bytes
+completed and image127193bytes reached backend DONE, and the first list-case
+voice100352bytes completed. Exact identity/key/options and length match; there
+is no independent device content-hash comparison, transcript/recognition/list
+semantic acceptance or global exactly-once claim. No cloud writes or media-body
+downloads occurred. Final visible-list voice98304bytes also reached confirmed cloud custody and completed processing (one recorded enqueue and worker attempt).
+
+- `cloud-interrupt-camera183-002/RESULT.json`: SHA256 `4a7db2c3a245f8325c14ccfb1e91d5485874839ab5913f5802788505d018e646`.
+- `cloud-interrupt183-001/RESULT.json`: SHA256 `31211d4348edd3ba29bc60258e244b67d33efa5964f24bb31ec952b1f30fcb4a`.
+- `interrupt-ui183-001/controller-result.json`: SHA256 `9c47e9dae8c61697a28a07de7239a419cc58971895dabad3274e27d76c063ad4`.
+- `interrupt-ui183-001/RESULT.json`: SHA256 `961d58404546f6ede2aa927d00d2e88877841ba1c658adccbfa8ec3ef6dd0222`.
+
+- `cloud-interrupt-ui183-001/RESULT.json`: SHA256 `05b1935385c6cc58652b60e3ccb73a1ee5690234bea35947372b04b391f79245`.
+- `FINAL-DEVICE-REVIEW.json`: SHA256 `bed06a3826ca9fb34ab5e4ebd194c4c1b2447ee51b1207bf013f20b87f04a7e1`.
+
+All three finite183 overlap cases and independent cloud reads are closed; the
+corrected visible-list case supplies the latest paired Sense183 app0/LCD180 app0
+SDK VALID evidence. The earlier two-case review and failed/dark cases are retained.
+There is no new full OTA-transfer, scheduled-OTA, phone-provisioning, physical
+navigation, recognition/list-action semantics or broad product qualification.
+The presign reserve-reacquisition warning still appeared (largest10228 versus
+16384bytes required), so the successful camera handoff is not a broad memory
+resolution. Parked jobs can cycle through the existing queue roughly every40ms
+while foreground work remains active; the reviewed cases did not start a second
+voice POST until the later flush. Public162 and frozen158 remain unchanged.

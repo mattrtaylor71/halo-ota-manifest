@@ -21,3 +21,40 @@ The helper checks callout and dial-in ownership for the known devices, uses only
 Software cannot guarantee restoration after relay disconnection, an uninterruptible kernel call, SIGKILL or host power loss. A forced stop, missing worker receipt or missing exact restore acknowledgement is a review condition; check the physical power state before another action. Do not loop power cycles or add an automatic stroke. The reusable helper was subsequently exercised in `cycle003`: the initially present actuator disappeared during a ten-second cut, returned after exact restore acknowledgement, and the worker closed/reaped cleanly. A separate bounded `HELP` query then proved its sketch responsive without movement. See `/Users/MattTaylor/halo-relay-20260917/cycle003/RESULT.json` and `actuator-help.json`. The earlier recovered actuator also completed a calibrated stroke and woke Halo for `image182-004`. A later small change tightened degraded-start and forced-stop reporting; those changed branches are host-tested rather than newly exercised on hardware.
 
 Validation: `python3 -B tools/test_actuator_relay_reset.py` passes70 inert checks of the actual cycle logic, including stale/wrong acknowledgements, partial off writes, ownership refusal, missing serial/degraded admission, restore I/O errors, repeated restore signals, descriptor failure and absent serial return. Tests use fake clocks, inventories and transports; they do not import pyserial or access hardware.
+
+
+## Later recurrence before183 service
+
+The next identity attempt, `service-identity183-001`, opened/configured the
+actuator but its bounded `HELP` query returned no reply. It closed without
+sending `PUSH` or opening either Halo capture port. The subsequent current-helper
+`cycle004` observed49 absent serial samples during a10-second off interval,
+received exact restore acknowledgement, and observed the exact actuator BSD
+serial return. The relay descriptor closed and its worker exited/reaped cleanly;
+there were zero actuator commands. Receipt:
+`/Users/MattTaylor/halo-relay-20260917/cycle004/RESULT.json`, SHA256
+`061219c92565bac2bc100e21a82b9ab27dc09556584fbf876ab00448e28ee23d`.
+This proves another bounded BSD recovery following a real recurrence.
+`service-identity183-002` then received the actuator's HELP response and its one
+`PUSH:500,200,500` woke both Halo boards. The old blocking helper nevertheless
+timed out after25seconds without a stroke-completion/descriptor-closure receipt.
+The collector captured normal boot and sleep and closed cleanly; no firmware was
+written. Preserve that failed helper result: actual wake is not proof that the
+helper received `Complete` or completed its cleanup.
+
+`cycle005` again proved the initially present exact BSD port disappeared and
+returned after a10-second cut; its worker closed/reaped without actuator commands.
+Receipt `/Users/MattTaylor/halo-relay-20260917/cycle005/RESULT.json`, SHA256
+`b48846cf6fcf3bd5ddccd788b338fb65bd9e6d1215ec098194827e391fbca020`.
+The separate traced helper in `service-identity183-003` received `Complete`,
+closed its descriptor and exited/reaped successfully. Its concurrent collector
+observed the one actual paired wake and then fresh unlocked Home with Sense182
+app1/LCD180 app0, both SDK VALID. The identity was collected after helper closure;
+no second stroke was sent. Pins under `/Users/MattTaylor/halo-upload181-20260917/`:
+
+- `service-identity183-003/wake-owner.json`: SHA256 `bdf373771dd4f8dfd548e24c39a5fc71f597d315f10ba34e119ce8162140e47d`.
+- `service-identity183-003/identity.json`: SHA256 `36840eeb0fc1eca88bb4a6493e18dc7fd1276b3aeb901cb34c7e2cfe71b52f23`.
+
+This establishes usable recovery for this recurrence. It does not prove the
+relay cures every USB failure, and does not turn the cycle004 helper timeout
+into a completed-stroke pass.

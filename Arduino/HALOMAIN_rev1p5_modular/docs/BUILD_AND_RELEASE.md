@@ -1,4 +1,4 @@
-> Current source: **182**, `ab87b6341a97`; controlled service selected **Sense182 app1**, retaining 181 app0 and leaving **LCD180 app0** untouched. Both canonical 182 builds/artifact checks and 23 snapshot host suites pass. Sense182 locally reached SDK VALID with current-state readback at 10,088 ms; no fresh paired LCD check was performed. Three functional attempts stopped at actuator serial open before any stroke or capture, so 182 functional acceptance awaits actuator USB recovery; see [the measured scope](UPLOAD_LATENCY_181_20260917.md). Public OTA remains162. Use `RELEASE_BASELINE.json.current_working_source`; preserve 180 and earlier historical evidence. The next candidate is 183 or later only after a fresh version inventory check.
+> Current source: **183**, `ad9eae595961`, firmware tree `4a3d346feb41c`; all 25 snapshot host suites pass. Both canonical183 builds/artifact checks pass and the pair is sealed (`ca4060d1627c`); controlled Sense-only installation, fresh paired SDK health and the console camera-overlap test passed. The corrected visible-list overlap, all three independent cloud metadata checks and final device review passed within the recorded scope. The external adapters called unchanged canonical `run()` under explicit measured-budget exceptions: 2.5 GiB initially, then a passed, separately approved LCD-only 2.0 GiB build after the first check stopped before LCD. This is not an ordinary CLI invocation; retain both receipts. Installed **Sense183 app0 / LCD180 app0** retain Sense182 app1 and LCD179 app1 fallbacks. The released Sense183 log confirms SDK VALID/current readback at10,077ms; fresh183/LCD180 paired SDK health was subsequently observed. Protected ranges/backups passed verification; no NVS, bootloader, current-bank or LCD writes. The 182 first-wake image and live-list interruption checks passed; camera interruption failed, while the original voice later recovered from SD during a dark retry. See [the measured scope](UPLOAD_LATENCY_181_20260917.md). Public OTA remains162. Use `RELEASE_BASELINE.json.current_working_source`; preserve 180 and earlier evidence. The next candidate is 184 or later only after a fresh version inventory check.
 
 # Build and release from the frozen 6.4.158 baseline
 
@@ -18,13 +18,13 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run relevant host regressions, and commit the reviewed source before preparing release artifacts. The baseline guard verifies identity; it does not establish device acceptance of new code.
 
-Allocate an unused version **6.4.183 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.184 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.183>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.184>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"
