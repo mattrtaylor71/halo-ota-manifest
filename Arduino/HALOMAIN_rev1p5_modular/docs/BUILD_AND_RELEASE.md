@@ -1,4 +1,4 @@
-> Latest private working candidate: **171**, canonical paired builds/artifact checks and45 host suites passed; **not installed or published**. Both boards remain169 at real provisioning step3. Read [the171 handoff](WIFI_MEDIA_CORNER_TESTING_171.md) and `RELEASE_BASELINE.json.current_working_source`. Retain169 fallback and frozen158 recovery. Allocate unused172+.
+> Latest private working candidate: **172**, source `c90050f`, sealed canonical pair and49 host suites passed. Exact172 is installed, Sense/app0 and LCD/app1 SDK VALID; not published. Phone-join root cause and a separate late-arrival setup sleep race remain unresolved. Read [the172 handoff](PROVISIONING_JOIN_INVESTIGATION_20260916.md) and `RELEASE_BASELINE.json.current_working_source`. Preserve169 fallback and frozen158 recovery; allocate unused173+.
 
 # Build and release from the frozen 6.4.158 baseline
 

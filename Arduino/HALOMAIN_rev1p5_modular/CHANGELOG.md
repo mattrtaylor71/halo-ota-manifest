@@ -1,3 +1,7 @@
+# 6.4.172 private provisioning candidate — September16,2026
+
+Built and sealed source `c90050f` with all171 media fixes, the profile silhouette, setup-owned Wi-Fi guard, live provisioning sleep deferral and read-only AP-driver diagnostics. Both canonical builds/artifact checks and49 exact-snapshot host suites pass. Pair SHA `d21894556dd65033f764a60c27ebdb9de9890c8603d5a36b3078f339213d412c`; application-only service and fresh paired SDK VALID health passed (Sense/app0, LCD/app1), retaining169 fallback banks and unchanged NVS/partitions. Live AP-driver SSID/password match manager. Phone association and functional acceptance remain pending; no publication or confirmed authentication fix. A newly arriving setup session during LCD teardown remains a separate known race. [Receipts and limits](docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md).
+
 # September16: provisioning follow-up source, not installed
 
 Source `e58a4fb` completes the missing profile icon and prevents an obsolete normal Wi-Fi guard from disrupting active setup. Actual rendering and ownership regressions pass;32 generated QR codes roundtrip exactly through Apple Vision and the iOS parser. Phone association still needs diagnosis; a fresh setup-session recovery experiment is pending.171 builds remain unchanged, and installed pair remains169. [Evidence and limits](docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md).

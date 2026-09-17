@@ -1759,25 +1759,24 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.169",
-    "status": "PAIRED_SDK_VALID_REAL_SETUP_GUIDE_STEPS1_TO3_PASS",
+    "version": "6.4.172",
+    "status": "PASS_FRESH_PAIRED_172_SDK_VALID_AND_AP_DRIVER_READBACK",
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/HEALTH169-OBSERVED001.json",
-      "sha256": "36616cb6dbafb99a9d730a08780e4c72fe44cd3a4ec1856f2326e2985da44f55"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
+      "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
     },
-    "guide_validation": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/hardware169-realguide001/RESULT.json",
-      "sha256": "94a47fddd1fd41ed1cefa780dd9fa0c2da2170de96c00616556af84672aee3d0"
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/INSTALLATION172-REVIEW.json",
+      "sha256": "11e2f02f3ef5629c68abfa8f50ebf8a18e3be5db0372971823fb45db30b5a832"
     },
     "installed": {
-      "sense": "6.4.169 app1 SDK VALID",
-      "lcd": "6.4.169 app0 SDK VALID"
+      "sense": "6.4.172 app0 SDK VALID",
+      "lcd": "6.4.172 app1 SDK VALID"
     },
-    "current_screen": "Real provisioning QR step3; awaiting user phone setup",
+    "setup_status": "Live AP driver SSID/password match manager; phone association and setup completion pending.",
     "limits": [
-      "Actual steps1-3, scroll clamps/backward navigation, three repeated real QR-page cycles, stable heap and panel flush passed. Unit left at real step3 QR; real setup was already active on168 before either installation.",
-      "Steps4-6 transition logic passed host tests; actual phone Wi-Fi/account setup, success animation and completion timer remain unverified on hardware. The isolated preview correctly refused real provisioning. Shopping refresh and sleep smoke were not run while setup was active.",
-      "Existing168 clock-timeout LCD stale-link fallback race remains. No new OTA transfer, USB-free, abrupt power-cut, RF-loss or full-product acceptance. Prior media evidence and known incomplete image remain unchanged."
+      "Fresh protocol/SDK health and driver readback only; phone association and actual setup completion pending.",
+      "Late/revived setup after teardown admission remains a separately recorded race."
     ]
   },
   "previous_development_baseline_124": {
@@ -4835,13 +4834,17 @@
     }
   },
   "current_validation_blocker": {
-    "status": "WAITING_FOR_REAL_APP_PROVISIONING",
-    "detail": "Both boards169; LCD step3 app_connected=0, provisioning sleep suppression active. Complete actual Trepo app setup before device media/retry tests.",
+    "status": "WAITING_FOR_172_PHONE_ASSOCIATION_AND_FUNCTIONAL_ACCEPTANCE",
+    "detail": "Exact172 is installed with fresh paired SDK VALID health; AP driver SSID/password equality to manager is verified. Phone-join/authentication root cause is not yet confirmed, and the separate late-arrival provisioning teardown race remains recorded.",
+    "candidate_installed": true,
     "evidence": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/device-status001/RESULT.json",
-      "sha256": "56f7cb7fb891288d457121e3dbb2b20b8f64beb9168f49e75952ceb1413314ad"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
+      "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
     },
-    "candidate_installed": false
+    "qualification_limits": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/tools/QUALIFICATION-LIMITS172.json",
+      "sha256": "64f29096e412af8f5cf34530f029f9d44aafbefdc522c045793ccb1cc014f438"
+    }
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -5964,41 +5967,60 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.171",
-    "status": "PASS_171_BUILDS_WITH_UNBUILT_PROVISIONING_DESCENDANT",
-    "artifact_source_commit": "aa221c2ef8871e428747c32ac61216993dae58bc",
-    "artifact_source_firmware_tree": "d71dc475d14e05148bb153251ad857380605d713",
-    "runtime_fix_commit": "aa221c2ef8871e428747c32ac61216993dae58bc",
-    "build_id": "6.4.171-20260917T014934Z-aa221c2ef887",
+    "version": "6.4.172",
+    "status": "PASS_PRIVATE_172_INSTALLED_PAIRED_SDK_VALID_PHONE_JOIN_PENDING",
+    "artifact_source_commit": "c90050f3a415327144d118ed5a4a4c056f02522d",
+    "artifact_source_firmware_tree": "31c9b66de8085d0b2c332ca0004f00462c2bc3cd",
+    "runtime_fix_commit": "c90050f3a415327144d118ed5a4a4c056f02522d",
+    "build_id": "6.4.172-20260917T040727Z-c90050f3a415",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from e58a4fb95ecfc408c867434e261f35c84308291f or reviewed descendants. Preserve all171 fixes.171 artifacts remain unchanged and uninstalled; newer provisioning source is host-tested but unbuilt.",
+    "source_selection": "Continue from c90050f3a415327144d118ed5a4a4c056f02522d or reviewed descendants, retaining all171 media/custody/retry fixes and172 provisioning fixes. Exact172 is built, sealed and installed with fresh paired SDK VALID health. Phone-join root cause and functional acceptance remain pending. Allocate unused173+ for new firmware bytes.",
     "candidate_receipt": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/CANDIDATE171.json",
-      "sha256": "00f523745b4751e13ecd9108c8c5be1d93cb1e56ff5edd533767cebaa24cd524"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/candidate172-001/RELEASE-PAIR.json",
+      "sha256": "d21894556dd65033f764a60c27ebdb9de9890c8603d5a36b3078f339213d412c"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/HOST-VALIDATION.json",
-      "sha256": "c39f4d41fb9b9232063ce24292667bcf9bed4c7166727568040a4170e5cb93c3"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/candidate172-001/host-final001/RESULT.json",
+      "sha256": "dd60bae093853a4a2ecef7eeb8977409c282068a8a1f62bfaa59daf40ce2771c"
     },
+    "host_suite_count": 49,
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "a12a294b1dcbbf5aa843ee0a64c7ae5128345ce7ea6497fd74544b30d7fa2559"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/candidate172-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "35f1990a483cc1c97ba471db775b1f81fe665e37a8341a67c38502760787d604"
+    },
+    "source_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/candidate172-001/REVIEWED-SOURCE.json",
+      "sha256": "23d22205ff6f062d45179b366a102a99d57a482a8d77a7a73a0a60f8651c44c6"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/candidate172-001/SOURCE-SCOPE.json",
+      "sha256": "cd77f8db03ea23cbd2a25d8b1699c75bf3247ad4a1a849264918861cd9869f4f"
     },
     "stack_review": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/STACK-REVIEW.json",
-      "sha256": "923491f4dfa96a5b9521c75a5431002919db755dd39a78dc9335c560565595c7"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/candidate172-001/STACK-REVIEW.json",
+      "sha256": "c5e886bfb9c25679b85df8e4fd3519d5a8cdef70fa38771af7478c43b44ebc46"
     },
-    "installed": false,
+    "qualification_limits": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/tools/QUALIFICATION-LIMITS172.json",
+      "sha256": "64f29096e412af8f5cf34530f029f9d44aafbefdc522c045793ccb1cc014f438"
+    },
+    "installer_binding": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/tools/BINDING172.json",
+      "sha256": "460484a8087822360a7fc15911bd9ee818006189b94a986e6f8f22f5f347ea49"
+    },
+    "installed": true,
+    "installation_status": "Application-only paired service verified; fresh Sense172/app0 and LCD172/app1 selected SDK VALID confirmed. Phone association and functional acceptance remain pending.",
     "published": false,
     "physical_acceptance": false,
+    "phone_join_root_cause_confirmed": false,
     "installed_firmware_last_observed": {
-      "sense": "6.4.169 app1 SDK VALID",
-      "lcd": "6.4.169 app0 SDK VALID"
+      "sense": "6.4.172 app0 SDK VALID",
+      "lcd": "6.4.172 app1 SDK VALID"
     },
     "fresh_device_status": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/device-status001/RESULT.json",
-      "sha256": "56f7cb7fb891288d457121e3dbb2b20b8f64beb9168f49e75952ceb1413314ad"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
+      "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
     },
     "current_public_ota_version": "6.4.162",
     "public_manifest_readback": {
@@ -6006,26 +6028,46 @@
       "sha256": "26877a35a7bb622c736d8c1ba61e23c4f09d91d40c10c9477302d7b4818cd765"
     },
     "backend_rollout": "verified_test_owner_only",
-    "handoff": "docs/WIFI_MEDIA_CORNER_TESTING_171.md",
-    "next_unused_version": "6.4.172",
+    "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
+    "next_unused_version": "6.4.173",
+    "resource_delta_vs169": {
+      "sense": {
+        "size": 8224,
+        "static_ram_bytes": 280,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": 8224
+      },
+      "lcd": {
+        "size": 7264,
+        "static_ram_bytes": 32,
+        "rtc_slow_bytes": 40,
+        "linked_program_bytes": 7228
+      }
+    },
     "limits": [
-      "Host fault injection only; no new hardware power-cut, RF, USB-free or backlight/input-latency validation.",
-      "Original media is never deleted based only on missing files. Legacy/corrupt orphans without valid accepted-delete markers stay held.",
-      "Cancellation waits for the next safe storage/network checkpoint; current SDK/filesystem calls cannot be interrupted instantly.",
-      "Compiler stack review is not measured runtime free stack.",
-      "170 service scripts remain bound to170; rebind/review171 artifacts before application-only installation, preserve169 fallback banks and all provisioning/NVS/SD."
+      "Actual phone association/join failure is not yet explained or proven fixed. AP driver diagnostics only observe state; host SDK doubles do not establish physical association.",
+      "The LCD guard covers an already-live setup session and rechecks during the sleep handshake. A new or revived provisioning session arriving after the final guard before UI teardown can still reach sleep: UART QR/status handlers do not cancel that transition. This separate late-arrival race is retained for follow-up; no full provisioning/sleep qualification is claimed.",
+      "Installation and SDK VALID identity, when obtained separately, do not establish media delivery, dark wake, user-input, OTA or full-product acceptance.",
+      "49 source-bound host suites and compiler frame review do not establish physical phone association, runtime free stack, power-cut recovery, RF behavior or USB-free operation.",
+      "Preserve169 selected fallback banks, provisioning/NVS/SD and OTA accounting during application-only service. Mac Wi-Fi must remain unchanged."
     ],
-    "unbuilt_provisioning_descendant": {
-      "source_commit": "e58a4fb95ecfc408c867434e261f35c84308291f",
-      "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
-      "built": false,
-      "installed": false,
-      "published": false,
-      "phone_join_root_cause_confirmed": false,
-      "fixes": [
-        "Draw missing profile silhouette in existing setup badge",
-        "Retire stale normal STA guard while provisioning owns radio"
-      ]
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/INSTALLATION172-REVIEW.json",
+      "sha256": "11e2f02f3ef5629c68abfa8f50ebf8a18e3be5db0372971823fb45db30b5a832"
+    },
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
+      "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
+    },
+    "paired_sdk_health_passed": true,
+    "ap_driver_readback": {
+      "ssid_matches_manager": true,
+      "password_matches_manager": true,
+      "phone_association_proven": false,
+      "evidence": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
+        "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
+      }
     }
   },
   "previous_verified_paired_health_158": {
@@ -7042,5 +7084,101 @@
     "no_OTA_allowance_schedule_credentials_or_debt_reset": true,
     "inherited_from": "6.4.168",
     "provisioning_phone_completion_pending": true
+  },
+  "previous_working_source_171": {
+    "version": "6.4.171",
+    "status": "PASS_171_BUILDS_WITH_UNBUILT_PROVISIONING_DESCENDANT",
+    "artifact_source_commit": "aa221c2ef8871e428747c32ac61216993dae58bc",
+    "artifact_source_firmware_tree": "d71dc475d14e05148bb153251ad857380605d713",
+    "runtime_fix_commit": "aa221c2ef8871e428747c32ac61216993dae58bc",
+    "build_id": "6.4.171-20260917T014934Z-aa221c2ef887",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from e58a4fb95ecfc408c867434e261f35c84308291f or reviewed descendants. Preserve all171 fixes.171 artifacts remain unchanged and uninstalled; newer provisioning source is host-tested but unbuilt.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/CANDIDATE171.json",
+      "sha256": "00f523745b4751e13ecd9108c8c5be1d93cb1e56ff5edd533767cebaa24cd524"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/HOST-VALIDATION.json",
+      "sha256": "c39f4d41fb9b9232063ce24292667bcf9bed4c7166727568040a4170e5cb93c3"
+    },
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "a12a294b1dcbbf5aa843ee0a64c7ae5128345ce7ea6497fd74544b30d7fa2559"
+    },
+    "stack_review": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/STACK-REVIEW.json",
+      "sha256": "923491f4dfa96a5b9521c75a5431002919db755dd39a78dc9335c560565595c7"
+    },
+    "installed": false,
+    "published": false,
+    "physical_acceptance": false,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.169 app1 SDK VALID",
+      "lcd": "6.4.169 app0 SDK VALID"
+    },
+    "fresh_device_status": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/device-status001/RESULT.json",
+      "sha256": "56f7cb7fb891288d457121e3dbb2b20b8f64beb9168f49e75952ceb1413314ad"
+    },
+    "current_public_ota_version": "6.4.162",
+    "public_manifest_readback": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst164-001/PUBLIC-MANIFESTS.json",
+      "sha256": "26877a35a7bb622c736d8c1ba61e23c4f09d91d40c10c9477302d7b4818cd765"
+    },
+    "backend_rollout": "verified_test_owner_only",
+    "handoff": "docs/WIFI_MEDIA_CORNER_TESTING_171.md",
+    "next_unused_version": "6.4.172",
+    "limits": [
+      "Host fault injection only; no new hardware power-cut, RF, USB-free or backlight/input-latency validation.",
+      "Original media is never deleted based only on missing files. Legacy/corrupt orphans without valid accepted-delete markers stay held.",
+      "Cancellation waits for the next safe storage/network checkpoint; current SDK/filesystem calls cannot be interrupted instantly.",
+      "Compiler stack review is not measured runtime free stack.",
+      "170 service scripts remain bound to170; rebind/review171 artifacts before application-only installation, preserve169 fallback banks and all provisioning/NVS/SD."
+    ],
+    "unbuilt_provisioning_descendant": {
+      "source_commit": "e58a4fb95ecfc408c867434e261f35c84308291f",
+      "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
+      "built": false,
+      "installed": false,
+      "published": false,
+      "phone_join_root_cause_confirmed": false,
+      "fixes": [
+        "Draw missing profile silhouette in existing setup badge",
+        "Retire stale normal STA guard while provisioning owns radio"
+      ]
+    }
+  },
+  "previous_current_validation_blocker_171": {
+    "status": "WAITING_FOR_REAL_APP_PROVISIONING",
+    "detail": "Both boards169; LCD step3 app_connected=0, provisioning sleep suppression active. Complete actual Trepo app setup before device media/retry tests.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/device-status001/RESULT.json",
+      "sha256": "56f7cb7fb891288d457121e3dbb2b20b8f64beb9168f49e75952ceb1413314ad"
+    },
+    "candidate_installed": false
+  },
+  "previous_device_health_169": {
+    "version": "6.4.169",
+    "status": "PAIRED_SDK_VALID_REAL_SETUP_GUIDE_STEPS1_TO3_PASS",
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/HEALTH169-OBSERVED001.json",
+      "sha256": "36616cb6dbafb99a9d730a08780e4c72fe44cd3a4ec1856f2326e2985da44f55"
+    },
+    "guide_validation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/hardware169-realguide001/RESULT.json",
+      "sha256": "94a47fddd1fd41ed1cefa780dd9fa0c2da2170de96c00616556af84672aee3d0"
+    },
+    "installed": {
+      "sense": "6.4.169 app1 SDK VALID",
+      "lcd": "6.4.169 app0 SDK VALID"
+    },
+    "current_screen": "Real provisioning QR step3; awaiting user phone setup",
+    "limits": [
+      "Actual steps1-3, scroll clamps/backward navigation, three repeated real QR-page cycles, stable heap and panel flush passed. Unit left at real step3 QR; real setup was already active on168 before either installation.",
+      "Steps4-6 transition logic passed host tests; actual phone Wi-Fi/account setup, success animation and completion timer remain unverified on hardware. The isolated preview correctly refused real provisioning. Shopping refresh and sleep smoke were not run while setup was active.",
+      "Existing168 clock-timeout LCD stale-link fallback race remains. No new OTA transfer, USB-free, abrupt power-cut, RF-loss or full-product acceptance. Prior media evidence and known incomplete image remain unchanged."
+    ]
   }
 }

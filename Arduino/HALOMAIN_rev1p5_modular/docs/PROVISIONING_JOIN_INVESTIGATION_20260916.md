@@ -1,9 +1,12 @@
 # Provisioning join investigation — September 16, 2026
 
-The installed pair is still private169. The source changes below are descendants
-of the built but uninstalled171 candidate; they are not built, installed or
-published. Use unused172+ for new firmware bytes. Preserve all171 media-retry
-changes and the169 fallback banks.
+Private172 is built and sealed from `c90050f3a415327144d118ed5a4a4c056f02522d`,
+build `6.4.172-20260917T040727Z-c90050f3a415`. Both canonical production builds,
+artifact checks and49 exact-snapshot host suites pass. Application-only service and fresh
+paired SDK VALID health passed: Sense172/app0 and LCD172/app1.169 fallback banks,
+NVS and partitions are preserved. Phone association and functional acceptance
+remain pending. No public release or confirmed authentication fix. Continue from172 or reviewed
+descendants, preserving171 fixes and169 fallback banks; allocate unused173+.
 
 ## Confirmed icon defect and source fix
 
@@ -110,7 +113,49 @@ reset or flash commands; the live memory read refused because the CPU was not
 halted. Capture006 confirms continuous uptime afterward. No password was
 recovered that way; further diagnosis uses the firmware's SDK getters.
 
-These source changes retain all171 media/retry fixes and e58a4fb profile/STA
-ownership fixes.172 build, installation and actual phone association are still
-pending at this source commit. Preserve169 fallback banks and NVS. Do not claim
-a fixed authentication failure until the phone test establishes it.
+These changes retain all171 media/retry fixes and e58a4fb profile/STA ownership
+fixes. The final172 build,49 host suites and installation/paired SDK health pass.
+Actual phone association and setup completion remain pending. Preserve169 fallback banks and NVS.
+Do not claim a fixed authentication failure until the phone test establishes it.
+
+A separate bounded source review found that a new or revived setup session
+arriving after the last guard, during LCD UI teardown, can still reach sleep.
+The UART provisioning handlers do not cancel that transition. The candidate is
+retained for the current phone/AP diagnosis; this late-arrival case remains open
+and no complete provisioning/sleep qualification is claimed.
+
+## Actual172 release evidence
+
+Candidate: `/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/candidate172-001`.
+`RELEASE_BASELINE.json.current_working_source` pins the exact receipts:
+
+- `RELEASE-PAIR.json`: SHA256 `d21894556dd65033f764a60c27ebdb9de9890c8603d5a36b3078f339213d412c`.
+- `host-final001/RESULT.json`:49 passing suites; SHA256 `dd60bae093853a4a2ecef7eeb8977409c282068a8a1f62bfaa59daf40ce2771c`.
+- `build/artifact-result-v2-sense-lcd.json`: both canonical shipping artifacts passed.
+- `SOURCE-SCOPE.json`, `STACK-REVIEW.json` and `../tools/QUALIFICATION-LIMITS172.json`:
+  exact37-file delta versus169, compiler frame evidence and retained known risk.
+- `../tools/BINDING172.json`: exact actual pair bound; no hardware action by binder.
+
+Sense image grows8224bytes versus169, static RAM280bytes and RTC unchanged;
+LCD grows7264bytes, static RAM32bytes and RTC40bytes. Both fit existing slots.
+Diagnostic compiler frame is544bytes, not a measured runtime stack margin.
+Historical171 artifacts and acceptance records remain unchanged.
+
+
+## Installed172 checkpoint
+
+`/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/INSTALLATION172-REVIEW.json` verifies the
+saved complete banks, exact candidate writes/selectors, protected NVS/partition
+bytes and service closure. SHA256:
+`11e2f02f3ef5629c68abfa8f50ebf8a18e3be5db0372971823fb45db30b5a832`.
+Separate `health172-observed001/RESULT.json` confirms Sense/app0 and LCD/app1
+selected SDK VALID, including the LCD nonce/CRC check. SHA256:
+`bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8`.
+The immutable sealed pair retains its original build-time checkpoint; these
+separate receipts establish the later installation and health facts.
+
+The actual driver reports SSID/password equality with the manager for session20AE.
+That eliminates a live driver/manager credential mismatch at these observations;
+it does not prove phone association or explain the earlier rejection. Root's
+phonejoin001 capture is active for the user's iPhone Settings test. Mac Wi-Fi
+remains unchanged. Phone success and complete setup are still unproven.
