@@ -1,5 +1,6 @@
 #pragma once
 #include "SenseDurablePolicyState.h"
+#include "DurableOtaDiscoveryRecovery.h"
 
 // Synchronous main-task coordinator adapter. The canonical Record and scratch
 // are owned by State.h; this object holds only the live invocation and borrowed
@@ -202,6 +203,45 @@ static bool normal_entry() {
   const uint32_t due=normal_calendar_due();
   return due&&due/86400UL==c.epoch/86400UL&&c.epoch>=due;
 }
+static durable_ota::Admission reserve_proved_discovery_recovery(
+    const durable_ota::Record& r,durable_ota::Clock c,bool manual,
+    durable_ota::Record& candidate) {
+  durable_ota::DiscoveryRecoveryProof proof{};
+  proof.credit=&g_coord_credit;proof.pending=g_coord_pending;
+  proof.completion_target=g_coord_completion_target;
+  proof.storage_ready=state_loaded&&state_allowed&&g_coord_credit_loaded&&
+    g_coord_credit_mutations&&!ota_peer_schedule_completed(g_coord_pending);
+  bool lcd_due=false;proof.lcd_debt_known=ota_storage_read_debt(lcd_due);
+  proof.uncertainty_clear=!g_ota_storage_uncertain&&!g_coord_credit_uncertain&&
+    !g_serial_install_uncertain&&!g_nvs_reclaim_uncertain;
+  proof.local_valid=nvs_capacity_image_valid();
+  proof.completed_comparison=durable_ota::target_valid(r.target)&&
+    peer_valid(r.target.peer_version)&&
+    (compareSemver(kFirmwareVersion,r.target.version)>0||
+     running_matches(r.target,work.original_start,work.original_budget));
+  {
+    std::lock_guard<std::recursive_mutex> config_lock(ProvisioningState::timezoneMutex());
+    std::lock_guard<std::recursive_mutex> time_lock(g_time_mutex);
+    char confirmed[64];
+    proof.pending_due=coord_credit_timezone_matches_configuration(confirmed)&&
+      nightly_credit_decide(g_coord_credit.pending,g_coord_pending,c.epoch,c.fresh,
+                            confirmed)==NightlyCreditDecision::Due;
+  }
+  // Recheck the same live peer proof after storage/TZ reads; they cannot renew
+  // the original nonce, owner, boot, or bounded admission opportunity.
+  proof.peer_ready=work.retry_baseline.boot&&g_peer_gate.active&&g_peer_gate.entered&&
+    g_peer_gate.ready&&g_peer_gate.locked&&!g_peer_gate.legacy&&g_peer_gate.owner[0]&&
+    uint32_t(millis()-g_peer_gate.proof_ms)<2000&&
+    int32_t(millis()-g_peer_gate.deadline_ms)<0&&peer_valid()&&
+    g_lcd_query_peer_boot_id==work.retry_baseline.boot&&
+    g_lcd_query_peer_boot_id==g_peer_gate.peer_boot&&
+    !strcmp(g_lcd_query_coord_id,g_peer_gate.challenge)&&
+    !strcmp(g_lcd_query_coord_owner,g_peer_gate.owner)&&
+    g_lcd_query_coord_lease_ms&&g_lcd_query_coord_lease_ms<=120000&&
+    g_lcd_ota_query_resp_part_size==work.retry_baseline.part_size;
+  proof.user_idle=!halo_primary_user_work_busy();
+  return durable_ota::reserve_recovery_discovery(r,c,proof,manual,candidate);
+}
 static bool enter(const char* reason,bool retained_legacy) {
   last_admission=durable_ota::Admission::NOT_DUE;
   if(work.live||!g_lcd_work_budget_live||!g_lcd_work_budget.remaining_ms()||!nvs_capacity_image_valid())return false;
@@ -287,8 +327,16 @@ static bool enter(const char* reason,bool retained_legacy) {
       const bool bench_discovery=durable_ota::bench_active(*r)&&r->phase==durable_ota::Phase::DISCOVERY;
       if(bench_discovery&&(!g_coord_credit_loaded||!g_coord_credit_mutations||retained_legacy||
           unresolved_legacy()||!peer_valid()||halo_primary_user_work_busy()))return false;
-      admitted=admission_allowed(durable_ota::reserve_discovery(*r,c,retained_legacy,false,candidate,origin,campaign,
-          halo_ota_manual_override_active()));
+      // prepare_work may have admitted a new pending after the caller's
+      // legacy snapshot. Existing read-only work must bind that same owner.
+      const bool discovery_pending=r->phase==durable_ota::Phase::DISCOVERY&&
+        g_coord_pending[0]&&strcmp(r->origin,g_coord_pending);
+      auto result=durable_ota::reserve_discovery(*r,c,retained_legacy||discovery_pending,false,candidate,origin,campaign,
+          halo_ota_manual_override_active());
+      if(result==durable_ota::Admission::LEGACY){
+        result=reserve_proved_discovery_recovery(*r,c,halo_ota_manual_override_active(),candidate);
+      }
+      admitted=admission_allowed(result);
     }
     else if(r->one_shot.phase==durable_ota::OneShotPhase::ARMED)
       admitted=admission_allowed(durable_ota::one_shot_reserve(*r,c,g_coord_sense_boot_id,true,false,candidate));
@@ -320,7 +368,7 @@ static bool bind_pair(const OtaManifest& lcd,const char* current_lcd) {
   durable_ota::Record candidate{};
   if(r->phase==durable_ota::Phase::DISCOVERY){
     const bool newer=compareSemver(sense.version,kFirmwareVersion)>0||update;
-    if(r->deferred_path&&work.legacy){
+    if(r->deferred_path&&work.legacy&&durable_ota::target_empty(r->target)){
       if(!durable_ota::bind_legacy_discovery(*r,fresh_clock(work.normal),target,true,
          !strcmp(r->origin,g_coord_pending),nvs_capacity_image_valid(),peer_valid(),candidate)||!commit(candidate))return false;
       r=current();
@@ -513,20 +561,18 @@ static bool halo_policy_resolve_pair(){
   using namespace sense_policy;
   const auto* r=current();if(!work.live||!r)return false;
   if(r->phase==durable_ota::Phase::DISCOVERY){
-#if HALO_OTA_BENCH_PROFILE
-    // Called only after the existing pair/policy check returned success. Commit the
-    // observed no-update outcome before optional reporting/unlock; an earlier
-    // failure or reset stays DISCOVERY and cannot acquire this terminal state.
-    if(durable_ota::bench_active(*r)){
-      if(!remaining()||!peer_valid())return false;
-      durable_ota::Record candidate{};
-      if(!durable_ota::close_discovery(*r,fresh_clock(work.normal),
-          uint32_t(millis()-work.phase_start),true,next_normal_epoch(),candidate,true)||
-          !commit(candidate))return false;
-      work.finished=true;
-    }
-#endif
-    return true; // no target completion or calendar credit
+    // The wrapper calls this only after the complete checked pair result.
+    // Close accounting durably before its separate coordinator completion.
+    // A reset in between retains pending and requires a new charged pair check;
+    // an empty closed discovery alone is never completion/transfer evidence.
+    if(work.finished)return !durable_ota::active_phase(*r);
+    if(!remaining()||!nvs_capacity_image_valid()||!peer_valid()||
+       (g_coord_pending[0]&&strcmp(r->origin,g_coord_pending)))return false;
+    durable_ota::Record candidate{};
+    if(!durable_ota::close_discovery(*r,fresh_clock(work.normal),
+        uint32_t(millis()-work.phase_start),true,next_normal_epoch(),candidate,true)||
+        !commit(candidate))return false;
+    work.finished=true;return true;
   }
   if(!peer_valid(r->target.peer_version)||!running_matches(r->target,work.original_start,work.original_budget))return false;
   durable_ota::Record candidate{};
@@ -534,6 +580,10 @@ static bool halo_policy_resolve_pair(){
   diagnostic_observed_pair(candidate);
   diagnostic_terminal(candidate);
   work.finished=true;return true;
+}
+static bool halo_policy_close_checked_discovery(){
+  const auto* r=sense_policy::current();
+  return r&&r->phase==durable_ota::Phase::DISCOVERY?halo_policy_resolve_pair():true;
 }
 static bool halo_policy_notice_due(const char* id){
   using namespace sense_policy;

@@ -130,6 +130,10 @@ static bool normal_entry(){return false;}
 static durable_ota::Clock fresh_clock(bool normal=false){return {epoch,clock_fresh,normal};}
 static uint32_t next_normal_epoch(){return epoch+86400;}
 static bool unresolved_legacy(){return false;}
+// Empty-discovery recovery has its own actual-function regression; these cases
+// exercise only the pre-existing exact-target postboot settlement contract.
+static durable_ota::Admission reserve_proved_discovery_recovery(const durable_ota::Record&,
+ durable_ota::Clock,bool,durable_ota::Record&){return durable_ota::Admission::LEGACY;}
 static bool legacy_expectation(uint32_t,uint32_t,bool&pending){pending=false;return !read_error;}
 static bool rollback_matches(const durable_ota::Record&,uint32_t,uint32_t){return false;}
 static bool image_matches(const esp_partition_t*,const durable_ota::Target&,uint32_t start,uint32_t budget){

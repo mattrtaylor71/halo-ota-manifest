@@ -4875,6 +4875,7 @@ static void handle_ota_proof() {
 #if HALO_DURABLE_OTA_POLICY
 static bool halo_policy_bind_pair(const OtaManifest&,const char*);
 static bool halo_policy_resolve_pair();
+static bool halo_policy_close_checked_discovery();
 static bool halo_policy_resolve_superseded();
 #endif
 static bool prepare_lcd_ota_proxy_retry(char* lcd_fw, size_t fw_len) {
@@ -5030,6 +5031,11 @@ static bool complete_downgrade_policy_check(const char* manifest_fw, const char*
   if (!prod_proxy_lcd_inline(false) || !sense_lcd_ota_retry_safe() ||
       !g_lcd_work_budget.remaining_ms() || !sense_boot_valid() || get_lcd_ota_due_nvs()) return false;
 
+#if HALO_DURABLE_OTA_POLICY
+  // Read-only discovery accounting must be durable before credit/debt closes.
+  // Exact-target supersession retains its existing separate resolver below.
+  if(!halo_policy_close_checked_discovery())return false;
+#endif
   const bool had_pending = g_coord_pending[0] != 0;
   if (!g_lcd_work_budget.remaining_ms()) return false;
   const CoordCompletion resolution = ota_peer_schedule_complete();
