@@ -1759,29 +1759,34 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.172",
-    "status": "PASS_FRESH_PAIRED_172_SDK_VALID_AND_AP_DRIVER_READBACK",
+    "version": "6.4.174",
+    "status": "PASS_CLOSED_CAPTURE_PAIRED_174_SDK_VALID_AND_AP_DRIVER_READBACK",
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
-      "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/health174-observed001/RESULT.json",
+      "sha256": "830fb117a425f49ab08e131ea3d2522510343c3bb21fda970f3e8ee794c7d99c"
     },
     "installation_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/INSTALLATION172-REVIEW.json",
-      "sha256": "11e2f02f3ef5629c68abfa8f50ebf8a18e3be5db0372971823fb45db30b5a832"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/INSTALLATION174-REVIEW.json",
+      "sha256": "c9482c907d4c1fe84c44af7e6a2a98419f71b10da262f2751fcd1eda2d6b4b79"
     },
     "installed": {
-      "sense": "6.4.172 app0 SDK VALID",
-      "lcd": "6.4.172 app1 SDK VALID"
+      "sense": "6.4.174 app0 SDK VALID",
+      "lcd": "6.4.174 app1 SDK VALID"
     },
-    "setup_status": "Live AP driver SSID/password match manager. Target session20AE failed on iPhone and Samsung. One USB-connected live setup run stayed awake past330seconds.",
+    "setup_status": "AP driver/manager credentials match. Both exact-password Galaxy attempts fail; wrong-password control logs SDK event. Public HMAC/PBKDF pass, but197 SDK AES allocation errors were captured in first correct attempt.",
+    "ap_auth_experiment": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/ap-auth174-experiment001/RESULT.json",
+      "sha256": "19b7ae41ac6219cadcb0fe07c006d5457eca5a643e9a62417d04e5e5de928e0d"
+    },
+    "aes_allocation_observation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/ap-auth174-experiment001/AES-ADDENDUM.json",
+      "sha256": "505e29ef73ef711f66b31ef1800e809d796b4e6bff27333affd4857ce66456f6"
+    },
     "limits": [
-      "Fresh protocol/SDK health and driver readback only; phone association and actual setup completion pending.",
-      "Late/revived setup after teardown admission remains a separately recorded race."
-    ],
-    "setup_awake_observation": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/setup-sleep172-observed001/RESULT.json",
-      "sha256": "a1f22e2fcf690e9a7d13937867cef25c513b2e55519bcba1fe799575eac453ec"
-    }
+      "Protocol/SDK health and AP readback only; full provisioning/functional acceptance remains unresolved.",
+      "Public crypto vectors and logged event behavior do not prove actual handshake PMK/MIC correctness or locate failure.",
+      "Late/revived setup during sleep teardown remains unresolved."
+    ]
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -4838,42 +4843,25 @@
     }
   },
   "current_validation_blocker": {
-    "status": "172_TARGET_AUTH_FAILURE_REPRODUCED_CAUSE_UNRESOLVED",
-    "detail": "Exact172 SDK VALID; live driver/manager credentials match. iPhone Incorrect password and independent Samsung target M1/M2 then timeout/WRONG_KEY reproduce join failure. Live setup remains awake past330seconds; new/revived setup during teardown remains a separate known race. Warm AP reset experiment outcome is not yet inferred.",
+    "status": "174_AUTH_FAILURE_WITH_AES_ALLOCATION_ERRORS_FIX_PENDING",
+    "detail": "Exact174 is SDK VALID; two correct-password Galaxy target attempts fail after M1/M2. Deliberate wrong-password trial alone logs AP_WRONG_PASSWORD. Manual public HMAC/PBKDF pass, while first correct trial includes197 SDK AES allocation failures. Camera DMA reserve release during provisioning is being implemented for175. Message-stage/PMK causality and fix effectiveness remain unproved.",
     "candidate_installed": true,
     "evidence": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
-      "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/ap-auth174-experiment001/RESULT.json",
+      "sha256": "19b7ae41ac6219cadcb0fe07c006d5457eca5a643e9a62417d04e5e5de928e0d"
+    },
+    "aes_allocation_observation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/ap-auth174-experiment001/AES-ADDENDUM.json",
+      "sha256": "505e29ef73ef711f66b31ef1800e809d796b4e6bff27333affd4857ce66456f6"
     },
     "qualification_limits": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/tools/QUALIFICATION-LIMITS172.json",
-      "sha256": "64f29096e412af8f5cf34530f029f9d44aafbefdc522c045793ccb1cc014f438"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/tools/QUALIFICATION-LIMITS174.json",
+      "sha256": "295036233e8ae9fc4f5598c2fd1c4f555cdb7398d5a5fd189cb2c121826807f3"
     },
-    "phone_join_observation": {
-      "status": "FAILED_ON_IPHONE_AND_SAMSUNG_TARGET_SESSION_20AE",
-      "iphone": "User reports Incorrect password in iPhone Settings.",
-      "independent_android": "Samsung SM_A366U on Mac mini, USB serial RFCY322W52W; exact startup password programmed by ADB. Target scan RSSI-48, WPA2-PSK/CCMP.",
-      "target_bssid": "9a:a3:16:f8:1a:6c",
-      "target_handshake": "M1 received at2026-09-17T04:23:43Z, M2 sent, reason15 timeout/WRONG_KEY about5.1seconds later; no target M3 observed. Later M1/M3 in the same capture belong to Garage Member BSSIDa4:f8:ff:8c:a1:46 during restoration.",
-      "phone_capture": {
-        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/phone-join001/RESULT.json",
-        "sha256": "8a8e8acccebf4d4d691c82c001b9254b3dd79b5b1d51c6f3351a8f2023c1fcc1"
-      },
-      "android_capture": {
-        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/android-join001/RESULT.json",
-        "sha256": "2c040f171f3f1f91edcb7bdb62f47ff094e015f050b28ab3cc4c79eafaecc5f0"
-      },
-      "android_log": {
-        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/android-join001/wifi-logcat.raw",
-        "sha256": "acb75418fbd03161c5d2aa4a0600cd5fb16a19f2a81ad5075b79de4fbfb6c18a"
-      },
-      "limits": "Driver/manager credential equality does not establish PMK correctness or explain the failed handshake. No PMK causal claim.",
-      "warm_ap_reset_experiment": "phone-join002/Android002 in progress; no outcome inferred."
-    },
-    "setup_awake_observation": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/setup-sleep172-observed001/RESULT.json",
-      "sha256": "a1f22e2fcf690e9a7d13937867cef25c513b2e55519bcba1fe799575eac453ec"
-    }
+    "known_separate_limits": [
+      "Late/revived setup during LCD teardown can still race sleep.",
+      "Blocking STA attempt ownership gap remains separately recorded."
+    ]
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -5996,70 +5984,79 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.173",
-    "status": "PRIVATE_INSTALLED_SDK_VALID_AP_AUTH_FAILURE_UNRESOLVED",
-    "artifact_source_commit": "0a9576b5ff56d0120407df1f2848ba298cb40d7a",
-    "artifact_source_firmware_tree": "51e153d46597a1fff8e28e1fc4a3a4e335d69dd3",
-    "build_id": "6.4.173-20260917T043640Z-0a9576b5ff56",
+    "version": "6.4.174",
+    "status": "PRIVATE_INSTALLED_SDK_VALID_AES_ALLOCATION_FAILURE_OBSERVED_FIX_PENDING",
+    "artifact_source_commit": "75debe873675ed1519c455e23275f3aefd1642db",
+    "artifact_source_firmware_tree": "72bd74b6a2a32128fbc44c6fdccde0798944529d",
+    "build_id": "6.4.174-20260917T050100Z-75debe873675",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from reviewed descendants of 0a9576b5ff56, preserving all171 media fixes and172 setup fixes. 173 adds a manual same-credential AP restart diagnostic only; its actual A/B did not fix phone authentication. New raw event/crypto diagnostics are being prepared for unused174. No public release or completed functional acceptance.",
+    "source_selection": "Continue from75debe873675 or reviewed descendants, preserving all171/172 fixes.174 adds raw AP wrong-password event observation and manual public HMAC/PBKDF diagnostics; authentication still fails and197 SDK AES allocation errors were logged. A camera DMA reserve fix is in preparation for175; no success or public release is claimed.",
     "candidate_receipt": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/RELEASE-PAIR.json",
-      "sha256": "620b8f30811c79d0b75b2e27409cb673f108244601879da234e65e2d7c0f8e98"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/candidate174-001/RELEASE-PAIR.json",
+      "sha256": "3c22b93ebceea4aea99115c95a362f065e94c933b627b1e69abac563b21a1c22"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/host-final001/RESULT.json",
-      "sha256": "277f724dc9aae4af6ef6566f87ac7711df7cf365d72b1bf1f5ac65cc5197f20a"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/candidate174-001/host-final001/RESULT.json",
+      "sha256": "3649e073cc6c322062366831a0506c91359e798a052fa19773fee81d7b88d3b3"
     },
-    "host_suite_count": 7,
-    "retained_host_lineage": "172 exact snapshot49-suite result retained in previous_working_source_172; unchanged unrelated runtime checked by173 source scope.",
+    "host_suite_count": 9,
+    "retained_host_lineage": "173 seven-suite and17249-suite receipts/logs retained and reverified; unrelated runtime including LCD byte-identical to173.",
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "84ead1c51ed2348a7e7d810285bc74cc9a83dac18c251a33cc6c10031aa201d8"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/candidate174-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "52752d0d70d54cb99dd841fb73cddd1e102d28ba6abc490f68f769fc4917b9d2"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/SOURCE-SCOPE.json",
-      "sha256": "d924655fc78a12e1af2cad67be09149a0fce2fdb6de2542a3763c86ea8358405"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/candidate174-001/SOURCE-SCOPE.json",
+      "sha256": "731a1bb6bba784ed280cbaf44f78c8b4818a6f7af8608d9ee1f57bd59140f473"
     },
     "stack_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/STACK-REVIEW.json",
-      "sha256": "96547602084891ebb049944abb64d4f5a63ace26c754109fbdbb560bb96aa301"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/candidate174-001/STACK-REVIEW.json",
+      "sha256": "bb15cb6fe3c61c12f59fef06bb4913e6f0d9a1278ca9b9247c826caad4fd9369"
     },
     "installer_binding": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/tools/BINDING173.json",
-      "sha256": "ac47c1c68def7fbd44ebaf6f71e70e12623995203c949855eff757c7546f0faa"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/tools/BINDING174.json",
+      "sha256": "0c0d0210f5522b3ac7ccea640097ac311fcc2a12fa7e508f96e8574a7945c271"
     },
     "installed": true,
     "published": false,
     "physical_acceptance": false,
     "phone_join_root_cause_confirmed": false,
     "installed_firmware_last_observed": {
-      "sense": "6.4.173 app1 SDK VALID",
-      "lcd": "6.4.173 app0 SDK VALID"
+      "sense": "6.4.174 app0 SDK VALID",
+      "lcd": "6.4.174 app1 SDK VALID"
     },
     "installation_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/INSTALLATION173-REVIEW.json",
-      "sha256": "9e661af683b2aa91b9f678721f1b29ac4e02cbd8004506b4b8190a1e8fbb9f8f"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/INSTALLATION174-REVIEW.json",
+      "sha256": "c9482c907d4c1fe84c44af7e6a2a98419f71b10da262f2751fcd1eda2d6b4b79"
     },
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/health173-observed001/RESULT.json",
-      "sha256": "a38cc14d037cf01947cb2db20deed4293db634219f44a5a1df33d7a6528254c4"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/health174-observed001/RESULT.json",
+      "sha256": "830fb117a425f49ab08e131ea3d2522510343c3bb21fda970f3e8ee794c7d99c"
     },
     "paired_sdk_health_passed": true,
-    "ap_restart_ab": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/ap-restart173-ab001/RESULT.json",
-      "sha256": "b8797ebddb11f80c51a5ffca87ec2c23248ee87db8302c9241d0748a62963dd3"
-    },
     "current_public_ota_version": "6.4.162",
-    "next_unused_version": "6.4.174",
+    "next_unused_version": "6.4.175",
     "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
     "limits": [
-      "Both Samsung attempts failed at authentication: target M1/M2 then reason15 WRONG_KEY, before and after verified unchanged-credential AP restart. No confirmed PMK or crypto cause.",
-      "Setup late-arrival sleep race and concurrent blocking STA attempt ownership gap remain separately documented and unqualified.",
-      "Application-only service preserved172 VALID fallback banks, NVS and partitions;169 backups retained. No media, OTA, USB-free, power-cut or full-product acceptance claimed.",
-      "Both Macs remain on their existing Wi-Fi. Galaxy is controlled by USB on Mac mini, restored to Garage Member, and only test-added networks were removed."
-    ]
+      "Both exact-password Galaxy attempts failed after target M1/M2 with reason15/WRONG_KEY and no targetM3 captured. Only deliberate wrong-password control logged the raw SDK wrong-password event; absence does not prove M2/MIC acceptance.",
+      "197 SDK AES allocation errors were logged in the first correct-password interval; none additionally logged in wrong001/correct002. Proposed DMA reserve change is pending; no proved M3 or PMK cause.",
+      "On-device public HMAC-SHA1/PBKDF2 vectors passed; this is algorithm evidence only, not actual WPA state, PMK, MIC, AES/key-wrap or full-crypto qualification.",
+      "Known late/revived setup sleep race and concurrent blocking STA ownership limitation remain recorded; no new media, OTA, USB-free, power-cut or full-product acceptance.",
+      "Application-only service preserved173 VALID fallback banks, NVS and partitions. Historical172/169 backups retained. Galaxy log owners closed/reaped; root reports test-network cleanup and restoration without changing either Mac Wi-Fi."
+    ],
+    "qualification_limits": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/tools/QUALIFICATION-LIMITS174.json",
+      "sha256": "295036233e8ae9fc4f5598c2fd1c4f555cdb7398d5a5fd189cb2c121826807f3"
+    },
+    "ap_auth_experiment": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/ap-auth174-experiment001/RESULT.json",
+      "sha256": "19b7ae41ac6219cadcb0fe07c006d5457eca5a643e9a62417d04e5e5de928e0d"
+    },
+    "aes_allocation_observation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174/ap-auth174-experiment001/AES-ADDENDUM.json",
+      "sha256": "505e29ef73ef711f66b31ef1800e809d796b4e6bff27333affd4857ce66456f6"
+    }
   },
   "previous_verified_paired_health_158": {
     "version": "6.4.158",
@@ -7274,6 +7271,135 @@
         "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
         "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
       }
+    },
+    "phone_join_observation": {
+      "status": "FAILED_ON_IPHONE_AND_SAMSUNG_TARGET_SESSION_20AE",
+      "iphone": "User reports Incorrect password in iPhone Settings.",
+      "independent_android": "Samsung SM_A366U on Mac mini, USB serial RFCY322W52W; exact startup password programmed by ADB. Target scan RSSI-48, WPA2-PSK/CCMP.",
+      "target_bssid": "9a:a3:16:f8:1a:6c",
+      "target_handshake": "M1 received at2026-09-17T04:23:43Z, M2 sent, reason15 timeout/WRONG_KEY about5.1seconds later; no target M3 observed. Later M1/M3 in the same capture belong to Garage Member BSSIDa4:f8:ff:8c:a1:46 during restoration.",
+      "phone_capture": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/phone-join001/RESULT.json",
+        "sha256": "8a8e8acccebf4d4d691c82c001b9254b3dd79b5b1d51c6f3351a8f2023c1fcc1"
+      },
+      "android_capture": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/android-join001/RESULT.json",
+        "sha256": "2c040f171f3f1f91edcb7bdb62f47ff094e015f050b28ab3cc4c79eafaecc5f0"
+      },
+      "android_log": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/android-join001/wifi-logcat.raw",
+        "sha256": "acb75418fbd03161c5d2aa4a0600cd5fb16a19f2a81ad5075b79de4fbfb6c18a"
+      },
+      "limits": "Driver/manager credential equality does not establish PMK correctness or explain the failed handshake. No PMK causal claim.",
+      "warm_ap_reset_experiment": "phone-join002/Android002 in progress; no outcome inferred."
+    },
+    "setup_awake_observation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/setup-sleep172-observed001/RESULT.json",
+      "sha256": "a1f22e2fcf690e9a7d13937867cef25c513b2e55519bcba1fe799575eac453ec"
+    }
+  },
+  "previous_working_source_173": {
+    "version": "6.4.173",
+    "status": "PRIVATE_INSTALLED_SDK_VALID_AP_AUTH_FAILURE_UNRESOLVED",
+    "artifact_source_commit": "0a9576b5ff56d0120407df1f2848ba298cb40d7a",
+    "artifact_source_firmware_tree": "51e153d46597a1fff8e28e1fc4a3a4e335d69dd3",
+    "build_id": "6.4.173-20260917T043640Z-0a9576b5ff56",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from reviewed descendants of 0a9576b5ff56, preserving all171 media fixes and172 setup fixes. 173 adds a manual same-credential AP restart diagnostic only; its actual A/B did not fix phone authentication. New raw event/crypto diagnostics are being prepared for unused174. No public release or completed functional acceptance.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/RELEASE-PAIR.json",
+      "sha256": "620b8f30811c79d0b75b2e27409cb673f108244601879da234e65e2d7c0f8e98"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/host-final001/RESULT.json",
+      "sha256": "277f724dc9aae4af6ef6566f87ac7711df7cf365d72b1bf1f5ac65cc5197f20a"
+    },
+    "host_suite_count": 7,
+    "retained_host_lineage": "172 exact snapshot49-suite result retained in previous_working_source_172; unchanged unrelated runtime checked by173 source scope.",
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "84ead1c51ed2348a7e7d810285bc74cc9a83dac18c251a33cc6c10031aa201d8"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/SOURCE-SCOPE.json",
+      "sha256": "d924655fc78a12e1af2cad67be09149a0fce2fdb6de2542a3763c86ea8358405"
+    },
+    "stack_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/candidate173-001/STACK-REVIEW.json",
+      "sha256": "96547602084891ebb049944abb64d4f5a63ace26c754109fbdbb560bb96aa301"
+    },
+    "installer_binding": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/tools/BINDING173.json",
+      "sha256": "ac47c1c68def7fbd44ebaf6f71e70e12623995203c949855eff757c7546f0faa"
+    },
+    "installed": true,
+    "published": false,
+    "physical_acceptance": false,
+    "phone_join_root_cause_confirmed": false,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.173 app1 SDK VALID",
+      "lcd": "6.4.173 app0 SDK VALID"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/INSTALLATION173-REVIEW.json",
+      "sha256": "9e661af683b2aa91b9f678721f1b29ac4e02cbd8004506b4b8190a1e8fbb9f8f"
+    },
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/health173-observed001/RESULT.json",
+      "sha256": "a38cc14d037cf01947cb2db20deed4293db634219f44a5a1df33d7a6528254c4"
+    },
+    "paired_sdk_health_passed": true,
+    "ap_restart_ab": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device173/ap-restart173-ab001/RESULT.json",
+      "sha256": "b8797ebddb11f80c51a5ffca87ec2c23248ee87db8302c9241d0748a62963dd3"
+    },
+    "current_public_ota_version": "6.4.162",
+    "next_unused_version": "6.4.174",
+    "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
+    "limits": [
+      "Both Samsung attempts failed at authentication: target M1/M2 then reason15 WRONG_KEY, before and after verified unchanged-credential AP restart. No confirmed PMK or crypto cause.",
+      "Setup late-arrival sleep race and concurrent blocking STA attempt ownership gap remain separately documented and unqualified.",
+      "Application-only service preserved172 VALID fallback banks, NVS and partitions;169 backups retained. No media, OTA, USB-free, power-cut or full-product acceptance claimed.",
+      "Both Macs remain on their existing Wi-Fi. Galaxy is controlled by USB on Mac mini, restored to Garage Member, and only test-added networks were removed."
+    ]
+  },
+  "previous_device_health_172": {
+    "version": "6.4.172",
+    "status": "PASS_FRESH_PAIRED_172_SDK_VALID_AND_AP_DRIVER_READBACK",
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
+      "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/INSTALLATION172-REVIEW.json",
+      "sha256": "11e2f02f3ef5629c68abfa8f50ebf8a18e3be5db0372971823fb45db30b5a832"
+    },
+    "installed": {
+      "sense": "6.4.172 app0 SDK VALID",
+      "lcd": "6.4.172 app1 SDK VALID"
+    },
+    "setup_status": "Live AP driver SSID/password match manager. Target session20AE failed on iPhone and Samsung. One USB-connected live setup run stayed awake past330seconds.",
+    "limits": [
+      "Fresh protocol/SDK health and driver readback only; phone association and actual setup completion pending.",
+      "Late/revived setup after teardown admission remains a separately recorded race."
+    ],
+    "setup_awake_observation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/setup-sleep172-observed001/RESULT.json",
+      "sha256": "a1f22e2fcf690e9a7d13937867cef25c513b2e55519bcba1fe799575eac453ec"
+    }
+  },
+  "previous_current_validation_blocker_172": {
+    "status": "172_TARGET_AUTH_FAILURE_REPRODUCED_CAUSE_UNRESOLVED",
+    "detail": "Exact172 SDK VALID; live driver/manager credentials match. iPhone Incorrect password and independent Samsung target M1/M2 then timeout/WRONG_KEY reproduce join failure. Live setup remains awake past330seconds; new/revived setup during teardown remains a separate known race. Warm AP reset experiment outcome is not yet inferred.",
+    "candidate_installed": true,
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
+      "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
+    },
+    "qualification_limits": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/tools/QUALIFICATION-LIMITS172.json",
+      "sha256": "64f29096e412af8f5cf34530f029f9d44aafbefdc522c045793ccb1cc014f438"
     },
     "phone_join_observation": {
       "status": "FAILED_ON_IPHONE_AND_SAMSUNG_TARGET_SESSION_20AE",

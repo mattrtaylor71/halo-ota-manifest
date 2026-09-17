@@ -1,3 +1,7 @@
+# 6.4.174 private authentication diagnostics — September17,2026
+
+Installed exact174 on Sense/app0 and LCD/app1, both SDK VALID, preserving173 fallback banks and protected data. Both canonical builds and nine focused suites pass. Two exact-password Galaxy attempts fail; the deliberate wrong-password control logs the sole raw SDK auth event. Manual public HMAC/PBKDF checks pass, while197 SDK AES allocation failures were captured in the first correct-password attempt. The175 camera DMA reserve fix is pending; no proved message-stage cause, successful phone setup or public release. [Evidence and limits](docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md).
+
 # 6.4.173 private provisioning diagnostic — September16,2026
 
 Installed exact173 on Sense/app1 and LCD/app0, both SDK VALID, retaining172 fallbacks and NVS. Seven focused suites and both canonical artifact checks pass. Same-credential AP restart A/B fails on Samsung both before and after verified restart; authentication root cause remains unresolved. No public release or functional acceptance. Raw driver event and crypto diagnostics are next. [Evidence](docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md).

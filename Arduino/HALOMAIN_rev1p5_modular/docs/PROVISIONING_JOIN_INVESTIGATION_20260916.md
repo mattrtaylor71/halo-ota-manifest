@@ -1,6 +1,6 @@
 # Provisioning join investigation — September 16, 2026
 
-Current installed diagnostic is private173, source `0a9576b5ff56d0120407df1f2848ba298cb40d7a`, build `6.4.173-20260917T043640Z-0a9576b5ff56`. Both canonical builds/artifact checks and seven focused suites pass with172's49-suite lineage retained. Sense/app1 and LCD/app0 are SDK VALID;172 fallback banks/NVS are preserved. Samsung authentication fails before and after an explicit same-credential AP restart. No authentication fix or publication is claimed. Continue from173 or reviewed descendants, preserving171/172 fixes; unused174 diagnostics are in development. Read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`. Keep the separately recorded late-arrival setup sleep race unresolved.
+Current installed diagnostic is private174, source `75debe873675ed1519c455e23275f3aefd1642db`, build `6.4.174-20260917T050100Z-75debe873675`. Both canonical builds/artifact checks and nine focused suites pass, retaining173/172 test lineage. Sense/app0 and LCD/app1 are SDK VALID;173 fallback banks and NVS are preserved. Two exact-password Galaxy joins fail; only the wrong-password control logs the SDK auth event. Public HMAC/PBKDF checks pass, but197 SDK AES allocation errors were captured during the first correct attempt. A camera DMA reserve fix is being prepared for175; its effectiveness is unproved. No authentication fix or publication is claimed. Continue from174 or reviewed descendants. Read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`; keep known setup sleep/ownership limits recorded.
 
 ## Confirmed icon defect and source fix
 
@@ -194,3 +194,49 @@ health173-observed001/RESULT.json, and ap-restart173-ab001/RESULT.json under
 `/Users/MattTaylor/halo-provisioning-review-2026-09-16`. Both original USB capture
 owners and both Android log children were closed/reaped; only the two temporary
 Galaxy test network entries were forgotten. It returned to Garage Member.
+
+
+## Private174: raw driver control, public crypto checks and AES allocation failure
+
+Exact174 source `75debe873675ed1519c455e23275f3aefd1642db` is installed on
+Sense/app0 and LCD/app1, both selected SDK VALID with LCD nonce/CRC verified.
+Application-only service preserved173 fallback banks, NVS and partitions.
+Both canonical builds and nine focused source-snapshot suites pass; retained
+173 seven-suite and17249-suite evidence and unchanged unrelated runtime were
+reverified. Sense grows1424bytes and16bytes static RAM versus173; LCD footprints
+are unchanged. Runtime stack high-water was not measured.
+
+One closed B117 setup session tested the Galaxy with exact startup credentials,
+a deliberately different password, then the exact password again. All three
+received target M1, sent M2 and ended with reason15/WRONG_KEY, without target M3
+captured. Correct attempts timed out after4.799 and4.041seconds from M1;
+the wrong-password control after3.023seconds. The only raw SDK
+AP_WRONG_PASSWORD event was logged during the wrong-password control
+(count1/total1). No additional event was logged during either correct trial.
+Later successful handshakes belong to Garage Member and are excluded.
+
+The manual on-device public HMAC-SHA1 and PBKDF2-HMAC-SHA1 vectors returned0 and
+matched expected output. This validates those algorithm executions only; it
+does not test the active authenticator's PMK, MIC, peer/nonce state or AES/key-wrap.
+The same Sense capture contains197 literal `esp-aes: Failed to allocate memory`
+errors in the first correct-password interval. None were additionally logged
+in the wrong-password or second correct-password interval. ESP log and Arduino
+millis clocks are not equated; ordered raw lines bracket the errors with
+periodic diagnostic commands during the first trial.
+
+These are real SDK AES allocation failures and a useful difference from the
+wrong-password control. They do not by themselves prove receipt/acceptance of
+M2, prove that M3 generation/transmission failed, or establish that freeing a
+particular allocation will fix authentication. A175 change to release the
+camera DMA reserve during provisioning and reacquire it afterward is being
+implemented; no175 build, install or successful phone outcome is claimed here.
+Known late/revived setup sleep and blocking STA ownership limits remain separate.
+
+Evidence root: `/Users/MattTaylor/halo-provisioning-review-2026-09-16/device174`.
+`RELEASE_BASELINE.json.current_working_source` pins the exact sealed pair,
+source/host/artifact receipts, `INSTALLATION174-REVIEW.json`,
+`health174-observed001/RESULT.json`, `ap-auth174-experiment001/RESULT.json` and
+its immutable `AES-ADDENDUM.json`. All captures are closed and Android log owners
+reaped. Root reports final test-network cleanup and restoration to Garage Member,
+preserving original networks0/1; neither Mac Wi-Fi changed. No public OTA,
+complete provisioning, media recovery or full-product acceptance is claimed.
