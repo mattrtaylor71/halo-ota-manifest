@@ -92,6 +92,10 @@ static struct {
   radio_mode=m;return true;
  }
 } WiFi;
+static void wifi_guard_set_inflight(bool inflight){
+ check(!inflight&&radio_mode==WIFI_OFF&&g_camera_radio_off_owned.load(),
+       "association retired only after owned radio stop");
+}
 static constexpr int MALLOC_CAP_DMA=1,MALLOC_CAP_INTERNAL=2;
 static size_t heap_caps_get_largest_free_block(int){
  return radio_mode==WIFI_OFF&&!fragment_without_wifi?32768:connected_largest;

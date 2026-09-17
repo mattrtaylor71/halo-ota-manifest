@@ -610,6 +610,11 @@ static bool camera_quiesce_wifi_for_dma(const char* reason) {
       delay(50);
     }
   }
+  // begin() may have returned while its asynchronous association still owns
+  // the guard. A confirmed stop cancels that attempt, not a network failure.
+  // Retire it before releasing the HTTP lease; camera ownership still excludes
+  // new Wi-Fi calls. Preserve the existing failure and begin-cooldown history.
+  if (radio_off) wifi_guard_set_inflight(false);
   if (!radio_off && !already_owned) g_camera_radio_off_owned.store(false);
   if (locked) xSemaphoreGive(http_mutex);
   // Keep the driver off: restarting STA here reclaims the contiguous memory

@@ -53,6 +53,9 @@ static struct {
   void disconnect(bool wifioff){assert(wifioff&&!http_inflight);++disconnects;}
   bool mode(unsigned mode){assert(!http_inflight);assert(mode==WIFI_OFF);++modes;return true;}
 } WiFi;
+static void wifi_guard_set_inflight(bool inflight){
+ assert(!inflight&&WiFi.getMode()==WIFI_OFF&&g_camera_radio_off_owned.load());
+}
 static struct {
   template<class... A> void printf(const char*,A...){}
   void println(const char*){}
