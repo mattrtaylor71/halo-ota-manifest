@@ -117,7 +117,14 @@ class Store {
     if(!valid(m)||!root_[0]||max_slots_==0)return Result::Invalid;
     if(active_)return Result::Conflict;
     if(mkdir(root_,0700)!=0&&errno!=EEXIST)return Result::Io;
+    bool retired_same=false;
+    Result cleanup=recover_deletes(m.owner_id,m.device_id,m.request_id,&retired_same);
+    if(cleanup!=Result::Ok)return cleanup;
+    // Do not reuse a request identity while retiring its accepted old record.
+    if(retired_same)return Result::Conflict;
     Meta old; Result existing=lookup(m.request_id,m.owner_id,m.device_id,&old);
+    if(existing==Result::Incomplete)return Result::Conflict;
+    if(existing==Result::Io)return existing;
     if(existing==Result::Ok)return same(m,old)?Result::AlreadyStored:Result::Conflict;
     char commit[kPathBytes],stage[kPathBytes],part[kPathBytes],pcm[kPathBytes];
     if(!path(m.request_id,".meta",commit,sizeof(commit))||!path(m.request_id,".meta.part",stage,sizeof(stage))
@@ -190,6 +197,9 @@ class Store {
   Result lookup(const char* request,const char* owner,const char* device,Meta* out) const {
     if(!request_valid(request)||!owner||!device||!out)return Result::Invalid;
     char p[kPathBytes];if(!path(request,".meta",p,sizeof(p)))return Result::Invalid;
+    char deleted[kPathBytes];path(request,".delete",deleted,sizeof(deleted));
+    struct stat st;if(stat(deleted,&st)==0)return Result::Incomplete;
+    if(errno!=ENOENT)return Result::Io;
     Meta m;Result r=read_meta(p,&m);if(r!=Result::Ok)return r;
     if(strcmp(request,m.request_id)||m.ordinal==0)return Result::Corrupt;
     if(strcmp(owner,m.owner_id)||strcmp(device,m.device_id))return Result::Conflict;
@@ -200,6 +210,8 @@ class Store {
   Result list(const char* owner,const char* device,Meta* oldest,Stats* stats,const char* after_request=nullptr) const {
     if(!owner||!device||!oldest||!stats)return Result::Invalid;
     if(after_request&&after_request[0]&&!request_valid(after_request))return Result::Invalid;
+    *stats=Stats{};
+    Result cleanup=recover_deletes(owner,device);if(cleanup!=Result::Ok)return cleanup;
     uint64_t after_ordinal=0;bool missing_cursor=false;
     if(after_request&&after_request[0]){
       char p[kPathBytes];path(after_request,".meta",p,sizeof(p));Meta cursor;
@@ -275,17 +287,28 @@ class Store {
     return result;
   }
   Result erase(const char* request,const char* owner,const char* device,uint32_t len,uint32_t crc) {
-    if(active_&&!strcmp(request?request:"",active_meta_.request_id))return Result::Conflict;
-    Meta m;Result r=lookup(request,owner,device,&m);if(r!=Result::Ok)return r;
-    if(m.len!=len||m.crc32!=crc)return Result::Conflict;
-    char pcm[kPathBytes],meta[kPathBytes];payload_path(request,pcm,sizeof(pcm));path(request,".meta",meta,sizeof(meta));
-    // This method is invoked only for a bound cloud-acceptance acknowledgement.
-    // If interrupted, the remaining record is unlisted rather than re-uploaded.
-    if(remove(pcm)!=0)return Result::Io;
-    if(remove(meta)!=0)return Result::Io;
-    path(request,".attempt",meta,sizeof(meta));if(remove(meta)!=0&&errno!=ENOENT)return Result::Io;
-    path(request,".attempt.part",meta,sizeof(meta));if(remove(meta)!=0&&errno!=ENOENT)return Result::Io;
-    return Result::Ok;
+    if(!request_valid(request)||!owner||!device)return Result::Invalid;
+    if(active_&&!strcmp(request,active_meta_.request_id))return Result::Conflict;
+    char p[kPathBytes],stage[kPathBytes];path(request,".delete",p,sizeof(p));
+    Meta receipt;Result r=read_meta(p,&receipt);
+    if(r==Result::NotFound) {
+      r=lookup(request,owner,device,&receipt);if(r!=Result::Ok)return r;
+      if(receipt.len!=len||receipt.crc32!=crc)return Result::Conflict;
+      // Only a fully validated record and its bound cloud receipt may create
+      // accepted-delete authority. A staging file alone never authorizes it.
+      uint8_t bytes[kMetaBytes];encode(receipt,bytes);
+      path(request,".delete.part",stage,sizeof(stage));
+      if(write_synced(stage,bytes,sizeof(bytes))!=Result::Ok)return Result::Io;
+      if(rename(stage,p)!=0)return Result::Io;
+      Meta observed;r=read_meta(p,&observed);
+      if(r!=Result::Ok)return r;
+      if(!same(receipt,observed)||receipt.ordinal!=observed.ordinal)return Result::Corrupt;
+      receipt=observed;
+    } else if(r!=Result::Ok)return r;
+    if(strcmp(request,receipt.request_id)||!receipt.ordinal)return Result::Corrupt;
+    if(strcmp(owner,receipt.owner_id)||strcmp(device,receipt.device_id)||
+       receipt.len!=len||receipt.crc32!=crc)return Result::Conflict;
+    return finish_delete(receipt);
   }
 
  private:
@@ -308,7 +331,59 @@ class Store {
   static bool file_request(const char* name,char request[33],const char** suffix) {
     if(!name||strlen(name)<33)return false;memcpy(request,name,32);request[32]=0;
     if(!request_valid(request))return false;*suffix=name+32;
-    return !strcmp(*suffix,".meta")||!strcmp(*suffix,".pcm")||!strcmp(*suffix,".part")||!strcmp(*suffix,".meta.part")||!strcmp(*suffix,".attempt")||!strcmp(*suffix,".attempt.part");
+    return !strcmp(*suffix,".meta")||!strcmp(*suffix,".pcm")||!strcmp(*suffix,".part")||!strcmp(*suffix,".meta.part")||!strcmp(*suffix,".attempt")||!strcmp(*suffix,".attempt.part")||!strcmp(*suffix,".delete")||!strcmp(*suffix,".delete.part");
+  }
+  // Accepted-delete recovery runs only under the caller's existing SD lease.
+  // Validate every surviving file before removing any; conflicting/corrupt data
+  // remains held. The committed receipt is removed last, so every interrupted
+  // cleanup still has durable authority when the next admission/list resumes.
+  Result finish_delete(const Meta& receipt) const {
+    if(!valid(receipt)||!receipt.ordinal)return Result::Corrupt;
+    char p[kPathBytes];
+    const char* metadata[]={".meta",".meta.part",".attempt",".attempt.part",".delete.part"};
+    for(const char* suffix:metadata){
+      path(receipt.request_id,suffix,p,sizeof(p));Meta observed;Result r=read_meta(p,&observed);
+      if(r==Result::NotFound)continue;if(r!=Result::Ok)return r;
+      Meta expected=receipt;
+      // A first-attempt marker overlays an immutable base epoch of zero.
+      if((!strcmp(suffix,".meta")||!strcmp(suffix,".meta.part"))&&observed.epoch==0)expected.epoch=0;
+      if(!same(expected,observed)||receipt.ordinal!=observed.ordinal)return Result::Conflict;
+    }
+    const char* payloads[]={".pcm",".part"};
+    for(const char* suffix:payloads){
+      path(receipt.request_id,suffix,p,sizeof(p));Result r=check_payload(p,receipt);
+      if(r!=Result::Ok&&r!=Result::Incomplete)return r;
+    }
+    const char* removed[]={".pcm",".part",".meta.part",".attempt.part",".attempt",".meta",".delete.part"};
+    for(const char* suffix:removed){
+      path(receipt.request_id,suffix,p,sizeof(p));
+      if(remove(p)!=0&&errno!=ENOENT)return Result::Io;
+    }
+    path(receipt.request_id,".delete",p,sizeof(p));
+    if(remove(p)!=0)return Result::Io;
+    return Result::Ok;
+  }
+  Result recover_deletes(const char* owner,const char* device,const char* target=nullptr,bool* retired_target=nullptr) const {
+    DIR* d=opendir(root_);if(!d)return errno==ENOENT?Result::Ok:Result::Io;
+    struct dirent* entry;Result result=Result::Ok;uint32_t receipts=0;
+    while((result=next_entry(d,&entry))==Result::Ok&&entry){
+      if(budget_&&!budget_()){result=Result::Io;break;}
+      char request[33];const char* suffix;
+      if(!file_request(entry->d_name,request,&suffix)||strcmp(suffix,".delete"))continue;
+      if(++receipts>40){result=Result::Io;break;}
+      char p[kPathBytes];path(request,".delete",p,sizeof(p));Meta receipt;
+      Result r=read_meta(p,&receipt);
+      if(r==Result::Io){result=r;break;}
+      if(r!=Result::Ok||strcmp(request,receipt.request_id)||!receipt.ordinal)continue;
+      if(strcmp(owner,receipt.owner_id)||strcmp(device,receipt.device_id))continue;
+      if(target&&retired_target&&!strcmp(target,request))*retired_target=true;
+      r=finish_delete(receipt);
+      if(r==Result::Io){result=r;break;}
+      // Invalid or conflicting survivors must stay held, never be guessed safe.
+      tick();
+    }
+    if(closedir(d)!=0)result=Result::Io;
+    return result;
   }
   Result occupied(uint32_t* count) const {
     *count=0;DIR* d=opendir(root_);if(!d)return Result::Io;

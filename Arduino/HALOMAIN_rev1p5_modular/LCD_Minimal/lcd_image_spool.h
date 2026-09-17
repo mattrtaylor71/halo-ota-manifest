@@ -27,7 +27,8 @@ static constexpr uint32_t LCD_IMAGE_XFER_MS = 90000;
 static constexpr uint32_t LCD_IMAGE_IDLE_MS = 4000;
 static uint32_t g_image_sd_work_started_ms = 0, g_image_sd_work_budget_ms = 12000;
 static bool lcd_image_sd_budget() {
-  return (uint32_t)(millis()-g_image_sd_work_started_ms)<g_image_sd_work_budget_ms;
+  return !lcd_media_replay_cancelled() &&
+    (uint32_t)(millis()-g_image_sd_work_started_ms)<g_image_sd_work_budget_ms;
 }
 
 static bool lcd_image_sd_mount() {
@@ -197,7 +198,7 @@ static bool lcd_image_uart(JsonDocument& doc) {
     if(strlen(probe)==16)r["probe"]=probe;
   }
   if(!parsed){r["ok"]=0;r["reason"]="invalid";lcd_image_reply(r);return true;}
-  if(!lcd_image_link_idle() || !lcd_media_try_claim(fetch||list,lcd_media_deferred_intent_pending())) {
+  if(!lcd_image_link_idle() || !lcd_media_try_claim(!begin,lcd_media_deferred_intent_pending())) {
     r["ok"]=0;r["reason"]="busy";r["json_ready"]=lcd_image_link_idle();lcd_image_reply(r);return true;
   }
   // Prevent either sleep route from entering while mounting/validating storage.

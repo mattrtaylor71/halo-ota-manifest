@@ -27,7 +27,8 @@ static constexpr uint32_t LCD_VOICE_XFER_MS = 90000;
 static constexpr uint32_t LCD_VOICE_IDLE_MS = 4000;
 static uint32_t g_voice_sd_work_started_ms = 0, g_voice_sd_work_budget_ms = 12000;
 static bool lcd_voice_sd_budget() {
-  return (uint32_t)(millis()-g_voice_sd_work_started_ms)<g_voice_sd_work_budget_ms;
+  return !lcd_media_replay_cancelled() &&
+    (uint32_t)(millis()-g_voice_sd_work_started_ms)<g_voice_sd_work_budget_ms;
 }
 
 static bool lcd_voice_sd_mount() {
@@ -181,7 +182,7 @@ static bool lcd_voice_uart(JsonDocument& doc) {
     if(strlen(probe)==16)r["probe"]=probe;
   }
   if(!parsed){r["ok"]=0;r["reason"]="invalid";lcd_voice_reply(r);return true;}
-  if(!lcd_voice_link_idle() || !lcd_media_try_claim(fetch||list,lcd_media_deferred_intent_pending())) {
+  if(!lcd_voice_link_idle() || !lcd_media_try_claim(!begin,lcd_media_deferred_intent_pending())) {
     r["ok"]=0;r["reason"]="busy";r["json_ready"]=lcd_voice_link_idle();lcd_voice_reply(r);return true;
   }
   // Prevent either sleep route from entering while mounting/validating storage.

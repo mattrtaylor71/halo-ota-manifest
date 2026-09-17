@@ -363,8 +363,8 @@ static void wifi_guard_poll() {
                   WiFi.RSSI());
     return;
   }
-  if (wifi_inflight_start_ms == 0 ||
-      (now - wifi_inflight_start_ms) <= WIFI_CONNECT_TIMEOUT_MS) {
+  // The inflight flag owns validity; a start at millis()==0 is valid too.
+  if ((now - wifi_inflight_start_ms) <= WIFI_CONNECT_TIMEOUT_MS) {
     return;
   }
   // The loop polls after maintenance; it must not bypass that owner's yield
@@ -449,7 +449,7 @@ static bool ensure_wifi_connected(const char* reason, uint32_t timeout_ms) {
   }
   unsigned long now = millis();
   wifi_guard_poll();
-  if (wifi_connect_inflight && wifi_inflight_start_ms > 0) {
+  if (wifi_connect_inflight) {
     unsigned long inflight_elapsed = now - wifi_inflight_start_ms;
     if (reason && strcmp(reason, "pre_sleep") == 0 &&
         inflight_elapsed < WIFI_CONNECT_TIMEOUT_MS) {
@@ -663,8 +663,7 @@ static void service_wifi_maintenance(unsigned long now_ms) {
 
   // Connection attempt in flight — monitor for timeout
   if (wifi_connect_inflight) {
-    if (wifi_inflight_start_ms > 0 &&
-        (now_ms - wifi_inflight_start_ms) > WIFI_CONNECT_TIMEOUT_MS) {
+    if ((now_ms - wifi_inflight_start_ms) > WIFI_CONNECT_TIMEOUT_MS) {
       // Start backoff at failure, not at begin (25s ago). Otherwise every
       // cooldown has already elapsed and a dead AP makes resets continuous.
       Serial.printf("[WIFI_MAINT] connect_timeout elapsed_ms=%lu fails=%u -> backoff\n",
