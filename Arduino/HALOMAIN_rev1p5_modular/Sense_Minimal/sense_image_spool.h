@@ -151,6 +151,8 @@ static bool sense_image_spool_store(const UploadJob& job, uint32_t deadline, boo
   if (busy_refused) *busy_refused = false;
   if (job.from_image_sd) return true; // failed replay still has its original committed slot
   if (!sense_image_payload_matches(job)) return false;
+  // Retain a retry hint even if the commit reply is lost after the LCD saved it.
+  media_retry_inventory(halo_media_retry::ImageSd, true);
   if (sense_image_spool_remaining(deadline) <= IMAGE_SPOOL_CLEANUP_MS) return false;
   const uint32_t work_deadline = deadline - IMAGE_SPOOL_CLEANUP_MS;
   SenseImageUartLease lease(deadline);
@@ -180,6 +182,7 @@ static bool sense_image_spool_store(const UploadJob& job, uint32_t deadline, boo
       sense_image_spool_ready(d, job) && d["stored"].is<unsigned>()) {
     if (d["stored"].as<unsigned>() == 1) {
       sense_lcd_mode_confirm();
+      media_retry_saved(halo_media_retry::ImageSd);
       return true;
     }
     if (d["stored"].as<unsigned>() == 0) {
@@ -204,8 +207,10 @@ static bool sense_image_spool_store(const UploadJob& job, uint32_t deadline, boo
       }
     }
   }
-  if (ok) sense_lcd_mode_confirm();
-  else sense_image_spool_cleanup(proto, job, seq, deadline);
+  if (ok) {
+    sense_lcd_mode_confirm();
+    media_retry_saved(halo_media_retry::ImageSd);
+  } else sense_image_spool_cleanup(proto, job, seq, deadline);
   return ok;
 }
 
@@ -291,10 +296,18 @@ static bool sense_image_spool_fetch(UploadJob& job) {
     d.clear();
     d["owner_id"] = owner; d["device_id"] = device[0] ? device : TREPO_DEVICE_ID;
     if (sense_voice_request_id_valid(g_image_spool_cursor)) d["after_request_id"] = g_image_spool_cursor;
+    char probe[17] = {};
+    snprintf(probe, sizeof(probe), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+    d["probe"] = probe;
     sense_image_spool_json(d, "IMAGE_SPOOL_LIST_REQ");
     if (!sense_image_spool_read(d, "IMAGE_SPOOL_LIST", nullptr, list_deadline) ||
+        !d["ok"].is<unsigned>() || d["ok"].as<unsigned>() != 1 ||
+        (strcmp(d["reason"] | "", "ok") && strcmp(d["reason"] | "", "empty")) ||
+        strcmp(d["probe"] | "", probe) || strcmp(d["owner_id"] | "", owner) ||
+        strcmp(d["device_id"] | "", device[0] ? device : TREPO_DEVICE_ID) ||
         !d["count"].is<uint32_t>()) return false;
     g_image_spool_depth = d["count"].as<uint32_t>();
+    media_retry_inventory(halo_media_retry::ImageSd, g_image_spool_depth != 0);
     if (!g_image_spool_depth) { g_image_spool_cursor[0] = 0; return false; }
     const char* id = d["request_id"] | "";
     if (!sense_voice_request_id_valid(id)) { g_image_spool_cursor[0] = 0; continue; }
@@ -355,8 +368,7 @@ static bool sense_image_spool_fetch(UploadJob& job) {
     // is separate from line-mode proof: join the peer's actual closed stream
     // via the request-bound ABORT/json_ready exchange before ordinary JSON.
     ok = sense_image_spool_cleanup(proto, job, seq, deadline);
-    if (ok) g_image_spool_cursor[0] = 0; // preserve FIFO while deliverable work is pending
-    else { free(job.image_buf); job.image_buf = nullptr; }
+    if (!ok) { free(job.image_buf); job.image_buf = nullptr; }
   }
   else {
     // Use requested identity even if malformed metadata prevented decode.
@@ -380,14 +392,14 @@ static bool sense_image_prepare_first_attempt(UploadJob& job) {
 }
 
 static void sense_image_spool_replay_tick() {
-  if (g_media_spool_replayed_this_boot || g_image_spool_replayed_this_boot || !wifi_is_connected() || upload_inflight ||
+  if (g_media_retry_user_paused.load() || g_media_spool_replayed_this_boot || g_image_spool_replayed_this_boot || !wifi_is_connected() || upload_inflight ||
       upload_queue_count() || foreground_active || current_job.active || voice_recording_active ||
       dish_scan_inflight || scan_ui_inflight || !sense_uart_ordinary_tx_allowed()) return;
 #ifdef HALO_SENSE_PROD_WRAPPER
   if (halo_provisioning_active() || halo_prod_boot_ota_pending()) return;
 #endif
   if (!sense_time_has_fresh_sync()) return;
-  // One probe/transfer per ordinary connected boot. Never manufacture a wake.
+  // One probe/transfer per kind per wake; the scheduler rotates first choice.
   g_image_spool_replayed_this_boot = true;
   UploadJob job = {};
   const bool fetched = sense_image_spool_fetch(job);
@@ -395,7 +407,13 @@ static void sense_image_spool_replay_tick() {
   const bool queued = eligible && queue_upload_job(job.job_id, job.mode, job.expiry_date,
       job.quantity, job.add_to_shopping_list, &job.camera_meta, job.image_buf, job.image_len,
       job.retries, false, job.created_epoch, &job.image, true);
-  if (queued) g_media_spool_replayed_this_boot = true;
+  if (queued) {
+    g_media_spool_replayed_this_boot = true;
+    media_retry_attempted(halo_media_retry::ImageSd);
+    // Advance even if the cloud later rejects this request. Keep its original
+    // durable slot; another pending capture must get a turn on the next wake.
+    snprintf(g_image_spool_cursor, sizeof(g_image_spool_cursor), "%s", job.image.request_id);
+  }
   if (fetched && !queued) {
     free(job.image_buf); // original committed SD slot remains untouched
   }

@@ -261,11 +261,22 @@ static bool ship_voice_gesture_begin() {
   return false;
 }
 
+static void ship_voice_status_begin() {
+  // A new local recording retires the previous voice's UI identity. Wait for
+  // Sense's RECORDING status to bind the new job before accepting its failure.
+  snprintf(g_ship_ui_op, sizeof(g_ship_ui_op), "VOICE");
+  snprintf(g_ship_ui_phase, sizeof(g_ship_ui_phase), "RECORDING");
+  g_ship_ui_job_id = 0;
+  g_ship_ui_finalized = false;
+  g_ship_ui_dirty = false;
+}
+
 static bool ship_queue_voice_input(const char* type, const char* wake_reason) {
   if (!type || !type[0]) {
     return false;
   }
   if (strcmp(type, "INPUT_LONG_PRESS_START") == 0) {
+    ship_voice_status_begin();
     g_voice_fire_and_forget_ignore_ui = false;
     waiting_for_voice_response = false;
     voice_response_deadline_ms = 0;

@@ -24,6 +24,8 @@
 #ifndef SENSE_UPLOAD_H
 #define SENSE_UPLOAD_H
 
+#include "sense_media_retry_client.h"
+
 // ── Presign error text ──────────────────────────────────────────────
 
 static void presign_set_error_text(const char* text) {
@@ -95,7 +97,10 @@ static void http_queue_unlock(const char* label, uint32_t job_id) {
   }
   if (wifi_recover_requested) {
     wifi_recover_requested = false;
-    wifi_hard_reset_and_reconnect("deferred_recover", 15000);
+    // Saved-media recovery never owns a blocking radio reset. Its original
+    // remains durable while the normal Wi-Fi owner retries association.
+    if (!media_retry_network_active())
+      wifi_hard_reset_and_reconnect("deferred_recover", 15000);
   }
 }
 
@@ -110,6 +115,7 @@ static bool http_post_json_with_retries(const char* url,
                                         const char* bearer,
                                         uint32_t job_id,
                                         uint32_t deadline_ms) {
+  if (media_retry_network_cancelled()) { http_code = -1; resp_body = ""; return false; }
   SenseBackupWifiCall backup_call; if (!backup_call) { http_code = -1; resp_body = ""; return false; }
   // Release camera DMA reservation to defragment internal SRAM for TLS.
   bool dma_was_reserved_post = (g_camera_dma_reserve != nullptr);
@@ -132,6 +138,7 @@ static bool http_post_json_with_retries(const char* url,
   }
   http_queue_lock(label, effective_job);
   for (int attempt = 0; attempt < max_attempts; ++attempt) {
+    if (media_retry_network_cancelled()) break;
     if (deadline_expired(deadline_ms)) {
       presign_set_error_text("Network timeout");
       Serial.printf("[%s] deadline_exceeded\n", label ? label : "HTTP");
@@ -159,14 +166,15 @@ static bool http_post_json_with_retries(const char* url,
       presign_set_error_text("Network timeout");
       break;
     }
-    if (!ensure_wifi_ready("http_ready", wifi_timeout)) {
+    if (media_retry_network_active() && WiFi.status() != WL_CONNECTED) break;
+    if (!media_retry_network_active() && !ensure_wifi_ready("http_ready", wifi_timeout)) {
       presign_set_error_text("Wi-Fi not ready");
       log_wifi_snapshot("wifi_not_ready");
       uint32_t backoff = clamp_timeout_ms(backoff_ms[attempt], deadline_ms);
       if (backoff == 0) {
         break;
       }
-      delay(backoff);
+      if (!media_retry_network_wait(backoff)) break;
       continue;
     }
     uint32_t time_timeout = clamp_timeout_ms(15000, deadline_ms);
@@ -174,18 +182,21 @@ static bool http_post_json_with_retries(const char* url,
       presign_set_error_text("Network timeout");
       break;
     }
-    if (!ensure_time_valid("http_ready", time_timeout)) {
+    if (media_retry_network_cancelled() ||
+        (media_retry_network_active() && !sense_time_has_fresh_sync())) break;
+    if (!media_retry_network_active() && !ensure_time_valid("http_ready", time_timeout)) {
       presign_set_error_text("Time not set");
       log_wifi_snapshot("time_not_ready");
       uint32_t backoff = clamp_timeout_ms(backoff_ms[attempt], deadline_ms);
       if (backoff == 0) {
         break;
       }
-      delay(backoff);
+      if (!media_retry_network_wait(backoff)) break;
       continue;
     }
     HaloNtpDnsGuard ntp_dns_guard;
-    WiFiClientSecure client;
+    if (media_retry_network_cancelled()) break;
+    SenseMediaRetryClient client;
     tls_configure(client, label);
     HTTPClient http;
     if (!http.begin(client, url)) {
@@ -193,12 +204,14 @@ static bool http_post_json_with_retries(const char* url,
       resp_body = "";
       presign_set_error_text("Network error. Tap to retry.");
       log_http_failure_details(label, url, http_code, &client);
-      wifi_recover_if_needed("http_begin", http_code);
+      if (media_retry_network_cancelled()) break;
+      if (media_retry_network_active()) break;
+      if (!media_retry_network_active()) wifi_recover_if_needed("http_begin", http_code);
       uint32_t backoff = clamp_timeout_ms(backoff_ms[attempt], deadline_ms);
       if (backoff == 0) {
         break;
       }
-      delay(backoff);
+      if (!media_retry_network_wait(backoff)) break;
       continue;
     }
   http.addHeader("Content-Type", "application/json");
@@ -210,8 +223,11 @@ static bool http_post_json_with_retries(const char* url,
       http.addHeader("Authorization", auth);
     }
     http_code = http.POST(body);
+    if (media_retry_network_cancelled()) { http.end(); client.stop(); break; }
     resp_body = http.getString();
     http.end();
+    if (media_retry_network_cancelled()) break;
+    if (media_retry_network_active() && http_code < 0) break;
     if (http_code >= 200 && http_code < 300) {
       uart_send_sense_diag("http", "success", label, (int32_t)http_code, "post");
       http_queue_unlock(label, effective_job);
@@ -219,12 +235,12 @@ static bool http_post_json_with_retries(const char* url,
     }
     presign_set_error_text("Network error. Tap to retry.");
     log_http_failure_details(label, url, http_code, &client);
-    wifi_recover_if_needed("http_post", http_code);
+    if (!media_retry_network_active()) wifi_recover_if_needed("http_post", http_code);
     uint32_t backoff = clamp_timeout_ms(backoff_ms[attempt], deadline_ms);
     if (backoff == 0) {
       break;
     }
-    delay(backoff);
+    if (!media_retry_network_wait(backoff)) break;
   }
   http_queue_unlock(label, effective_job);
   return false;

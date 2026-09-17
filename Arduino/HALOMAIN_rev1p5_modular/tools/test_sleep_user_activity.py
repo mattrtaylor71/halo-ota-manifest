@@ -27,6 +27,7 @@ def main():
 #include "sense_user_activity.h"
 struct SerialMock {template<class... A>void printf(const char*,A...) {}} Serial;
 std::vector<std::string> calls;
+static std::atomic<bool> g_media_retry_user_paused{false};
 void cancel_pending_sleep_for_user_action(const char*) {calls.push_back("cancel");}
 void sense_spool_drain_yield_to_user(){calls.push_back("yield");}
 void uart_send_input_ack(uint32_t){calls.push_back("ack");}
@@ -40,9 +41,9 @@ int main(){
  (void)&sense_note_admitted_user_action; // Keep old admission compilable for the behavioral negative control.
  const char* passive[]={"INPUT_PING","INPUT_SLEEP","INPUT_SENSE_FW","INPUT_FW_INFO","INPUT_TEST_ERRORS","INPUT_MAINT_TEST","LINK_HB","LCD_DIAG","UNKNOWN","INPUT_NOT_A_COMMAND"};
  uint32_t id=100;
- for(const char* type:passive){calls.clear();auto old=sense_user_action_generation();admit(type,id++);check(sense_user_action_generation()==old,"passive frame does not advance user generation");check(std::find(calls.begin(),calls.end(),"cancel")==calls.end(),"passive frame does not cancel cleanup");}
- const char* active[]={"INPUT_WAKE","INPUT_TOUCH","INPUT_MENU_PRESS","INPUT_MENU_SELECT","INPUT_SCROLL","INPUT_DELETE","INPUT_EXPIRY_DATE","INPUT_DISCARD_OPTIONS","INPUT_LONG_PRESS_START","INPUT_LONG_PRESS_END","INPUT_RETRY","INPUT_RESET_WIFI","INPUT_OTA_CHECK","INPUT_WIFI_SCAN","INPUT_WIFI_TEST"};
- for(const char* type:active){calls.clear();auto old=sense_user_action_generation();uint32_t current=id++;admit(type,current);check(sense_user_action_generation()==old+1,"new action increments exactly once");check(calls==std::vector<std::string>({"ack","cancel","yield"}),"ACK precedes cancellation and background yield");calls.clear();admit(type,current);check(sense_user_action_generation()==old+1,"duplicate cannot renew flush generation");check(calls==std::vector<std::string>({"ack"}),"duplicate re-ACK only");}
+ for(const char* type:passive){calls.clear();g_media_retry_user_paused=false;auto old=sense_user_action_generation();admit(type,id++);check(sense_user_action_generation()==old,"passive frame does not advance user generation");check(std::find(calls.begin(),calls.end(),"cancel")==calls.end(),"passive frame does not cancel cleanup");check(!g_media_retry_user_paused,"passive frame cannot pause background replay");}
+ const char* active[]={"INPUT_WAKE","INPUT_USER_ACTIVE","INPUT_TOUCH","INPUT_MENU_PRESS","INPUT_MENU_SELECT","INPUT_SCROLL","INPUT_DELETE","INPUT_EXPIRY_DATE","INPUT_DISCARD_OPTIONS","INPUT_LONG_PRESS_START","INPUT_LONG_PRESS_END","INPUT_RETRY","INPUT_RESET_WIFI","INPUT_OTA_CHECK","INPUT_WIFI_SCAN","INPUT_WIFI_TEST"};
+ for(const char* type:active){calls.clear();g_media_retry_user_paused=false;auto old=sense_user_action_generation();uint32_t current=id++;admit(type,current);check(sense_user_action_generation()==old+1,"new action increments exactly once");check(calls==std::vector<std::string>({"ack","cancel","yield"}),"ACK precedes cancellation and background yield");check(g_media_retry_user_paused,"admitted real user action pauses saved replay");calls.clear();admit(type,current);check(sense_user_action_generation()==old+1,"duplicate cannot renew flush generation");check(calls==std::vector<std::string>({"ack"}),"duplicate re-ACK only");check(g_media_retry_user_paused,"duplicate cannot resume paused replay");}
  check(!sense_user_action_cancels_flush(nullptr),"null is not user activity");
  g_sense_user_action_generation.store(UINT32_MAX);admit("INPUT_MENU_SELECT",id++);check(sense_user_action_generation()==0,"generation wraps and still changes");
  auto before=sense_user_action_generation();admit("INPUT_MENU_SELECT",id++);admit("INPUT_MENU_SELECT",id++);check(sense_user_action_generation()==before+2,"distinct inputs in same clock tick both count");

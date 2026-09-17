@@ -67,6 +67,7 @@ typedef struct app_event_t app_event_t;
 #include "HardwareSerial.h"
 #include "ArduinoJson.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -451,6 +452,7 @@ RTC_DATA_ATTR static uint32_t g_lcd_maintenance_grace_after_sec = 0;
 RTC_DATA_ATTR static uint8_t g_lcd_schedule_timer_armed = 0;
 RTC_DATA_ATTR static uint32_t g_lcd_schedule_wake_in_s = 0;
 RTC_DATA_ATTR static uint32_t g_lcd_schedule_next_epoch = 0;
+#include "lcd_media_retry.h"
 static bool g_lcd_maintenance_wake_window = false;
 static bool g_lcd_schedule_wake_window = false;
 static unsigned long g_lcd_schedule_window_deadline_ms = 0;
@@ -555,6 +557,7 @@ static void lcd_coord_resume_notice(int current_reset) {
 
 
 static void lcd_timer_receiver_wait_release(const char* reason) {
+  lcd_media_retry_wait_release(reason);
   // Ownership handoff retains origin until terminal cleanup or timeout.
   if (reason && (strcmp(reason, "user_input") == 0 || strcmp(reason, "sleep_aborted_by_touch") == 0)) {
     lcd_coord_cancel_preflight(false);
@@ -2854,8 +2857,9 @@ static bool sense_pong_take_expired(unsigned long now_ms) {
   return expired;
 }
 
-// Only accepted typed media frames/receipts call this. Do not refresh user
-// activity, coordinator identity, media deadlines, or manufacture link sync.
+// Accepted typed media frames/receipts and field-validated coordinator traffic
+// share this atomic peer proof. Do not refresh user activity, coordinator
+// identity, media deadlines, or manufacture link sync.
 static void note_sense_binary_media_rx(const char* source) {
   const unsigned long now_ms = millis();
   portENTER_CRITICAL(&s_sense_pong_mux);
@@ -3161,6 +3165,7 @@ static bool sleep_blocked_for_ota() {
   // A missed PONG during Sense's synchronous HTTPS work does not cancel the
   // receiver's bounded timer rendezvous.
   if (lcd_timer_receiver_wait_active()) return true;
+  if (lcd_media_retry_wait_active()) return true;
   const uint32_t now_ms = (uint32_t)millis();
   bool hold_expired = false;
   {
@@ -3573,22 +3578,22 @@ static void lcd_wake_pin_drive_level(int level, int mode) {
 static void lcd_diag_timer_selected(uint64_t timer_us,int32_t sdk);
 #endif
 
-static void configure_sleep_sources(bool enable_ext0, uint32_t timer_sec) {
+static bool configure_sleep_sources(bool enable_ext0, uint32_t timer_sec) {
+  bool timer_ok = false;
 #if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
   lcd_sleep_witness_configure_begin();
 #endif
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
 #if HALO_ALLOW_TIMER_WAKE
   if (timer_sec > 0) {
-#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
     const uint64_t timer_us=static_cast<uint64_t>(timer_sec)*1000000ULL;
     const esp_err_t timer_sdk=esp_sleep_enable_timer_wakeup(timer_us);
+    timer_ok = timer_sdk == ESP_OK;
+#if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
     lcd_diag_timer_selected(timer_us,timer_sdk);
 #if HALO_LCD_SLEEP_WITNESS
     lcd_sleep_witness_after_sdk(timer_us,timer_sdk);
 #endif
-#else
-    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(timer_sec) * 1000000ULL);
 #endif
   }
 #endif
@@ -3601,6 +3606,7 @@ static void configure_sleep_sources(bool enable_ext0, uint32_t timer_sec) {
   uint64_t wakeMask = buildWakeMaskForSleep();
   esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
   wake_ext1_enabled = true;
+  return timer_ok;
 }
 
 static void wake_line_pulse_ms(unsigned long pulse_ms, const char* reason) {
@@ -3651,6 +3657,7 @@ static bool wake_reason_requires_immediate_pulse(const char* reason) {
          strcmp(reason, "INPUT_SENSE_FW") == 0 ||
          strcmp(reason, "pre_sleep_touch") == 0 ||
          strcmp(reason, "INPUT_WAKE") == 0 ||
+         strcmp(reason, "INPUT_USER_ACTIVE") == 0 ||
          strcmp(reason, "scroll_wake") == 0 ||
          strcmp(reason, "menu_select") == 0 ||
          strcmp(reason, "voice_start") == 0 ||
@@ -4220,6 +4227,8 @@ void setup() {
   }
   esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
   esp_reset_reason_t reset_reason = esp_reset_reason();
+  lcd_media_retry_note_boot(reset_reason == ESP_RST_DEEPSLEEP,
+                            wake_cause == ESP_SLEEP_WAKEUP_TIMER);
   {
     if (reset_reason == ESP_RST_BROWNOUT || reset_reason == ESP_RST_INT_WDT ||
         reset_reason == ESP_RST_TASK_WDT || reset_reason == ESP_RST_PANIC) {
@@ -4303,7 +4312,7 @@ void setup() {
     g_panel_enabled = false;
   }
   g_lcd_maintenance_wake_window =
-      (effective_timer_wake && maintenance_context && maintenance_resume_hint);
+      (effective_timer_wake && !g_lcd_media_retry_boot && maintenance_context && maintenance_resume_hint);
   if (g_lcd_maintenance_wake_window) {
 #ifdef HALO_LCD_PROD_WRAPPER
     lcd_coord_capture_timer((int)wake_cause, (int)reset_reason);
@@ -4343,7 +4352,7 @@ void setup() {
 #endif
   }
   g_lcd_schedule_wake_window =
-      (effective_timer_wake && g_lcd_schedule_timer_armed);
+      (effective_timer_wake && !g_lcd_media_retry_boot && g_lcd_schedule_timer_armed);
   if (g_lcd_schedule_wake_window) {
     Serial.println("[LCD_SCHED] wake_window_start");
     g_lcd_schedule_timer_armed = 0;

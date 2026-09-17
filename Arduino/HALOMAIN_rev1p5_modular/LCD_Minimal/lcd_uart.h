@@ -223,6 +223,7 @@ static void uart_send_input_message(const char* type, int delta = 0, const char*
   auto input_requires_sense = [](const char* msg_type) -> bool {
     if (!msg_type) return false;
     return strcmp(msg_type, "INPUT_WAKE") == 0 ||
+           strcmp(msg_type, "INPUT_USER_ACTIVE") == 0 ||
            strcmp(msg_type, "INPUT_DELETE") == 0 ||
            strcmp(msg_type, "INPUT_LONG_PRESS_START") == 0 ||
            strcmp(msg_type, "INPUT_LONG_PRESS_END") == 0 ||
@@ -402,6 +403,7 @@ static bool tx_msg_requires_awake_proof(const tx_msg_t* tx_msg) {
     return true;
   }
   return strcmp(tx_msg->type, "INPUT_OTA_CHECK") == 0 ||
+         strcmp(tx_msg->type, "INPUT_USER_ACTIVE") == 0 ||
          strcmp(tx_msg->type, "INPUT_DELETE") == 0 ||
          strcmp(tx_msg->type, "INPUT_FW_INFO") == 0 ||
          strcmp(tx_msg->type, "INPUT_SENSE_FW") == 0;

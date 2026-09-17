@@ -123,6 +123,7 @@ static bool upload_wait_for_foreground_window(const UploadJob& job,
     ~HoldFlag() { upload_worker_holding_in_place = false; }
   } hold_flag;
   while ((millis() - start_ms) < max_wait_ms) {
+    if (media_retry_network_cancelled()) return false;
     const char* active_reason = NULL;
     if (!foreground_priority_active(millis(), &active_reason)) {
       return true;
@@ -220,6 +221,7 @@ static bool upload_wait_for_foreground_clear_in_place(const UploadJob& job,
                                                       const char* stage,
                                                       uint32_t deadline_ms,
                                                       bool* budget_exhausted) {
+  if (media_retry_network_cancelled()) return false;
   const char* reason = NULL;
   if (!foreground_priority_active(millis(), &reason)) {
     return true;
@@ -230,6 +232,7 @@ static bool upload_wait_for_foreground_clear_in_place(const UploadJob& job,
   unsigned long parked_start_ms = millis();
   unsigned long last_log_ms = 0;
   while (foreground_priority_active(millis(), &reason)) {
+    if (media_retry_network_cancelled()) return false;
     if (deadline_ms != 0) {
       uint32_t remaining_ms = deadline_remaining_ms(deadline_ms);
       if (remaining_ms < ACTION_MIN_REMAINING_MS) {
@@ -252,7 +255,7 @@ static bool upload_wait_for_foreground_clear_in_place(const UploadJob& job,
     }
     vTaskDelay(pdMS_TO_TICKS(80));
   }
-  return true;
+  return !media_retry_network_cancelled();
 }
 
 #endif // SENSE_OP_QUEUE_H

@@ -74,6 +74,7 @@ static bool link_ack_should_track(const char* type) {
   if (!type) return false;
   return strcmp(type, "INPUT_MENU_SELECT") == 0 ||      // capture / check-in / dish
          strcmp(type, "INPUT_WAKE") == 0 ||
+         strcmp(type, "INPUT_USER_ACTIVE") == 0 ||
          strcmp(type, "INPUT_DELETE") == 0 ||
          strcmp(type, "INPUT_LONG_PRESS_START") == 0 || // voice hold
          strcmp(type, "INPUT_LONG_PRESS_END") == 0 ||
@@ -169,7 +170,9 @@ static void link_ack_service() {
       } else if (!strcmp(g_link_ack[i].type, "INPUT_DELETE")) {
         StaticJsonDocument<256> failed;
         if (!deserializeJson(failed, g_link_ack[i].payload)) post_list_delete_result(failed["id"] | "", false);
-      } else if (app_event_queue != NULL) {
+      } else if (strcmp(g_link_ack[i].type, "INPUT_USER_ACTIVE") != 0 && app_event_queue != NULL) {
+        // A background-pause notice must not replace the user's current UI.
+        // Its bounded failure remains available in the diagnostic log above.
         app_event_t evt = {EVT_LINK_SEND_FAILED, {0}};
         xQueueSend(app_event_queue, &evt, 0);
       }

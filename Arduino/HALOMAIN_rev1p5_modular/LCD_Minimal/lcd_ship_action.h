@@ -415,8 +415,29 @@ static void ship_menu_handle_ui_status(const JsonDocument& doc) {
                 (unsigned long)prev_job_id,
                 prev_screen ? prev_screen : "UNKNOWN",
                 text);
-  if (g_voice_fire_and_forget_ignore_ui && strcmp(op, "VOICE") == 0) {
+  const bool voice_status = strcmp(op, "VOICE") == 0;
+  const uint32_t voice_job_id = (uint32_t)(doc["job_id"] | 0);
+  const bool matching_voice_job = voice_job_id && strcmp(prev_op, "VOICE") == 0 &&
+                                  voice_job_id == prev_job_id;
+  if (voice_status && strcmp(phase, "ERROR") == 0 &&
+      (!matching_voice_job || waiting_for_scan_response ||
+       (ui_screen_state != SCREEN_VOICE_ACK && ui_screen_state != SCREEN_AI_LISTENING &&
+        ui_screen_state != SCREEN_HOME && ui_screen_state != SCREEN_PROCESSING))) {
+    // A retained/replayed note can fail after a different action has begun.
+    // Its job must not replace that action, nor bind to a new unconfirmed voice.
+    Serial.printf("[VOICE_FAF] stale_error job_id=%lu current_job_id=%lu\n",
+                  (unsigned long)voice_job_id, (unsigned long)prev_job_id);
+    return;
+  }
+  if (g_voice_fire_and_forget_ignore_ui && voice_status) {
+    if (strcmp(phase, "RECORDING") == 0 && voice_job_id &&
+        strcmp(prev_op, "VOICE") == 0 && prev_job_id == 0) {
+      // A short gesture can end before RECORDING arrives. Learn identity while
+      // preserving the local acknowledgment and its animation.
+      g_ship_ui_job_id = voice_job_id;
+    }
     if (strcmp(phase, "DONE") == 0 || strcmp(phase, "ERROR") == 0) {
+      if (!matching_voice_job) return;
       g_voice_fire_and_forget_ignore_ui = false;
       waiting_for_voice_response = false;
       voice_response_deadline_ms = 0;
@@ -429,7 +450,9 @@ static void ship_menu_handle_ui_status(const JsonDocument& doc) {
                     phase,
                     (unsigned long)job_id);
     }
-    return;
+    if (strcmp(phase, "ERROR") != 0) return;
+    // Matching failures use the normal UI event/latched fallback, including
+    // when the event queue is full. Success/progress retain fire-and-forget UI.
   }
   bool prev_processing_phase = (strcmp(prev_phase, "RESULT_WAITING") == 0 ||
                                 strcmp(prev_phase, "UPLOAD_STARTING") == 0 ||

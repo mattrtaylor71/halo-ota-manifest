@@ -4231,7 +4231,7 @@ static void boot_ota_report_both_current(const char* lcd_fw, const char* manifes
 
 // Call once early in setup. USB reset / touch wake is not a timer wake.
 static void nightly_maintenance_note_wake() {
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER && !g_media_retry_timer_boot) {
     boot_ota_queue("nightly");
   }
 }
@@ -6948,7 +6948,7 @@ void halo_prod_setup() {
   ota_sched_print_status("boot");
 #endif
   g_last_wake_cause = esp_sleep_get_wakeup_cause();
-  g_maintenance_mode = ((g_last_wake_cause == ESP_SLEEP_WAKEUP_TIMER && g_ota_sched.enabled) ||
+  g_maintenance_mode = ((g_last_wake_cause == ESP_SLEEP_WAKEUP_TIMER && g_ota_sched.enabled && !g_media_retry_timer_boot) ||
                         g_maint_followup_retry_wake);
 #if HALO_OTA_POLICY_MAINTENANCE_ONLY
   {

@@ -10,7 +10,7 @@
 static bool sense_user_action_cancels_flush(const char* type) {
   if (!type) return false;
   static const char* const actions[] = {
-    "INPUT_WAKE", "INPUT_TOUCH", "INPUT_MENU_PRESS", "INPUT_MENU_SELECT",
+    "INPUT_WAKE", "INPUT_USER_ACTIVE", "INPUT_TOUCH", "INPUT_MENU_PRESS", "INPUT_MENU_SELECT",
     "INPUT_SCROLL", "INPUT_DELETE", "INPUT_EXPIRY_DATE",
     "INPUT_DISCARD_OPTIONS", "INPUT_LONG_PRESS_START", "INPUT_LONG_PRESS_END",
     "INPUT_RETRY", "INPUT_RESET_WIFI", "INPUT_OTA_CHECK",

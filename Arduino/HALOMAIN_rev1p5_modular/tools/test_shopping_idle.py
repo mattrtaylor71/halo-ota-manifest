@@ -85,7 +85,7 @@ static unsigned long lcd_refresh_start_ms,refresh_timeout_count;
 static bool provision_return_home_pending,g_ota_screen_active,ota_locked;
 static bool g_lcd_maintenance_active,g_lcd_maintenance_aborted,g_ota_mode_active;
 static bool sense_ota_active,sense_ota_apply_required,ota_check_requested,ota_check_pending;
-static bool g_lcd_ota_uart_receiving,timer_wait,time_valid,current_window;
+static bool g_lcd_ota_uart_receiving,timer_wait,media_wait,time_valid,current_window;
 static std::atomic<bool> g_lcd_validation_pending{false},g_lcd_coord_notice_clear{false};
 static unsigned long ota_stay_awake_until_ms,g_ota_lock_window_until_ms;
 static unsigned long g_ota_continuation_hold_start_ms,g_lcd_maintenance_deadline_ms;
@@ -95,6 +95,7 @@ static constexpr int SENSE_ASLEEP=0,SENSE_AWAKE=1;
 static int sense_state;
 struct LcdCoordCriticalGuard {};
 static bool lcd_timer_receiver_wait_active(){return timer_wait;}
+static bool lcd_media_retry_wait_active(){return media_wait;}
 static bool lcd_time_valid(){return time_valid;}
 static bool lcd_maintenance_window_is_current(uint64_t){return current_window;}
 static bool lcd_maintenance_active(){return g_lcd_maintenance_active;}
@@ -148,7 +149,7 @@ static void reset(){
   provision_return_home_pending=g_ota_screen_active=ota_locked=false;
   g_lcd_maintenance_active=g_lcd_maintenance_aborted=g_ota_mode_active=false;
   sense_ota_active=sense_ota_apply_required=ota_check_requested=ota_check_pending=false;
-  g_lcd_ota_uart_receiving=timer_wait=time_valid=current_window=false;
+  g_lcd_ota_uart_receiving=timer_wait=media_wait=time_valid=current_window=false;
   g_lcd_validation_pending=false;g_lcd_coord_notice_clear=false;
   ota_stay_awake_until_ms=g_ota_lock_window_until_ms=g_ota_continuation_hold_start_ms=0;
   g_lcd_maintenance_deadline_ms=g_lcd_maintenance_start_epoch=g_ota_check_block_since_ms=0;
@@ -233,12 +234,13 @@ int main(){
     assert(provision_return_home_pending==visible);
     assert(ui_screen_state==SCREEN_SHOPPING_LIST);
   }
-  // Hardware validation, binary receive and rendezvous remain absolute guards.
-  for(int guard=0;guard<3;++guard){
+  // Hardware validation, binary receive and both rendezvous remain absolute guards.
+  for(int guard=0;guard<4;++guard){
     reset();ota_locked=true;ota_stay_awake_until_ms=50;g_ota_screen_active=true;
     if(guard==0)g_lcd_validation_pending=true;
     if(guard==1)g_lcd_ota_uart_receiving=true;
     if(guard==2)timer_wait=true;
+    if(guard==3)media_wait=true;
     assert(sleep_blocked_for_ota()&&ota_locked&&g_ota_screen_active);
     assert(!provision_return_home_pending&&!g_lcd_coord_notice_clear.load());
   }

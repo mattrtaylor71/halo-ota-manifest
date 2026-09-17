@@ -34,6 +34,35 @@ static void ui_handle_ship_toast(const JsonDocument& doc) {
 #endif
 
 // ── UART Message Processing ─────────────────────────────────────────
+#include "lcd_control_liveness.h"
+static bool lcd_media_retry_uart(JsonDocument& doc) {
+  if (strcmp(doc["type"] | "", "MEDIA_RETRY_ARM")) return false;
+  if (!doc["ver"].is<unsigned>() || doc["ver"].as<unsigned>() != PROTOCOL_VERSION ||
+      !doc["token"].is<const char*>() || !doc["wake_in_s"].is<uint32_t>()) return true;
+  const char* token = doc["token"].as<const char*>();
+  const uint32_t seconds = doc["wake_in_s"].as<uint32_t>();
+  if (!halo_media_timer::token_valid(token) || (seconds &&
+      (seconds < halo_media_timer::kMinArmSeconds || seconds > halo_media_timer::kMaxArmSeconds))) return true;
+  LcdMaintenanceStorageGuard guard;
+  // Typed binary owners cannot be interrupted even by a control refusal.
+  if (g_suppress_uart_json_tx || g_img_rx_active || g_img_rx_binary_mode ||
+      g_spool_tx_pending || g_spool_tx_active) return true;
+  bool ok = !g_lcd_sleep_commit_gate.load() && !lcd_ota_in_progress_for_sd_guard() &&
+      !provisioning_input_locked() &&
+      lcd_media_try_claim(false, lcd_media_deferred_intent_pending());
+  if (ok) {
+    ok = lcd_media_retry_arm(token, seconds);
+    lcd_media_release();
+  }
+  StaticJsonDocument<256> ack;
+  ack["ver"] = PROTOCOL_VERSION; ack["type"] = "MEDIA_RETRY_ARM_ACK";
+  ack["msg_id"] = get_next_msg_id(); ack["ts"] = millis();
+  ack["token"] = token; ack["wake_in_s"] = seconds; ack["ok"] = ok ? 1 : 0;
+  serializeJson(ack, senseSerial); senseSerial.print('\n'); senseSerial.flush();
+  Serial.printf("[MEDIA_RETRY] arm wake_in_s=%lu ok=%u\n", (unsigned long)seconds, ok ? 1 : 0);
+  return true;
+}
+
 // CRITICAL: This function runs from uart_task - NO LVGL calls allowed!
 // Only writes to g_pending buffer and posts events to UI task
 static void uart_process_received_message(const char* json_str) {
@@ -107,6 +136,8 @@ static void uart_process_received_message(const char* json_str) {
   }
   last_sense_any_rx_ms = millis();
   last_sense_msg_ms = last_sense_any_rx_ms;
+  lcd_note_control_awake_proof(doc);
+  if (lcd_media_retry_uart(doc)) return;
   if (lcd_voice_uart(doc)) return;
   if (lcd_image_uart(doc)) return;
   Serial.printf("[PROTO] RX: type=%s\n", type);
@@ -443,6 +474,7 @@ static void uart_process_received_message(const char* json_str) {
   }
 
   if (strcmp(type, "SLEEP_READY") == 0) {
+    lcd_media_retry_wait_release("sleep_ready");
     if (g_lcd_maintenance_active) {
       Serial.println("[SLEEP_PROTO] SLEEP_READY received (maintenance_active)");
     }

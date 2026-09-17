@@ -31,6 +31,7 @@
 #ifndef SENSE_VOICE_H
 #define SENSE_VOICE_H
 #include <mbedtls/sha256.h>
+#include "sense_media_network.h"
 
 // ── Voice WiFi helpers ─────────────────────────────────────────────
 
@@ -367,6 +368,7 @@ static bool sense_voice_backend_ack(const UploadJob& job, int code, JsonDocument
 // Success means backend durably accepted the work; firmware does not wait for result payloads.
 // Backend now accepts raw PCM sample-rate via header, so firmware sends original 16 kHz capture directly.
 static bool voice_upload_and_parse(const UploadJob& job) {
+  if (media_retry_network_cancelled()) return false;
   SenseBackupWifiCall backup_call; if (!backup_call) return false;
   const uint8_t* audio_buf = job.image_buf;
   const size_t audio_size = job.image_len;
@@ -425,11 +427,13 @@ static bool voice_upload_and_parse(const UploadJob& job) {
   uint32_t voice_http_job = voice_job_id;
   bool accepted = false;
   for (uint8_t attempt = 1; attempt <= max_attempts; ++attempt) {
-    WiFiClientSecure client;
+    if (media_retry_network_cancelled()) break;
+    SenseMediaRetryClient client;
     HTTPClient http;
     bool http_locked = false;
     client.setInsecure();
     client.setTimeout(15000);
+    client.setHandshakeTimeout(sense_media_network::handshake_timeout_seconds(UINT32_MAX));
 
     http_queue_lock("VOICE_POST", voice_http_job);
     http_locked = true;
@@ -440,7 +444,7 @@ static bool voice_upload_and_parse(const UploadJob& job) {
       http_queue_unlock("VOICE_POST", voice_http_job);
       http_locked = false;
       if (attempt < max_attempts) {
-        delay(250);
+        if (!media_retry_network_wait(250)) break;
         continue;
       }
       break;
@@ -448,7 +452,7 @@ static bool voice_upload_and_parse(const UploadJob& job) {
 
     http.setReuse(false);
     http.setTimeout(60000);
-    http.setConnectTimeout(10000);
+    http.setConnectTimeout(sense_media_network::connect_timeout_ms(UINT32_MAX));
     http.addHeader("Content-Type", "audio/pcm");  // Raw PCM, not WAV
     http.addHeader("x-owner-id", owner_id);
     http.addHeader("x-device-id", device_id[0] ? device_id : TREPO_DEVICE_ID);
@@ -461,6 +465,10 @@ static bool voice_upload_and_parse(const UploadJob& job) {
     Serial.printf("[VOICE] HTTP POST attempt=%u/%u\n", (unsigned)attempt, (unsigned)max_attempts);
     int httpResponseCode = http.POST((uint8_t*)audio_buf, audio_size);
     Serial.printf("[VOICE] HTTP Response: %d\n", httpResponseCode);
+    if (media_retry_network_cancelled()) {
+      http.end(); client.stop(); http_queue_unlock("VOICE_POST", voice_http_job);
+      break;
+    }
 
     StaticJsonDocument<512> voice_ack;
     bool durable_ack = false;
@@ -470,7 +478,7 @@ static bool voice_upload_and_parse(const UploadJob& job) {
                     deserializeJson(voice_ack, reply) == DeserializationError::Ok &&
                     sense_voice_backend_ack(job, httpResponseCode, voice_ack);
     }
-    if (durable_ack) {
+    if (durable_ack && !media_retry_network_cancelled()) {
       Serial.printf("[VOICE] Async accept success: %d\n", httpResponseCode);
       uart_send_sense_diag("voice", "upload_ok", "VOICE_POST", (int32_t)httpResponseCode, "accepted");
       http.end();
@@ -500,15 +508,26 @@ static bool voice_upload_and_parse(const UploadJob& job) {
       http_queue_unlock("VOICE_POST", voice_http_job);
       http_locked = false;
     }
+    if (media_retry_network_cancelled()) break;
 
+    if (attempt < max_attempts && sense_media_network::transient_http_status(httpResponseCode)) {
+      // Retry the frozen request once. An HTTP response proves the transport
+      // worked; resetting the radio does not help a busy/transient backend.
+      Serial.println("[VOICE] Transient HTTP response, retrying original request");
+      if (!media_retry_network_wait(250)) break;
+      continue;
+    }
     if (httpResponseCode < 0 && attempt < max_attempts) {
+      // Saved media keeps its original copy. Let the next scheduled wake and
+      // owner Wi-Fi maintenance retry instead of holding a radio-reset wait.
+      if (media_retry_network_active()) break;
       Serial.println("[VOICE] TLS transport failure, hard WiFi reset before retry");
       wifi_hard_reset_and_reconnect("voice_tls_retry", 15000);
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[VOICE] WiFi reconnect failed after hard reset");
         break;
       }
-      delay(250);
+      if (!media_retry_network_wait(250)) break;
       continue;
     }
     break;

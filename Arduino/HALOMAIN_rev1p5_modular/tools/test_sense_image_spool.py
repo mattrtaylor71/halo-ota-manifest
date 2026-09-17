@@ -26,6 +26,12 @@ def harness(root):
 #include <CommonCrypto/CommonDigest.h>
 #include <ctime>
 #include "Sense_Minimal/sense_ops.h"
+#include "halo_common/MediaRetryPolicy.h"
+static uint32_t esp_random(){static uint32_t value=100;return ++value;}
+static bool retry_pending=true;
+static unsigned retry_inventory_calls=0;
+static void media_retry_inventory(halo_media_retry::Store,bool pending){retry_pending=pending;++retry_inventory_calls;}
+static void media_retry_saved(halo_media_retry::Store){retry_pending=true;}
 static time_t epoch=1800000000;
 static time_t fake_time(time_t*){return epoch;}
 #define time fake_time
@@ -63,6 +69,7 @@ static void ready(JsonDocument& d,const UploadJob& j){
 struct Frame{uint8_t type;uint16_t seq;std::vector<uint8_t> bytes;};
 static std::vector<Frame> incoming;
 static bool final_ack=true,cleanup_ok=true,wrong_kind=false;
+static unsigned list_mutation=0;
 static unsigned allocations=0,frees=0,markers=0,final_acks=0;
 static std::vector<std::string> controls;
 static UploadJob stored;
@@ -88,6 +95,15 @@ static void sense_image_spool_json(JsonDocument& d,const char* type){
  controls.emplace_back(type);JsonDocument r;r["ver"]=1;r["image_schema"]=1;
  if(!strcmp(type,"IMAGE_SPOOL_LIST_REQ")){
   r["type"]="IMAGE_SPOOL_LIST";r["count"]=1;r["request_id"]=stored.image.request_id;r["epoch"]=stored.created_epoch;
+  r["ok"]=1;r["reason"]="ok";r["probe"]=d["probe"];r["owner_id"]=d["owner_id"];r["device_id"]=d["device_id"];
+  if(list_mutation==1)r.remove("ok");
+  if(list_mutation==2){r["ok"]=0;r["reason"]="io";r["count"]=0;}
+  if(list_mutation==3){r["reason"]="budget";r["count"]=0;}
+  if(list_mutation==4)r["probe"]="0000000000000000";
+  if(list_mutation==5)r["owner_id"]="other-owner";
+  if(list_mutation==6)r["device_id"]="other-device";
+  if(list_mutation==7)r["count"]=-1;
+  if(list_mutation==8){r["count"]=0;r["reason"]="empty";r.remove("request_id");}
  }else if(!strcmp(type,"IMAGE_SPOOL_FETCH")){
   ready(r,stored);if(wrong_kind)r["meta"]["kind"]="voice";
  }else if(!strcmp(type,"IMAGE_XFER_ABORT")){
@@ -104,6 +120,7 @@ static void sense_image_spool_json(JsonDocument& d,const char* type){
 static void prepare(){
  reset();stored=fixture();controls.clear();allocations=frees=markers=final_acks=0;
  final_ack=cleanup_ok=true;wrong_kind=hash_failed=false;g_image_spool_cursor[0]=0;
+ list_mutation=0;retry_pending=true;retry_inventory_calls=0;
  std::vector<uint8_t> proof;put32(proof,stored.image_len);put32(proof,stored.image.crc32);
  proof.insert(proof.end(),stored.image.request_id,stored.image.request_id+32);
  incoming={{MSG_IMG_CHUNK,0,std::vector<uint8_t>(jpeg,jpeg+sizeof(jpeg))},{MSG_IMG_END,1,proof}};
@@ -137,6 +154,15 @@ int main(){
  prepare();final_ack=false;out={};check(!sense_image_spool_fetch(out)&&frees==1&&!out.image_buf,"failed final ACK cannot establish completed fetch custody");
  prepare();cleanup_ok=false;out={};check(!sense_image_spool_fetch(out)&&frees==1&&!out.image_buf&&g_lcd_ota_mode_unconfirmed,"missing JSON-ready proof keeps quarantine and original slot");
  check(!uart_rx_mutex->held&&!uart_json_tx_mutex->held&&!g_img_spool_tx_active,"all image exits release only local UART custody");
+ for(unsigned mutation=1;mutation<=7;++mutation){
+  prepare();list_mutation=mutation;out={};
+  check(!sense_image_spool_fetch(out)&&allocations==0&&frees==0&&!out.image_buf,
+        "failed or unbound LIST never admits a payload");
+  check(retry_pending&&retry_inventory_calls==0,"unproven LIST cannot clear pending retry hint");
+ }
+ prepare();list_mutation=8;out={};
+ check(!sense_image_spool_fetch(out)&&allocations==0&&!retry_pending&&retry_inventory_calls==1,
+       "only bound successful empty LIST clears pending retry hint");
  printf("PASS %u combined actual-source image/read/voice/query checks\n",checks);
 }
 '''

@@ -240,7 +240,8 @@ static struct{void print(const char* s){wire.emplace_back(s);}void flush(){}} se
 static void lcd_errlog_store_with_context(const char*,const char*,const char*,int,const char*){}
 struct app_event_t{int type;char data[8];};static void* app_event_queue=nullptr;
 static constexpr int EVT_LINK_SEND_FAILED=1;
-static void xQueueSend(void*,app_event_t*,int){}
+static unsigned link_ui_errors=0;
+static void xQueueSend(void*,app_event_t* evt,int){assert(evt->type==EVT_LINK_SEND_FAILED);++link_ui_errors;}
 #define HALO_DEMO_MODE 0
 #define LINK_ACK_SLOTS 4
 #define LINK_ACK_RETRY_MS 400
@@ -255,7 +256,7 @@ static void xQueueSend(void*,app_event_t*,int){}
         definition(main, 'static void lcd_manual_ota_finish'),
         definition(action, 'static void ship_menu_send_manual_ota'),
         definition(uart, 'static bool tx_msg_requires_awake_proof'),
-        *[definition(ack, sig) for sig in ['static bool link_ack_should_track', 'static void link_ack_track', 'static bool link_ack_on_ack','static void link_ack_service']],
+        *[definition(ack, sig) for sig in ['static bool link_ack_should_track', 'static void link_ack_track', 'static bool link_ack_on_ack','static void link_ack_service','static bool link_ack_inflight']],
         definition(sense,'static bool sense_input_seen_recently'),
         definition(sense,'static void sense_input_mark_seen'),
     ])
@@ -305,6 +306,27 @@ int main(){
   link_ack_track(45,"INPUT_DELETE","not json");
   for(unsigned i=0;i<5;++i){now_ms+=400;link_ack_service();}
   assert(delete_results.size()==1&&g_link_ack_failed==3&&g_manual_ota_result==4);
+  // Wake-only user activity must reach Sense reliably without creating a
+  // foreground operation or replacing the user's screen if the peer is gone.
+  const char* active_payload=R"({"ver":1,"type":"INPUT_USER_ACTIVE","msg_id":46,"ts":100})";
+  strcpy(m.type,"INPUT_USER_ACTIVE");assert(tx_msg_requires_awake_proof(&m));
+  assert(link_ack_should_track(m.type));wire.clear();
+  app_event_queue=&m;link_ack_track(46,m.type,active_payload);
+  assert(link_ack_inflight());now_ms+=399;link_ack_service();assert(wire.empty());
+  ++now_ms;link_ack_service();assert(wire.size()==2&&wire[0]==active_payload&&wire[1]=="\n");
+  assert(!link_ack_on_ack(999)&&link_ack_inflight());
+  assert(!sense_input_seen_recently(46));sense_input_mark_seen(46);assert(sense_input_seen_recently(46));
+  assert(link_ack_on_ack(46)&&!link_ack_inflight());
+  wire.clear();now_ms+=400;link_ack_service();assert(wire.empty()&&!link_ui_errors);
+  const char* lost_active_payload=R"({"ver":1,"type":"INPUT_USER_ACTIVE","msg_id":47,"ts":100})";
+  link_ack_track(47,m.type,lost_active_payload);
+  for(unsigned i=0;i<5;++i){now_ms+=400;link_ack_service();}
+  assert(!link_ack_inflight()&&wire.size()==8&&g_link_ack_failed==4&&!link_ui_errors);
+  for(unsigned i=0;i<wire.size();i+=2)assert(wire[i]==lost_active_payload&&wire[i+1]=="\n");
+  // Real capture exhaustion remains visible; silence is specific to the notice.
+  link_ack_track(48,"INPUT_MENU_SELECT","capture fixture");
+  for(unsigned i=0;i<5;++i){now_ms+=400;link_ack_service();}
+  assert(link_ui_errors==1&&g_link_ack_failed==5&&!link_ack_inflight());
   puts("PASS actual LCD action single queued request, awake-proof, byte-identical ACK replay, Sense dedupe, readable refusal, bounded delivery failure and delete-failure routing");
 }
 '''

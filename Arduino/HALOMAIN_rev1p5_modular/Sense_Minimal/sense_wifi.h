@@ -22,6 +22,8 @@
 #ifndef SENSE_WIFI_H
 #define SENSE_WIFI_H
 
+#include "sense_wifi_events.h"
+
 // ── Wi-Fi Functions ────────────────────────────────────────────────
 static bool sense_backup_offline_active();
 bool wifi_is_connected() {
@@ -323,6 +325,23 @@ static void wifi_guard_mark_failed(wl_status_t status, const char* reason) {
   uart_send_sense_diag("wifi", "fail", reason, (int32_t)status, wifi_state_to_string(wifi_state));
 }
 
+static bool wifi_maintenance_work_busy() {
+  return http_inflight || upload_inflight || upload_worker_claim_active.load() ||
+         foreground_active || current_job.active || voice_recording_active ||
+         scan_ui_inflight || dish_scan_inflight;
+}
+
+// A status check alone races a worker entering HTTP. Hold its mutex only for
+// the radio mutation, and defer immediately if a request already owns it.
+struct WifiMaintenanceHttpLease {
+  SemaphoreHandle_t mutex;
+  bool acquired;
+  WifiMaintenanceHttpLease() : mutex(http_mutex),
+      acquired(mutex && xSemaphoreTake(mutex, 0) == pdTRUE) {}
+  ~WifiMaintenanceHttpLease() { if (acquired) xSemaphoreGive(mutex); }
+  explicit operator bool() const { return !mutex || acquired; }
+};
+
 static void wifi_guard_poll() {
   SenseBackupWifiCall backup_call;
   if(!backup_call)return;
@@ -344,97 +363,71 @@ static void wifi_guard_poll() {
                   WiFi.RSSI());
     return;
   }
-  if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
-    if (wifi_inflight_start_ms > 0 &&
-        (now - wifi_inflight_start_ms) > WIFI_CONNECT_TIMEOUT_MS) {
-      wifi_guard_mark_failed(status, "poll");
-    }
+  if (wifi_inflight_start_ms == 0 ||
+      (now - wifi_inflight_start_ms) <= WIFI_CONNECT_TIMEOUT_MS) {
     return;
   }
-  if (status == WL_DISCONNECTED || status == WL_CONNECTION_LOST) {
-    if (wifi_inflight_start_ms > 0 &&
-        (now - wifi_inflight_start_ms) > WIFI_CONNECT_TIMEOUT_MS) {
-      wifi_guard_mark_failed(status, "poll");
-    }
-    return;
-  }
-  if (wifi_inflight_start_ms > 0 &&
-      (now - wifi_inflight_start_ms) > WIFI_CONNECT_TIMEOUT_MS) {
+  // The loop polls after maintenance; it must not bypass that owner's yield
+  // with a diagnostic scan or disconnect while HTTP/foreground work is live.
+  if (wifi_maintenance_work_busy()) return;
+  WifiMaintenanceHttpLease http_lease;
+  if (!http_lease || wifi_maintenance_work_busy()) return;
+  if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL ||
+      status == WL_DISCONNECTED || status == WL_CONNECTION_LOST) {
+    wifi_guard_mark_failed(status, "poll");
+  } else {
     wifi_guard_handle_timeout(now - wifi_inflight_start_ms);
   }
 }
 
 // ── WiFi event handler ──────────────────────────────────────────────
 
+static constexpr size_t WIFI_EVENT_QUEUE_CAPACITY = 16;
+static portMUX_TYPE wifi_event_mux = portMUX_INITIALIZER_UNLOCKED;
+static sense_wifi_events::Queue<WIFI_EVENT_QUEUE_CAPACITY> wifi_events;
+
 static void handle_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
-  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-    Serial.printf("[WIFI_EVENT] event=%d t=%lu status=%d inflight=%d state=%d reason=%u\n",
-                  (int)event,
-                  millis(),
-                  (int)WiFi.status(),
-                  wifi_connect_inflight ? 1 : 0,
-                  (int)wifi_state,
-                  (unsigned)info.wifi_sta_disconnected.reason);
-  } else {
-    Serial.printf("[WIFI_EVENT] event=%d t=%lu status=%d inflight=%d state=%d\n",
-                  (int)event,
-                  millis(),
-                  (int)WiFi.status(),
-                  wifi_connect_inflight ? 1 : 0,
-                  (int)wifi_state);
-  }
-#if defined(ARDUINO_EVENT_WIFI_STA_GOT_IP)
-  if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
-    wifi_guard_set_inflight(false);
-    wifi_connected_ms = millis();
-    wifi_guard_set_state(WIFI_STATE_CONNECTED, "event_got_ip", WL_CONNECTED);
-    Serial.printf("[WIFI_GUARD] connect_ok ip=%s rssi=%d\n",
-                  WiFi.localIP().toString().c_str(),
-                  WiFi.RSSI());
-    wifi_diag_note_success(WiFi.RSSI());
-    String ip = WiFi.localIP().toString();
-    uart_send_sense_diag("wifi", "got_ip", "event_got_ip", (int32_t)WiFi.RSSI(), ip.c_str());
-    apply_public_dns_for_api("wifi_got_ip");
-  } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-    wl_status_t status = WiFi.status();
-    wifi_diag_note_disconnect();
-    if (wifi_connect_inflight) {
-      wifi_guard_mark_failed(status, "event_disconnect");
-    } else if (wifi_state == WIFI_STATE_FAILED || wifi_state == WIFI_STATE_FAILED_TIMEOUT) {
-      wifi_guard_set_inflight(false);
-      wifi_guard_set_state(wifi_state, "event_disconnect", status);
-    } else {
-      wifi_guard_set_inflight(false);
-      wifi_guard_set_state(WIFI_STATE_DISCONNECTED, "event_disconnect", status);
+  const sense_wifi_events::Event pending = {
+      (int32_t)event, (uint32_t)millis(),
+      event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED
+          ? (uint8_t)info.wifi_sta_disconnected.reason : (uint8_t)0};
+  portENTER_CRITICAL(&wifi_event_mux);
+  wifi_events.push(pending);
+  portEXIT_CRITICAL(&wifi_event_mux);
+}
+
+// Called only by the boot/loop owner, never by the SDK event task or workers.
+// Arduino-ESP32 3.x event names are enum values, not preprocessor macros.
+static void wifi_service_events() {
+  uint32_t dropped;
+  portENTER_CRITICAL(&wifi_event_mux);
+  dropped = wifi_events.take_dropped();
+  portEXIT_CRITICAL(&wifi_event_mux);
+  if (dropped) Serial.printf("[WIFI_EVENT] dropped=%lu\n", (unsigned long)dropped);
+  for (size_t count = 0; count < WIFI_EVENT_QUEUE_CAPACITY; ++count) {
+    sense_wifi_events::Event event;
+    portENTER_CRITICAL(&wifi_event_mux);
+    const bool available = wifi_events.pop(event);
+    portEXIT_CRITICAL(&wifi_event_mux);
+    if (!available) break;
+    const wl_status_t status = WiFi.status();
+    Serial.printf("[WIFI_EVENT] event=%ld t=%lu serviced=%lu status=%d inflight=%d state=%d reason=%u\n",
+                  (long)event.id, (unsigned long)event.at_ms, millis(),
+                  (int)status, wifi_connect_inflight ? 1 : 0,
+                  (int)wifi_state, (unsigned)event.reason);
+    if (event.id == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+      wifi_diag_note_disconnect();
+      // A disconnect can be transient during association or deliberately
+      // caused by a reset. Retain the original attempt and its deadline.
+    } else if (event.id == ARDUINO_EVENT_WIFI_STA_GOT_IP && status == WL_CONNECTED) {
+      wifi_diag_note_success(WiFi.RSSI());
+      String ip = WiFi.localIP().toString();
+      uart_send_sense_diag("wifi", "got_ip", "event_got_ip", (int32_t)WiFi.RSSI(), ip.c_str());
     }
+    // Events may be queued before a newer begin/reset or provisioning submit.
+    // They are diagnostics only: live-status polling owns guard transitions,
+    // and ordinary DNS readiness remains with the network operation's owner.
   }
-#elif defined(SYSTEM_EVENT_STA_GOT_IP)
-  if (event == SYSTEM_EVENT_STA_GOT_IP) {
-    wifi_guard_set_inflight(false);
-    wifi_connected_ms = millis();
-    wifi_guard_set_state(WIFI_STATE_CONNECTED, "event_got_ip", WL_CONNECTED);
-    Serial.printf("[WIFI_GUARD] connect_ok ip=%s rssi=%d\n",
-                  WiFi.localIP().toString().c_str(),
-                  WiFi.RSSI());
-    wifi_diag_note_success(WiFi.RSSI());
-    String ip = WiFi.localIP().toString();
-    uart_send_sense_diag("wifi", "got_ip", "event_got_ip", (int32_t)WiFi.RSSI(), ip.c_str());
-    apply_public_dns_for_api("wifi_got_ip");
-  } else if (event == SYSTEM_EVENT_STA_DISCONNECTED) {
-    wl_status_t status = WiFi.status();
-    wifi_diag_note_disconnect();
-    if (wifi_connect_inflight) {
-      wifi_guard_mark_failed(status, "event_disconnect");
-    } else if (wifi_state == WIFI_STATE_FAILED || wifi_state == WIFI_STATE_FAILED_TIMEOUT) {
-      wifi_guard_set_inflight(false);
-      wifi_guard_set_state(wifi_state, "event_disconnect", status);
-    } else {
-      wifi_guard_set_inflight(false);
-      wifi_guard_set_state(WIFI_STATE_DISCONNECTED, "event_disconnect", status);
-    }
-  }
-#endif
-  (void)info;
 }
 
 // ── WiFi connection functions ───────────────────────────────────────
@@ -642,6 +635,8 @@ static bool wifi_connect() {
 
 static unsigned long wifi_maint_last_attempt_ms = 0;
 static unsigned long wifi_maint_last_log_ms = 0;
+static unsigned long wifi_maint_last_failure_ms = 0;
+static bool wifi_maint_retry_pending = false;
 static uint8_t wifi_maint_consecutive_fails = 0;
 static const uint8_t WIFI_MAINT_MAX_FAILS_BEFORE_RESET = 3;
 static const unsigned long WIFI_MAINT_LOG_INTERVAL_MS = 5000;
@@ -658,71 +653,51 @@ static void service_wifi_maintenance(unsigned long now_ms) {
   // Already connected — nothing to do
   if (WiFi.status() == WL_CONNECTED) {
     wifi_maint_consecutive_fails = 0;
+    wifi_maint_retry_pending = false;
     return;
   }
+
+  // Preserve the pending attempt/backoff while another operation owns the
+  // device. The owner loop will revisit maintenance once that work finishes.
+  if (wifi_maintenance_work_busy()) return;
 
   // Connection attempt in flight — monitor for timeout
   if (wifi_connect_inflight) {
     if (wifi_inflight_start_ms > 0 &&
         (now_ms - wifi_inflight_start_ms) > WIFI_CONNECT_TIMEOUT_MS) {
-      // Timed out — hard reset and retry
-      Serial.printf("[WIFI_MAINT] connect_timeout elapsed_ms=%lu fails=%u -> hard_reset\n",
+      // Start backoff at failure, not at begin (25s ago). Otherwise every
+      // cooldown has already elapsed and a dead AP makes resets continuous.
+      Serial.printf("[WIFI_MAINT] connect_timeout elapsed_ms=%lu fails=%u -> backoff\n",
                     (unsigned long)(now_ms - wifi_inflight_start_ms),
                     (unsigned)wifi_maint_consecutive_fails);
-      wifi_maint_consecutive_fails++;
+      if (wifi_maint_consecutive_fails < UINT8_MAX) ++wifi_maint_consecutive_fails;
+      wifi_maint_last_failure_ms = now_ms;
+      wifi_maint_retry_pending = true;
       wifi_guard_set_inflight(false);
       wifi_guard_set_state(WIFI_STATE_FAILED_TIMEOUT, "maint_timeout", WiFi.status());
       wifi_guard_note_fail("maint_timeout");
-      // Immediately retry with hard reset if under fail limit
-      if (wifi_maint_consecutive_fails <= WIFI_MAINT_MAX_FAILS_BEFORE_RESET) {
-        hardResetSta();
-        delay(50);
-        const char* ssid = WIFI_SSID;
-        const char* pass = WIFI_PASS;
-#ifdef HALO_SENSE_PROD_WRAPPER
-        char provision_ssid[64];
-        char provision_pass[64];
-        if (halo_get_provisioned_wifi(provision_ssid, sizeof(provision_ssid),
-                                      provision_pass, sizeof(provision_pass))) {
-          ssid = provision_ssid;
-          pass = provision_pass;
-        }
-#endif
-        if (ssid && ssid[0]) {
-          WiFi.mode(WIFI_STA);
-          WiFi.setAutoReconnect(true);
-          WiFi.setSleep(false);
-          esp_wifi_set_ps(WIFI_PS_NONE);
-          WiFi.begin(ssid, pass);
-          wifi_connect_inflight = true;
-          wifi_inflight_start_ms = now_ms;
-          wifi_last_begin_ms = now_ms;
-          wifi_maint_last_attempt_ms = now_ms;
-          wifi_guard_set_state(WIFI_STATE_CONNECTING, "maint_hard_reset_retry", WiFi.status());
-          Serial.printf("[WIFI_MAINT] hard_reset_retry fails=%u\n",
-                        (unsigned)wifi_maint_consecutive_fails);
-        }
-      }
     }
     return;
   }
 
   // Not connected, not inflight — respect cooldown then start a new attempt
   unsigned long cooldown_ms = WIFI_BEGIN_COOLDOWN_MS;
-  // Back off after consecutive failures: 2s, 4s, 8s (capped)
+  // Back off after consecutive failures: 4s, 8s, 16s (capped).
   if (wifi_maint_consecutive_fails > 0) {
     cooldown_ms = WIFI_BEGIN_COOLDOWN_MS << (wifi_maint_consecutive_fails < 3 ? wifi_maint_consecutive_fails : 3);
     if (cooldown_ms > 16000) cooldown_ms = 16000;
   }
-  if (wifi_maint_last_attempt_ms > 0 &&
-      (now_ms - wifi_maint_last_attempt_ms) < cooldown_ms) {
+  const unsigned long cooldown_start_ms = wifi_maint_retry_pending
+      ? wifi_maint_last_failure_ms : wifi_maint_last_attempt_ms;
+  if ((wifi_maint_retry_pending || wifi_maint_last_attempt_ms > 0) &&
+      (now_ms - cooldown_start_ms) < cooldown_ms) {
     // Log periodically while waiting
     if (wifi_maint_last_log_ms == 0 ||
         (now_ms - wifi_maint_last_log_ms) >= WIFI_MAINT_LOG_INTERVAL_MS) {
       Serial.printf("[WIFI_MAINT] waiting cooldown_ms=%lu fails=%u next_ms=%lu\n",
                     cooldown_ms,
                     (unsigned)wifi_maint_consecutive_fails,
-                    (unsigned long)(wifi_maint_last_attempt_ms + cooldown_ms));
+                    (unsigned long)(cooldown_start_ms + cooldown_ms));
       wifi_maint_last_log_ms = now_ms;
     }
     return;
@@ -750,16 +725,39 @@ static void service_wifi_maintenance(unsigned long now_ms) {
   }
 #endif
 
+  WifiMaintenanceHttpLease http_lease;
+  if (!http_lease || wifi_maintenance_work_busy()) return;
   if (!wifi_guard_try_claim_connect("wifi_maint")) {
     return;  // Someone else owns the connection attempt
   }
+  if (wifi_maintenance_work_busy()) {
+    wifi_guard_set_inflight(false);
+    return;
+  }
 
-  wifi_maint_last_attempt_ms = now_ms;
+  // Claim first so a worker cannot start its own connection during reset.
+  // Live status above cancels a pending reset if SDK auto-reconnect succeeded.
+  if (WiFi.status() == WL_CONNECTED) {
+    wifi_maint_consecutive_fails = 0;
+    wifi_maint_retry_pending = false;
+    wifi_guard_set_inflight(false);
+    wifi_guard_set_state(WIFI_STATE_CONNECTED, "maint_claim_connected", WL_CONNECTED);
+    return;
+  }
+  if (wifi_maint_retry_pending &&
+      wifi_maint_consecutive_fails <= WIFI_MAINT_MAX_FAILS_BEFORE_RESET) {
+    hardResetSta();
+    wifi_diag_note_hard_reset();
+  }
+  wifi_maint_retry_pending = false;
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(false);
   esp_wifi_set_ps(WIFI_PS_NONE);
   delay(20);
+  wifi_maint_last_attempt_ms = millis();
+  wifi_inflight_start_ms = wifi_maint_last_attempt_ms;
+  wifi_last_begin_ms = wifi_maint_last_attempt_ms;
   WiFi.begin(ssid, pass);
   wifi_guard_set_state(WIFI_STATE_CONNECTING, "maint_begin", WiFi.status());
   Serial.printf("[WIFI_MAINT] begin_connect fails=%u cooldown=%lu ssid=%s\n",

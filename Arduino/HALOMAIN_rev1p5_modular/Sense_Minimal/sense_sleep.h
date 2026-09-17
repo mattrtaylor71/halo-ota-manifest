@@ -690,6 +690,16 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     sleep_notify_late_block("pre_wifi_off");
     return;
   }
+  // Independent saved-media arm while normal receive dispatch is still live.
+  // Relative time works without SNTP; no OTA arm, allowance or debt is changed.
+  const uint32_t media_retry_s = media_retry_interval();
+  const uint32_t media_arm_at_ms = millis();
+  media_retry_arm_lcd(media_retry_s, sleep_user_generation);
+  if (sleep_upload_flush_yield_to_user(sleep_user_generation, media_arm_at_ms, 1800)) return;
+  if (!sleep_allowed_now("media_arm_complete", NULL)) {
+    sleep_notify_late_block("media_arm_complete");
+    return;
+  }
   // Belt-and-suspenders: never tear down WiFi while the user is on the LCD
   // shopping-list screen. Normally the sleep gate (sense_can_sleep_now) blocks
   // us from ever reaching here while list-active, but if we somehow do, keep
@@ -794,6 +804,12 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   }
   if (wake_pin_stuck && WAKE_PIN_FAILSAFE_TIMER_S < normal_or_user_s)
     normal_or_user_s = WAKE_PIN_FAILSAFE_TIMER_S;
+  const uint32_t before_media_s = timer_delta_s;
+  const uint32_t media_elapsed_s = (uint32_t)(millis() - media_arm_at_ms + 999U) / 1000U;
+  const uint32_t media_remaining_s = !media_retry_s ? 0 :
+      (media_retry_s > media_elapsed_s ? media_retry_s - media_elapsed_s : 1);
+  if (media_remaining_s && media_remaining_s < timer_delta_s) timer_delta_s = media_remaining_s;
+  if (media_remaining_s && media_remaining_s < normal_or_user_s) normal_or_user_s = media_remaining_s;
   Serial.printf("[SLEEP] wake timer: nightly=%lus ota=%lus chosen=%lus\n",
                 (unsigned long)nightly_s, (unsigned long)ota_timer_delta_s,
                 (unsigned long)timer_delta_s);
@@ -810,6 +826,10 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
   if(!sense_config_deep_sleep_wakeup(ext0_allowed, timer_delta_s, normal_or_user_s)){
     sleep_notify_late_block("timer_configuration");return;
   }
+  g_media_retry_timer_selected = halo_media_retry::selected(timer_delta_s, media_remaining_s, before_media_s);
+  Serial.printf("[MEDIA_RETRY] sleep seconds=%lu selected=%u peer_ack=%u\n",
+                (unsigned long)media_remaining_s, g_media_retry_timer_selected ? 1 : 0,
+                g_media_retry_arm_acked ? 1 : 0);
   if (g_sleep_timer_selected_hook) g_sleep_timer_selected_hook(timer_delta_s);
   Serial.printf("[SLEEP_DIAG] wake_sources ext0_gpio=%d ext0_level=%d ext0_enabled=%d timer_delta_s=%lu ota_timer_delta_s=%lu wake_pin_stuck=%d kind=%d\n",
                 WAKE_GPIO,
@@ -841,6 +861,7 @@ static void sense_enter_deep_sleep(SenseSleepKind kind) {
     sleep_notify_late_block("pre_deep_sleep");
     return;
   }
+  media_retry_commit_sleep();
   if (!sleep_ready_sent_for_cycle) {
     Serial.printf("[SLEEP] sending SLEEP_READY reason=%s\n",
                   sleep_ready_reason ? sleep_ready_reason : "unknown");

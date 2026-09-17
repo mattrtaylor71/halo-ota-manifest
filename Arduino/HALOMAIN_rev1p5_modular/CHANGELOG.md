@@ -1,3 +1,7 @@
+# September16:170 saved-media retry candidate
+
+Independent paired retry timers keep the LCD dark while saved voice/photo work recovers. Real user input pauses recovery; saved originals remain until bound cloud receipts. Wi-Fi callbacks/backoff, transient voice HTTP retry, fair SD replay and late voice errors are covered by executable host fault tests. Canonical build and device acceptance remain pending at this source commit;169 remains installed. No public release. See [the behavior, tests and limits](docs/WIFI_MEDIA_RECOVERY_170.md).
+
 # September16: private169 guided provisioning installed
 
 Implement the approved six-screen setup guide, centered content, real app-download QR, yellow “On Trepo App” pills and automatic app/Wi-Fi/account progression. Preserve existing menu artwork. The Sense presentation bridge recognizes app contact, repeats setup progress and requires owner confirmation before success; it also accepts the existing failure contract. Canonical builds/artifact checks and nine host suites passed. Both boards run169 SDK VALID with168 fallback banks retained and NVS/partitions unchanged. Real guide steps1–3, scroll bounds, three page cycles, stable heap and panel flush passed; unit is left at its real step3 QR. Phone-driven steps4–6 remain pending. No public OTA promotion. See [the scoped design and state contract](docs/PROVISIONING_GUIDE_169.md).

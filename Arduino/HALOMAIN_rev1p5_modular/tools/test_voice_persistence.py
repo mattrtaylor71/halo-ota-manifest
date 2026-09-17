@@ -49,6 +49,7 @@ def harness(root):
 #include <thread>
 #include <vector>
 #include "Sense_Minimal/sense_ops.h"
+#include "halo_common/MediaRetryPolicy.h"
 #define HALO_SENSE_PROD_WRAPPER 1
 #define HALO_SENSE_UPLOAD_PERSISTENCE 1
 static unsigned checks;
@@ -119,6 +120,14 @@ template<class...T>static void uart_send_ui_status_extended(T...){++errors;}
 static void dump_system_truth(const char*){}
 static bool wifi_is_connected(){return true;}
 static bool halo_provisioning_active(){return false;}
+static bool boot_ota_pending=false,ordinary_uart_allowed=true;
+static bool halo_prod_boot_ota_pending(){return boot_ota_pending;}
+static bool sense_uart_ordinary_tx_allowed(){return ordinary_uart_allowed;}
+static bool foreground_active=false,voice_recording_active=false;
+static std::atomic<bool> g_media_retry_user_paused{false};
+static struct {bool active=false;} current_job;
+static void media_retry_inventory(halo_media_retry::Store,bool){}
+static void media_retry_saved(halo_media_retry::Store){}
 static bool upload_inflight=false,dish_scan_inflight=false,scan_ui_inflight=false;
 static int g_boot_reset_reason=0;
 static const char* reset_reason_label(int){return "host";}
@@ -152,7 +161,11 @@ static int mbedtls_sha256(const uint8_t* p,size_t n,uint8_t* out,int is224){retu
 static uint8_t* allocate_upload_buffer(size_t n,bool* psram){*psram=false;return (uint8_t*)malloc(n);}
 static uint32_t upload_queue_count(){return 0;}
 static bool queue_upload_job(uint32_t,const char*,const char*,uint16_t,bool,const UploadJob::CameraUploadMeta*,uint8_t*,size_t,uint8_t,bool,uint32_t){return false;}
-static bool queue_voice_upload_job(uint32_t,uint8_t*,size_t,uint8_t,bool,uint32_t,const UploadJob::VoiceEnvelope*,bool){return false;}
+static unsigned replay_queue_calls=0;
+static bool replay_queue_accept=false;
+static bool queue_voice_upload_job(uint32_t,uint8_t* p,size_t,uint8_t,bool,uint32_t,const UploadJob::VoiceEnvelope*,bool){
+ ++replay_queue_calls;if(replay_queue_accept){free(p);return true;}return false;
+}
 static uint8_t pcm[8]={1,2,3,4,5,6,7,8};
 static UploadJob fixture(char id='a'){
  UploadJob j={};j.job_id=41;j.is_voice=true;j.image_buf=pcm;j.image_len=sizeof(pcm);strcpy(j.mode,"voice");
@@ -162,6 +175,10 @@ static UploadJob fixture(char id='a'){
 static void reset(){files.clear();writes=removes=errors=sd_writes=sd_marks=0;now_ms=1000;now_epoch=1800000000;
  fresh=true;owner="owner-a";device="device-a";truncate_next_write=rename_fail=sd_save_ok=mount_failure=false;mount_arguments.clear();
  g_upload_persist_ready=false;g_upload_persist_attempted_this_boot=false;g_voice_spool_replayed_this_boot=false;
+ g_upload_persist_replay_not_before_ms=0;g_upload_persist_last_check_ms=0;
+ boot_ota_pending=false;ordinary_uart_allowed=true;foreground_active=voice_recording_active=current_job.active=false;
+ g_media_retry_user_paused=false;
+ replay_queue_calls=0;replay_queue_accept=false;
  upload_persist_setup();}
 static UploadJob load(){UploadJob j={};check(upload_persist_load(&j),"load actual saved voice");return j;}
 int main(){
@@ -183,8 +200,8 @@ int main(){
  check(sense_voice_prepare_first_attempt(restored)&&restored.created_epoch==first_epoch&&files==attempted,"retry never renews age");
  const unsigned before_sd=sd_writes;
  check(upload_persist_handle_failure(restored,"host")&&files==attempted&&sd_writes==before_sd,"SPIFFS-origin failure retains original without duplicate SD copy");
- check(g_upload_persist_attempted_this_boot&&g_voice_spool_replayed_this_boot&&g_upload_persist_replay_not_before_ms>now_ms,
-       "failure arms existing same-boot replay suppression/backoff");
+ check(g_upload_persist_attempted_this_boot&&!g_voice_spool_replayed_this_boot&&g_upload_persist_replay_not_before_ms>now_ms,
+       "flash failure suppresses only its same-boot replay and leaves SD voice eligible");
  free(restored.image_buf);
  owner="new-owner";UploadJob blocked={};check(!upload_persist_load(&blocked)&&files==attempted,"reclaimed device retains old account recording without replay/delete");owner="owner-a";
  now_epoch=first_epoch+7*86400+1;check(!upload_persist_load(&blocked)&&files==attempted,"expired voice retained without replay/delete");
@@ -242,7 +259,7 @@ int main(){
  check(!upload_persist_delete_voice(other)&&files.size()==2,"wrong voice receipt cannot delete pending payload");
  check(upload_persist_delete_voice(j)&&files.empty(),"matching backend-owned voice removes only own SPIFFS record");
  reset();j=fixture();j.from_voice_sd=true;const unsigned before=writes;
- check(upload_persist_handle_failure(j,"host")&&sd_writes==0&&writes==before&&files.empty(),"SD-origin failure does not copy or delete its committed slot");
+ check(upload_persist_handle_failure(j,"host")&&sd_writes==0&&writes==before&&files.empty()&&errors==0,"SD-origin failure neither copies/deletes its committed slot nor emits foreground error");
  reset();j=fixture();fresh=false;check(!sense_voice_prepare_first_attempt(j)&&j.created_epoch==0,"fresh RAM waits for valid time before first POST");
  fresh=true;check(sense_voice_prepare_first_attempt(j)&&j.created_epoch==(uint32_t)now_epoch&&files.empty(),"healthy live RAM remains fallback-only latency");
  reset();j=fixture();other=fixture('b');other.job_id=42;std::atomic<bool> go=false;bool a=false,b=false;
@@ -268,6 +285,39 @@ int main(){
  check(!g_upload_persist_ready&&mount_arguments==std::vector<bool>{false},"failed setup never invokes format fallback");
  check(files==retained,"mount failure preserves every retained voice byte");
  mount_failure=false;upload_persist_setup();check(g_upload_persist_ready&&files==retained,"later good mount recovers original data without format");
+ // Real replay entry point must defer before consuming its one boot attempt.
+ // The queue double accepts ownership only after every external gate clears.
+ for(unsigned gate=0;gate<5;++gate){
+  reset();j=fixture();j.created_epoch=now_epoch;
+  check(upload_persist_save(j,1),"prepare replay admission fixture");
+  const auto intact=files;now_ms=10000;replay_queue_accept=true;
+  if(gate==0)fresh=false;
+  if(gate==1)foreground_active=true;
+  if(gate==2)current_job.active=true;
+  if(gate==3)ordinary_uart_allowed=false;
+  if(gate==4)boot_ota_pending=true;
+  upload_persist_maybe_replay();
+  check(!g_upload_persist_attempted_this_boot&&replay_queue_calls==0&&files==intact,
+        "blocked replay retains boot eligibility and exact durable bytes");
+  fresh=true;foreground_active=current_job.active=false;ordinary_uart_allowed=true;boot_ota_pending=false;
+  upload_persist_maybe_replay();
+  check(g_upload_persist_attempted_this_boot&&replay_queue_calls==1&&files==intact,
+        "clearing admission gate permits replay during this same wake");
+ }
+ reset();j=fixture();j.created_epoch=now_epoch;
+ check(upload_persist_save(j,1),"prepare user-paused flash replay");
+ const auto paused_bytes=files;replay_queue_accept=true;g_media_retry_user_paused=true;
+ for(unsigned elapsed:{10000U,600000U,21600000U}){
+  now_ms=elapsed;foreground_active=current_job.active=voice_recording_active=false;
+  upload_persist_maybe_replay();
+  check(!g_upload_persist_attempted_this_boot&&replay_queue_calls==0&&files==paused_bytes&&g_media_retry_user_paused,
+        "cleared foreground and elapsed time cannot restart saved replay during user's wake");
+ }
+ // A later boot constructs a fresh pause flag; the retained bytes stay intact.
+ g_media_retry_user_paused=false;g_upload_persist_last_check_ms=0;
+ upload_persist_maybe_replay();
+ check(g_upload_persist_attempted_this_boot&&replay_queue_calls==1&&files==paused_bytes,
+       "next background wake can admit the untouched flash recording");
  printf("PASS %u actual-header voice persistence/attempt/ownership checks\n",checks);
 }
 '''

@@ -54,7 +54,7 @@ static void delay(unsigned long n){if(advance)advance(n);else clock_ms+=n;}
 static void vTaskDelay(unsigned long n){delay(n);}
 static unsigned long pdMS_TO_TICKS(unsigned long n){return n;}
 struct SerialType {template<class... A>void printf(const char*,A...){}void println(const char*){}} Serial;
-struct UploadJob {uint32_t job_id=0;char mode[16]="discard";uint8_t* image_buf=nullptr;size_t image_len=1;bool is_voice=false;};
+struct UploadJob {uint32_t job_id=0;char mode[16]="discard";uint8_t* image_buf=nullptr;size_t image_len=1;bool is_voice=false;bool from_voice_sd=false,from_image_sd=false,from_persisted=false;};
 static std::vector<UploadJob> queue;
 static void* upload_queue=&queue;
 static uint32_t upload_queue_count(){return queue.size();}
@@ -62,6 +62,7 @@ static bool guardian_force_sleep=false,g_upload_flush_requested=false,upload_inf
 static bool upload_worker_holding_in_place=false,upload_worker_has_parked_job=false;
 static UploadJob parked_job;
 static std::atomic<bool> upload_worker_claim_active{false};
+static std::atomic<bool> g_media_retry_user_paused{false};
 static std::atomic<uint32_t> g_media_custody_waiters{0};
 static bool g_spool_owns_uart=false,g_img_spool_tx_active=false,g_spool_drain_wake=false;
 static bool http_inflight=false,background_sleep_bypass_active=false,g_list_screen_active=false;
@@ -78,6 +79,8 @@ static bool upload_worker_take_parked_job(UploadJob& out,const char** stage=null
  out=parked_job;upload_worker_has_parked_job=false;if(stage)*stage="test";if(at)*at=0;return true;
 }
 static const int pdTRUE=1;
+static int xQueuePeek(void*,UploadJob* out,int){if(queue.empty())return 0;*out=queue.front();return pdTRUE;}
+static bool foreground_priority_active(unsigned long,const char**){return false;}
 static std::function<void()> after_take;
 static int xQueueReceive(void*,UploadJob* out,int){if(queue.empty())return 0;*out=queue.front();queue.erase(queue.begin());if(after_take)after_take();return pdTRUE;}
 static unsigned denials=0,pumps=0,teardowns=0,main_saves=0,parallel_attempts=0;

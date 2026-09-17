@@ -131,6 +131,8 @@ enum {EVT_RENDER_ACTIVE_LIST,EVT_RESET_UI};
 #define pdMS_TO_TICKS(n) (n)
 static void xQueueSend(void*,app_event_t*,int){}
 static void lcd_timer_receiver_wait_release(const char*){}
+static void lcd_media_user_wake(){}
+static void lcd_media_retry_wait_release(const char*){}
 static void lcd_allow_visible_ui(const char*){}
 static void sleep_fallback_reset(const char*){}
 static void lcd_clear_maintenance_state(const char*,bool){}
@@ -373,7 +375,7 @@ class UserWake(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_explicit_user_actions_after_sleep_ready_and_unknown(self):
-        for reason in ('settings_fw_info', 'INPUT_SENSE_FW', 'INPUT_OTA_CHECK', 'manual_ota'):
+        for reason in ('settings_fw_info', 'INPUT_SENSE_FW', 'INPUT_OTA_CHECK', 'manual_ota', 'INPUT_USER_ACTIVE'):
             with self.subTest(reason=reason):
                 self.run_case('user:' + reason)
                 self.run_case('short:' + reason)

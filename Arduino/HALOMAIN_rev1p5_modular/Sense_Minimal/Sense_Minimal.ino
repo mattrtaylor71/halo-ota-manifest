@@ -897,6 +897,7 @@ static void diag_record_error_persistent(const char* stage, int32_t code, const 
 #endif
 #include "sense_http.h"
 #include "sense_wifi.h"
+#include "sense_media_retry.h"
 #include "sense_upload.h"
 #include "sense_voice.h"
 #include "sense_voice_spool.h"
@@ -1273,7 +1274,9 @@ static void uart_send_ui_status_extended(const char* op, const char* phase, cons
   if (phase != NULL && strlen(phase) > 0) doc["phase"] = phase;
   doc["text"] = text;
   if (mode != NULL && strlen(mode) > 0) doc["mode"] = mode;  // "dish" or "discard" for SCAN operations
-  if (job_id == 0 && current_job.active && current_job.job_id > 0 && op != NULL && strcmp(op, "SCAN") == 0) {
+  if (job_id == 0 && current_job.active && current_job.job_id > 0 && op != NULL &&
+      ((strcmp(op, "SCAN") == 0 && current_job.type == OP_SCAN) ||
+       (strcmp(op, "VOICE") == 0 && current_job.type == OP_VOICE))) {
     job_id = current_job.job_id;
   }
   if (job_id > 0) {
@@ -1753,6 +1756,7 @@ static bool sense_idle_mode_active() {
 
 
 static void service_boot_wifi_connect(unsigned long now_ms) {
+  wifi_service_events();
   service_wifi_maintenance(now_ms);
   // First IP can arrive on the same iteration that inactivity becomes eligible.
   // Start/resume only the original per-boot attempt before any sleep decision;
@@ -1804,6 +1808,7 @@ static const char* sense_device_state_name() {
 // (sleep_defer_queued_background_uploads, allocate_upload_buffer,
 //  queue_upload_job, queue_voice_upload_job removed — see sense_upload_queue.h)
 #include "sense_upload_queue.h"
+#include "sense_media_retry_transport.h"
 // Must follow sense_upload_queue.h: the drain hands fetched images to
 // queue_upload_job(). Pulls spooled captures back off the LCD's SD card so they
 // actually reach the backend instead of sitting there durably and uselessly.
@@ -1858,6 +1863,17 @@ static bool uploads_held_for_session(const char** why_out) {
   if (g_upload_flush_requested) { if (why_out) *why_out = "flush_requested"; return false; }
   const uint32_t n = upload_queue_count();
   if (n == 0) { g_upload_hold_since_ms = 0; if (why_out) *why_out = "empty"; return false; }
+  // A previously durable replay is background recovery, not a new capture.
+  // Release only that FIFO head and only outside foreground/user-input work;
+  // subsequent fresh captures retain the existing defer-until-sleep policy.
+  UploadJob head = {};
+  if (upload_queue && xQueuePeek(upload_queue, &head, 0) == pdTRUE &&
+      (head.from_voice_sd || head.from_image_sd || head.from_persisted) &&
+      !g_media_retry_user_paused.load() &&
+      !foreground_priority_active(millis(), nullptr)) {
+    if (why_out) *why_out = "durable_replay";
+    return false;
+  }
   if (n >= UPLOAD_HOLD_HIGHWATER) { if (why_out) *why_out = "highwater"; return false; }
   if (g_upload_hold_since_ms == 0) g_upload_hold_since_ms = millis();
   if ((millis() - g_upload_hold_since_ms) > UPLOAD_HOLD_MAX_MS) {
@@ -1918,6 +1934,7 @@ static void upload_worker_task(void *arg) {
       vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (got_job) {
+      MediaRetryNetworkScope retry_network(job);
       if (!job.image_buf || job.image_len == 0) {
         Serial.println(job.is_voice ? "[VOICE_QUEUE] job missing audio buffer"
                                     : "[UPLOAD] job missing image buffer");
@@ -1930,6 +1947,24 @@ static void upload_worker_task(void *arg) {
       }
       diag_record_action(job.is_voice ? "voice_upload" : "upload");
       upload_inflight = true;
+      if ((job.from_voice_sd || job.from_image_sd || job.from_persisted) &&
+          g_media_retry_user_paused.load()) {
+        // Only the fetched RAM copy is released. The committed original keeps
+        // its identity and will be retried on a later background wake.
+        Serial.printf("[MEDIA_RETRY] yield_to_user job=%lu retained=1\n", (unsigned long)job.job_id);
+        free(job.image_buf);
+        upload_inflight = false;
+        continue;
+      }
+      // The owner loop already retries association and fresh clock sync. Once
+      // the user leaves, offline captures go straight to durable custody; do
+      // not spend a separate multi-attempt Wi-Fi budget on each queued item.
+      if (!wifi_is_connected() || !sense_time_has_fresh_sync()) {
+        upload_persist_handle_failure(job, "network_or_clock_pending");
+        free(job.image_buf);
+        upload_inflight = false;
+        continue;
+      }
       if (job.is_voice) {
         Serial.printf("[VOICE_QUEUE] start job_id=%lu len=%u q=%lu\n",
                       (unsigned long)job.job_id,
@@ -1940,16 +1975,12 @@ static void upload_worker_task(void *arg) {
           vTaskDelay(pdMS_TO_TICKS(40));
           continue;
         }
-        bool accepted = false;
-        if (WiFi.status() != WL_CONNECTED) {
-          Serial.println("[VOICE_QUEUE] Wi-Fi not connected, connecting...");
-          accepted = voice_ensure_wifi_connected() &&
-                     sense_voice_prepare_first_attempt(job) &&
-                     voice_upload_and_parse(job);
-        } else {
-          accepted = sense_voice_prepare_first_attempt(job) && voice_upload_and_parse(job);
-        }
+        // Association loss after the earlier gate is another deferred attempt,
+        // not permission for a new synchronous multi-reset connection loop.
+        const bool accepted = wifi_is_connected() && !media_retry_network_cancelled() &&
+                              sense_voice_prepare_first_attempt(job) && voice_upload_and_parse(job);
         if (accepted) {
+          media_retry_delivered();
           Serial.println("[VOICE_QUEUE] async accept complete; backend owns completion");
           if (job.from_voice_sd) {
             const bool deleted = sense_voice_spool_delete(job);
@@ -2000,10 +2031,13 @@ static void upload_worker_task(void *arg) {
                     (unsigned)psram_free);
 
       const uint32_t backoff_ms[] = {500, 1500, 3500};
-      const uint8_t max_retries = 3;
+      // A saved copy already has an independent future retry. Keep this wake
+      // bounded; the HTTP helper retains its own bounded server retry policy.
+      const uint8_t max_retries = media_retry_network_active() ? 1 : 3;
       PresignReply upload_presign;
       bool presign_success = false;
       for (uint8_t attempt = 0; attempt < max_retries; ++attempt) {
+        if (media_retry_network_cancelled()) break;
         if (!upload_wait_for_foreground_clear_in_place(job, "presign", presign_deadline_ms, &budget_exhausted)) {
           break;
         }
@@ -2035,7 +2069,7 @@ static void upload_worker_task(void *arg) {
             budget_exhausted = true;
             break;
           }
-          vTaskDelay(pdMS_TO_TICKS(backoff));
+          if (!media_retry_network_wait(backoff)) break;
           continue;
         }
         const char* expiry = (job.expiry_date[0] != '\0') ? job.expiry_date : NULL;
@@ -2051,10 +2085,10 @@ static void upload_worker_task(void *arg) {
           budget_exhausted = true;
           break;
         }
-        vTaskDelay(pdMS_TO_TICKS(backoff));
+        if (!media_retry_network_wait(backoff)) break;
       }
       if (budget_exhausted) {
-        if (is_dish) {
+        if (is_dish && !media_retry_network_active()) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
         }
         upload_persist_handle_failure(job, "presign_timeout");
@@ -2063,7 +2097,7 @@ static void upload_worker_task(void *arg) {
         continue;
       }
       if (!presign_success) {
-        if (is_dish) {
+        if (is_dish && !media_retry_network_active()) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
         }
         diag_record_action_event("upload", job.mode, "err", "presign", -1);
@@ -2089,6 +2123,7 @@ static void upload_worker_task(void *arg) {
       uint32_t put_deadline_ms = is_dish ? job_deadline_ms : (millis() + BACKGROUND_UPLOAD_PUT_BUDGET_MS);
       bool upload_success = false;
       for (uint8_t attempt = 0; attempt < max_retries; ++attempt) {
+        if (media_retry_network_cancelled()) break;
         if (!upload_wait_for_foreground_clear_in_place(job, "put", put_deadline_ms, &budget_exhausted)) {
           break;
         }
@@ -2117,7 +2152,7 @@ static void upload_worker_task(void *arg) {
             budget_exhausted = true;
             break;
           }
-          vTaskDelay(pdMS_TO_TICKS(backoff));
+          if (!media_retry_network_wait(backoff)) break;
           continue;
         }
         bool aborted_for_budget = false;
@@ -2155,10 +2190,10 @@ static void upload_worker_task(void *arg) {
           budget_exhausted = true;
           break;
         }
-        vTaskDelay(pdMS_TO_TICKS(backoff));
+        if (!media_retry_network_wait(backoff)) break;
       }
       if (budget_exhausted) {
-        if (is_dish) {
+        if (is_dish && !media_retry_network_active()) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
         }
         diag_record_action_event("upload", job.mode, "err", "timeout", -1);
@@ -2175,7 +2210,7 @@ static void upload_worker_task(void *arg) {
       }
 #endif
       if (!upload_success) {
-        if (is_dish) {
+        if (is_dish && !media_retry_network_active()) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
         }
         diag_record_action_event("upload", job.mode, "err", "put_fail", -1);
@@ -2225,6 +2260,7 @@ static void upload_worker_task(void *arg) {
       if (g_cycle_uploads_ok < 0xFFFF) g_cycle_uploads_ok++;
       if (job.from_image_sd) {
         const bool deleted = sense_image_spool_delete(job);
+        media_retry_delivered();
         uart_send_sense_diag("upload", deleted ? "sd_delivered" : "sd_delete_pending", job.mode,
                             (int32_t)job.job_id, deleted ? "durable_backend_ack" : "original_slot_kept");
       } else if (job.from_persisted) {
@@ -2258,6 +2294,11 @@ static void upload_worker_task(void *arg) {
 
 static bool net_ready_for_tls(const char* reason, uint32_t timeout_ms, const char* mode, uint32_t job_id, const char* ui_policy) {
   (void)ui_policy;
+  // Saved recovery yields to the user and never starts a blocking radio reset.
+  // The owner loop and next retry wake handle association/time recovery.
+  if (media_retry_network_active()) {
+    return !media_retry_network_cancelled() && wifi_is_connected() && sense_time_has_fresh_sync();
+  }
   if (!ensure_wifi_ready(reason, timeout_ms)) {
     presign_set_error_text("Wi-Fi not ready");
     return false;
@@ -2333,6 +2374,10 @@ static bool parse_input_message(const char* json_str) {
   last_uart_rx_ms = last_lcd_communication;
   
   const char* type = doc["type"] | "";
+  if (!strcmp(type, "MEDIA_RETRY_ARM_ACK")) {
+    media_retry_arm_ack(doc);
+    return true;
+  }
   Serial.printf("[PROTO] RX: type=%s\n", type);
   uart_rx_count++;
   uart_note_rx_type(type);
@@ -2361,6 +2406,7 @@ static bool parse_input_message(const char* json_str) {
     sense_input_mark_seen(in_msg_id);
     if (sense_user_action_cancels_flush(type)) {
       sense_note_admitted_user_action();
+      g_media_retry_user_paused.store(true);
       cancel_pending_sleep_for_user_action(type);
       // Yield background work only for a new user action, not a repeated ACK
       // request or an automatic firmware/status query.
@@ -2417,7 +2463,13 @@ static bool parse_input_message(const char* json_str) {
   halo_prod_on_lcd_message(type);
 #endif
   
-  if (strcmp(type, "INPUT_WAKE") == 0) {
+  if (strcmp(type, "INPUT_USER_ACTIVE") == 0) {
+    // A real wake-only tap/turn during a dark media retry needs priority but
+    // must not initiate a shopping-list refresh or change the current screen.
+    last_input_wake_ms = millis();
+    last_user_activity_ms = last_input_wake_ms;
+    return true;
+  } else if (strcmp(type, "INPUT_WAKE") == 0) {
     unsigned long now_ms = millis();
     if (last_input_wake_ms > 0 && (now_ms - last_input_wake_ms) < 1500) {
       Serial.printf("[INPUT_WAKE] ignored debounce age_ms=%lu\n",
@@ -3536,9 +3588,7 @@ static void op_worker_task(void *arg) {
             scan_ui_inflight_set(false, "scan_error");
             skip_upload = true;
           } else {
-            scan_ui_status_emit("DONE", "Logged!", job.mode, job.job_id, false);
-            flow_step(job.job_id, "DONE_UI");
-            scan_ui_inflight_set(false, "ui_done");
+
             size_t psram_free = 0;
 #if (CONFIG_SPIRAM_USE_MALLOC || CONFIG_SPIRAM)
             psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -3557,6 +3607,9 @@ static void op_worker_task(void *arg) {
               scan_send_terminal_status("ERROR", "Device busy, try again", job.mode, true);
               free(job_buf);
             } else {
+              scan_ui_status_emit("DONE", "Logged!", job.mode, job.job_id, false);
+              flow_step(job.job_id, "DONE_UI");
+              scan_ui_inflight_set(false, "ui_done");
               flow_step(job.job_id, "UPLOAD_ENQUEUED");
               diag_record_action_event("scan", job.mode, "queued", "upload_enqueue", 0);
             }
@@ -3654,13 +3707,7 @@ static void op_worker_task(void *arg) {
                               current_job.add_to_shopping_list ? 1 : 0);
               }
 
-              scan_ui_status_emit("DONE", "Logged!", job.mode, job.job_id, false);
-              flow_step(job.job_id, "DONE_UI");
-            } else if (is_dish_mode) {
-              scan_ui_status_emit("DONE", "Logged!", job.mode, job.job_id, false);
-              flow_step(job.job_id, "DONE_UI");
             }
-            scan_ui_inflight_set(false, "ui_done");
             size_t psram_free = 0;
 #if (CONFIG_SPIRAM_USE_MALLOC || CONFIG_SPIRAM)
             psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -3692,6 +3739,9 @@ static void op_worker_task(void *arg) {
               if (is_dish_mode) {
                 dish_handed_off_to_upload = true;
               }
+              scan_ui_status_emit("DONE", "Logged!", job.mode, job.job_id, false);
+              flow_step(job.job_id, "DONE_UI");
+              scan_ui_inflight_set(false, "ui_done");
               flow_step(job.job_id, "UPLOAD_ENQUEUED");
               diag_record_action_event("scan", job.mode, "queued", "upload_enqueue", 0);
             }
@@ -3760,6 +3810,12 @@ scan_exit:
 
 void setup() {
   g_sense_main_task_handle = xTaskGetCurrentTaskHandle();
+  // Must precede halo_prod_pre_setup(): that hook classifies timer boots for
+  // OTA. Only an actually selected media timer has this separate purpose.
+  g_media_retry_timer_boot = esp_reset_reason() == ESP_RST_DEEPSLEEP &&
+                            esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER &&
+                            g_media_retry_timer_selected;
+  g_media_retry_timer_selected = false;
   Serial.printf("[BOOT_FLOW] stage=setup_enter t=%lu heap=%u min_heap=%u\n",
                 millis(),
                 (unsigned)ESP.getFreeHeap(),
@@ -3874,7 +3930,8 @@ void setup() {
       }
       delay(50);
     }
-    ota_on_timer_wake();
+    if (!g_media_retry_timer_boot) ota_on_timer_wake();
+    else Serial.println("[MEDIA_RETRY] timer_wake purpose=saved_uploads");
     // A timer wake is the one boot with no user waiting and no camera init, so
     // it is where the SD spool gets emptied. Whether there is anything to empty
     // is answered by the probe once the link and WiFi are up.
@@ -4429,8 +4486,13 @@ void loop() {
   // The opportunistic tick stays for the case where the device happens to be
   // idle with WiFi up anyway. It rarely fires; the drain wake is the real path.
   sense_spool_drain_tick();
-  sense_voice_spool_replay_tick();
-  sense_image_spool_replay_tick();
+  if (media_retry_image_first()) {
+    sense_image_spool_replay_tick();
+    sense_voice_spool_replay_tick();
+  } else {
+    sense_voice_spool_replay_tick();
+    sense_image_spool_replay_tick();
+  }
 
   // Relay the wake history once the link is up, exactly once per boot. Deferred
   // to here rather than setup() because the LCD may not be listening yet, and a

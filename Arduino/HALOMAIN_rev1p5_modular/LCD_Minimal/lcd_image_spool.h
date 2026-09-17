@@ -191,6 +191,11 @@ static bool lcd_image_uart(JsonDocument& doc) {
   halo_image::Result result=halo_image::Result::Invalid;
   const bool parsed=begin?lcd_image_parse_meta(d,&m):lcd_image_binding(d,owner,device,request,!list);
   if(begin&&parsed)lcd_image_echo(r,m);else if(request[0])r["request_id"]=request;
+  if(list&&parsed) {
+    r["owner_id"]=owner;r["device_id"]=device;
+    const char* probe=d["probe"]|"";
+    if(strlen(probe)==16)r["probe"]=probe;
+  }
   if(!parsed){r["ok"]=0;r["reason"]="invalid";lcd_image_reply(r);return true;}
   if(!lcd_image_link_idle() || !lcd_media_try_claim(fetch||list,lcd_media_deferred_intent_pending())) {
     r["ok"]=0;r["reason"]="busy";r["json_ready"]=lcd_image_link_idle();lcd_image_reply(r);return true;

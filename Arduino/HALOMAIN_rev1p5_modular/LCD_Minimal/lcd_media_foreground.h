@@ -8,6 +8,19 @@ static LcdMediaMode g_lcd_media_mode = LCD_MEDIA_IDLE;
 static uint32_t g_lcd_media_queued_intents = 0;
 static bool g_lcd_media_voice_gesture = false;
 static bool g_lcd_media_cancel_replay = false;
+// User input owns the rest of this awake session. New boot resets this hint;
+// ending a replay must not immediately admit another one behind the menu.
+static bool g_lcd_media_user_session = false;
+
+static bool lcd_media_note_user_input(bool* had_replay = nullptr) {
+  portENTER_CRITICAL(&g_lcd_media_mux);
+  const bool first = !g_lcd_media_user_session;
+  if (had_replay) *had_replay = g_lcd_media_mode == LCD_MEDIA_REPLAY;
+  g_lcd_media_user_session = true;
+  if (g_lcd_media_mode == LCD_MEDIA_REPLAY) g_lcd_media_cancel_replay = true;
+  portEXIT_CRITICAL(&g_lcd_media_mux);
+  return first;
+}
 
 static bool lcd_media_is_intent(const char* type) {
   return type && (!strcmp(type,"INPUT_MENU_SELECT") ||
@@ -40,7 +53,7 @@ static void lcd_media_queue_end(const char* type) {
 static bool lcd_media_try_claim(bool replay, bool deferred_intent) {
   portENTER_CRITICAL(&g_lcd_media_mux);
   const bool ok=g_lcd_media_mode==LCD_MEDIA_IDLE && !g_lcd_media_voice_gesture &&
-    !g_lcd_media_queued_intents && !deferred_intent;
+    !g_lcd_media_queued_intents && !deferred_intent && (!replay || !g_lcd_media_user_session);
   if(ok){g_lcd_media_mode=replay?LCD_MEDIA_REPLAY:LCD_MEDIA_SAVE;g_lcd_media_cancel_replay=false;}
   portEXIT_CRITICAL(&g_lcd_media_mux);
   return ok;

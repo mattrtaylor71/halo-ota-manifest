@@ -280,7 +280,23 @@ static void lcd_set_idle_screen_dark(bool dark, const char* reason) {
                 g_lvgl_running ? 1 : 0);
 }
 
+static void lcd_media_user_wake() {
+  lcd_media_note_user_input();
+  // Sense may be replaying its own local copy without any LCD timer/transfer.
+  // Every first real user session therefore publishes the same pause notice.
+  static std::atomic<bool> notice_queued{false};
+  bool expected = false;
+  if (notice_queued.compare_exchange_strong(expected, true)) {
+    tx_msg_t msg = {};
+    strncpy(msg.type, "INPUT_USER_ACTIVE", sizeof(msg.type) - 1);
+    // Normal TX waits for binary mode cleanup. User-visible wake never waits
+    // for this notice, and it deliberately carries no list-refresh request.
+    if (!uart_tx_enqueue(&msg, "media_user_wake")) notice_queued.store(false);
+  }
+}
+
 static void ensure_awake_for_ui(const char* reason) {
+  lcd_media_user_wake();
   lcd_timer_receiver_wait_release("user_input");
   // Only call this on real user input (touch/scroll/pull-to-refresh).
   // A new gesture may begin a new failed-wake episode; background retries may
@@ -344,6 +360,7 @@ static void abort_sleep_transition(const char* reason, bool user_input = true) {
   // Pin/teardown callers have real input. The handshake wait can also abort on
   // generic activity (e.g. a firmware-info retry); that must remain dark.
   if (user_input) {
+    lcd_media_user_wake();
     lcd_timer_receiver_wait_release("sleep_aborted_by_touch");
     lcd_allow_visible_ui(reason);
     sleep_fallback_reset("sleep_aborted_by_touch");

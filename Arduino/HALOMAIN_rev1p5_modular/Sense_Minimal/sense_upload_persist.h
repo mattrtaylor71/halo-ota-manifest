@@ -194,6 +194,7 @@ static bool upload_persist_has_pending() {
          SPIFFS.exists(UPLOAD_PERSIST_META_PATH) &&
          SPIFFS.exists(UPLOAD_PERSIST_IMAGE_PATH);
   g_upload_persist_cached_count = pending ? 1 : 0;
+  if (g_upload_persist_ready) media_retry_inventory(halo_media_retry::VoiceFlash, pending);
   return pending;
 }
 
@@ -453,7 +454,9 @@ static bool upload_persist_save(const UploadJob& job, uint8_t next_retries) {
                 meta.mode);
   if (job.is_voice) {
     PersistedUploadMeta verified = {};
-    return upload_persist_read_meta(&verified) && upload_persist_voice_matches(job, verified);
+    const bool saved = upload_persist_read_meta(&verified) && upload_persist_voice_matches(job, verified);
+    if (saved) media_retry_saved(halo_media_retry::VoiceFlash);
+    return saved;
   }
   return true;
 }
@@ -577,12 +580,13 @@ static void upload_persist_maybe_replay() {
   if (!upload_persist_has_pending()) {
     return;
   }
-  if (!wifi_is_connected() || upload_inflight || upload_queue_count() > 0 ||
-      dish_scan_inflight || scan_ui_inflight) {
+  if (g_media_retry_user_paused.load() || !wifi_is_connected() || !sense_time_has_fresh_sync() || upload_inflight || upload_queue_count() > 0 ||
+      foreground_active || current_job.active || voice_recording_active ||
+      dish_scan_inflight || scan_ui_inflight || !sense_uart_ordinary_tx_allowed()) {
     return;
   }
 #ifdef HALO_SENSE_PROD_WRAPPER
-  if (halo_provisioning_active()) {
+  if (halo_provisioning_active() || halo_prod_boot_ota_pending()) {
     return;
   }
 #endif
@@ -706,7 +710,9 @@ static bool upload_persist_handle_failure(const UploadJob& job, const char* reas
     g_upload_persist_attempted_this_boot = true;
     g_upload_persist_replay_not_before_ms = millis() + UPLOAD_PERSIST_VOICE_REPLAY_BACKOFF_MS;
 #endif
-    g_voice_spool_replayed_this_boot = true;
+    // A failed internal-flash retry must not consume the separate SD turn.
+    // New captures still wait until a later wake after being backed up.
+    if (!job.from_persisted) g_voice_spool_replayed_this_boot = true;
     char payload_sha[65] = {};
     sense_image_hash(job.image_buf, job.image_len, payload_sha);
     Serial.printf("[MEDIA_BACKUP] kind=voice request=%s job=%lu bytes=%u crc=%08lx sha256=%s saved=%u from_sd=%u\n",
@@ -714,7 +720,7 @@ static bool upload_persist_handle_failure(const UploadJob& job, const char* reas
                   (unsigned long)job.voice.crc32,payload_sha,saved?1:0,job.from_voice_sd?1:0);
     uart_send_sense_diag("voice", saved ? "saved_for_retry" : "storage_failed", "voice",
                          (int32_t)job.job_id, saved ? "durable_copy_retained" : "not_saved");
-    if (!saved) uart_send_ui_status_extended("VOICE", "ERROR", "Voice not saved. Please try again.");
+    if (!saved) uart_send_ui_status_extended("VOICE", "ERROR", "Voice not saved. Please try again.", nullptr, job.job_id);
     return saved;
   }
   // New photos use the checked multi-record SD queue. The old single SPIFFS
@@ -742,7 +748,7 @@ static bool upload_persist_handle_failure(const UploadJob& job, const char* reas
                 (unsigned long)job.image.crc32,job.image.checksum_sha256,saved?1:0,job.from_image_sd?1:0);
   uart_send_sense_diag("upload", saved ? "saved_for_retry" : "storage_failed", job.mode,
                       (int32_t)job.job_id, saved ? "durable_copy_retained" : "not_saved");
-  if (!saved) uart_send_ui_status_extended("SCAN", "ERROR", "Photo not saved. Please try again.");
+  if (!saved) uart_send_ui_status_extended("SCAN", "ERROR", "Photo not saved. Please try again.", job.mode, job.job_id);
   return saved;
 }
 

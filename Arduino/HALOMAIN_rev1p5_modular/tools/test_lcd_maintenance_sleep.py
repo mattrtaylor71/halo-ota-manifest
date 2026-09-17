@@ -15,7 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ('ordinary_arm', 'handshake_future_race', 'handshake_future_hold',
          'touch', 'scroll', 'early_provisioning', 'early_ota',
          'early_recent_ready', 'early_asleep', 'early_link',
-         'early_wake_line', 'denied', 'timeout')
+         'early_wake_line', 'denied', 'timeout', 'abort_ota_early',
+         'abort_ota_late', 'abort_bench', 'abort_ota_touch_early', 'abort_ota_touch_late')
 
 
 def definition(text, anchor):
@@ -48,6 +49,17 @@ def harness(root):
         arm, scope, media,
         definition(sleep, 'static bool notify_sense_sleep() {'),
     ))
+    # Execute the actual teardown call arguments, including a coincident real
+    # touch; do not model all OTA aborts as implicit user input.
+    abort_calls = {name: next(line.strip() for line in sleep.splitlines()
+                             if 'abort_sleep_transition("'+reason+'"' in line)
+                   for name,reason in (('early','ota_before_teardown'),
+                                       ('late','ota_or_cancel_during_teardown'),
+                                       ('bench','bench_timer_arm_failed'))}
+    actual += '\nstatic void teardown_abort(const char* stage){\n'
+    for name,call in abort_calls.items():
+        actual += 'if(!strcmp(stage,"'+name+'")){'+call+'return;}\n'
+    actual += '}\n'
     return r'''
 #include <atomic>
 #include <cassert>
@@ -80,6 +92,7 @@ static uint64_t g_lcd_maintenance_start_epoch;
 static uint8_t g_lcd_maintenance_timer_armed;
 static uint32_t g_lcd_maintenance_wake_in_s,g_lcd_maintenance_remaining_s;
 static bool lcd_timer_receiver_wait_active(){return false;}
+static bool lcd_media_retry_wait_active(){return false;}
 static bool lcd_time_valid(){return false;}
 static bool lcd_maintenance_window_is_current(uint64_t){return false;}
 static bool lcd_maintenance_active(){return g_lcd_maintenance_active;}
@@ -115,6 +128,10 @@ static bool sleep_prepare_wake_line_for_request(){return wake_line_ok;}
 static void send_input_sleep_message(){++sleep_messages;}
 static void sleep_enter_wait_low_power(const char*){}
 static void lcd_timer_receiver_wait_release(const char*){}
+static unsigned media_user_notices=0;
+static void lcd_media_user_wake(){++media_user_notices;}
+static bool host_sleep_touch_irq=false;
+static bool lcd_sleep_touch_fired(){return host_sleep_touch_irq;}
 static void sleep_fallback_reset(const char*){}
 static void lcd_allow_visible_ui(const char*){++visible_calls;g_background_wake_dark=false;}
 static void lcd_set_backlight_binary(bool on,const char*){g_backlight_duty=on?128:0;if(on)++relights;}
@@ -151,7 +168,17 @@ static void assert_future_arm_preserved(){
 }
 int main(int argc,char** argv){
   assert(argc==2);scenario=argv[1];
-  if(scenario=="ordinary_arm"){
+  if(scenario.find("abort_")==0){
+    const bool touch=scenario.find("touch")!=std::string::npos;
+    host_sleep_touch_irq=touch;g_background_wake_dark=true;g_sleep_transition=true;
+    const char* stage=scenario.find("bench")!=std::string::npos?"bench":
+                      (scenario.find("early")!=std::string::npos?"early":"late");
+    teardown_abort(stage);
+    assert(media_user_notices==(touch?1u:0u));
+    assert(visible_calls==(touch?1u:0u) && relights==(touch?1u:0u));
+    assert(g_backlight_duty==(touch?128:0) && g_background_wake_dark==!touch);
+    assert(!g_sleep_transition);
+  }else if(scenario=="ordinary_arm"){
     receive_future_arm(3600,3500);assert_future_arm_preserved();
     assert(last_user_activity_ms==now_ms && home_shown_ms==now_ms);
     assert(ota_stay_awake_until_ms==now_ms+8000 && sleep_blocked_for_ota());
@@ -177,11 +204,13 @@ int main(int argc,char** argv){
       assert(last_user_activity_ms==9000 && home_shown_ms==9000 && last_scroll_activity_ms==9000);
       assert(!sleep_cancelled_by_user_input && !ota_stay_awake_until_ms && !sleep_blocked_for_ota());
       assert(g_backlight_duty==0 && !g_panel_enabled && g_idle_screen_dark && relights==0 && visible_calls==0);
+      assert(media_user_notices==0);
       assert(sleep_messages==1);
     }else if(scenario=="touch"||scenario=="scroll"){
       assert(!result && guard_seen && sleep_cancelled_by_user_input && !sense_sleep_intent_pending);
       assert_future_arm_preserved();assert(visible_calls==1 && relights==1 && g_backlight_duty==128);
       assert(!ota_stay_awake_until_ms);
+      assert(media_user_notices==1);
     }else if(scenario=="early_recent_ready"||scenario=="early_asleep"){
       assert(result && sleep_messages==0);
     }else if(scenario=="denied"){

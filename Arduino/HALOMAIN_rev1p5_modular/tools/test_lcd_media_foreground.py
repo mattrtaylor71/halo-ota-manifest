@@ -54,6 +54,9 @@ UI = r'''
 static unsigned listening=0,on_it=0,toasts=0,scans=0,wakes=0;
 static bool provisioned=true,ship_ai_touch_active=false,ship_ai_touch_blocked=false,long_press_sent=false;
 static bool g_voice_fire_and_forget_ignore_ui=false,waiting_for_voice_response=false,g_ship_voice_json_pending=false;
+static char g_ship_ui_op[16]="",g_ship_ui_phase[16]="";
+static uint32_t g_ship_ui_job_id=0;
+static bool g_ship_ui_finalized=false,g_ship_ui_dirty=false;
 static unsigned long voice_response_deadline_ms=0,ship_voice_end_resend_due_ms=0,touch_press_time=0,ship_ai_listening_countdown_start_ms=0;
 static uint8_t ship_voice_end_resends_remaining=0;
 static char g_ship_voice_json_text[32]="";
@@ -106,6 +109,8 @@ def harness(root, media, negative=False):
     funcs=UI
     if 'static bool ship_voice_gesture_begin(' in screens:
         funcs+=definition(screens,'static bool ship_voice_gesture_begin(')+'\n'
+    if 'static void ship_voice_status_begin(' in screens:
+        funcs+=definition(screens,'static void ship_voice_status_begin(')+'\n'
     sig='static bool ship_queue_voice_input(' if 'static bool ship_queue_voice_input(' in screens else 'static void ship_queue_voice_input('
     funcs+=definition(screens,sig)+'\n'+definition(screens,'static void ship_service_voice_end_resend(')+'\n'
     funcs+=definition(action,'static void ship_menu_send_menu_select(')+'\n'
@@ -129,7 +134,7 @@ static void reset_ui(){
  listening=on_it=toasts=scans=wakes=0;ship_ai_touch_active=ship_ai_touch_blocked=long_press_sent=false;
  ship_voice_end_resends_remaining=0;ship_voice_end_resend_due_ms=0;ui_screen_state=0;g_lcd_ota_binary_mode=false;
 #ifdef HAS_MEDIA_FOREGROUND
- g_lcd_media_queued_intents=0;lcd_media_voice_end();lcd_media_release();
+ g_lcd_media_queued_intents=0;g_lcd_media_user_session=false;lcd_media_voice_end();lcd_media_release();
 #endif
 }
 static void gesture(){press();tick_ms+=500;held();tick_ms+=2500;release_touch();}
@@ -168,6 +173,21 @@ int main(){
 '''
 MAIN=r'''
 int main(){
+ {
+  reset_case();reset_ui();auto m=fixture();commit(m);fetch(m);peer=Peer::DropChunk;
+  chunk_hook=[](){lcd_media_note_user_input();};output_frames.clear();
+  const auto started=tick_ms;lcd_MEDIA_send_file();
+  check(tick_ms-started<3000&&pin_count==0&&g_MEDIA_waiting_abort,"wake-only tap/encoder cancels replay promptly without needing an action");
+  check(retained(m),"wake-only yield preserves original SD media");
+  JsonDocument a;deserializeJson(a,abort_json(m));lcd_MEDIA_uart(a);
+  check(released()&&!lcd_media_try_claim(true,false),"replay stays paused for rest of user awake session after cleanup");
+  check(lcd_media_try_claim(false,false),"fresh SD save remains admitted in user session");lcd_media_release();
+ }
+ {
+  reset_case();reset_ui();auto m=fixture();begin(m);lcd_media_note_user_input();
+  check(g_MEDIA_rx&&!lcd_media_replay_cancelled(),"user wake never cancels a SAVE holding the only current capture");
+  JsonDocument a;deserializeJson(a,abort_json(m));lcd_MEDIA_uart(a);
+ }
  for(bool replay:{false,true}){
   reset_case();reset_ui();auto m=fixture();if(replay){commit(m);fetch(m);}else begin(m);
   gesture();check(listening==0&&on_it==0&&toasts==1,"busy gesture rejected before Listening and On it");

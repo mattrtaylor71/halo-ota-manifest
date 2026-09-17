@@ -29,6 +29,16 @@
 #ifndef SENSE_UPLOAD_EXEC_H
 #define SENSE_UPLOAD_EXEC_H
 
+#include "sense_media_network.h"
+
+static bool upload_put_reset_with_budget(const char* reason, uint32_t deadline_ms) {
+  if (media_retry_network_active()) return false;
+  const uint32_t timeout_ms = sense_media_network::reset_wait_timeout_ms(
+      deadline_remaining_ms(deadline_ms));
+  if (timeout_ms < ACTION_MIN_REMAINING_MS) return false;
+  return wifi_hard_reset_and_reconnect(reason, timeout_ms);
+}
+
 // Bytes handed to tls.write() per call during the S3 PUT body.
 //
 // This is a MEMORY parameter, not a throughput one. Each call becomes one TLS
@@ -157,6 +167,7 @@ static bool put_to_presigned_url(const String& url,
                                  const PresignReply* durable,
                                  int* response_code) {
   if (response_code) *response_code = 0;
+  if (media_retry_network_cancelled()) return false;
   SenseBackupWifiCall backup_call; if (!backup_call) return false;
   if (durable && durable->immutable_image &&
       (durable->expected_image_bytes != len || durable->checksum_sha256_b64.length() != 44)) return false;
@@ -254,11 +265,14 @@ static bool put_to_presigned_url(const String& url,
   const int put_hard_reset_from_attempt = 4;
   bool write_ok = false;
   int put_attempt;
-  WiFiClientSecure tls;
+  SenseMediaRetryClient tls;
   // Retrying must never outlive the upload budget. The per-write deadline check
   // below only covers a write already in progress; without this, ten attempts
   // plus their settles could sail past it between attempts.
   for (put_attempt = 1; put_attempt <= put_max_attempts; put_attempt++) {
+    if (media_retry_network_cancelled()) {
+      tls.stop(); http_queue_unlock("UPLOAD_PUT", effective_job); return false;
+    }
     if (put_attempt > 1 && deadline_expired(deadline_ms)) {
       Serial.printf("[UPLOAD] out of budget after %d attempts - giving the slot back\n",
                     put_attempt - 1);
@@ -306,20 +320,38 @@ static bool put_to_presigned_url(const String& url,
       return false;
     }
     tls.setTimeout(tls_timeout);
+    const uint32_t connect_timeout = sense_media_network::connect_timeout_ms(
+        deadline_remaining_ms(deadline_ms));
+    const uint32_t handshake_seconds = sense_media_network::handshake_timeout_seconds(connect_timeout);
+    if (handshake_seconds == 0) {
+      if (aborted_for_budget) *aborted_for_budget = true;
+      presign_set_error_text("Upload timeout");
+      http_queue_unlock("UPLOAD_PUT", effective_job);
+      return false;
+    }
+    // Stream::setTimeout does not change the SDK's default 120s handshake.
+    // These bound individual phases; DNS and progress-based writes are separate.
+    tls.setHandshakeTimeout(handshake_seconds);
 
-    if (!tls.connect(host.c_str(), port)) {
+    if (!tls.connect(host.c_str(), port, (int32_t)connect_timeout)) {
       Serial.printf("[UPLOAD] TLS connect failed for PUT (attempt %d/%d)\n", put_attempt, put_max_attempts);
       tls.stop();
+      if (media_retry_network_cancelled()) {
+        http_queue_unlock("UPLOAD_PUT", effective_job); return false;
+      }
+      if (media_retry_network_active()) {
+        http_queue_unlock("UPLOAD_PUT", effective_job); return false;
+      }
       if (put_attempt < put_max_attempts) {
         if (put_attempt >= put_hard_reset_from_attempt) {
           Serial.println("[UPLOAD] Hard WiFi reset before PUT retry (connect)");
           http_queue_unlock("UPLOAD_PUT", effective_job);
-          wifi_hard_reset_and_reconnect("put_tls_connect", 15000);
+          upload_put_reset_with_budget("put_tls_connect", deadline_ms);
           http_queue_lock("UPLOAD_PUT", effective_job);
         } else {
           Serial.printf("[UPLOAD] retrying PUT connect (attempt %d) without WiFi reset\n",
                         put_attempt + 1);
-          delay(400);
+          media_retry_network_wait(400);
         }
         continue;
       }
@@ -386,7 +418,7 @@ static bool put_to_presigned_url(const String& url,
         http_queue_unlock("UPLOAD_PUT", effective_job);
         return false;
       }
-      if (foreground_active) {
+      if (media_retry_network_cancelled() || foreground_active) {
         Serial.println("[UPLOAD] abort during PUT (foreground user action)");
         diag_record_error("upload_put", -1, "foreground_preempt");
         uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "foreground_preempt");
@@ -427,11 +459,17 @@ static bool put_to_presigned_url(const String& url,
     if (!write_ok) {
       Serial.printf("[UPLOAD] PUT write failed (attempt %d/%d)\n", put_attempt, put_max_attempts);
       tls.stop();
+      if (media_retry_network_cancelled()) {
+        http_queue_unlock("UPLOAD_PUT", effective_job); return false;
+      }
+      if (media_retry_network_active()) {
+        http_queue_unlock("UPLOAD_PUT", effective_job); return false;
+      }
       if (put_attempt < put_max_attempts) {
         if (put_attempt >= put_hard_reset_from_attempt) {
           Serial.println("[UPLOAD] Hard WiFi reset before PUT retry (write)");
           http_queue_unlock("UPLOAD_PUT", effective_job);
-          wifi_hard_reset_and_reconnect("put_write_fail", 15000);
+          upload_put_reset_with_budget("put_write_fail", deadline_ms);
           http_queue_lock("UPLOAD_PUT", effective_job);
         } else {
           // Give the allocator a moment: TLS teardown returns internal SRAM
@@ -443,7 +481,7 @@ static bool put_to_presigned_url(const String& url,
           const uint32_t settle_ms = (uint32_t)put_attempt * 250;
           Serial.printf("[UPLOAD] retrying PUT (attempt %d) without WiFi reset, settle=%lums\n",
                         put_attempt + 1, (unsigned long)(settle_ms > 1500 ? 1500 : settle_ms));
-          delay(settle_ms > 1500 ? 1500 : settle_ms);
+          media_retry_network_wait(settle_ms > 1500 ? 1500 : settle_ms);
         }
         continue;
       }
@@ -459,6 +497,9 @@ static bool put_to_presigned_url(const String& url,
   }  // end retry loop
 
   String status_line = tls.readStringUntil('\n');
+  if (media_retry_network_cancelled()) {
+    tls.stop(); http_queue_unlock("UPLOAD_PUT", effective_job); return false;
+  }
   status_line.trim();
   int code = -1;
   if (status_line.startsWith("HTTP/")) {
@@ -471,6 +512,9 @@ static bool put_to_presigned_url(const String& url,
   String resp;
   const unsigned long resp_deadline = millis() + 2000;
   while (millis() < resp_deadline) {
+    if (media_retry_network_cancelled()) {
+      tls.stop(); http_queue_unlock("UPLOAD_PUT", effective_job); return false;
+    }
     while (tls.available()) {
       char c = (char)tls.read();
       if (resp.length() < 1024) {

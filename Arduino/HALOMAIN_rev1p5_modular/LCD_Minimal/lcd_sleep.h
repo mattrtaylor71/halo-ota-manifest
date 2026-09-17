@@ -323,7 +323,7 @@ static void enterLightSleep() {
   lcd_sleep_touch_watch_begin();
   if (sleep_blocked_for_ota()) {
     lcd_sleep_touch_watch_end();
-    abort_sleep_transition("ota_before_teardown");
+    abort_sleep_transition("ota_before_teardown", lcd_sleep_touch_fired());
     return;
   }
 #ifdef HALO_LCD_PROD_WRAPPER
@@ -471,6 +471,11 @@ static void enterLightSleep() {
     sleep_timer_sec = LCD_OTA_WAKE_INTERVAL_SEC;
     timer_reason = "periodic";
   }
+  bool media_timer_selected = false;
+#if HALO_ALLOW_TIMER_WAKE
+  sleep_timer_sec = lcd_media_retry_choose_timer(sleep_timer_sec, &media_timer_selected);
+  if (media_timer_selected) timer_reason = "media_retry";
+#endif
   Serial.printf("[SLEEP_TIMER] reason=%s timer_s=%lu maint_armed=%d wake_in_s=%lu clock_valid=%d now_epoch=%llu target_epoch=%llu start_epoch=%llu\n",
                 timer_reason,
                 (unsigned long)sleep_timer_sec,
@@ -500,7 +505,12 @@ static void enterLightSleep() {
 #if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
   lcd_sleep_witness_prepare(timer_reason, maint_now_epoch, sleep_timer_sec, LCD_MAINT_WAKE_LEAD_S);
 #endif
-  configure_sleep_sources(true, sleep_timer_sec);
+  const bool sleep_timer_ok = configure_sleep_sources(true, sleep_timer_sec);
+  if (media_timer_selected && !sleep_timer_ok) {
+    lcd_sleep_touch_watch_end();
+    abort_sleep_transition("media_timer_arm_failed", false);
+    return;
+  }
   if (sleep_fallback_timer_sec > 0) {
     Serial.printf("[SLEEP_PROTO] fallback_timer_active timer_s=%lu\n",
                   (unsigned long)sleep_fallback_timer_sec);
@@ -538,7 +548,7 @@ static void enterLightSleep() {
   // vTaskDelete: once the UI task is gone there is no clean way back.
   if (!g_sleep_transition || sleep_blocked_for_ota()) {
     lcd_sleep_touch_watch_end();
-    abort_sleep_transition("ota_or_cancel_during_teardown");
+    abort_sleep_transition("ota_or_cancel_during_teardown", lcd_sleep_touch_fired());
     return;
   }
   if (lcd_sleep_touch_fired()) {
@@ -554,7 +564,7 @@ static void enterLightSleep() {
                               !g_lcd_arm_storage_fault &&
                               strcmp(timer_reason, "maintenance_abs") == 0,
                               g_lcd_maintenance_request_id)) {
-    abort_sleep_transition("bench_timer_arm_failed");
+    abort_sleep_transition("bench_timer_arm_failed", false);
     return;
   }
 #endif
@@ -602,6 +612,9 @@ static void enterLightSleep() {
 #if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS && HALO_LCD_SLEEP_WITNESS
   lcd_sleep_witness_enter();
 #endif
+  // Only a committed sleep with a successful SDK timer arm may label the next
+  // actual TIMER boot as media. Aborted teardown never creates that identity.
+  lcd_media_retry_commit_sleep(sleep_timer_sec, media_timer_selected, sleep_timer_ok);
   esp_deep_sleep_start();
   
   // Deep sleep never returns. Wake policy and UI restoration live in setup().
