@@ -4835,25 +4835,13 @@
     }
   },
   "current_validation_blocker": {
-    "status": "CLOCK_TIMEOUT_LCD_STALE_LINK_FALLBACK_RACE_REMAINS",
-    "candidate": "6.4.169",
-    "installation_blocked": false,
-    "disk_blocked": false,
-    "closure": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS168-CLOSURE.json",
-      "sha256": "7742cce1cfc61e1b434682bf97763ec43fc2e5a5c30101a328dc21fc9e06ef43"
+    "status": "WAITING_FOR_REAL_APP_PROVISIONING",
+    "detail": "Both boards169; LCD step3 app_connected=0, provisioning sleep suppression active. Complete actual Trepo app setup before device media/retry tests.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/device-status001/RESULT.json",
+      "sha256": "56f7cb7fb891288d457121e3dbb2b20b8f64beb9168f49e75952ceb1413314ad"
     },
-    "diagnosis": {
-      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sleep168-review001/BURST002-003-SETUP-AND-SLEEP-REVIEW.json",
-      "sha256": "96461b463eaba026e9150b073422474d6083ab4bde2439b28a15850c038f976c"
-    },
-    "next_steps": [
-      "Validate incoming coordinator/query traffic as peer-liveness without extending user idle, OTA lease or policy debt.",
-      "Test both orderings of coordinator expiry and arriving OTA_UNLOCK under missing fresh clock; repeat scoped media test after that separate fix."
-    ],
-    "no_OTA_allowance_schedule_credentials_or_debt_reset": true,
-    "inherited_from": "6.4.168",
-    "provisioning_phone_completion_pending": true
+    "candidate_installed": false
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -5976,38 +5964,30 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.170",
-    "status": "BUILT_HOST_VERIFIED_NOT_INSTALLED_WAITING_FOR_REAL_WIFI_SETUP",
-    "artifact_source_commit": "bf2e5e2cf6a9c219404f29b948ff7e4a377864ec",
-    "artifact_source_firmware_tree": "d7d70fcd613b2462cc0d3e0b5e252b45fba24191",
-    "runtime_fix_commit": "bf2e5e2cf6a9c219404f29b948ff7e4a377864ec",
-    "build_id": "6.4.170-20260917T001602Z-bf2e5e2cf6a9",
+    "version": "6.4.171",
+    "status": "PASS_HOST_AND_CANONICAL_BUILDS_NOT_INSTALLED",
+    "artifact_source_commit": "aa221c2ef8871e428747c32ac61216993dae58bc",
+    "artifact_source_firmware_tree": "d71dc475d14e05148bb153251ad857380605d713",
+    "runtime_fix_commit": "aa221c2ef8871e428747c32ac61216993dae58bc",
+    "build_id": "6.4.171-20260917T014934Z-aa221c2ef887",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from bf2e5e2cf6a9c219404f29b948ff7e4a377864ec or reviewed descendants, retaining169 provisioning and all prior media/OTA fixes. 170 is built and host-tested, not installed or publicly published. Frozen158 and public162 remain separate references.",
-    "release_pair": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/candidate170-001/RELEASE-PAIR.json",
-      "sha256": "998bf8ebb384516d4de0af227c909026c0263ac438d62b164e430758c283d4fa"
+    "source_selection": "Continue from aa221c2ef8871e428747c32ac61216993dae58bc or reviewed descendants preserving all prior fixes. 171 is built/host-tested, not installed or published.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/CANDIDATE171.json",
+      "sha256": "00f523745b4751e13ecd9108c8c5be1d93cb1e56ff5edd533767cebaa24cd524"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/candidate170-001/host-final001/RESULT.json",
-      "sha256": "850a9602271cf5e48a01cd88e9c1951eb2a6409472f70dbb55d52c6b62db3d26"
-    },
-    "source_scope": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/candidate170-001/SOURCE-SCOPE.json",
-      "sha256": "d7ed7bdd538f9c0742f03267d3a095bae8a1507728a4e0f0cbcb404a9f074d90"
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/HOST-VALIDATION.json",
+      "sha256": "c39f4d41fb9b9232063ce24292667bcf9bed4c7166727568040a4170e5cb93c3"
     },
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/candidate170-001/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "823e11fa1e5d0198528d79e96695da295be701d0eafac68d60fcbbcee77abbe7"
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "a12a294b1dcbbf5aa843ee0a64c7ae5128345ce7ea6497fd74544b30d7fa2559"
     },
-    "status_receipt": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/STATUS170.json",
-      "sha256": "75170022836ca9cf5c33097111403c03bdf78fc42425a4c9cfbfd218c6c2cfd3"
-    },
-    "install_binding": {
-      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/tools/BINDING170.json",
-      "sha256": "ea20f6e7feb08388fb52157755e9172f1fd217043fc8e89879bf920c961c5757"
+    "stack_review": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/STACK-REVIEW.json",
+      "sha256": "923491f4dfa96a5b9521c75a5431002919db755dd39a78dc9335c560565595c7"
     },
     "installed": false,
     "published": false,
@@ -6016,9 +5996,9 @@
       "sense": "6.4.169 app1 SDK VALID",
       "lcd": "6.4.169 app0 SDK VALID"
     },
-    "retained_169_health": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/HEALTH169-OBSERVED001.json",
-      "sha256": "36616cb6dbafb99a9d730a08780e4c72fe44cd3a4ec1856f2326e2985da44f55"
+    "fresh_device_status": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device171/candidate171-001/device-status001/RESULT.json",
+      "sha256": "56f7cb7fb891288d457121e3dbb2b20b8f64beb9168f49e75952ceb1413314ad"
     },
     "current_public_ota_version": "6.4.162",
     "public_manifest_readback": {
@@ -6026,15 +6006,14 @@
       "sha256": "26877a35a7bb622c736d8c1ba61e23c4f09d91d40c10c9477302d7b4818cd765"
     },
     "backend_rollout": "verified_test_owner_only",
-    "handoff": "docs/WIFI_MEDIA_RECOVERY_170.md",
-    "next_unused_version": "6.4.171",
+    "handoff": "docs/WIFI_MEDIA_CORNER_TESTING_171.md",
+    "next_unused_version": "6.4.172",
     "limits": [
-      "40 exact-snapshot host suites and both canonical production builds/artifact checks pass; no physical170 installation or media qualification yet.",
-      "Unit still in real Wi-Fi setup on169. Actual provisioning completion and ordinary media/sleep checks await real app setup; no simulated completion.",
-      "Dark PWM/panel boot and touch/encoder priority pass host tests. Physical flash-free wake and touch-to-action latency remain unmeasured.",
-      "Saved upload cancellation waits for the next safe SDK boundary: in-flight DNS/TCP/TLS cannot be interrupted instantly. Original media remains durable.",
-      "168 stale peer-age/lease race has a source correction and executable race coverage; physical regression still pending.",
-      "Backend durable image admission remains last-verified test-owner-only. No RF/fridge, USB-free or abrupt power-cut qualification, fleet promotion or Git remote push in this candidate."
+      "Host fault injection only; no new hardware power-cut, RF, USB-free or backlight/input-latency validation.",
+      "Original media is never deleted based only on missing files. Legacy/corrupt orphans without valid accepted-delete markers stay held.",
+      "Cancellation waits for the next safe storage/network checkpoint; current SDK/filesystem calls cannot be interrupted instantly.",
+      "Compiler stack review is not measured runtime free stack.",
+      "170 service scripts remain bound to170; rebind/review171 artifacts before application-only installation, preserve169 fallback banks and all provisioning/NVS/SD."
     ]
   },
   "previous_verified_paired_health_158": {
@@ -6968,5 +6947,88 @@
       "Steps4-6 transition logic passed host tests; actual phone Wi-Fi/account setup, success animation and completion timer remain unverified on hardware. The isolated preview correctly refused real provisioning. Shopping refresh and sleep smoke were not run while setup was active.",
       "Existing168 clock-timeout LCD stale-link fallback race remains. No new OTA transfer, USB-free, abrupt power-cut, RF-loss or full-product acceptance. Prior media evidence and known incomplete image remain unchanged."
     ]
+  },
+  "previous_working_source_170": {
+    "version": "6.4.170",
+    "status": "BUILT_HOST_VERIFIED_NOT_INSTALLED_WAITING_FOR_REAL_WIFI_SETUP",
+    "artifact_source_commit": "bf2e5e2cf6a9c219404f29b948ff7e4a377864ec",
+    "artifact_source_firmware_tree": "d7d70fcd613b2462cc0d3e0b5e252b45fba24191",
+    "runtime_fix_commit": "bf2e5e2cf6a9c219404f29b948ff7e4a377864ec",
+    "build_id": "6.4.170-20260917T001602Z-bf2e5e2cf6a9",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from bf2e5e2cf6a9c219404f29b948ff7e4a377864ec or reviewed descendants, retaining169 provisioning and all prior media/OTA fixes. 170 is built and host-tested, not installed or publicly published. Frozen158 and public162 remain separate references.",
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/candidate170-001/RELEASE-PAIR.json",
+      "sha256": "998bf8ebb384516d4de0af227c909026c0263ac438d62b164e430758c283d4fa"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/candidate170-001/host-final001/RESULT.json",
+      "sha256": "850a9602271cf5e48a01cd88e9c1951eb2a6409472f70dbb55d52c6b62db3d26"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/candidate170-001/SOURCE-SCOPE.json",
+      "sha256": "d7ed7bdd538f9c0742f03267d3a095bae8a1507728a4e0f0cbcb404a9f074d90"
+    },
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/candidate170-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "823e11fa1e5d0198528d79e96695da295be701d0eafac68d60fcbbcee77abbe7"
+    },
+    "status_receipt": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/STATUS170.json",
+      "sha256": "75170022836ca9cf5c33097111403c03bdf78fc42425a4c9cfbfd218c6c2cfd3"
+    },
+    "install_binding": {
+      "path": "/Users/MattTaylor/halo-wifi-recovery-2026-09-16/device170/tools/BINDING170.json",
+      "sha256": "ea20f6e7feb08388fb52157755e9172f1fd217043fc8e89879bf920c961c5757"
+    },
+    "installed": false,
+    "published": false,
+    "physical_acceptance": false,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.169 app1 SDK VALID",
+      "lcd": "6.4.169 app0 SDK VALID"
+    },
+    "retained_169_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device169/HEALTH169-OBSERVED001.json",
+      "sha256": "36616cb6dbafb99a9d730a08780e4c72fe44cd3a4ec1856f2326e2985da44f55"
+    },
+    "current_public_ota_version": "6.4.162",
+    "public_manifest_readback": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/cloud-burst164-001/PUBLIC-MANIFESTS.json",
+      "sha256": "26877a35a7bb622c736d8c1ba61e23c4f09d91d40c10c9477302d7b4818cd765"
+    },
+    "backend_rollout": "verified_test_owner_only",
+    "handoff": "docs/WIFI_MEDIA_RECOVERY_170.md",
+    "next_unused_version": "6.4.171",
+    "limits": [
+      "40 exact-snapshot host suites and both canonical production builds/artifact checks pass; no physical170 installation or media qualification yet.",
+      "Unit still in real Wi-Fi setup on169. Actual provisioning completion and ordinary media/sleep checks await real app setup; no simulated completion.",
+      "Dark PWM/panel boot and touch/encoder priority pass host tests. Physical flash-free wake and touch-to-action latency remain unmeasured.",
+      "Saved upload cancellation waits for the next safe SDK boundary: in-flight DNS/TCP/TLS cannot be interrupted instantly. Original media remains durable.",
+      "168 stale peer-age/lease race has a source correction and executable race coverage; physical regression still pending.",
+      "Backend durable image admission remains last-verified test-owner-only. No RF/fridge, USB-free or abrupt power-cut qualification, fleet promotion or Git remote push in this candidate."
+    ]
+  },
+  "previous_current_validation_blocker_170": {
+    "status": "CLOCK_TIMEOUT_LCD_STALE_LINK_FALLBACK_RACE_REMAINS",
+    "candidate": "6.4.169",
+    "installation_blocked": false,
+    "disk_blocked": false,
+    "closure": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/STRESS168-CLOSURE.json",
+      "sha256": "7742cce1cfc61e1b434682bf97763ec43fc2e5a5c30101a328dc21fc9e06ef43"
+    },
+    "diagnosis": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/offline-stress-20260915/sleep168-review001/BURST002-003-SETUP-AND-SLEEP-REVIEW.json",
+      "sha256": "96461b463eaba026e9150b073422474d6083ab4bde2439b28a15850c038f976c"
+    },
+    "next_steps": [
+      "Validate incoming coordinator/query traffic as peer-liveness without extending user idle, OTA lease or policy debt.",
+      "Test both orderings of coordinator expiry and arriving OTA_UNLOCK under missing fresh clock; repeat scoped media test after that separate fix."
+    ],
+    "no_OTA_allowance_schedule_credentials_or_debt_reset": true,
+    "inherited_from": "6.4.168",
+    "provisioning_phone_completion_pending": true
   }
 }

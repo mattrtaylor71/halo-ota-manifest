@@ -1,3 +1,7 @@
+# 6.4.171 candidate — September16,2026
+
+Fixed Wi-Fi zero-clock timeout, interrupted accepted-upload deletion/slot recovery, and SD replay preemption after user input. 45 host suites and both canonical builds/artifact checks pass. Source `aa221c2`; not installed/published. Both boards169 remain in real provisioning. [Evidence and limits](docs/WIFI_MEDIA_CORNER_TESTING_171.md).
+
 # September16:170 saved-media retry candidate
 
 Independent paired retry timers keep the LCD dark while saved voice/photo work recovers. Real user input pauses recovery; saved originals remain until bound cloud receipts. Wi-Fi callbacks/backoff and shared radio ownership, transient voice HTTP retry, fair SD replay and late errors are covered by executable fault tests. Source `bf2e5e2`, all40 exact-snapshot host suites, both canonical production builds and artifact checks pass. Both boards remain169: real Wi-Fi setup is still active, so170 installation and physical media/retry qualification remain pending. No public release. See [the behavior, receipts and limits](docs/WIFI_MEDIA_RECOVERY_170.md).

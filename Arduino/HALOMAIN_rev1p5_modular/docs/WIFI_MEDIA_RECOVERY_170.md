@@ -1,3 +1,5 @@
+> Working candidate170 is superseded by [171 corner-case fixes](WIFI_MEDIA_CORNER_TESTING_171.md). The original170 receipts below remain unchanged.
+
 # Wi-Fi and saved-media recovery candidate 170
 
 This change starts from committed private169 (`98e26ef`). It is a development
