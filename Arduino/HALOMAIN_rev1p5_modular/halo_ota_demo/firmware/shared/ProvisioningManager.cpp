@@ -767,6 +767,80 @@ void ProvisioningManager::logApDiagnostics(const char* source) const {
                 config_err == ESP_OK ? (int)config.ap.beacon_interval : -1);
 }
 
+bool ProvisioningManager::restartSetupAp() {
+  if (!setup_mode_active || ProvisioningState::isProvisioned() ||
+      ProvisioningState::getState() != ProvisioningState::STATE_AP_SETUP ||
+      claim_in_progress || g_scan_inflight || !server || !dns_server) {
+    Serial.println("[PROVISION_AP_RESTART] ok=0 stage=setup_guard");
+    return false;
+  }
+  wifi_mode_t mode = WIFI_MODE_NULL;
+  wifi_config_t before = {};
+  esp_netif_ip_info_t before_ip = {};
+  esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+  if (esp_wifi_get_mode(&mode) != ESP_OK || mode != WIFI_MODE_APSTA ||
+      WiFi.status() == WL_CONNECTED ||
+      esp_wifi_get_config(WIFI_IF_AP, &before) != ESP_OK || !netif ||
+      esp_netif_get_ip_info(netif, &before_ip) != ESP_OK || !before_ip.ip.addr) {
+    Serial.println("[PROVISION_AP_RESTART] ok=0 stage=radio_guard");
+    return false;
+  }
+  const size_t ssid_len = strnlen(ap_ssid, sizeof(ap_ssid));
+  const size_t password_len = strnlen(ap_password, sizeof(ap_password));
+  const size_t driver_ssid_len = before.ap.ssid_len ? before.ap.ssid_len :
+      strnlen(reinterpret_cast<const char*>(before.ap.ssid), sizeof(before.ap.ssid));
+  if (!ssid_len || ssid_len > sizeof(before.ap.ssid) || ssid_len != driver_ssid_len ||
+      password_len < 8 || password_len >= sizeof(ap_password) ||
+      strnlen(reinterpret_cast<const char*>(before.ap.password), sizeof(before.ap.password)) != password_len ||
+      memcmp(before.ap.ssid, ap_ssid, ssid_len) ||
+      memcmp(before.ap.password, ap_password, password_len)) {
+    Serial.println("[PROVISION_AP_RESTART] ok=0 stage=identity_guard");
+    return false;
+  }
+
+  // Unlike softAPdisconnect(true), disabling only the AP does not clear its
+  // profile. The next begin recreates its authenticator from that same profile.
+  // Keep server/socket objects alive; the AP netif/IP is checked after the cycle.
+  Serial.println("[PROVISION_AP_RESTART] stage=begin same_identity=1");
+  if (!WiFi.enableAP(false)) {
+    Serial.println("[PROVISION_AP_RESTART] ok=0 stage=disable_failed");
+    return false;
+  }
+  if (!WiFi.AP.begin()) {
+    Serial.println("[PROVISION_AP_RESTART] ok=0 stage=enable_failed");
+    return false;
+  }
+
+  esp_netif_ip_info_t after_ip = {};
+  netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+  if (!netif || esp_netif_get_ip_info(netif, &after_ip) != ESP_OK) {
+    Serial.println("[PROVISION_AP_RESTART] ok=0 stage=ip_read_failed");
+    return false;
+  }
+  const bool ip_changed = after_ip.ip.addr != before_ip.ip.addr ||
+      after_ip.gw.addr != before_ip.gw.addr || after_ip.netmask.addr != before_ip.netmask.addr;
+  if (ip_changed) {
+    if (!WiFi.softAPConfig(IPAddress(before_ip.ip.addr), IPAddress(before_ip.gw.addr),
+                           IPAddress(before_ip.netmask.addr)) ||
+        esp_netif_get_ip_info(netif, &after_ip) != ESP_OK) {
+      Serial.println("[PROVISION_AP_RESTART] ok=0 stage=ip_restore_failed");
+      return false;
+    }
+  }
+  wifi_config_t after = {};
+  const esp_err_t config_err = esp_wifi_get_config(WIFI_IF_AP, &after);
+  const esp_err_t mode_err = esp_wifi_get_mode(&mode);
+  const bool config_same = config_err == ESP_OK &&
+      memcmp(&before.ap, &after.ap, sizeof(before.ap)) == 0;
+  const bool ip_same = after_ip.ip.addr == before_ip.ip.addr &&
+      after_ip.gw.addr == before_ip.gw.addr && after_ip.netmask.addr == before_ip.netmask.addr;
+  const bool ok = config_same && ip_same && mode_err == ESP_OK && mode == WIFI_MODE_APSTA;
+  Serial.printf("[PROVISION_AP_RESTART] ok=%d stage=verify config_same=%d ip_same=%d ip_restored=%d config_err=%d mode_err=%d mode=%d\n",
+                ok ? 1 : 0, config_same ? 1 : 0, ip_same ? 1 : 0, ip_changed ? 1 : 0,
+                (int)config_err, (int)mode_err, mode_err == ESP_OK ? (int)mode : -1);
+  return ok;
+}
+
 void ProvisioningManager::stopSoftAP() {
   WiFi.softAPdisconnect(true);
   LOG_INFO("[PROVISION] SoftAP stopped");

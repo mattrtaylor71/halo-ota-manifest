@@ -1773,11 +1773,15 @@
       "sense": "6.4.172 app0 SDK VALID",
       "lcd": "6.4.172 app1 SDK VALID"
     },
-    "setup_status": "Live AP driver SSID/password match manager; phone association and setup completion pending.",
+    "setup_status": "Live AP driver SSID/password match manager. Target session20AE failed on iPhone and Samsung. One USB-connected live setup run stayed awake past330seconds.",
     "limits": [
       "Fresh protocol/SDK health and driver readback only; phone association and actual setup completion pending.",
       "Late/revived setup after teardown admission remains a separately recorded race."
-    ]
+    ],
+    "setup_awake_observation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/setup-sleep172-observed001/RESULT.json",
+      "sha256": "a1f22e2fcf690e9a7d13937867cef25c513b2e55519bcba1fe799575eac453ec"
+    }
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -4834,8 +4838,8 @@
     }
   },
   "current_validation_blocker": {
-    "status": "WAITING_FOR_172_PHONE_ASSOCIATION_AND_FUNCTIONAL_ACCEPTANCE",
-    "detail": "Exact172 is installed with fresh paired SDK VALID health; AP driver SSID/password equality to manager is verified. Phone-join/authentication root cause is not yet confirmed, and the separate late-arrival provisioning teardown race remains recorded.",
+    "status": "172_TARGET_AUTH_FAILURE_REPRODUCED_CAUSE_UNRESOLVED",
+    "detail": "Exact172 SDK VALID; live driver/manager credentials match. iPhone Incorrect password and independent Samsung target M1/M2 then timeout/WRONG_KEY reproduce join failure. Live setup remains awake past330seconds; new/revived setup during teardown remains a separate known race. Warm AP reset experiment outcome is not yet inferred.",
     "candidate_installed": true,
     "evidence": {
       "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
@@ -4844,6 +4848,31 @@
     "qualification_limits": {
       "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/tools/QUALIFICATION-LIMITS172.json",
       "sha256": "64f29096e412af8f5cf34530f029f9d44aafbefdc522c045793ccb1cc014f438"
+    },
+    "phone_join_observation": {
+      "status": "FAILED_ON_IPHONE_AND_SAMSUNG_TARGET_SESSION_20AE",
+      "iphone": "User reports Incorrect password in iPhone Settings.",
+      "independent_android": "Samsung SM_A366U on Mac mini, USB serial RFCY322W52W; exact startup password programmed by ADB. Target scan RSSI-48, WPA2-PSK/CCMP.",
+      "target_bssid": "9a:a3:16:f8:1a:6c",
+      "target_handshake": "M1 received at2026-09-17T04:23:43Z, M2 sent, reason15 timeout/WRONG_KEY about5.1seconds later; no target M3 observed. Later M1/M3 in the same capture belong to Garage Member BSSIDa4:f8:ff:8c:a1:46 during restoration.",
+      "phone_capture": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/phone-join001/RESULT.json",
+        "sha256": "8a8e8acccebf4d4d691c82c001b9254b3dd79b5b1d51c6f3351a8f2023c1fcc1"
+      },
+      "android_capture": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/android-join001/RESULT.json",
+        "sha256": "2c040f171f3f1f91edcb7bdb62f47ff094e015f050b28ab3cc4c79eafaecc5f0"
+      },
+      "android_log": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/android-join001/wifi-logcat.raw",
+        "sha256": "acb75418fbd03161c5d2aa4a0600cd5fb16a19f2a81ad5075b79de4fbfb6c18a"
+      },
+      "limits": "Driver/manager credential equality does not establish PMK correctness or explain the failed handshake. No PMK causal claim.",
+      "warm_ap_reset_experiment": "phone-join002/Android002 in progress; no outcome inferred."
+    },
+    "setup_awake_observation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/setup-sleep172-observed001/RESULT.json",
+      "sha256": "a1f22e2fcf690e9a7d13937867cef25c513b2e55519bcba1fe799575eac453ec"
     }
   },
   "diagnostic_candidate151": {
@@ -5968,14 +5997,14 @@
   },
   "current_working_source": {
     "version": "6.4.172",
-    "status": "PASS_PRIVATE_172_INSTALLED_PAIRED_SDK_VALID_PHONE_JOIN_PENDING",
+    "status": "PASS_PRIVATE_172_INSTALLED_SDK_VALID_SETUP_AWAKE_AUTH_FAILURE_UNRESOLVED",
     "artifact_source_commit": "c90050f3a415327144d118ed5a4a4c056f02522d",
     "artifact_source_firmware_tree": "31c9b66de8085d0b2c332ca0004f00462c2bc3cd",
     "runtime_fix_commit": "c90050f3a415327144d118ed5a4a4c056f02522d",
     "build_id": "6.4.172-20260917T040727Z-c90050f3a415",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from c90050f3a415327144d118ed5a4a4c056f02522d or reviewed descendants, retaining all171 media/custody/retry fixes and172 provisioning fixes. Exact172 is built, sealed and installed with fresh paired SDK VALID health. Phone-join root cause and functional acceptance remain pending. Allocate unused173+ for new firmware bytes.",
+    "source_selection": "Continue from c90050f3a415327144d118ed5a4a4c056f02522d or reviewed descendants, retaining all171 media/custody/retry fixes and172 provisioning fixes. Exact172 is built, sealed and installed with fresh paired SDK VALID health. iPhone and independent Samsung target joins failed despite driver/manager credential equality; root cause and functional acceptance remain unresolved. Allocate unused173+ for new firmware bytes.",
     "candidate_receipt": {
       "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/candidate172-001/RELEASE-PAIR.json",
       "sha256": "d21894556dd65033f764a60c27ebdb9de9890c8603d5a36b3078f339213d412c"
@@ -6068,6 +6097,31 @@
         "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/health172-observed001/RESULT.json",
         "sha256": "bff0a571947755f8378c298af0dceff1727414f4d59ac1815bc19bf33d7262d8"
       }
+    },
+    "phone_join_observation": {
+      "status": "FAILED_ON_IPHONE_AND_SAMSUNG_TARGET_SESSION_20AE",
+      "iphone": "User reports Incorrect password in iPhone Settings.",
+      "independent_android": "Samsung SM_A366U on Mac mini, USB serial RFCY322W52W; exact startup password programmed by ADB. Target scan RSSI-48, WPA2-PSK/CCMP.",
+      "target_bssid": "9a:a3:16:f8:1a:6c",
+      "target_handshake": "M1 received at2026-09-17T04:23:43Z, M2 sent, reason15 timeout/WRONG_KEY about5.1seconds later; no target M3 observed. Later M1/M3 in the same capture belong to Garage Member BSSIDa4:f8:ff:8c:a1:46 during restoration.",
+      "phone_capture": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/phone-join001/RESULT.json",
+        "sha256": "8a8e8acccebf4d4d691c82c001b9254b3dd79b5b1d51c6f3351a8f2023c1fcc1"
+      },
+      "android_capture": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/android-join001/RESULT.json",
+        "sha256": "2c040f171f3f1f91edcb7bdb62f47ff094e015f050b28ab3cc4c79eafaecc5f0"
+      },
+      "android_log": {
+        "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/android-join001/wifi-logcat.raw",
+        "sha256": "acb75418fbd03161c5d2aa4a0600cd5fb16a19f2a81ad5075b79de4fbfb6c18a"
+      },
+      "limits": "Driver/manager credential equality does not establish PMK correctness or explain the failed handshake. No PMK causal claim.",
+      "warm_ap_reset_experiment": "phone-join002/Android002 in progress; no outcome inferred."
+    },
+    "setup_awake_observation": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device172/setup-sleep172-observed001/RESULT.json",
+      "sha256": "a1f22e2fcf690e9a7d13937867cef25c513b2e55519bcba1fe799575eac453ec"
     }
   },
   "previous_verified_paired_health_158": {

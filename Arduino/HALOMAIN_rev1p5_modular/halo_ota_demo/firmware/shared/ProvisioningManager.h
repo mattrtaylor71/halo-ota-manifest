@@ -47,6 +47,10 @@ public:
   // Read the live driver configuration without starting/changing the radio.
   // Passwords are compared locally and never included in this diagnostic.
   void logApDiagnostics(const char* source) const;
+
+  // Explicit setup-only experiment: recreate AP auth with the same profile.
+  // Normal startup never calls this; HTTP/DNS and provisioning identity stay owned.
+  bool restartSetupAp();
   
   // Get device ID
   const char* getDeviceId() const { return device_id; }

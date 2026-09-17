@@ -80,6 +80,7 @@ void halo_prod_loop();
 void halo_prod_pre_sleep();
 void halo_prod_reset_wifi();
 void halo_prod_provision_diag();
+void halo_prod_provision_restart_ap();
 bool halo_prod_should_delay_sleep();
 bool halo_prod_boot_ota_pending();
 void halo_prod_on_lcd_message(const char* type);
@@ -2697,6 +2698,12 @@ static bool parse_input_message(const char* json_str) {
     halo_prod_provision_diag();
 #else
     Serial.println("[PROVISION_DIAG] unavailable (no prod wrapper)");
+#endif
+  } else if (strcmp(type, "INPUT_PROVISION_RESTART_AP") == 0) {
+#ifdef HALO_SENSE_PROD_WRAPPER
+    halo_prod_provision_restart_ap();
+#else
+    Serial.println("[PROVISION_AP_RESTART] unavailable (no prod wrapper)");
 #endif
   } else if (strcmp(type, "INPUT_FW_INFO") == 0) {
     unsigned long now_ms = millis();

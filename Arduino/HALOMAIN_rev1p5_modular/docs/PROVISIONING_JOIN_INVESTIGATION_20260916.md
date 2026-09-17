@@ -4,8 +4,8 @@ Private172 is built and sealed from `c90050f3a415327144d118ed5a4a4c056f02522d`,
 build `6.4.172-20260917T040727Z-c90050f3a415`. Both canonical production builds,
 artifact checks and49 exact-snapshot host suites pass. Application-only service and fresh
 paired SDK VALID health passed: Sense172/app0 and LCD172/app1.169 fallback banks,
-NVS and partitions are preserved. Phone association and functional acceptance
-remain pending. No public release or confirmed authentication fix. Continue from172 or reviewed
+NVS and partitions are preserved. iPhone/Samsung target joins fail despite matching driver credentials;
+authentication cause and functional acceptance remain unresolved. No public release or confirmed authentication fix. Continue from172 or reviewed
 descendants, preserving171 fixes and169 fallback banks; allocate unused173+.
 
 ## Confirmed icon defect and source fix
@@ -155,7 +155,23 @@ The immutable sealed pair retains its original build-time checkpoint; these
 separate receipts establish the later installation and health facts.
 
 The actual driver reports SSID/password equality with the manager for session20AE.
-That eliminates a live driver/manager credential mismatch at these observations;
-it does not prove phone association or explain the earlier rejection. Root's
-phonejoin001 capture is active for the user's iPhone Settings test. Mac Wi-Fi
-remains unchanged. Phone success and complete setup are still unproven.
+The user's iPhone Settings attempt nevertheless returned "Incorrect password."
+An independent Samsung SM_A366U (USB RFCY322W52W through Mac mini) reproduced the
+failure with the exact startup password programmed by ADB. Its target scan was
+RSSI-48, WPA2-PSK/CCMP. For Halo BSSID9a:a3:16:f8:1a:6c, Android received M1 at
+04:23:43UTC and sent M2, then reported reason15 timeout/WRONG_KEY about5.1seconds
+later; no target M3 was captured. The later M1/M3 belongs to Garage Member
+BSSIDa4:f8:ff:8c:a1:46 during restoration, not successful Halo authentication.
+
+This verifies a failed target handshake despite driver/manager credential
+readback equality. It does not establish PMK correctness or identify the cause;
+no PMK causal claim or confirmed authentication fix is made. phone-join001 is
+closed; android-join001/RESULT.json and wifi-logcat.raw retain the independent
+attempt. Mac Wi-Fi remained unchanged. The warm AP-reset experiment in
+phone-join002/Android002 is still in progress; its outcome is not inferred here.
+
+Separately, setup-sleep172-observed001/RESULT.json (SHA256
+`a1f22e2fcf690e9a7d13937867cef25c513b2e55519bcba1fe799575eac453ec`)
+confirms live setup stayed awake beyond330seconds. This is one USB-connected
+live-peer run with read-only diagnostic queries every15seconds and no touch or
+scroll input; it does not cover the known late/revived-session teardown race.
