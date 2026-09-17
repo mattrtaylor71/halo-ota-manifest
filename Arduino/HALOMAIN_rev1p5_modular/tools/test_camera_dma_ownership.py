@@ -22,10 +22,13 @@ def harness(root):
     main = (root / "Sense_Minimal/Sense_Minimal.ino").read_text()
     backup = (root / "Sense_Minimal/sense_backup_diagnostic.h").read_text()
     admission = definition(backup, "class SenseBackupWifiCall") + ";\n"
-    functions = "\n".join(definition(camera, signature) for signature in (
+    signatures = [
         "static void deinit_camera()",
         "static bool camera_quiesce_wifi_for_dma(",
-        "static bool init_camera()"))
+        "static bool init_camera()"]
+    if "static bool camera_claim_network_dma(" in camera:
+        signatures.insert(2, "static bool camera_claim_network_dma(")
+    functions = "\n".join(definition(camera, signature) for signature in signatures)
     constants = []
     for name in ("CAMERA_HTTP_DRAIN_MAX_MS", "CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES",
                  "CAMERA_DMA_RESERVE_BYTES", "CAMERA_DMA_RECOVER_MAX_MS",

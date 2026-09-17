@@ -144,3 +144,42 @@ instantaneously. Cancellation is checked at safe owner-task boundaries; the 8 s
 handshake cap is not an operation-wide maximum or a guarantee of immediate
 foreground response. The one-shot 20 s media clock retry remains bounded. If fresh
 time is still unavailable, media retains its existing durable retry path.
+
+## Relay recovery and resumed182 device tests
+
+The user added an actuator-only normally closed USB relay. A ten-second power
+cut restored its serial port and responsive sketch; the actuator then woke Halo.
+See `ACTUATOR_RELAY_RECOVERY_20260917.md`. This resolved the bench blocker above.
+
+`image182-004` passed first-wake image acceptance and paired sleep plus15seconds
+quiet. It exercised the actual primary SNTP timeout and successful secondary
+clock attempt (fresh after1722ms).126412 bytes uploaded: capture start to PUT200
+21.300s, queue to flush14.605s, flush to PUT2006.393s. Exact cloud admission/key,
+length and backend DONE were verified independently. Device SHA was not logged;
+a stored object SHA alone is not an independent device-to-cloud hash comparison.
+The image was unrecognized by grocery processing; this verifies delivery rather
+than recognition quality.
+
+`interrupt182-001` passed the live shopping-list overlap: voice job20 paused,
+parked, resumed the same session and reached HTTP202. List refresh completed in
+1118ms (948ms HTTP plus97ms parse); command to observed list receipt was1.258s.
+Both boards slept afterward. Independent cloud evidence found one ingress,
+one queued worker and completed processing for100352 bytes. Inputs were console
+commands through the device's real handlers, not physical menu navigation.
+
+`interrupt-camera182-001` failed and must remain a failed capture test. Voice22
+was cancelled, but the camera attempted allocation after `http_inflight` cleared
+and before the voice function's complete `SenseBackupWifiCall` lease and DMA
+reserve destructor finished. The camera's Wi-Fi teardown correctly refused an
+active lease; camera init nevertheless proceeded and failed a16384-byte DMA
+allocation (largest available10740 bytes). Retry remained short at12276 bytes.
+The98304-byte voice payload was preserved to SD. Its automatic dark replay later
+obtained HTTP202 and deleted the SD record, as captured in
+`camera182-failure-followup001`; successful voice recovery does not pass the
+failed camera operation.
+
+The follow-up must gate camera allocation on complete transport cleanup, not
+HTTP unlock alone. Retain the accepted capture while waiting at safe task
+boundaries, exclude new network entrants during camera ownership, and never
+allocate camera DMA after a drain timeout. No OTA ownership/policy change is
+needed for this correction. Final build and device results follow separately.

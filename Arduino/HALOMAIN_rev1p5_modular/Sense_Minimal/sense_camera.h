@@ -564,7 +564,10 @@ static void deinit_camera() {
   // Re-reserve the DMA block now that camera has freed its buffers.
   // This protects the contiguous region from WiFi/TLS fragmentation
   // before the next camera init.
-  camera_dma_reserve_acquire("camera_deinit");
+  // An init admission timeout can reach this cleanup while TLS still owns
+  // memory. Its outer DMA guard will restore the reserve after it unwinds.
+  if (!http_inflight && sense_backup_diag::wifi_calls.load() == 0)
+    camera_dma_reserve_acquire("camera_deinit");
   Serial.println("[CAM_PWR] esp_camera_deinit complete");
   camera_stop_xclk();
   camera_set_pins_high_z();
@@ -623,6 +626,40 @@ static bool camera_quiesce_wifi_for_dma(const char* reason) {
   return radio_off;
 }
 
+static bool camera_claim_network_dma() {
+  // HTTP unlock precedes transport/DMA destructors. Publish camera ownership
+  // first, preventing another network call from entering while we wait for
+  // the complete admitted call (including its reserve restoration) to finish.
+  const bool already_owned = g_camera_radio_off_owned.exchange(true);
+  const bool fg_prev = foreground_active;
+  foreground_active = true;
+  const uint32_t started = millis();
+  const uint32_t drain_limit_ms = 20000;
+  while (uint32_t(millis() - started) < drain_limit_ms) {
+    if (!http_inflight && sense_backup_diag::wifi_calls.load() == 0) {
+      const bool locked = http_mutex && xSemaphoreTake(http_mutex, 0) == pdTRUE;
+      if (!http_mutex || locked) {
+        const bool drained = !http_inflight && sense_backup_diag::wifi_calls.load() == 0;
+        if (locked) xSemaphoreGive(http_mutex);
+        if (drained) {
+          foreground_active = fg_prev;
+          return true;
+        }
+      }
+    }
+    // Only the operation worker waits. Main-loop UART/UI and the socket's
+    // owner keep running; no other task stops a client or tears down its Wi-Fi.
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+  foreground_active = fg_prev;
+  if (!already_owned) g_camera_radio_off_owned.store(false);
+  Serial.printf("[CAMERA] transport cleanup timeout after %lums; camera not allocated\n",
+                (unsigned long)drain_limit_ms);
+  uart_send_sense_diag("camera", "transport_drain_timeout", "init",
+                       (int32_t)drain_limit_ms, "camera_not_allocated");
+  return false;
+}
+
 static bool init_camera() {
 #if HALO_CAMERA_KEEP_INIT
   // Already initialised from an earlier capture this session — reuse it.
@@ -659,48 +696,14 @@ static bool init_camera() {
   Serial.println("[CAMERA] Initializing camera...");
   camera_timeline_event("init_begin", 0);
 
-  // --- HTTP drain: user capture takes absolute priority over background uploads.
-  //
-  // This block used to say "don't wait for upload to finish" and call
-  // WiFi.mode(WIFI_OFF) with an HTTP request still in flight. That is a
-  // use-after-free: tearing down the interface frees lwIP's pbufs while the
-  // upload task is blocked inside recv(), so when that recv returns it walks a
-  // freed pbuf and calls its stale free-callback. Captured on-device as
-  //   Guru Meditation Error: Core 1 panic'ed (InstrFetchProhibited)
-  //   lwip_recvfrom -> lwip_recv_tcp -> pbuf_free -> esp_pbuf_free -> garbage PC
-  // ~14% of captures when an upload happened to overlap. The foreground_active
-  // abort cannot prevent it: that check only runs BETWEEN retry attempts, so it
-  // can never interrupt a task already blocked in recv().
-  //
-  // The capture still has absolute priority — we simply let the socket close
-  // itself first. foreground_active makes the upload task bail at its next
-  // check; we wait a bounded time for http_inflight to clear before touching
-  // WiFi at all.
-  if (http_inflight) {
-    // Nudge the upload worker to bail, but restore the flag afterwards — the
-    // scan flow owns foreground_active (set/cleared in Sense_Minimal.ino), and
-    // leaving it stuck true here would suppress every later background upload.
-    const bool fg_prev = foreground_active;
-    foreground_active = true;
-    const uint32_t drain_deadline_ms = millis() + CAMERA_HTTP_DRAIN_MAX_MS;
-    while (http_inflight && (int32_t)(millis() - drain_deadline_ms) < 0) {
-      vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    foreground_active = fg_prev;
-    if (http_inflight) {
-      // Did not drain in time. Killing WiFi here is what crashes, so DON'T.
-      // Skip the teardown and let the capture proceed on whatever DMA is
-      // available; a degraded capture beats a panic that reboots the board,
-      // strands the LCD and loses the image entirely.
-      Serial.printf("[CAMERA] HTTP still inflight after %lums — SKIPPING WiFi teardown "
-                    "(avoids pbuf use-after-free panic)\n",
-                    (unsigned long)CAMERA_HTTP_DRAIN_MAX_MS);
-      uart_send_sense_diag("camera", "http_drain_timeout", "init",
-                           (int32_t)CAMERA_HTTP_DRAIN_MAX_MS, "skipped_wifi_kill");
-    } else {
-      Serial.println("[CAMERA] HTTP drained — safe to free DMA via WiFi teardown");
-      camera_quiesce_wifi_for_dma("http_drained");
-    }
+  // Keep this admitted capture pending until the cancelled upload's complete
+  // transport scope has unwound. A cleared HTTP flag alone is insufficient:
+  // its later DMA guard could otherwise reserve16KiB during esp_camera_init.
+  const bool network_was_busy = http_inflight || sense_backup_diag::wifi_calls.load() != 0;
+  if (!camera_claim_network_dma()) return false;
+  if (network_was_busy) {
+    Serial.println("[CAMERA] transport cleanup drained; camera owns DMA admission");
+    camera_quiesce_wifi_for_dma("transport_drained");
   } else {
     // No HTTP inflight. Do NOT pre-emptively tear WiFi down.
     //
