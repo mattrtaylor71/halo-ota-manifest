@@ -1,6 +1,6 @@
 # Provisioning join investigation — September 16, 2026
 
-Current installed private pair is 176, source `770c60aa99e9bb1e498419faebf8d7ca66156fdb`, build `6.4.176-20260917T055849Z-770c60aa99e9`. Both canonical builds/artifact checks and 15 snapshot suites pass. Sense and LCD run app0 SDK VALID, retaining Sense175/LCD174 app1 fallbacks and protected data. Owner claim now runs on the existing upload worker, and LCD has a finite setup-progress sleep lease. Assisted health and one console Check-in capture/upload/sleep smoke passed within scope; touch, fresh intended-owner phone provisioning, and same-boot camera recovery after provisioning remain unqualified. Preserve the observed reserve warnings and the distinction between the logical 20-second claim limit and synchronous SDK timing. No publication. Continue from reviewed 176 descendants and read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`.
+Current installed private pair is 177, source `ebb006726a81b947f13fc2dc500c3de9ffd66444`, build `6.4.177-20260917T063649Z-ebb006726a81`. Both canonical builds/artifact checks and 19 snapshot suites pass. Sense and LCD run app1 SDK VALID, retaining both176 app0 fallbacks and protected data. The confirmation page gains a 360ms eased entrance; camera DMA recovery now keeps Wi-Fi off until camera teardown. One ordinary console capture/client upload/instrumented sleep smoke passed. Fresh177 phone setup, the physical confirmation transition and immediate same-boot camera recovery remain pending. The176 phone setup completed responsively, but its same-boot camera failed. Preserve the reserve warning, probe-induced wake pulse and existing qualification limits; no broad memory-resolution or public-release claim. Continue from reviewed177 descendants and read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`.
 
 ## Confirmed icon defect and source fix
 
@@ -323,7 +323,7 @@ the actual claim response sequence and both sleep tails. Owner state persistence
 is observed; full functional acceptance remains false.
 
 
-## Private176: async claim and bounded LCD progress; phone retest pending
+## Private176: responsive phone setup completed; same-boot camera failed
 
 Exact source `770c60aa99e9bb1e498419faebf8d7ca66156fdb`, build
 `6.4.176-20260917T055849Z-770c60aa99e9`, moves claim HTTP/TLS to the existing
@@ -358,11 +358,17 @@ read back in this review. Reserve reacquisition after presign warned that the
 largest block was9,716bytes versus16,384 needed. Retain this warning without
 claiming a newly diagnosed regression.
 
-This smoke was an ordinary wake, **not the same boot after fresh provisioning**.
-The intended owner has been asked to perform a fresh iPhone setup attempt.
-Responsive claim completion and camera recovery immediately after that flow
-remain pending. Both boards were left asleep with the existing provisioned
-state; no public OTA or full-product acceptance is claimed.
+This first smoke was an ordinary wake, **not the same boot after fresh provisioning**.
+A later intended-owner phone setup completed, confirmed by the user and closed
+logs. Home Wi-Fi connected on its first attempt in1,135ms. Two roughly8-second
+claim failures preceded HTTP200; owner success arrived17,367ms after the first
+queue while Sense/LCD remained responsive. The connection failure cause is
+unknown. A subsequent same-boot camera action failed both init attempts with
+no frame and a largest DMA block of11,764bytes. LCD returned to the menu and
+both boards slept coherently. No full-product acceptance is claimed.
+
+`app-flow176-observed001/RESULT.json` binds that later outcome, SHA256
+`042db0354a3beef6227c7b0edf0897f9c1bdcecf165e286a27bb29501cbdac29`.
 
 Evidence root: `/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176`.
 
@@ -379,5 +385,50 @@ Evidence root: `/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176`
 
 All listed service and capture receipts are closed. Read-only review performed
 no hardware action. Historical175 joining successes and its eventual-owner but
-unresponsive claim flow remain under `previous_working_source_175`; they are not
-176 phone acceptance. Known setup sleep/STA ownership limits remain recorded.
+unresponsive claim flow remain under `previous_working_source_175`; the later176 phone outcome is separately bound above. Known setup sleep/STA
+ownership limits remain recorded.
+
+
+## Private177: confirmation motion and camera radio ownership
+
+Source `ebb006726a81b947f13fc2dc500c3de9ffd66444`, build
+`6.4.177-20260917T063649Z-ebb006726a81`, changes three runtime paths only:
+`lcd_provision.h`, `sense_camera.h` and `sense_backup_diagnostic.h`. The success
+page gains a360ms eased cream-to-green entrance and8px settle of existing
+objects, with unchanged final pixels/text/artwork/dwell and cancellation before
+cleanup. Camera recovery retains radio ownership with Wi-Fi off through camera
+allocation/teardown, preventing reconnect from consuming the freed DMA region.
+Both canonical builds/artifact checks and19 snapshot suites pass; retained176
+and172 evidence and unchanged unrelated runtime were reverified. Image sizes
+grow288bytes on Sense and432bytes on LCD; static/RTC RAM is unchanged.
+
+LCD-first application-only service installed both177 app1 images and preserved
+both176 app0 VALID fallbacks, NVS and partition tables. The closed ordinary-wake
+smoke proves fresh paired SDK VALID, exact LCD nonce/CRC/build digest, awake
+unlocked HOME and one **console** Check-in/quantity1. Camera initialized once
+and captured113,187bytes at1280×1024 in1,185ms. Logs show Wi-Fi off before camera
+init and reconnect after teardown, client presign/PUT HTTP200, queue drain in
+8,434ms, return to HOME and coordinated deep sleep. No backend object readback
+was performed. Periodic fwinfo probes triggered a stale-awake force wake pulse;
+this is not unattended sleep qualification. Reserve reacquisition after presign
+still warned largest10,740<16,384; no broad memory-resolution claim is made.
+
+Fresh177 intended-owner phone setup, the physical confirmation animation and
+immediate same-boot camera recovery remain **pending**. The ordinary wake does
+not qualify the176 post-provision failure. Existing late/revived setup arrival
+during LCD teardown, reserve warnings and logical claim-timeout versus SDK
+wall-clock limits remain recorded. No publication, broad media/OTA/power-cut or
+full-product acceptance is claimed.
+
+Evidence root: `/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177`.
+
+- `candidate177-001/RELEASE-PAIR.json`: SHA256
+  `a29953bab081858115a20255f819e2f0e5688a88d31e48547c01adc7bf22dfec`.
+- `candidate177-001/host-final001/RESULT.json`:19 suites PASS, SHA256
+  `83f18ddd194445507fe1776d32a4f238008a63f7a5846e1ee2dcf6b1920df17e`.
+- `INSTALLATION177-REVIEW.json`: SHA256
+  `158c4838d67799213de36e89946ddcf6df213c13fd0ef0a7d03e39e8c38595f5`.
+- `smoke177-observed001/RESULT.json`: paired health and scoped smoke, SHA256
+  `a43392d2f07cb81e803a71d115a278b24997064a0793ffdfed6d1b5a577b280d`.
+
+All cited service/capture records are closed. Review performed no hardware action.

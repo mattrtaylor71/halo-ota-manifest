@@ -1759,33 +1759,33 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.176",
-    "status": "PASS_PAIRED_SDK_VALID_ASSISTED_HEALTH_AND_SCOPED_ORDINARY_CAMERA_SMOKE",
+    "version": "6.4.177",
+    "status": "PASS_PAIRED_SDK_VALID_SCOPED_ORDINARY_CAMERA_UPLOAD_INSTRUMENTED_SLEEP",
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
-      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/smoke177-observed001/RESULT.json",
+      "sha256": "a43392d2f07cb81e803a71d115a278b24997064a0793ffdfed6d1b5a577b280d"
     },
     "installation_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/INSTALLATION176-REVIEW.json",
-      "sha256": "dadd8ab56ed76e7a682a1dc959583ba41ad22fa8e8fd433cec7d716ebba65002"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/INSTALLATION177-REVIEW.json",
+      "sha256": "158c4838d67799213de36e89946ddcf6df213c13fd0ef0a7d03e39e8c38595f5"
     },
     "installed": {
-      "sense": "6.4.176 app0 SDK VALID",
-      "lcd": "6.4.176 app0 SDK VALID"
+      "sense": "6.4.177 app1 SDK VALID",
+      "lcd": "6.4.177 app1 SDK VALID"
     },
-    "setup_status": "Previously provisioned state retained; new intended-owner phone reprovisioning on176 is pending.",
+    "setup_status": "Existing provisioned state retained.176 fresh phone setup passed but same-boot camera failed; fresh177 phone+same-boot retest pending.",
     "ordinary_camera_smoke": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
-      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/smoke177-observed001/RESULT.json",
+      "sha256": "a43392d2f07cb81e803a71d115a278b24997064a0793ffdfed6d1b5a577b280d"
     },
     "limits": [
-      "Fresh intended-owner phone reprovisioning on176 is pending. Host tests and normal camera smoke do not prove the175 full-flow responsiveness defect is physically fixed.",
-      "The20s claim request age is a logical cancellation/result-admission limit, not an asserted20s wall-clock bound on synchronous SDK DNS/TCP/TLS. No measured whole-call-chain or runtime stack high-water pass.",
-      "Initial SDK-health capture was assisted and began about10s after the stroke, already idle-dark/backlight0; no coldboot, full awake UI or scheduled-wake pass.",
-      "One ordinary console Check-in bypassed touch and passed camera/client HTTP upload/coordinated sleep. It was not the same boot after fresh provisioning; camera recovery in that condition remains unqualified.",
-      "Reserve warning after smoke presign (largest9716<16384) is retained alongside175 warm/final-AP-exit warnings. No new regression cause is inferred.",
-      "Application-only LCD-first service preserved LCD174/app1 and Sense175/app1 VALID fallbacks, NVS, partition layouts and SD. No OTA/publication, abrupt power-cut, broad media or full-product acceptance.",
-      "Known late/revived setup arrival during LCD teardown and blocking STA ownership limits remain separately recorded."
+      "One instrumented ordinary wake with console Check-in/quantity1 bypassed physical touch; it was not the same boot after fresh phone provisioning.",
+      "Periodic fwinfo probes triggered a stale-awake force wake pulse before coordinated sleep; this is not unattended sleep/wake qualification.",
+      "Client presign/PUT HTTP200 and drained queue were observed; no independent backend object readback.",
+      "Reserve reacquisition after presign still warned largest10740<16384; retain the warning without a new causal claim.",
+      "Fresh177 intended-owner phone setup, actual confirmation animation and immediate same-boot post-provision camera remain pending.",
+      "No broad media/OTA/power-cut/full-product acceptance.",
+      "Known late/revived setup during LCD teardown and blocking STA ownership limits remain recorded. The20s claim age is logical cancellation/admission, not a measured synchronous SDK wall-clock bound; no runtime stack high-water claim."
     ]
   },
   "previous_development_baseline_124": {
@@ -4843,21 +4843,25 @@
     }
   },
   "current_validation_blocker": {
-    "status": "176_INSTALLED_PHONE_REPROVISION_AND_POST_PROVISION_CAMERA_PENDING",
-    "detail": "Both176 boards are SDK VALID and one ordinary console Check-in capture/client HTTP upload/sleep smoke passed. Fresh intended-owner phone setup has not retested the175 claim/UI delay; same-boot camera recovery after provisioning remains unqualified. Reserve warnings are retained. No full functional acceptance.",
+    "status": "177_INSTALLED_FRESH_PHONE_PHYSICAL_TRANSITION_AND_SAME_BOOT_CAMERA_PENDING",
+    "detail": "Both177 boards SDK VALID; ordinary console camera/client upload/instrumented coordinated sleep passed. Fresh177 phone setup/physical success animation and immediate same-boot camera remain pending. Reserve10740 warning and probe-induced wake pulse remain; no broad memory-resolution or full-product acceptance.",
     "candidate_installed": true,
-    "installed_scope": "LCD176/app0 first from174/app1; Sense176/app0 from175/app1",
+    "installed_scope": "LCD177/app1 first from176/app0; Sense177/app1 from176/app0; both176app0VALID fallbacks retained",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
-      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/smoke177-observed001/RESULT.json",
+      "sha256": "a43392d2f07cb81e803a71d115a278b24997064a0793ffdfed6d1b5a577b280d"
     },
     "ordinary_camera_smoke": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
-      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/smoke177-observed001/RESULT.json",
+      "sha256": "a43392d2f07cb81e803a71d115a278b24997064a0793ffdfed6d1b5a577b280d"
     },
     "qualification_limits": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/QUALIFICATION-LIMITS176.json",
-      "sha256": "c4b95e368df6cc853b6c55dd773c9595d3047ef7865a5f0b052d5827005d108f"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/tools/QUALIFICATION-LIMITS177.json",
+      "sha256": "0b40619dcaf50f95a9105523920d64658344489c3efaa7edc1e27fe240d99d5d"
+    },
+    "prior176_app_flow": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/app-flow176-observed001/RESULT.json",
+      "sha256": "042db0354a3beef6227c7b0edf0897f9c1bdcecf165e286a27bb29501cbdac29"
     },
     "known_separate_limits": [
       "Late/revived setup during LCD teardown can still race sleep.",
@@ -5985,84 +5989,104 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.176",
-    "status": "PRIVATE_PAIRED_176_SDK_VALID_SCOPED_CAMERA_SMOKE_PASS_PHONE_REPROVISION_PENDING",
-    "artifact_source_commit": "770c60aa99e9bb1e498419faebf8d7ca66156fdb",
-    "artifact_source_firmware_tree": "cf90608313357a5e76188bfd3ca2366e6c134f7c",
-    "build_id": "6.4.176-20260917T055849Z-770c60aa99e9",
+    "version": "6.4.177",
+    "status": "PRIVATE_PAIRED_177_SDK_VALID_SCOPED_ORDINARY_CAMERA_SMOKE_PASS_PHONE_AND_SAME_BOOT_RETEST_PENDING",
+    "artifact_source_commit": "ebb006726a81b947f13fc2dc500c3de9ffd66444",
+    "artifact_source_firmware_tree": "3db9131c47a8a6da86b717b3710609425b96192d",
+    "build_id": "6.4.177-20260917T063649Z-ebb006726a81",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from770c60a or reviewed descendants.176 moves claim transport to the existing upload worker with fixed snapshots/generation-bound owner-loop application and a finite LCD setup-progress sleep lease. Retain175 provisioning DMA reserve ownership and prior media/OTA fixes. Physical phone reprovisioning and post-provision same-boot camera recovery remain pending.",
+    "source_selection": "Continue from ebb0067 or reviewed descendants.177 adds smooth confirmation entrance and keeps radio off while camera DMA recovery owns it. Preserve176 async claim/LCD progress lease,175 provisioning reserve ownership and prior media/OTA fixes. Fresh177 phone/physical-animation/same-boot camera validation remains pending.",
     "candidate_receipt": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/RELEASE-PAIR.json",
-      "sha256": "85c60af88cbe8f2bcbc7eb75caac08f996475d5ffbc08184d9a89bbf234bd793"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/candidate177-001/RELEASE-PAIR.json",
+      "sha256": "a29953bab081858115a20255f819e2f0e5688a88d31e48547c01adc7bf22dfec"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/host-final001/RESULT.json",
-      "sha256": "f0943b27d323459c950f31dfbb973b8874f093a4a7ce1b2524bc4c856d416429"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/candidate177-001/host-final001/RESULT.json",
+      "sha256": "83f18ddd194445507fe1776d32a4f238008a63f7a5846e1ee2dcf6b1920df17e"
     },
-    "host_suite_count": 15,
-    "retained_host_lineage": "17510-suite and17249-suite receipts/logs retained and reverified. Exactly nine reviewed runtime paths differ from175; unrelated runtime is unchanged apart from generated version identities.",
+    "host_suite_count": 19,
+    "retained_host_lineage": "17615-suite and17249-suite evidence/logs retained and reverified. Exactly three reviewed runtime paths differ from176; unrelated runtime is unchanged apart from generated version identities.",
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "e73a4687537164c362dd2871d9d5e80cba49c4b60a572a696e7b07a50b54dd56"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/candidate177-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "70810e0a2111ad33feb28757b11e7c238ff77b4c1b233ff29fbaa721e1c88495"
     },
     "source_scope": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/SOURCE-SCOPE.json",
-      "sha256": "f4487a377aa3e3f03dbf14a4da7214b4d0315681f1d6ff4f309083e6444bb553"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/candidate177-001/SOURCE-SCOPE.json",
+      "sha256": "97766d93f5c154bb7077e57a6c3fe3dd16fabc9967e679756b66dc69cd1d0859"
     },
     "stack_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/STACK-REVIEW.json",
-      "sha256": "eae6e803aaf3d95ac6f6fc10e650d7470092e89bd8263df7c206bc9296f946b6"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/candidate177-001/STACK-REVIEW.json",
+      "sha256": "5d6fda921b1d83c2c9ba72a900d8bf283299ca9d9f14a590228f471c58505ea5"
     },
     "installer_binding": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/BINDING176.json",
-      "sha256": "e253e942bd1e44dbc602c7aa4c717e47813544939e94984945dd4c2a987d298e"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/tools/BINDING177.json",
+      "sha256": "15368958d1839ce09aa47bf9f7fe3294c874ee9c694034216fc5b2de6006e14f"
     },
     "installed": true,
     "published": false,
     "physical_acceptance": false,
     "phone_join_root_cause_confirmed": false,
     "installed_firmware_last_observed": {
-      "sense": "6.4.176 app0 SDK VALID",
-      "lcd": "6.4.176 app0 SDK VALID"
+      "sense": "6.4.177 app1 SDK VALID",
+      "lcd": "6.4.177 app1 SDK VALID"
     },
     "installation_review": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/INSTALLATION176-REVIEW.json",
-      "sha256": "dadd8ab56ed76e7a682a1dc959583ba41ad22fa8e8fd433cec7d716ebba65002"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/INSTALLATION177-REVIEW.json",
+      "sha256": "158c4838d67799213de36e89946ddcf6df213c13fd0ef0a7d03e39e8c38595f5"
     },
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
-      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/smoke177-observed001/RESULT.json",
+      "sha256": "a43392d2f07cb81e803a71d115a278b24997064a0793ffdfed6d1b5a577b280d"
     },
     "paired_sdk_health_passed": true,
     "current_public_ota_version": "6.4.162",
-    "next_unused_version": "6.4.177",
+    "next_unused_version": "6.4.178",
     "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
     "limits": [
-      "Fresh intended-owner phone reprovisioning on176 is pending. Host tests and normal camera smoke do not prove the175 full-flow responsiveness defect is physically fixed.",
-      "The20s claim request age is a logical cancellation/result-admission limit, not an asserted20s wall-clock bound on synchronous SDK DNS/TCP/TLS. No measured whole-call-chain or runtime stack high-water pass.",
-      "Initial SDK-health capture was assisted and began about10s after the stroke, already idle-dark/backlight0; no coldboot, full awake UI or scheduled-wake pass.",
-      "One ordinary console Check-in bypassed touch and passed camera/client HTTP upload/coordinated sleep. It was not the same boot after fresh provisioning; camera recovery in that condition remains unqualified.",
-      "Reserve warning after smoke presign (largest9716<16384) is retained alongside175 warm/final-AP-exit warnings. No new regression cause is inferred.",
-      "Application-only LCD-first service preserved LCD174/app1 and Sense175/app1 VALID fallbacks, NVS, partition layouts and SD. No OTA/publication, abrupt power-cut, broad media or full-product acceptance.",
-      "Known late/revived setup arrival during LCD teardown and blocking STA ownership limits remain separately recorded."
+      "One instrumented ordinary wake with console Check-in/quantity1 bypassed physical touch; it was not the same boot after fresh phone provisioning.",
+      "Periodic fwinfo probes triggered a stale-awake force wake pulse before coordinated sleep; this is not unattended sleep/wake qualification.",
+      "Client presign/PUT HTTP200 and drained queue were observed; no independent backend object readback.",
+      "Reserve reacquisition after presign still warned largest10740<16384; retain the warning without a new causal claim.",
+      "Fresh177 intended-owner phone setup, actual confirmation animation and immediate same-boot post-provision camera remain pending.",
+      "No broad media/OTA/power-cut/full-product acceptance.",
+      "Known late/revived setup during LCD teardown and blocking STA ownership limits remain recorded. The20s claim age is logical cancellation/admission, not a measured synchronous SDK wall-clock bound; no runtime stack high-water claim."
     ],
     "qualification_limits": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/QUALIFICATION-LIMITS176.json",
-      "sha256": "c4b95e368df6cc853b6c55dd773c9595d3047ef7865a5f0b052d5827005d108f"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/tools/QUALIFICATION-LIMITS177.json",
+      "sha256": "0b40619dcaf50f95a9105523920d64658344489c3efaa7edc1e27fe240d99d5d"
     },
-    "installation_scope": "LCD176/app0 first from174/app1; Sense176/app0 from175/app1",
+    "installation_scope": "LCD177/app1 first from176/app0; Sense177/app1 from176/app0; both176app0VALID fallbacks retained",
     "paired_sdk_health_versions": {
-      "sense": "6.4.176",
-      "lcd": "6.4.176"
+      "sense": "6.4.177",
+      "lcd": "6.4.177"
     },
-    "app_provisioning_status": "PENDING_FRESH_INTENDED_OWNER_PHONE_REPROVISIONING",
-    "camera_recovery_status": "ORDINARY_WAKE_SMOKE_PASS_SAME_BOOT_AFTER_PROVISION_UNQUALIFIED",
-    "full176_pair_installed": true,
+    "app_provisioning_status": "PENDING_FRESH_177_INTENDED_OWNER_PHONE_SETUP",
+    "confirmation_transition_status": "ACTUAL_LVGL_HOST_PASS_PHYSICAL_PANEL_PENDING",
+    "camera_recovery_status": "ORDINARY_WAKE_PASS_FRESH_SAME_BOOT_POST_PROVISION_RETEST_PENDING",
+    "full177_pair_installed": true,
     "ordinary_camera_smoke": {
-      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
-      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/smoke177-observed001/RESULT.json",
+      "sha256": "a43392d2f07cb81e803a71d115a278b24997064a0793ffdfed6d1b5a577b280d"
+    },
+    "prior176_phone_and_camera_outcome": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/app-flow176-observed001/RESULT.json",
+      "sha256": "042db0354a3beef6227c7b0edf0897f9c1bdcecf165e286a27bb29501cbdac29"
+    },
+    "broad_memory_resolution_claimed": false,
+    "resource_delta_vs176": {
+      "sense": {
+        "size": 288,
+        "static_ram_bytes": 0,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": 284
+      },
+      "lcd": {
+        "size": 432,
+        "static_ram_bytes": 0,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": 432
+      }
     }
   },
   "previous_verified_paired_health_158": {
@@ -7708,5 +7732,143 @@
       "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device175/app-flow175-observed001/RESULT.json",
       "sha256": "6c0fb90be24e2aae1a21ac75b68fbc6e730cdb8865db70ec29fae29770ca7101"
     }
+  },
+  "previous_working_source_176": {
+    "version": "6.4.176",
+    "status": "PRIVATE_PAIRED_176_SDK_VALID_SCOPED_CAMERA_SMOKE_PASS_PHONE_REPROVISION_PENDING",
+    "artifact_source_commit": "770c60aa99e9bb1e498419faebf8d7ca66156fdb",
+    "artifact_source_firmware_tree": "cf90608313357a5e76188bfd3ca2366e6c134f7c",
+    "build_id": "6.4.176-20260917T055849Z-770c60aa99e9",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from770c60a or reviewed descendants.176 moves claim transport to the existing upload worker with fixed snapshots/generation-bound owner-loop application and a finite LCD setup-progress sleep lease. Retain175 provisioning DMA reserve ownership and prior media/OTA fixes. Physical phone reprovisioning and post-provision same-boot camera recovery remain pending.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/RELEASE-PAIR.json",
+      "sha256": "85c60af88cbe8f2bcbc7eb75caac08f996475d5ffbc08184d9a89bbf234bd793"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/host-final001/RESULT.json",
+      "sha256": "f0943b27d323459c950f31dfbb973b8874f093a4a7ce1b2524bc4c856d416429"
+    },
+    "host_suite_count": 15,
+    "retained_host_lineage": "17510-suite and17249-suite receipts/logs retained and reverified. Exactly nine reviewed runtime paths differ from175; unrelated runtime is unchanged apart from generated version identities.",
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "e73a4687537164c362dd2871d9d5e80cba49c4b60a572a696e7b07a50b54dd56"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/SOURCE-SCOPE.json",
+      "sha256": "f4487a377aa3e3f03dbf14a4da7214b4d0315681f1d6ff4f309083e6444bb553"
+    },
+    "stack_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/candidate176-001/STACK-REVIEW.json",
+      "sha256": "eae6e803aaf3d95ac6f6fc10e650d7470092e89bd8263df7c206bc9296f946b6"
+    },
+    "installer_binding": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/BINDING176.json",
+      "sha256": "e253e942bd1e44dbc602c7aa4c717e47813544939e94984945dd4c2a987d298e"
+    },
+    "installed": true,
+    "published": false,
+    "physical_acceptance": false,
+    "phone_join_root_cause_confirmed": false,
+    "installed_firmware_last_observed": {
+      "sense": "6.4.176 app0 SDK VALID",
+      "lcd": "6.4.176 app0 SDK VALID"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/INSTALLATION176-REVIEW.json",
+      "sha256": "dadd8ab56ed76e7a682a1dc959583ba41ad22fa8e8fd433cec7d716ebba65002"
+    },
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
+      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
+    },
+    "paired_sdk_health_passed": true,
+    "current_public_ota_version": "6.4.162",
+    "next_unused_version": "6.4.177",
+    "handoff": "docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md",
+    "limits": [
+      "Fresh intended-owner phone reprovisioning on176 is pending. Host tests and normal camera smoke do not prove the175 full-flow responsiveness defect is physically fixed.",
+      "The20s claim request age is a logical cancellation/result-admission limit, not an asserted20s wall-clock bound on synchronous SDK DNS/TCP/TLS. No measured whole-call-chain or runtime stack high-water pass.",
+      "Initial SDK-health capture was assisted and began about10s after the stroke, already idle-dark/backlight0; no coldboot, full awake UI or scheduled-wake pass.",
+      "One ordinary console Check-in bypassed touch and passed camera/client HTTP upload/coordinated sleep. It was not the same boot after fresh provisioning; camera recovery in that condition remains unqualified.",
+      "Reserve warning after smoke presign (largest9716<16384) is retained alongside175 warm/final-AP-exit warnings. No new regression cause is inferred.",
+      "Application-only LCD-first service preserved LCD174/app1 and Sense175/app1 VALID fallbacks, NVS, partition layouts and SD. No OTA/publication, abrupt power-cut, broad media or full-product acceptance.",
+      "Known late/revived setup arrival during LCD teardown and blocking STA ownership limits remain separately recorded."
+    ],
+    "qualification_limits": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/QUALIFICATION-LIMITS176.json",
+      "sha256": "c4b95e368df6cc853b6c55dd773c9595d3047ef7865a5f0b052d5827005d108f"
+    },
+    "installation_scope": "LCD176/app0 first from174/app1; Sense176/app0 from175/app1",
+    "paired_sdk_health_versions": {
+      "sense": "6.4.176",
+      "lcd": "6.4.176"
+    },
+    "app_provisioning_status": "PENDING_FRESH_INTENDED_OWNER_PHONE_REPROVISIONING",
+    "camera_recovery_status": "ORDINARY_WAKE_SMOKE_PASS_SAME_BOOT_AFTER_PROVISION_UNQUALIFIED",
+    "full176_pair_installed": true,
+    "ordinary_camera_smoke": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
+      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
+    },
+    "subsequent_closed_app_flow": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/app-flow176-observed001/RESULT.json",
+      "sha256": "042db0354a3beef6227c7b0edf0897f9c1bdcecf165e286a27bb29501cbdac29"
+    },
+    "subsequent_outcome": "Phone setup completed responsively; same-boot camera failed twice with no frame. Supersedes earlier pending phone/camera status at this checkpoint."
+  },
+  "previous_device_health_176": {
+    "version": "6.4.176",
+    "status": "PASS_PAIRED_SDK_VALID_ASSISTED_HEALTH_AND_SCOPED_ORDINARY_CAMERA_SMOKE",
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
+      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/INSTALLATION176-REVIEW.json",
+      "sha256": "dadd8ab56ed76e7a682a1dc959583ba41ad22fa8e8fd433cec7d716ebba65002"
+    },
+    "installed": {
+      "sense": "6.4.176 app0 SDK VALID",
+      "lcd": "6.4.176 app0 SDK VALID"
+    },
+    "setup_status": "Previously provisioned state retained; new intended-owner phone reprovisioning on176 is pending.",
+    "ordinary_camera_smoke": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
+      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
+    },
+    "limits": [
+      "Fresh intended-owner phone reprovisioning on176 is pending. Host tests and normal camera smoke do not prove the175 full-flow responsiveness defect is physically fixed.",
+      "The20s claim request age is a logical cancellation/result-admission limit, not an asserted20s wall-clock bound on synchronous SDK DNS/TCP/TLS. No measured whole-call-chain or runtime stack high-water pass.",
+      "Initial SDK-health capture was assisted and began about10s after the stroke, already idle-dark/backlight0; no coldboot, full awake UI or scheduled-wake pass.",
+      "One ordinary console Check-in bypassed touch and passed camera/client HTTP upload/coordinated sleep. It was not the same boot after fresh provisioning; camera recovery in that condition remains unqualified.",
+      "Reserve warning after smoke presign (largest9716<16384) is retained alongside175 warm/final-AP-exit warnings. No new regression cause is inferred.",
+      "Application-only LCD-first service preserved LCD174/app1 and Sense175/app1 VALID fallbacks, NVS, partition layouts and SD. No OTA/publication, abrupt power-cut, broad media or full-product acceptance.",
+      "Known late/revived setup arrival during LCD teardown and blocking STA ownership limits remain separately recorded."
+    ]
+  },
+  "previous_current_validation_blocker_176": {
+    "status": "176_INSTALLED_PHONE_REPROVISION_AND_POST_PROVISION_CAMERA_PENDING",
+    "detail": "Both176 boards are SDK VALID and one ordinary console Check-in capture/client HTTP upload/sleep smoke passed. Fresh intended-owner phone setup has not retested the175 claim/UI delay; same-boot camera recovery after provisioning remains unqualified. Reserve warnings are retained. No full functional acceptance.",
+    "candidate_installed": true,
+    "installed_scope": "LCD176/app0 first from174/app1; Sense176/app0 from175/app1",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/health176-observed001/RESULT.json",
+      "sha256": "b23e9ee7e94674321f50a204cf1516c80ea21f62167fda833a99b67508826615"
+    },
+    "ordinary_camera_smoke": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/smoke176-observed001/RESULT.json",
+      "sha256": "f6da09216bc2ca3a79b01c81f8ace535548c07d39347fd9c2655a7c538e9faec"
+    },
+    "qualification_limits": {
+      "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device176/tools/QUALIFICATION-LIMITS176.json",
+      "sha256": "c4b95e368df6cc853b6c55dd773c9595d3047ef7865a5f0b052d5827005d108f"
+    },
+    "known_separate_limits": [
+      "Late/revived setup during LCD teardown can still race sleep.",
+      "Blocking STA attempt ownership gap remains separately recorded."
+    ]
   }
 }

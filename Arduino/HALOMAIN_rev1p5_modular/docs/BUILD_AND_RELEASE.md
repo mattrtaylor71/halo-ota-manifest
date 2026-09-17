@@ -1,4 +1,4 @@
-> Current installed private pair: **176**, source `770c60a`, both app0 SDK VALID with Sense175/LCD174 app1 fallbacks. Both canonical builds and 15 snapshot suites pass. Assisted health and one console capture/upload/sleep smoke passed within scope; fresh phone provisioning and same-boot camera recovery after setup remain pending. No public release. Continue from reviewed 176 descendants. Read [the handoff](PROVISIONING_JOIN_INVESTIGATION_20260916.md) and `RELEASE_BASELINE.json.current_working_source`.
+> Current installed private pair: **177**, source `ebb0067`, both app1 SDK VALID with both176 app0 fallbacks. Both canonical builds and 19 snapshot suites pass. One ordinary console capture/client upload/instrumented sleep smoke passed; fresh177 phone setup, physical confirmation motion and same-boot camera recovery remain pending. Preserve the reserve warning and probe-induced wake pulse; no broad memory-resolution claim or publication. Continue from reviewed177 descendants. Read [the handoff](PROVISIONING_JOIN_INVESTIGATION_20260916.md) and `RELEASE_BASELINE.json.current_working_source`.
 
 # Build and release from the frozen 6.4.158 baseline
 
