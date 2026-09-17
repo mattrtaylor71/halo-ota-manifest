@@ -168,12 +168,16 @@ static bool sleep_defer_for_media() {
 
 // A live setup session owns the display even if SYNC was missed or cached
 // sleep state is stale. Apply this at the sleep funnel, before the guardian's
-// denial-count escape, and throughout the handshake. An absent peer still
-// expires under the existing RX-stale bound; the guide alone creates no lease.
+// denial-count escape, and throughout the handshake. Connecting/claiming owns
+// the display until its existing absolute progress deadline, even if Sense is
+// busy in network code. Repeated statuses do not extend that deadline. A guide
+// without active progress still uses the existing short RX-stale bound.
 static bool s_sleep_provision_deferred = false;
 static bool sleep_defer_for_provisioning() {
-  if (!provisioning_active || !last_sense_rx_ms ||
-      (uint32_t)((uint32_t)millis() - (uint32_t)last_sense_rx_ms) > SENSE_RX_STALE_MS) return false;
+  const uint32_t now = (uint32_t)millis();
+  if (!provision_flow.progress_sleep_pending(now) &&
+      (!provisioning_active || !last_sense_rx_ms ||
+       uint32_t(now - (uint32_t)last_sense_rx_ms) > SENSE_RX_STALE_MS)) return false;
   s_sleep_provision_deferred = true;
   return true;
 }

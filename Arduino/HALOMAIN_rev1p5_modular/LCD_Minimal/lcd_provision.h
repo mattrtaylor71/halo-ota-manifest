@@ -440,6 +440,7 @@ static void provision_ui_preview(int step) {
 static void provision_ui_qr_timeout() {
   provision_ui_qr_failed = true;
   provision_flow.begin();
+  provision_flow.clear_progress_sleep();
   provision_flow.step = LcdProvisionFlow::Failed;
   provision_ui_render();
 }
