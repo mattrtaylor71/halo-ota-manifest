@@ -140,6 +140,49 @@ static void provision_ui_profile_draw(lv_event_t* e) {
   lv_draw_rect(lv_event_get_draw_ctx(e), &ink, &head);
   lv_draw_rect(lv_event_get_draw_ctx(e), &ink, &shoulders);
 }
+static void provision_ui_success_frame(void* object, int32_t value) {
+  lv_obj_t* page = (lv_obj_t*)object;
+  const lv_opa_t opacity = (lv_opa_t)value;
+  lv_obj_set_style_bg_color(page,
+      lv_color_mix(lv_color_hex(COL_GREEN), lv_color_hex(COL_CREAM), opacity), 0);
+  // Animate existing primitives, not object opacity or transformed layers.
+  // The two cards retain their original fill, border and 85% hard shadow.
+  const int offset = 8 * (255 - value) / 255;
+  const int final_y[] = {52, 113, 225};
+  for (uint32_t i = 0; i < lv_obj_get_child_cnt(page) && i < 3; ++i) {
+    lv_obj_t* child = lv_obj_get_child(page, i);
+    lv_obj_set_y(child, final_y[i] + offset);
+    if (i < 2) {
+      lv_obj_set_style_bg_opa(child, opacity, 0);
+      lv_obj_set_style_border_opa(child, opacity, 0);
+      lv_obj_set_style_shadow_opa(child, (lv_opa_t)(217 * value / 255), 0);
+      lv_obj_t* ink = lv_obj_get_child(child, 0);
+      if (ink) lv_obj_set_style_text_opa(ink, opacity, 0);
+    } else {
+      lv_obj_set_style_text_opa(child, opacity, 0);
+    }
+  }
+}
+static void provision_ui_success_stop() {
+  if (provision_screen) lv_anim_del(provision_screen, provision_ui_success_frame);
+}
+static void provision_ui_success_start() {
+  provision_ui_success_stop();
+  // Install the final primitive styles before allocating the animation. If
+  // memory is tight, keep this fully visible final page without any motion.
+  provision_ui_success_frame(provision_screen, LV_OPA_COVER);
+  lv_mem_monitor_t memory;
+  lv_mem_monitor(&memory);
+  if (memory.free_biggest_size < 1024) return;
+  lv_anim_t anim;
+  lv_anim_init(&anim);
+  lv_anim_set_var(&anim, provision_screen);
+  lv_anim_set_exec_cb(&anim, provision_ui_success_frame);
+  lv_anim_set_values(&anim, LV_OPA_TRANSP, LV_OPA_COVER);
+  lv_anim_set_time(&anim, 360);
+  lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+  if (!lv_anim_start(&anim)) provision_ui_success_frame(provision_screen, LV_OPA_COVER);
+}
 static void provision_ui_render() {
   if (g_ota_screen_active) { provision_ui_deferred = true; return; }
   if (!provision_flow.active()) return;
@@ -149,6 +192,7 @@ static void provision_ui_render() {
   }
   // Delete the previous page's small objects and its owned spinner together.
   // No full-screen canvas or animated transformed layer is allocated.
+  provision_ui_success_stop();
   lv_obj_clean(provision_screen);
   provision_qr = provision_status_label = provision_title_label = NULL;
   provision_ssid_label = provision_url_label = NULL;
@@ -220,16 +264,7 @@ static void provision_ui_render() {
     lv_obj_t* seal = halo_ui_card(provision_screen, 140, 113, 80, 80, COL_GOLD, 40);
     halo_ui_icon(seal, HALO_ICON_CHECK, 14, 14, 48, COL_GREEN);
     provision_ui_label(provision_screen, "Welcome to\nyour assistant", &nunito_28, COL_WHITE, 225, 300);
-    // Small finite fade-in; no moving decoration or full-screen layer.
-    lv_anim_t anim;
-    lv_anim_init(&anim);
-    lv_anim_set_var(&anim, seal);
-    lv_anim_set_exec_cb(&anim, [](void* p, int32_t opa) {
-      lv_obj_set_style_opa((lv_obj_t*)p, opa, 0);
-    });
-    lv_anim_set_values(&anim, 40, 255);
-    lv_anim_set_time(&anim, 320);
-    lv_anim_start(&anim);
+    provision_ui_success_start();
   } else if (step == LcdProvisionFlow::Failed) {
     lv_obj_t* seal = halo_ui_card(provision_screen, 144, 48, 72, 72, COL_RED, 36);
     halo_ui_icon(seal, HALO_ICON_WARNING, 14, 14, 40, COL_WHITE);
@@ -381,6 +416,7 @@ static void hide_provisioning_screen() {
   provision_ui_preview_at_ms = 0;
   provision_flow.close();
   if (provision_screen) {
+    provision_ui_success_stop();
     lv_obj_add_flag(provision_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clean(provision_screen);
   }
@@ -397,6 +433,7 @@ static void provision_ui_suspend_for_ota() {
   provision_ui_deferred = true;
   provision_ui_can_scroll = false;
   if (provision_screen) {
+    provision_ui_success_stop();
     lv_obj_clean(provision_screen);
     lv_obj_add_flag(provision_screen, LV_OBJ_FLAG_HIDDEN);
   }

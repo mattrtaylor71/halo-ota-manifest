@@ -51,6 +51,7 @@ static void *provision_ssid_label,*provision_url_label,*provision_ui_back_btn,*p
 static constexpr int LV_OBJ_FLAG_HIDDEN=1;
 static void lv_obj_add_flag(void*,int){}
 static void lv_obj_clean(void*){}
+static void provision_ui_success_stop(){}
 static void provision_qr_wait_clear(const char*){}
 static void hide_provision_intro_screen(const char*){}
 static void provision_ui_render(){++renders;}
