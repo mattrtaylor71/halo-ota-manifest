@@ -1,5 +1,7 @@
 # Guided kitchen assistant setup — installed private169
 
+> Historical implementation record. For the current 177 flow and iOS integration contract, use [Kitchen assistant provisioning: iOS handoff](PROVISIONING_IOS_HANDOFF_177.md).
+
 This change implements the approved six-screen provisioning design on the LCD. The source starts from private168 and preserves the existing menu artwork, camera/audio recovery, OTA policy, schedule, partitions and stored media. The known168 clock-timeout sleep limitation remains separate.
 
 ## Flow

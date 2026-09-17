@@ -1,6 +1,6 @@
 # Provisioning join investigation — September 16, 2026
 
-Current installed private pair is 177, source `ebb006726a81b947f13fc2dc500c3de9ffd66444`, build `6.4.177-20260917T063649Z-ebb006726a81`. Both canonical builds/artifact checks and 19 snapshot suites pass. Sense and LCD run app1 SDK VALID, retaining both176 app0 fallbacks and protected data. The confirmation page gains a 360ms eased entrance; camera DMA recovery now keeps Wi-Fi off until camera teardown. One ordinary console capture/client upload/instrumented sleep smoke passed. Fresh177 phone setup, the physical confirmation transition and immediate same-boot camera recovery remain pending. The176 phone setup completed responsively, but its same-boot camera failed. Preserve the reserve warning, probe-induced wake pulse and existing qualification limits; no broad memory-resolution or public-release claim. Continue from reviewed177 descendants and read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`.
+Current installed private pair is 177, source `ebb006726a81b947f13fc2dc500c3de9ffd66444`, build `6.4.177-20260917T063649Z-ebb006726a81`. Both canonical builds/artifact checks and 19 snapshot suites pass. Sense and LCD run app1 SDK VALID, retaining both176 app0 fallbacks and protected data. The confirmation page gains a 360ms eased entrance; camera DMA recovery now keeps Wi-Fi off until camera teardown. One ordinary console capture/client upload/instrumented sleep smoke passed. On September 17 the user reported that setup on 177 worked really well. This is user-reported success; a separate instrumented 177 setup/animation capture and immediate same-boot camera recovery check remain pending. See `docs/PROVISIONING_IOS_HANDOFF_177.md` for the current app/device contract. The176 phone setup completed responsively, but its same-boot camera failed. Preserve the reserve warning, probe-induced wake pulse and existing qualification limits; no broad memory-resolution or public-release claim. Continue from reviewed177 descendants and read `docs/PROVISIONING_JOIN_INVESTIGATION_20260916.md` and `RELEASE_BASELINE.json.current_working_source`.
 
 ## Confirmed icon defect and source fix
 
@@ -413,8 +413,12 @@ was performed. Periodic fwinfo probes triggered a stale-awake force wake pulse;
 this is not unattended sleep qualification. Reserve reacquisition after presign
 still warned largest10,740<16,384; no broad memory-resolution claim is made.
 
-Fresh177 intended-owner phone setup, the physical confirmation animation and
-immediate same-boot camera recovery remain **pending**. The ordinary wake does
+On September 17, after the 177 installation, the user reported: “nice! Worked
+really well.” Record this as user-reported provisioning success. No new paired
+log capture or explicit immediate post-provision camera result accompanied that
+report. A separate instrumented setup/animation capture and immediate same-boot
+camera check remain **pending**. The [iOS handoff](PROVISIONING_IOS_HANDOFF_177.md)
+documents the current screens, API contract and app-side improvements. The ordinary wake does
 not qualify the176 post-provision failure. Existing late/revived setup arrival
 during LCD teardown, reserve warnings and logical claim-timeout versus SDK
 wall-clock limits remain recorded. No publication, broad media/OTA/power-cut or

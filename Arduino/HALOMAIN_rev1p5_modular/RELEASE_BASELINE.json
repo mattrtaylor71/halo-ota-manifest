@@ -5990,13 +5990,13 @@
   },
   "current_working_source": {
     "version": "6.4.177",
-    "status": "PRIVATE_PAIRED_177_SDK_VALID_SCOPED_ORDINARY_CAMERA_SMOKE_PASS_PHONE_AND_SAME_BOOT_RETEST_PENDING",
+    "status": "PRIVATE_PAIRED_177_SDK_VALID_USER_REPORTED_SETUP_SUCCESS_SAME_BOOT_CAMERA_RETEST_PENDING",
     "artifact_source_commit": "ebb006726a81b947f13fc2dc500c3de9ffd66444",
     "artifact_source_firmware_tree": "3db9131c47a8a6da86b717b3710609425b96192d",
     "build_id": "6.4.177-20260917T063649Z-ebb006726a81",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from ebb0067 or reviewed descendants.177 adds smooth confirmation entrance and keeps radio off while camera DMA recovery owns it. Preserve176 async claim/LCD progress lease,175 provisioning reserve ownership and prior media/OTA fixes. Fresh177 phone/physical-animation/same-boot camera validation remains pending.",
+    "source_selection": "Continue from ebb0067 or reviewed descendants.177 adds smooth confirmation entrance and keeps radio off while camera DMA recovery owns it. Preserve176 async claim/LCD progress lease,175 provisioning reserve ownership and prior media/OTA fixes. The user reported setup worked well on 177; separate instrumented setup/animation and same-boot camera checks remain pending.",
     "candidate_receipt": {
       "path": "/Users/MattTaylor/halo-provisioning-review-2026-09-16/device177/candidate177-001/RELEASE-PAIR.json",
       "sha256": "a29953bab081858115a20255f819e2f0e5688a88d31e48547c01adc7bf22dfec"
@@ -6048,7 +6048,7 @@
       "Periodic fwinfo probes triggered a stale-awake force wake pulse before coordinated sleep; this is not unattended sleep/wake qualification.",
       "Client presign/PUT HTTP200 and drained queue were observed; no independent backend object readback.",
       "Reserve reacquisition after presign still warned largest10740<16384; retain the warning without a new causal claim.",
-      "Fresh177 intended-owner phone setup, actual confirmation animation and immediate same-boot post-provision camera remain pending.",
+      "The user reported setup worked well on 177; separate instrumented setup/animation and immediate same-boot post-provision camera checks remain pending.",
       "No broad media/OTA/power-cut/full-product acceptance.",
       "Known late/revived setup during LCD teardown and blocking STA ownership limits remain recorded. The20s claim age is logical cancellation/admission, not a measured synchronous SDK wall-clock bound; no runtime stack high-water claim."
     ],
@@ -6061,7 +6061,7 @@
       "sense": "6.4.177",
       "lcd": "6.4.177"
     },
-    "app_provisioning_status": "PENDING_FRESH_177_INTENDED_OWNER_PHONE_SETUP",
+    "app_provisioning_status": "USER_REPORTED_177_SETUP_SUCCESS_NO_NEW_INSTRUMENTED_CAPTURE",
     "confirmation_transition_status": "ACTUAL_LVGL_HOST_PASS_PHYSICAL_PANEL_PENDING",
     "camera_recovery_status": "ORDINARY_WAKE_PASS_FRESH_SAME_BOOT_POST_PROVISION_RETEST_PENDING",
     "full177_pair_installed": true,
@@ -6087,6 +6087,12 @@
         "rtc_slow_bytes": 0,
         "linked_program_bytes": 432
       }
+    },
+    "ios_provisioning_handoff": "docs/PROVISIONING_IOS_HANDOFF_177.md",
+    "user_feedback_20260917": {
+      "source": "User message in the current task after 177 installation",
+      "report": "nice! Worked really well.",
+      "interpretation": "User-reported provisioning success; no separate instrumented setup/animation capture or explicit same-boot camera result accompanied the report."
     }
   },
   "previous_verified_paired_health_158": {
