@@ -35,12 +35,13 @@ def run(baseline=False):
     overlay_signature = ('if (!g_lcd_ota_binary_mode || !s_ota_overlay_pushed)' if baseline
                          else 'if (!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode)')
     overlay = definition(ui, overlay_signature)
-    # Provisioning owns its suspension implementation; keep that scoped change
-    # separate from the exact OTA creation/phase/label/progress preservation.
+    # Preserve exact object creation and suspension. The deliberate static
+    # installation phase is covered by test_lcd_ota_install_frame and native
+    # LVGL pixel QA; it does not change these main-loop exclusion predicates.
     visual_start = '        // Create overlay on first entry'
-    visual_end = '      if (ota_overlay) {\n        lv_obj_move_foreground(ota_overlay);\n      }'
-    assert ui[ui.index(visual_start):ui.index(visual_end)] == old_ui[old_ui.index(visual_start):old_ui.index(visual_end)]
     entry = definition(ui, 'if (!ota_overlay)')
+    old_entry = definition(old_ui, 'if (!ota_overlay)')
+    assert entry[entry.index(visual_start):] == old_entry[old_entry.index(visual_start):]
     motion_stop = '        halo_ui_motion_stop(lv_scr_act());'
     suspension = entry[entry.index(motion_stop):entry.index(visual_start)]
     expected_suspension = motion_stop + '\n' + (
@@ -62,6 +63,7 @@ def run(baseline=False):
 #include <cstdio>
 static std::atomic<bool> g_lcd_ota_uart_receiving{false};
 static bool g_lcd_ota_binary_mode = false;
+INSTALL_FRAME_BOUNDARY
 BASELINE_STATE
 static unsigned renders = 0, unlocks = 0;
 static void lv_timer_handler() { ++renders; }
@@ -109,6 +111,12 @@ int main() {
   puts("PASS current: all 15 loop sites guarded; active flash/binary suppression, mutex release, preflight overlay, delayed-first suppression and post-OTA resume");
 }
 '''.replace('HELPER', helper).replace('RENDER', render).replace('OVERLAY', overlay).replace('BASELINE_MODE', str(baseline).lower()).replace('BASELINE_STATE', 'static bool s_ota_overlay_pushed = false;')
+    harness = harness.replace('INSTALL_FRAME_BOUNDARY', '' if baseline else '''
+static bool install_frame=false;
+static unsigned install_token=0;
+static void* ota_overlay=nullptr;
+static void lcd_ota_install_frame_submit(unsigned,void*){assert(false);}
+''')
     with tempfile.TemporaryDirectory(prefix='halo-lcd-render-') as temp:
         cpp = Path(temp) / 'test.cpp'
         binary = Path(temp) / 'test'

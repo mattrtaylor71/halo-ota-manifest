@@ -22,6 +22,30 @@
 // cadence as a finger. 0 = no tap pending.
 static unsigned long usb_deltouch_tap_due_ms = 0;
 
+// Called only by ui_task with the LVGL mutex held. Keep ownership from the
+// forced full frame through UART inhibition, so another renderer cannot replace
+// the acknowledged frame. UART's existing barrier proves actual DMA completion;
+// a synthetic flush-ready, skipped frame or failed submission is not sufficient.
+static bool lcd_ota_install_frame_visible() {
+  return g_ota_screen_active && g_ui_initialized && g_panel_enabled && g_lvgl_running &&
+      g_backlight_duty > 0 && !g_sleep_transition && !g_lcd_maintenance_headless &&
+      !g_background_wake_dark;
+}
+
+static void lcd_ota_install_frame_submit(uint32_t token, lv_obj_t* overlay) {
+  if (!overlay || !lcd_ota_install_frame_visible() ||
+      !g_lcd_ota_install_frame.active(token, millis())) return;
+  uint32_t before_ok = 0, before_fail = 0, after_ok = 0, after_fail = 0;
+  lcd_bsp_get_flush_submit_stats(&before_ok, &before_fail, nullptr, nullptr);
+  lv_obj_invalidate(overlay);
+  lv_refr_now(nullptr);
+  lcd_bsp_get_flush_submit_stats(&after_ok, &after_fail, nullptr, nullptr);
+  if (after_ok == before_ok || after_fail != before_fail || !lcd_ota_install_frame_visible() ||
+      !g_lcd_ota_install_frame.acknowledge(token, millis())) return;
+  while (g_lcd_ota_install_frame.active(token, millis()) && !g_lcd_ota_uart_receiving)
+    vTaskDelay(pdMS_TO_TICKS(1));
+}
+
 static void ui_task(void *arg) {
   Serial.println("[UI] UI task started");
 
@@ -172,13 +196,15 @@ static void ui_task(void *arg) {
       }
       // Dark designer system surface. Only the display byte counter is a
       // percentage; unknown/preparation and continuation remain indeterminate.
-      bool is_transfer = g_lcd_ota_show_progress && g_lcd_ota_progress_pct >= 0;
+      const uint32_t install_token = g_lcd_ota_install_frame.pending(millis());
+      const bool install_frame = install_token != 0;
+      bool is_transfer = !install_frame && g_lcd_ota_show_progress && g_lcd_ota_progress_pct >= 0;
       bool need_update = false;
       if (is_transfer)
         ota_saw_transfer = true;
       const bool finishing = ota_saw_transfer || g_ota_continuation_hold_start_ms != 0;
       const uint8_t manual_result = g_manual_ota_ui_active ? g_manual_ota_result.load() : 0;
-      const int phase = manual_result ? 2 + manual_result : (is_transfer ? 1 : (finishing ? 2 : 0));
+      const int phase = install_frame ? -2 : manual_result ? 2 + manual_result : (is_transfer ? 1 : (finishing ? 2 : 0));
 
       if (!ota_overlay) {
         // Covered presentation must not keep animating behind this overlay.
@@ -230,14 +256,14 @@ static void ui_task(void *arg) {
             manual_result == 2 ? "Please try again tomorrow." :
             manual_result == 3 ? "The automatic retry stays scheduled." :
             manual_result == 4 ? "Please try again when connected." : "Returning to the menu.";
-        lv_label_set_text(ota_label, manual_result ? result_title : is_transfer
+        lv_label_set_text(ota_label, install_frame ? "Something new is coming" : manual_result ? result_title : is_transfer
                                          ? "Something new is coming"
                                          : (finishing ? "Finishing update" : "Checking for updates"));
-        lv_obj_set_pos(ota_label, 40, is_transfer ? 84 : 196);
-        lv_label_set_text(ota_description, manual_result ? result_detail : is_transfer ? ""
+        lv_obj_set_pos(ota_label, 40, install_frame ? 150 : is_transfer ? 84 : 196);
+        lv_label_set_text(ota_description, install_frame ? "Installing update" : manual_result ? result_detail : is_transfer ? ""
                                                        : (finishing ? "" : "Getting things ready..."));
-        lv_obj_set_pos(ota_description, 50, is_transfer ? 250 : 236);
-        if (!manual_result && (is_transfer || finishing))
+        lv_obj_set_pos(ota_description, 50, install_frame ? 220 : is_transfer ? 250 : 236);
+        if (!install_frame && !manual_result && (is_transfer || finishing))
           lv_obj_add_flag(ota_description, LV_OBJ_FLAG_HIDDEN);
         else
           lv_obj_clear_flag(ota_description, LV_OBJ_FLAG_HIDDEN);
@@ -254,14 +280,14 @@ static void ui_task(void *arg) {
 
       // Never run an overlay animation during binary receive. A static arc
       // remains available for the first frame when progress is not yet known.
-      if (manual_result || is_transfer || g_lcd_ota_binary_mode) {
+      if (install_frame || manual_result || is_transfer || g_lcd_ota_binary_mode) {
         if (ota_spinner) {
           lv_obj_del(ota_spinner);
           ota_spinner = NULL;
         }
-        if (!is_transfer && !manual_result)
+        if (!install_frame && !is_transfer && !manual_result)
           lv_obj_clear_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
-        if (manual_result)
+        if (install_frame || manual_result)
           lv_obj_add_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
       } else {
         lv_obj_add_flag(ota_activity, LV_OBJ_FLAG_HIDDEN);
@@ -290,7 +316,8 @@ static void ui_task(void *arg) {
       // the main loop observes the same receive/binary guard. A PSRAM-backed
       // LVGL flush must not overlap flash erase, write or finalization.
       if (!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode) {
-        lv_timer_handler();
+        if (install_frame) lcd_ota_install_frame_submit(install_token, ota_overlay);
+        else lv_timer_handler();
       }
       example_lvgl_unlock();
       vTaskDelay(pdMS_TO_TICKS(50));

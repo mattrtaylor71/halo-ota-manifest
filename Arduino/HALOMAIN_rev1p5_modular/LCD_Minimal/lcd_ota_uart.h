@@ -28,6 +28,7 @@
 #include "esp_partition.h"
 #include "mbedtls/sha256.h"
 #include "soc/rtc_cntl_reg.h"
+#include "lcd_ota_install_frame.h"
 #include "../halo_ota_demo/firmware/shared/UartOtaProtocol.h"
 #if defined(HALO_OTA_BENCH_CASE)
 #include "../halo_ota_demo/firmware/shared/HaloOtaBenchFaults.h"
@@ -239,19 +240,40 @@ static void lcd_ota_uart_restore_ui(const LcdNvsDeadline& deadline=LcdNvsDeadlin
     Serial.println("[LCD_OTA_UART] OTA flags cleared");
 }
 
-// Inhibit first, then join the current LVGL owner and prove real DMA drain.
-// Retain the original attempt deadline; a refused handoff performs no NVS or
-// inactive-image mutation and uses the existing logical UI cleanup only.
+// Visible updates first submit a truthful static frame on the UI owner. The UI
+// retains that owner until UART inhibits rendering; then the existing barrier
+// proves real DMA drain. Both steps share the original <=500 ms handoff budget.
+// A refused handoff performs no NVS or inactive-image mutation.
 static bool lcd_ota_quiesce_before_begin() {
     s_lcd_ota_state = LCD_OTA_RECEIVING;
-    g_lcd_ota_uart_receiving = true;
+    const uint32_t started = millis();
     const uint32_t elapsed = (uint32_t)(millis() - s_lcd_ota_started_ms);
     const uint32_t remaining = elapsed < s_lcd_ota_budget_ms ? s_lcd_ota_budget_ms - elapsed : 0;
     const uint32_t wait_ms = remaining < 500U ? remaining : 500U;
     Serial.printf("[LCD_OTA_UART] render_quiesce start session=%u budget_ms=%u\n", s_lcd_ota_session_id, wait_ms);
-    const bool ready = lcd_lvgl_quiesce_for_flash(wait_ms);
-    Serial.printf("[LCD_OTA_UART] render_quiesce result=%s session=%u elapsed_ms=%u\n",
+    // Never initialize, wake or relight the panel for a scheduled/headless BEGIN.
+    const bool visible = g_ota_screen_active && !g_lcd_maintenance_headless && !g_background_wake_dark;
+    uint32_t token = 0;
+    bool submitted = !visible;
+    if (visible && wait_ms) {
+        token = g_lcd_ota_install_frame.request(s_lcd_ota_session_id, started, wait_ms);
+        while ((uint32_t)(millis() - started) < wait_ms) {
+            if (g_lcd_ota_install_frame.acknowledged(token, s_lcd_ota_session_id, millis())) {
+                submitted = true;
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+    }
+    // Publish BEFORE joining the UI owner: an acknowledged UI frame keeps its
+    // mutex until it observes this flag (or the request expires/is cancelled).
+    g_lcd_ota_uart_receiving = true;
+    const uint32_t spent = (uint32_t)(millis() - started);
+    const bool ready = submitted && spent < wait_ms && lcd_lvgl_quiesce_for_flash(wait_ms - spent);
+    if (token) g_lcd_ota_install_frame.cancel(token);
+    Serial.printf("[LCD_OTA_UART] render_quiesce result=%s session=%u visible=%u frame_submitted=%u elapsed_ms=%u\n",
                   ready ? "drained" : "refused", s_lcd_ota_session_id,
+                  visible ? 1U : 0U, visible && submitted ? 1U : 0U,
                   (unsigned)(millis() - s_lcd_ota_started_ms));
     if (!ready) {
         lcd_ota_uart_restore_ui(LcdNvsDeadline::fromAttempt(s_lcd_ota_started_ms,s_lcd_ota_budget_ms), false);

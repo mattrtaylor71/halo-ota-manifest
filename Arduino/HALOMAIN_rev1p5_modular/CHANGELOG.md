@@ -1,3 +1,7 @@
+# LCD OTA installation-screen correction — candidate 6.4.187
+
+Before receive inhibition, have the existing UI owner submit a static “Something new is coming” / “Installing update” frame. Preserve the flash/DMA protection and original handoff/attempt deadline; fail before writes if the frame or drain cannot finish. Sense runtime, policy, allowance and daily schedule are unchanged. Build and device acceptance are pending. [Design and evidence](docs/OTA_UI_HANDOFF_187_20260917.md).
+
 # September17 physical manual186 result
 
 Both185→186 OTA transfers and app0 SDKVALID boot checks passed after the user pressed the actual button. Native policy resolved; Home returned and both boards slept with02:00Pacific preserved. UI presentation failed: receive inhibition freezes the preceding Checking screen during LCD transfer. This is recorded separately and remains unfixed. [Evidence and scope](docs/MANUAL_OTA_186_20260917.md).

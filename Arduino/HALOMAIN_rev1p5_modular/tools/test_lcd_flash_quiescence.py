@@ -63,6 +63,7 @@ def main():
 #include <mutex>
 #include <thread>
 #include <algorithm>
+#include "lcd_ota_install_frame.h"
 using namespace std::chrono;
 static auto epoch=steady_clock::now();
 static uint32_t millis(){return duration_cast<milliseconds>(steady_clock::now()-epoch).count();}
@@ -89,7 +90,7 @@ static uint32_t s_flush_dma_pending=0,flush_outstanding_count=0;
 static unsigned long s_flush_start_ms=0;
 static uint32_t s_flush_submit_ok=0,s_flush_submit_fail=0,flush_fail_count=0;
 static int s_flush_soft_fault=0;
-static bool display_reset_requested=false,g_sleep_transition=false;
+static bool display_reset_requested=false,g_sleep_transition=false,g_background_wake_dark=false;
 static unsigned ready_calls=0;
 static void lv_disp_flush_ready(lv_disp_drv_t*){++ready_calls;}
 using esp_err_t=int;
@@ -208,7 +209,7 @@ int main(){
     harness = harness.replace('BASELINE_ENABLED', str(bool(args.baseline_root)).lower()).replace('OLD_HANDOFF',old_handoff)
     with tempfile.TemporaryDirectory(prefix='halo-lcd-quiesce-') as temp:
         cpp=Path(temp)/'test.cpp';exe=Path(temp)/'test';cpp.write_text(harness)
-        subprocess.run(['c++','-std=c++17','-pthread','-Wall','-Wextra',str(cpp),'-o',str(exe)],check=True)
+        subprocess.run(['c++','-std=c++17','-pthread','-Wall','-Wextra','-I',str(ROOT/'LCD_Minimal'),str(cpp),'-o',str(exe)],check=True)
         subprocess.run([str(exe)],check=True,timeout=10)
     print('PASS actual BEGIN order/rejection, watchdog placement and main-loop owner guards')
 

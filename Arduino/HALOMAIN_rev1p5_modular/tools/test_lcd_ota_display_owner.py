@@ -84,6 +84,12 @@ static void example_lvgl_unlock(){assert(owns_lvgl);owns_lvgl=false;lvgl.unlock(
 static void lcd_timer_receiver_wait_release(const char*){}
 static void lcd_set_backlight_binary(bool on,const char*){++backlights;g_backlight_duty=on?128:0;}
 static void lv_timer_handler(){assert(owns_lvgl&&g_panel_enabled);++renders;}
+// This suite owns the independent ordinary render/owner boundary. The actual
+// token/frame-submit handshake is exercised by test_lcd_ota_install_frame.py.
+static bool install_frame=false;
+static uint32_t install_token=0;
+static void* ota_overlay=nullptr;
+static void lcd_ota_install_frame_submit(uint32_t,void*){assert(false);}
 static struct {template<class...T>void printf(const char*,T...){}void println(const char*){}}Serial;
 static void lcd_panel_set_power(bool on){
  assert(on);++panel_calls;if(!owns_lvgl)++owner_violations;
