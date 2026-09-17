@@ -1,12 +1,12 @@
 #pragma once
 #include "sense_media_network.h"
 
-// The saved-media scope and atomic user pause are owned by sense_media_retry.h.
+// The upload scope, input generation and saved pause are owned by sense_media_retry.h.
 // Only the upload worker calls this client's methods/stop(). No other task
 // closes a socket or tears down Wi-Fi underneath an active SDK operation.
 class SenseMediaRetryClient : public WiFiClientSecure {
  public:
-  SenseMediaRetryClient() : background_(media_retry_network_active()) {
+  SenseMediaRetryClient() : background_(media_upload_network_active()) {
     if (background_) setHandshakeTimeout(8);
   }
   using WiFiClientSecure::connect;
@@ -71,7 +71,7 @@ class SenseMediaRetryClient : public WiFiClientSecure {
 };
 
 static bool media_retry_network_wait(uint32_t delay_ms) {
-  if (!media_retry_network_active()) { delay(delay_ms); return true; }
+  if (!media_upload_network_active()) { delay(delay_ms); return true; }
   const uint32_t started = millis();
   while (uint32_t(millis() - started) < delay_ms) {
     if (media_retry_network_cancelled()) return false;

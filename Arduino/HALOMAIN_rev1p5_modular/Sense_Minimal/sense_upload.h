@@ -97,9 +97,9 @@ static void http_queue_unlock(const char* label, uint32_t job_id) {
   }
   if (wifi_recover_requested) {
     wifi_recover_requested = false;
-    // Saved-media recovery never owns a blocking radio reset. Its original
-    // remains durable while the normal Wi-Fi owner retries association.
-    if (!media_retry_network_active())
+    // Saved recovery and an upload cancelled by new input must not start a
+    // blocking radio reset during cleanup. The Wi-Fi owner can retry later.
+    if (!media_retry_network_active() && !media_retry_network_cancelled())
       wifi_hard_reset_and_reconnect("deferred_recover", 15000);
   }
 }

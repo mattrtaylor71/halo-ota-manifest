@@ -79,6 +79,7 @@ static void xSemaphoreGive(void*){}
 static std::vector<size_t> write_sizes;
 static bool media_retry_network_active(){return background&&task==owner;}
 static bool media_retry_network_cancelled(){return media_retry_network_active()&&paused;}
+static bool media_upload_network_active(){return media_retry_network_active();}
 static bool foreground_active=false,dish_scan_inflight=false,voice_recording_active=false;
 static bool upload_worker_holding_in_place=false,g_upload_flush_requested=false;
 static const char* foreground_reason="foreground_active";

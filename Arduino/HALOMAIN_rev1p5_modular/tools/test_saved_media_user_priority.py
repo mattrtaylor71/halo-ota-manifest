@@ -22,7 +22,7 @@ def harness():
     pause=definition(worker,'      if ((job.from_voice_sd || job.from_image_sd || job.from_persisted) &&')
     ticks=definition(voice,'static void sense_voice_spool_replay_tick(')+'\n'+definition(image,'static void sense_image_spool_replay_tick(')
     state=(ROOT/'Sense_Minimal/sense_media_retry.h').read_text()
-    network=definition(state,'static bool media_retry_network_active(')+'\n'+definition(state,'class MediaRetryNetworkScope {')+';\n'
+    network=state[state.index('static std::atomic<bool> g_media_retry_user_paused'):state.index('static void media_retry_load_locked()')]
     guard='if (is_dish && !media_retry_network_active())'
     ui_guards=[definition(worker[m.start():],guard) for m in re.finditer(re.escape(guard),worker)]
     assert len(ui_guards)==4,'All four saved dish failure routes require foreground UI isolation'
@@ -35,17 +35,16 @@ def harness():
 #include <cstring>
 #include <vector>
 #include "Sense_Minimal/sense_ops.h"
+#include "Sense_Minimal/sense_user_activity.h"
 #include "halo_common/MediaRetryPolicy.h"
 #define HALO_SENSE_PROD_WRAPPER 1
 static unsigned checks=0;
 static void check(bool ok,const char* why){++checks;if(!ok){fprintf(stderr,"FAIL %s\n",why);abort();}}
 static uint32_t clock_ms=1000;
 static uint32_t millis(){return clock_ms;}
-static std::atomic<bool> g_media_retry_user_paused{false};
 using TaskHandle_t=void*;
 static int worker_task;
 static TaskHandle_t xTaskGetCurrentTaskHandle(){return &worker_task;}
-static std::atomic<TaskHandle_t> g_media_retry_network_owner{nullptr};
 ''' + network + r'''
 static bool g_media_spool_replayed_this_boot=false,g_voice_spool_replayed_this_boot=false,g_image_spool_replayed_this_boot=false;
 static bool upload_inflight=false,foreground_active=false,voice_recording_active=false,dish_scan_inflight=false,scan_ui_inflight=false;

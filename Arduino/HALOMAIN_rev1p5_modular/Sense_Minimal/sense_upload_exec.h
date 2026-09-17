@@ -31,8 +31,128 @@
 
 #include "sense_media_network.h"
 
+// S3 normally returns Content-Length: 0. Finish when framing proves the reply
+// complete instead of holding the HTTP owner for an unconditional two seconds.
+// Unknown-length bodies still require EOF; incomplete/malformed replies never
+// acknowledge custody. Keep both parser memory and the existing drain bounded.
+struct UploadPutResponseFraming {
+  enum Phase { HEADERS, BODY, CLOSE_BODY, CHUNK_SIZE, CHUNK_DATA,
+               CHUNK_CR, CHUNK_LF, TRAILERS, DONE, INVALID };
+  Phase phase = HEADERS;
+  char line[256] = {};
+  size_t line_size = 0;
+  uint32_t header_bytes = 0, remaining = 0;
+  bool have_length = false, chunked = false;
+  int status;
+  explicit UploadPutResponseFraming(int code) : status(code) {}
+
+  static bool number(const char* p, unsigned base, uint32_t& value,
+                     bool allow_extension = false) {
+    value = 0;
+    bool digit_seen = false;
+    for (; *p; ++p) {
+      if (allow_extension && *p == ';') return digit_seen;
+      unsigned digit = *p >= '0' && *p <= '9' ? unsigned(*p - '0') :
+                       *p >= 'a' && *p <= 'f' ? unsigned(*p - 'a' + 10) :
+                       *p >= 'A' && *p <= 'F' ? unsigned(*p - 'A' + 10) : 16U;
+      if (digit >= base || value > (UINT32_MAX - digit) / base) return false;
+      value = value * base + digit;
+      digit_seen = true;
+    }
+    return digit_seen;
+  }
+  void finish_line() {
+    line[line_size] = 0;
+    if (phase == CHUNK_SIZE) {
+      if (!number(line, 16, remaining, true)) phase = INVALID;
+      else phase = remaining ? CHUNK_DATA : TRAILERS;
+    } else if (phase == TRAILERS) {
+      if (!line_size) phase = DONE;
+      else if (!strchr(line, ':')) phase = INVALID;
+    } else if (!line_size) {
+      if ((chunked && have_length) || status < 200 || status > 599) phase = INVALID;
+      else if (status == 204 || status == 304) phase = DONE;
+      else if (chunked) phase = CHUNK_SIZE;
+      else if (have_length) phase = remaining ? BODY : DONE;
+      else phase = CLOSE_BODY;
+    } else {
+      char* colon = strchr(line, ':');
+      if (!colon) { phase = INVALID; return; }
+      *colon = 0;
+      for (char* p = line; *p; ++p) if (*p >= 'A' && *p <= 'Z') *p += 'a' - 'A';
+      char* value = colon + 1;
+      while (*value == ' ' || *value == '\t') ++value;
+      char* end = value + strlen(value);
+      while (end > value && (end[-1] == ' ' || end[-1] == '\t')) *--end = 0;
+      if (!strcmp(line, "content-length")) {
+        uint32_t length = 0;
+        if (!number(value, 10, length) || (have_length && remaining != length)) phase = INVALID;
+        else { have_length = true; remaining = length; }
+      } else if (!strcmp(line, "transfer-encoding")) {
+        for (char* p = value; *p; ++p) if (*p >= 'A' && *p <= 'Z') *p += 'a' - 'A';
+        if (chunked || strcmp(value, "chunked")) phase = INVALID;
+        else chunked = true;
+      }
+    }
+    line_size = 0;
+  }
+  void consume(char c) {
+    if (phase == DONE || phase == INVALID) return;
+    if (phase == BODY || phase == CHUNK_DATA) {
+      if (--remaining == 0) phase = phase == BODY ? DONE : CHUNK_CR;
+    } else if (phase == CLOSE_BODY) {
+      return;
+    } else if (phase == CHUNK_CR) {
+      phase = c == '\r' ? CHUNK_LF : INVALID;
+    } else if (phase == CHUNK_LF) {
+      phase = c == '\n' ? CHUNK_SIZE : INVALID;
+    } else {
+      if (++header_bytes > 8192) { phase = INVALID; return; }
+      if (c == '\n') {
+        if (line_size == 0 || line[line_size - 1] != '\r') { phase = INVALID; return; }
+        --line_size;
+        finish_line();
+      } else if (c == 0 || line_size >= sizeof(line) - 1) {
+        phase = INVALID;
+      } else {
+        line[line_size++] = c;
+      }
+    }
+  }
+  bool complete(bool eof) const { return phase == DONE || (eof && phase == CLOSE_BODY); }
+};
+
+static bool upload_put_drain_response(SenseMediaRetryClient& tls, int code,
+                                      uint32_t deadline_ms, String& response) {
+  UploadPutResponseFraming framing(code);
+  const uint32_t started = millis();
+  while (uint32_t(millis() - started) < 2000 && !deadline_expired(deadline_ms)) {
+    if (media_retry_network_cancelled()) return false;
+    const int available = tls.available();
+    if (media_retry_network_cancelled()) return false;
+    if (available > 0) {
+      const int value = tls.read();
+      if (media_retry_network_cancelled()) return false;
+      if (value < 0) { delay(1); continue; }
+      if (response.length() < 1024) response += char(value);
+      framing.consume(char(value));
+      if (framing.phase == UploadPutResponseFraming::INVALID) return false;
+      if (framing.complete(false)) return true;
+    } else {
+      const bool connected = tls.connected();
+      if (media_retry_network_cancelled()) return false;
+      if (!connected && tls.available() == 0) {
+        if (media_retry_network_cancelled()) return false;
+        return framing.complete(true);
+      }
+      delay(10);
+    }
+  }
+  return false;
+}
+
 static bool upload_put_reset_with_budget(const char* reason, uint32_t deadline_ms) {
-  if (media_retry_network_active()) return false;
+  if (media_retry_network_cancelled() || media_retry_network_active()) return false;
   const uint32_t timeout_ms = sense_media_network::reset_wait_timeout_ms(
       deadline_remaining_ms(deadline_ms));
   if (timeout_ms < ACTION_MIN_REMAINING_MS) return false;
@@ -510,23 +630,14 @@ static bool put_to_presigned_url(const String& url,
   }
 
   String resp;
-  const unsigned long resp_deadline = millis() + 2000;
-  while (millis() < resp_deadline) {
-    if (media_retry_network_cancelled()) {
-      tls.stop(); http_queue_unlock("UPLOAD_PUT", effective_job); return false;
-    }
-    while (tls.available()) {
-      char c = (char)tls.read();
-      if (resp.length() < 1024) {
-        resp += c;
-      }
-    }
-    if (!tls.available()) {
-      delay(10);
-    }
-  }
+  const bool response_complete = upload_put_drain_response(tls, code, deadline_ms, resp);
   tls.stop();
   http_queue_unlock("UPLOAD_PUT", effective_job);
+  if (!response_complete) {
+    // A status without a complete reply is not a safe success/412 receipt.
+    // Keep the original media for an independent, same-identity retry.
+    code = -1;
+  }
 
   if (response_code) *response_code = code;
   Serial.printf("[UPLOAD] PUT status: %d\n", code);

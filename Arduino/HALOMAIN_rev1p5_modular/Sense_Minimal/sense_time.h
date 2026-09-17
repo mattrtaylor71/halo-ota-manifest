@@ -65,6 +65,12 @@ static const uint32_t SENSE_NTP_MANUAL_RETRY_MS = 40000;
 static bool g_ntp_manual_retry_requested = false;  // g_time_mutex
 static bool g_ntp_scheduled_retry_requested = false;  // g_time_mutex
 static uint32_t g_ntp_scheduled_retry_deadline_ms = 0;
+// Fresh captures share the SAME single secondary generation. They may use a
+// shorter opportunity without creating manual OTA intent or extending a live
+// manual/calendar attempt. Twenty seconds permits the alternate server's
+// startup jitter plus a full receive window; this is async owner-loop work.
+static const uint32_t SENSE_NTP_MEDIA_RETRY_MS = 20000;
+static bool g_ntp_media_retry_requested = false;  // g_time_mutex
 static std::atomic<bool> g_ntp_manual_retry_used{false};
 static std::atomic<uint32_t> g_ntp_resolve_until_ms{0};
 static std::atomic<uint32_t> g_ntp_manual_resolve_until_ms{0};
@@ -224,6 +230,16 @@ static void sense_ntp_request_manual_retry() {
       !g_ntp_manual_retry_used.load()) g_ntp_manual_retry_requested = true;
 }
 
+// Owner loop only, after observing a fresh FIFO head. Queue changes/high-water
+// flushes need not block on this request: upload still requires a fresh reply
+// and otherwise retains custody. Repeated observations cannot restart a used
+// generation or extend its deadline.
+static void sense_ntp_request_media_retry() {
+  std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
+  if (!g_ntp_sleep_quiesced && !g_ntp_fresh_this_boot.load() &&
+      !g_ntp_manual_retry_used.load()) g_ntp_media_retry_requested = true;
+}
+
 // The production coordinator supplies an already qualified calendar wake and
 // the earlier of its original readiness deadlines. Repeated service can only
 // shorten that deadline, never renew the secondary opportunity.
@@ -242,17 +258,20 @@ static void sense_ntp_request_scheduled_retry(uint32_t deadline_ms) {
 // mailbox drained. Missing addresses get new static DNS slots/deadline; late
 // callbacks keep their original arguments and can never fill these new slots.
 static void sense_ntp_try_manual_retry_locked(uint32_t now_ms) {
-  if ((!g_ntp_manual_retry_requested && !g_ntp_scheduled_retry_requested) ||
+  if ((!g_ntp_manual_retry_requested && !g_ntp_scheduled_retry_requested &&
+       !g_ntp_media_retry_requested) ||
       g_ntp_manual_retry_used.load() ||
       !g_ntp_attempt_finished || g_ntp_sleep_quiesced ||
       g_ntp_fresh_this_boot.load() || g_ntp_received_epoch.load() ||
       g_ntp_attempt_budget_ms != SENSE_NTP_ATTEMPT_MS) return;
-  const bool scheduled = !g_ntp_manual_retry_requested;
-  uint32_t retry_budget = SENSE_NTP_MANUAL_RETRY_MS;
+  const int32_t scheduled_left = g_ntp_scheduled_retry_requested
+      ? (int32_t)(g_ntp_scheduled_retry_deadline_ms - now_ms) : 0;
+  const bool scheduled = !g_ntp_manual_retry_requested && scheduled_left > 0;
+  const bool media = !g_ntp_manual_retry_requested && !scheduled;
+  if (media && !g_ntp_media_retry_requested) return;
+  uint32_t retry_budget = media ? SENSE_NTP_MEDIA_RETRY_MS : SENSE_NTP_MANUAL_RETRY_MS;
   if (scheduled) {
-    const int32_t left = (int32_t)(g_ntp_scheduled_retry_deadline_ms - now_ms);
-    if (left <= 0) return;
-    if ((uint32_t)left < retry_budget) retry_budget = (uint32_t)left;
+    if ((uint32_t)scheduled_left < retry_budget) retry_budget = (uint32_t)scheduled_left;
   }
   sense_ntp_stop_locked();  // closes old UDP client/timers under TCPIP lock
   g_ntp_resolve_until_ms.store(0);  // original DNS generation stays closed
@@ -269,13 +288,15 @@ static void sense_ntp_try_manual_retry_locked(uint32_t now_ms) {
       (retry_budget < SENSE_NTP_ATTEMPT_MS ? retry_budget : SENSE_NTP_ATTEMPT_MS));
   g_ntp_manual_retry_requested = false;
   g_ntp_scheduled_retry_requested = false;
+  g_ntp_media_retry_requested = false;
   g_ntp_attempt_start_ms = now_ms;
   g_ntp_dns_held_ms = 0;
   g_ntp_dns_hold_start_ms = now_ms;
   g_ntp_attempt_budget_ms = retry_budget;
   g_ntp_attempt_finished = false;
   Serial.printf("[TIME] %s SNTP retry generation=1 budget_ms=%lu cached_numeric=%u fresh_dns_slots=%u\n",
-                scheduled ? "scheduled" : "manual", (unsigned long)retry_budget, cached, 3U - cached);
+                scheduled ? "scheduled" : media ? "media" : "manual",
+                (unsigned long)retry_budget, cached, 3U - cached);
 }
 
 static void sense_ntp_begin() {

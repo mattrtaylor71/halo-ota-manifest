@@ -2,6 +2,7 @@
 #include <mutex>
 #include <atomic>
 #include "../halo_common/MediaRetryPolicy.h"
+#include "sense_user_activity.h"
 
 // Protected across the upload worker and main task. NVS contains a compact
 // hint only; SD/SPIFFS records and their bound cloud receipts remain authority.
@@ -19,29 +20,64 @@ static bool g_media_retry_timer_boot = false;
 // Fresh captures can still flush safely when that user session ends.
 static std::atomic<bool> g_media_retry_user_paused{false};
 static std::atomic<TaskHandle_t> g_media_retry_network_owner{nullptr};
+static std::atomic<bool> g_media_retry_network_saved{false};
+static std::atomic<uint32_t> g_media_retry_network_generation{0};
 
 // Socket cancellation is performed only by the task that owns that socket.
 // A foreground request on another task must never inherit background cancel.
-static bool media_retry_network_active() {
+static bool media_upload_network_active() {
   const TaskHandle_t owner = g_media_retry_network_owner.load();
   return owner && owner == xTaskGetCurrentTaskHandle();
 }
+// Keep saved-replay policy separate from fresh uploads: this predicate also
+// controls retry budgets, radio recovery and foreground error reporting.
+static bool media_retry_network_active() {
+  return media_upload_network_active() && g_media_retry_network_saved.load();
+}
 static bool media_retry_network_cancelled() {
-  return g_media_retry_user_paused.load() && media_retry_network_active();
+  return media_upload_network_active() &&
+      ((g_media_retry_network_saved.load() && g_media_retry_user_paused.load()) ||
+       sense_user_action_generation() != g_media_retry_network_generation.load());
 }
 class MediaRetryNetworkScope {
  public:
-  explicit MediaRetryNetworkScope(const UploadJob& job)
-      : active_(job.from_voice_sd || job.from_image_sd || job.from_persisted) {
-    if (active_) g_media_retry_network_owner.store(xTaskGetCurrentTaskHandle());
+  explicit MediaRetryNetworkScope(const UploadJob& job) {
+    const TaskHandle_t task = xTaskGetCurrentTaskHandle();
+    const uint32_t generation = sense_user_action_generation();
+    const bool saved = job.from_voice_sd || job.from_image_sd || job.from_persisted;
+    TaskHandle_t expected = nullptr;
+    if (task && g_media_retry_network_owner.compare_exchange_strong(expected, task)) {
+      // Only this task consults these fields after publishing its ownership.
+      // Snapshot before claiming so an input racing admission is not lost.
+      g_media_retry_network_generation.store(generation);
+      g_media_retry_network_saved.store(saved);
+      active_ = outermost_ = true;
+    } else if (task && expected == task) {
+      // Nested work inherits the original input generation; opening a nested
+      // scope must not revive an upload already cancelled by new user input.
+      previous_saved_ = g_media_retry_network_saved.load();
+      g_media_retry_network_saved.store(previous_saved_ || saved);
+      active_ = true;
+    }
+    // A foreign task cannot steal this worker's socket ownership or cancel
+    // its own foreground HTTP because another task is doing saved recovery.
   }
   ~MediaRetryNetworkScope() {
-    if (active_) g_media_retry_network_owner.store(nullptr);
+    if (!active_) return;
+    if (outermost_) {
+      g_media_retry_network_saved.store(false);
+      g_media_retry_network_generation.store(0);
+      g_media_retry_network_owner.store(nullptr);
+    } else {
+      g_media_retry_network_saved.store(previous_saved_);
+    }
   }
   MediaRetryNetworkScope(const MediaRetryNetworkScope&) = delete;
   MediaRetryNetworkScope& operator=(const MediaRetryNetworkScope&) = delete;
  private:
-  bool active_;
+  bool active_ = false;
+  bool outermost_ = false;
+  bool previous_saved_ = false;
 };
 
 static void media_retry_load_locked() {

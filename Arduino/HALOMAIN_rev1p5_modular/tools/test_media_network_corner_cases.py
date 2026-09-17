@@ -50,7 +50,8 @@ static std::string input_bytes,reply_body;
 static size_t input_offset=0;
 static unsigned ack_checks=0;
 ''')
-    source = replace_once(source, 'static bool media_retry_network_active(){return background&&task==owner;}\nstatic bool media_retry_network_cancelled(){return media_retry_network_active()&&paused;}', r'''
+    source = replace_once(source, 'static bool media_retry_network_active(){return background&&task==owner;}\nstatic bool media_retry_network_cancelled(){return media_retry_network_active()&&paused;}\nstatic bool media_upload_network_active(){return media_retry_network_active();}', r'''
+#include "Sense_Minimal/sense_user_activity.h"
 using TaskHandle_t=void*;
 static TaskHandle_t xTaskGetCurrentTaskHandle(){return reinterpret_cast<void*>(static_cast<uintptr_t>(task));}
 ''' + owner)

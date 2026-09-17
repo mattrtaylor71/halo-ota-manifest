@@ -4127,7 +4127,32 @@ static void ota_control_probe_service() {
   g_control_probe_querying = sense_lcd_ota_query_start(challenge, remaining < 3000 ? remaining : 3000);
 }
 
+// Fresh captures normally wait for the sleep flush. End only an unentered
+// automatic readiness opportunity before its peer/clock waits can hold that
+// same sleep open. This changes RAM ownership, never stored OTA obligations,
+// attempt allowances, force intent, or upload custody.
+static bool ota_yield_automatic_readiness_to_fresh_media() {
+  if (!g_boot_ota_pending || !nvs_capacity_image_valid() ||
+      g_manual_ota_override || g_manual_ota_joined_readiness || g_ota_check_requested ||
+      g_peer_episode_finished || g_ota_check_done || g_peer_gate.entered ||
+      g_lcd_work_budget_live || g_peer_continue_work || g_self_retry_execution ||
+      g_ota_check_in_progress || g_ota_apply_in_progress || g_ota_pending_verify_active ||
+      g_lcd_ota_task_running || g_lcd_ota_proxy_owns_uart || g_lcd_ota_request_active ||
+      (g_ota_simple_proof_started && !g_ota_simple_proof_done)) return false;
+  UploadJob head = {};
+  if (!upload_queue || xQueuePeek(upload_queue, &head, 0) != pdTRUE ||
+      head.from_voice_sd || head.from_image_sd || head.from_persisted) return false;
+  ota_set_last_result("policy_deferred");
+  Serial.println("[OTA_POLICY] deferred reason=fresh_media_pending before_readiness=1");
+  g_ota_check_done = true;
+  g_peer_episode_finished = true;
+  ota_peer_cancel("fresh_media_pending");
+  boot_ota_finish("fresh_media_pending");
+  return true;
+}
+
 static void ota_peer_service() {
+  if (ota_yield_automatic_readiness_to_fresh_media()) return;
   coord_credit_cancel_future_notice();
   uint64_t until_due_ms = 0;
   if (g_lcd_timer_notice.pending &&
@@ -5426,6 +5451,7 @@ static bool ota_clock_ready_before_work() {
 static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   // Do not consume debt/requests or begin a new OTA before local VALID.
   if (!nvs_capacity_image_valid()) return;
+  if (ota_yield_automatic_readiness_to_fresh_media()) return;
   if (g_peer_episode_finished) { g_ota_check_done = true; return; }
   if (g_ota_check_done || g_ota_apply_in_progress) {
     return;

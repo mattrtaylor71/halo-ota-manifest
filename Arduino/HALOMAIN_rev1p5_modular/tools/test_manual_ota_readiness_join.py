@@ -45,6 +45,8 @@ static unsigned long g_manual_ota_override_until_ms=0,g_manual_ota_request_ms=0,
 static const unsigned long MANUAL_OTA_OVERRIDE_TTL_MS=300000;
 static bool g_ota_check_requested=false,g_ota_check_in_progress=false,g_ota_apply_in_progress=false;
 static bool g_lcd_ota_task_running=false,g_lcd_ota_proxy_owns_uart=false;
+static bool g_lcd_ota_request_active=false,g_ota_pending_verify_active=false;
+static bool g_ota_simple_proof_started=false,g_ota_simple_proof_done=false;
 static bool g_self_retry_boot=false,g_self_retry_execution=false,g_ota_skip_logged=false,g_lcd_ota_done=false,g_lcd_ota_attempted_this_window=false;
 static char g_lcd_work_schedule[64]{},g_last_ota_result[32]="none";
 static bool g_maintenance_mode=false,g_maintenance_handled=false;
@@ -124,6 +126,7 @@ static void reset_join(){
  g_manual_ota_override_until_ms=g_manual_ota_request_ms=g_manual_ota_wifi_retry_ms=0;
  g_ota_check_requested=g_ota_check_in_progress=g_ota_apply_in_progress=false;
  g_lcd_ota_task_running=g_lcd_ota_proxy_owns_uart=false;g_self_retry_boot=g_self_retry_execution=false;
+ g_lcd_ota_request_active=g_ota_pending_verify_active=g_ota_simple_proof_started=g_ota_simple_proof_done=false;
  g_peer_gate.entered=false;g_peer_gate.deadline_ms=now_ms+30000;g_boot_ota_deadline_ms=now_ms+60000;
  g_lcd_work_budget_live=g_peer_continue_work=false;current_job={};upload_inflight=http_inflight=false;
  voice_recording_active=scan_ui_inflight=dish_scan_inflight=foreground_active=upload_worker_has_parked_job=false;
@@ -142,10 +145,32 @@ static unsigned long g_upload_hold_since_ms=0,UPLOAD_HOLD_MAX_MS=600000;
 static const uint32_t UPLOAD_HOLD_HIGHWATER=8;
 struct UploadJob{bool from_voice_sd=false,from_image_sd=false,from_persisted=false;};
 static void* upload_queue=(void*)1;static constexpr int pdTRUE=1;
-static int xQueuePeek(void*,UploadJob*job,int){*job=UploadJob{};return pdTRUE;}
+static UploadJob queue_head{};static bool peek_fails=false;
+static unsigned peek_calls=0;
+static int xQueuePeek(void*,UploadJob*job,int){++peek_calls;if(!upload_count||peek_fails)return 0;*job=queue_head;return pdTRUE;}
 static struct{bool load(){return false;}}g_media_retry_user_paused;
 static bool foreground_priority_active(uint32_t,const char**){return false;}
 ''' + definition(worker, 'static bool uploads_held_for_session(') + '\n'
+    source += definition(wrapper, 'static bool ota_yield_automatic_readiness_to_fresh_media()') + '\n'
+    early_gate = 'if (ota_yield_automatic_readiness_to_fresh_media()) return;'
+    assert service.index(early_gate) < service.index('coord_credit_cancel_future_notice()')
+    assert common.index(early_gate) < common.index('ota_peer_ready()')
+    loop = definition(wrapper, 'void halo_prod_loop()')
+    assert loop.index('ota_peer_service();') < loop.index('if (sense_action_inflight())')
+    # Execute the exact service-entry block up to its existing coordinator
+    # boundary. The old ordering reaches that boundary and leaves the sleep
+    # hold live whenever queued media prevents peer readiness.
+    prefix = service[service.index('{') + 1:service.index('  coord_credit_cancel_future_notice();')]
+    source += r'''
+static unsigned later_readiness_calls=0;
+static void automatic_readiness_service(){
+''' + prefix + r'''
+ ++later_readiness_calls;
+}
+static void reset_automatic(){reset_join();queue_head={};peek_fails=false;peek_calls=0;
+ upload_queue=(void*)1;upload_count=1;later_readiness_calls=0;g_upload_flush_requested=false;
+}
+'''
 
     if negative is not None:
         return source + r'''
@@ -156,6 +181,65 @@ int main(){reset_join();const auto before=sense_policy::store.bytes;halo_prod_re
 '''
     return source + r'''
 int main(){using namespace sense_policy;using namespace durable_ota;
+ // Unentered automatic readiness yields before unrelated peer/clock work,
+ // including an unavailable peer, stale clock, and an existing bounded lock.
+ for(unsigned ready=0;ready<2;++ready){for(unsigned fresh=0;fresh<2;++fresh){
+  reset_automatic();g_peer_gate.ready=ready;clock_fresh=fresh;
+  const auto before=store.bytes;const auto credit_before=g_coord_credit;
+  const auto target_before=state_record.target;const bool debt_before=debt_value;
+  const auto boot_dead=g_boot_ota_deadline_ms,peer_dead=g_peer_gate.deadline_ms;
+  const auto pending=std::string(g_coord_pending),completion=std::string(g_coord_completion_target);
+  CHECK(uploads_held_for_session(nullptr));automatic_readiness_service();
+  CHECK(later_readiness_calls==0&&!g_boot_ota_pending&&!g_peer_gate.active&&g_peer_episode_finished&&g_ota_check_done);
+  CHECK(wire_result=="policy_deferred"&&at("result:policy_deferred")<at("terminal_unlock"));
+  CHECK(upload_count==1&&!g_upload_flush_requested&&store.bytes==before);
+  CHECK(!memcmp(&credit_before,&g_coord_credit,sizeof(credit_before))&&!memcmp(&target_before,&state_record.target,sizeof(target_before)));
+  CHECK(debt_value==debt_before&&pending==g_coord_pending&&completion==g_coord_completion_target);
+  CHECK(g_boot_ota_deadline_ms==boot_dead&&g_peer_gate.deadline_ms==peer_dead&&OtaIntent::clears==0&&OtaIntent::updates==0);
+  CHECK(clock_fresh==bool(fresh));
+  const auto event_count=events.size();CHECK(!ota_yield_automatic_readiness_to_fresh_media()&&events.size()==event_count);
+ }}
+ // Before the first peer query, fresh media needs no peer lock/round trip.
+ reset_automatic();g_peer_gate.active=g_peer_gate.locked=g_peer_gate.ready=false;
+ automatic_readiness_service();CHECK(later_readiness_calls==0&&wire_result.empty()&&!g_boot_ota_pending);
+ // An old target awaiting recovery is retained byte-for-byte, including its
+ // exhausted counters and reserved work; readiness is not resolution/credit.
+ {reset();const auto old_target_record=state_record;reset_automatic();
+  state_record=old_target_record;uint8_t raw[kRecordBytes];CHECK(encode(state_record,raw));
+  store.bytes.assign(raw,raw+sizeof(raw));const auto before=store.bytes;
+  strcpy(g_coord_completion_target,old_target_record.target.version);OtaIntent::force=true;
+  automatic_readiness_service();CHECK(!g_boot_ota_pending&&later_readiness_calls==0);
+  CHECK(store.bytes==before&&!memcmp(&state_record,&old_target_record,sizeof(state_record)));
+  CHECK(!strcmp(g_coord_completion_target,old_target_record.target.version)&&debt_value&&OtaIntent::force&&OtaIntent::clears==0);
+ }
+ // All active ownership and explicit/manual requests retain their old path.
+ for(unsigned i=0;i<18;++i){reset_automatic();switch(i){
+  case 0:g_boot_ota_pending=false;break;case 1:local_valid=false;break;
+  case 2:g_manual_ota_override=true;break;case 3:g_manual_ota_joined_readiness=true;break;
+  case 4:g_ota_check_requested=true;break;case 5:g_peer_episode_finished=true;break;
+  case 6:g_ota_check_done=true;break;case 7:g_peer_gate.entered=true;break;
+  case 8:g_lcd_work_budget_live=true;break;case 9:g_peer_continue_work=true;break;
+  case 10:g_self_retry_execution=true;break;case 11:g_ota_check_in_progress=true;break;
+  case 12:g_ota_apply_in_progress=true;break;case 13:g_ota_pending_verify_active=true;break;
+  case 14:g_lcd_ota_task_running=true;break;case 15:g_lcd_ota_proxy_owns_uart=true;break;
+  case 16:g_lcd_ota_request_active=true;break;case 17:g_ota_simple_proof_started=true;break;}
+  const auto before=store.bytes;const auto boot_pending=g_boot_ota_pending;
+  const auto entered=g_peer_gate.entered,live=g_lcd_work_budget_live;
+  automatic_readiness_service();CHECK(later_readiness_calls==1&&peek_calls==0&&events.empty());
+  CHECK(store.bytes==before&&g_boot_ota_pending==boot_pending&&g_peer_gate.entered==entered&&g_lcd_work_budget_live==live&&upload_count==1);
+ }
+ // Saved custody, empty or racing/missing FIFO head cannot trigger this rule.
+ for(unsigned i=0;i<7;++i){reset_automatic();switch(i){
+  case 0:queue_head.from_voice_sd=true;break;case 1:queue_head.from_image_sd=true;break;
+  case 2:queue_head.from_persisted=true;break;case 3:upload_count=0;break;
+  case 4:upload_queue=nullptr;break;case 5:peek_fails=true;break;
+  case 6:upload_count=0;upload_worker_has_parked_job=true;break;}
+  const auto count=upload_count;automatic_readiness_service();
+  CHECK(later_readiness_calls==1&&g_boot_ota_pending&&g_peer_gate.active&&events.empty()&&upload_count==count);
+ }
+ reset_automatic();halo_prod_request_manual_ota("manual");const auto attached_dead=g_manual_ota_override_until_ms;
+ automatic_readiness_service();CHECK(later_readiness_calls==1&&g_manual_ota_joined_readiness&&OtaIntent::force&&g_boot_ota_pending);
+ CHECK(g_manual_ota_override_until_ms==attached_dead&&OtaIntent::updates==1&&OtaIntent::clears==0);
  reset_join();begin_list();const auto bytes=store.bytes;const auto original=state_record;
  const uint32_t boot_dead=g_boot_ota_deadline_ms,peer_dead=g_peer_gate.deadline_ms;
  halo_prod_request_manual_ota("manual");CHECK(g_manual_ota_joined_readiness&&g_manual_ota_override&&OtaIntent::updates==1);

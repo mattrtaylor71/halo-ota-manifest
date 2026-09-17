@@ -1790,10 +1790,20 @@ static bool sense_idle_mode_active() {
 static void service_boot_wifi_connect(unsigned long now_ms) {
   wifi_service_events();
   service_wifi_maintenance(now_ms);
+  // Close/drain an expired primary attempt before admission and sleep checks,
+  // so a queued capture's one secondary opportunity has no empty-window gap.
+  sense_ntp_service();
   // First IP can arrive on the same iteration that inactivity becomes eligible.
-  // Start/resume only the original per-boot attempt before any sleep decision;
-  // begin() retains its first deadline and is inert after completion/quiescence.
-  if (wifi_is_connected()) sense_ntp_begin();
+  // Fresh captures may request the existing single secondary generation. This
+  // stays asynchronous; it does not dequeue media, bypass the upload hold or
+  // authorize TLS without a fresh reply.
+  if (wifi_is_connected()) {
+    UploadJob head = {};
+    if (upload_queue && xQueuePeek(upload_queue, &head, 0) == pdTRUE &&
+        !head.from_voice_sd && !head.from_image_sd && !head.from_persisted)
+      sense_ntp_request_media_retry();
+    sense_ntp_begin();
+  }
   // Consume actual SNTP replies or expire the bounded attempt on the owner
   // task. Plausible retained time alone must not stop a fresh synchronization.
   sense_ntp_service();
@@ -1972,6 +1982,17 @@ static void upload_worker_task(void *arg) {
     }
     if (got_job) {
       MediaRetryNetworkScope retry_network(job);
+      auto park_cancelled_fresh = [&](const char* stage) {
+        if (job.from_voice_sd || job.from_image_sd || job.from_persisted ||
+            !media_retry_network_cancelled()) return false;
+        // A new input ended this transport attempt, not the capture's custody.
+        // Preserve its exact RAM envelope before storage-busy retries can hold
+        // up that gesture. A full parked slot leaves the existing save path.
+        if (!upload_worker_park_job(job, stage, "new_user_input")) return false;
+        upload_inflight = false;
+        vTaskDelay(pdMS_TO_TICKS(40));
+        return true;
+      };
       if (!job.image_buf || job.image_len == 0) {
         Serial.println(job.is_voice ? "[VOICE_QUEUE] job missing audio buffer"
                                     : "[UPLOAD] job missing image buffer");
@@ -2033,6 +2054,7 @@ static void upload_worker_task(void *arg) {
                           (unsigned)g_upload_persist_cached_count);
           }
         } else {
+          if (park_cancelled_fresh("voice_cancelled")) continue;
           Serial.println("[VOICE_QUEUE] upload failed or backend rejected request");
           upload_persist_handle_failure(job, "voice_post_fail");
         }
@@ -2124,6 +2146,7 @@ static void upload_worker_task(void *arg) {
         }
         if (!media_retry_network_wait(backoff)) break;
       }
+      if ((!presign_success || budget_exhausted) && park_cancelled_fresh("presign_cancelled")) continue;
       if (budget_exhausted) {
         if (is_dish && !media_retry_network_active()) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
@@ -2229,6 +2252,7 @@ static void upload_worker_task(void *arg) {
         }
         if (!media_retry_network_wait(backoff)) break;
       }
+      if (!upload_success && park_cancelled_fresh("put_cancelled")) continue;
       if (budget_exhausted) {
         if (is_dish && !media_retry_network_active()) {
           scan_ui_status_emit("ERROR", presign_error_text(), job.mode, job.job_id, true);
