@@ -872,7 +872,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.162",
+  "current_production_latest_version": "6.4.184",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -6110,8 +6110,8 @@
     ],
     "prior182_blocked_attempts_preserved_in": "previous_working_source_182.functional_attempts",
     "actuator_blocker_status": "RESOLVED_BY_RELAY_RECOVERY_FOR_RESUMED182_TESTS; prior failures retained, not a claim that relay resolves all USB faults",
-    "current_public_ota_version": "6.4.162",
-    "next_unused_version": "6.4.184",
+    "current_public_ota_version": "6.4.184",
+    "next_unused_version": "6.4.185",
     "next_version_requires_fresh_inventory_check": true,
     "handoff": "docs/UPLOAD_LATENCY_181_20260917.md",
     "limits": [
@@ -6375,6 +6375,10 @@
       "sense": "6.4.183 app0 running/boot SDK VALID",
       "lcd": "6.4.180 app0 running/boot SDK VALID",
       "scope": "Fresh exact paired identity before console camera-overlap action; not OTA-transfer qualification."
+    },
+    "published_version_only_descendant": {
+      "path": "/Users/MattTaylor/halo-scheduled184-20260917/PUBLISHED184.json",
+      "sha256": "101c4902da0cc39f43f1b70507b323a2635b8b9bf44fb2a998e2be3feed35c11"
     }
   },
   "previous_verified_paired_health_158": {
@@ -8857,6 +8861,47 @@
       "sense": "6.4.181 app0 running/boot SDK VALID",
       "lcd": "6.4.180 app0 running/boot SDK VALID",
       "scope": "Latest paired identity before Sense182 service; retained historical evidence, not a fresh paired182 health check."
+    }
+  },
+  "published_manual_test_release_184": {
+    "version": "6.4.184",
+    "status": "PUBLISHED_VERSION_ONLY_BUMP_USER_MANUAL_TEST_PENDING",
+    "artifact_source_commit": "fd3fd394724237ac912f63d5ec4f8b116b020e46",
+    "artifact_source_firmware_tree": "0693208c1b632c0ca7a8f4ec85e7cc391be0c991",
+    "build_id": "6.4.184-20260917T201836Z-fd3fd3947242",
+    "runtime_baseline": "6.4.183",
+    "runtime_changed": false,
+    "release_pair": {
+      "path": "/Users/MattTaylor/halo-scheduled184-20260917/candidate184-001/RELEASE-PAIR.json",
+      "sha256": "5d7c5795ac351365a6a300e5c908128ab831805e31317dfca36f701a1dea28ef"
+    },
+    "build_review": {
+      "path": "/Users/MattTaylor/halo-scheduled184-20260917/candidate184-001/PIPELINE-RESULT.json",
+      "sha256": "22d42669e7f431933372eb196a8ff03661c8941ee2604dc9c1a5068304858be1"
+    },
+    "publication_plan": {
+      "path": "/Users/MattTaylor/halo-scheduled184-20260917/candidate184-001/publication002/release.json",
+      "sha256": "6b17c84443b46e369bbae6b8d48bc80e4b95ad34a7695c20aef84ebcda983e74"
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-scheduled184-20260917/publication-readback184-001/RESULT.json",
+      "sha256": "a6a274f2f40de0fae4dd62c6ae27d90842d2fc579501e621d47b8d68b4877569"
+    },
+    "release_tag": "halo-v6.4.184",
+    "release_tag_receipt": {
+      "path": "/Users/MattTaylor/halo-scheduled184-20260917/RELEASE-TAG184.json",
+      "sha256": "0a204555ba1374e6664c58d5fa2ead1ab7e01653f411e8f85e3f8378f59d4107"
+    },
+    "hardware_actions_this_release": 0,
+    "allowance_reset_performed": false,
+    "scheduled_OTA_qualified": false,
+    "manual_OTA_qualified": false,
+    "git_remote_push_performed": false,
+    "last_verified_unit": "Sense183 app0 / LCD180 app0 SDK VALID; both naturally slept.184 installation unobserved.",
+    "unit_eligibility": "Last direct Sense state had two of two UTC-day discovery windows spent and not_before1789722000; publication does not clear it.",
+    "prior_device_audit": {
+      "path": "/Users/MattTaylor/halo-scheduled184-20260917/CURRENT-STATE-REVIEW.json",
+      "sha256": "92f6dfaf5270f0ccff9d7be2514435be57f7578469bfb0e5d9839d0ad38267bb"
     }
   }
 }
