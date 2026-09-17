@@ -4843,8 +4843,8 @@
     }
   },
   "current_validation_blocker": {
-    "status": "177_INSTALLED_FRESH_PHONE_PHYSICAL_TRANSITION_AND_SAME_BOOT_CAMERA_PENDING",
-    "detail": "Both177 boards SDK VALID; ordinary console camera/client upload/instrumented coordinated sleep passed. Fresh177 phone setup/physical success animation and immediate same-boot camera remain pending. Reserve10740 warning and probe-induced wake pulse remain; no broad memory-resolution or full-product acceptance.",
+    "status": "177_TESTED_MEDIA_RECOVERY_PASS_WIFI_DELAY_AND_LEGACY_OTA_REFUSAL_OPEN",
+    "detail": "Four saved image/voice payloads delivered automatically with independent cloud custody, dark retries and physical user-priority interruption recovery. Both177 boards remain SDK VALID and sleep normally. Two open findings: stale asynchronous Wi-Fi association causes25s delay; inherited coordinator pending blocks manual OTA before manifest. Existing provisioning/same-boot camera, memory and other qualification limits remain; no full-product acceptance.",
     "candidate_installed": true,
     "installed_scope": "LCD177/app1 first from176/app0; Sense177/app1 from176/app0; both176app0VALID fallbacks retained",
     "evidence": {
@@ -4866,7 +4866,11 @@
     "known_separate_limits": [
       "Late/revived setup during LCD teardown can still race sleep.",
       "Blocking STA attempt ownership gap remains separately recorded."
-    ]
+    ],
+    "functional_campaign_20260917": {
+      "path": "/Users/MattTaylor/halo-functional177-20260917/RESULT.json",
+      "sha256": "390d140bf97b0913f43829a2fede5821b50eec1e7831b2aa8c1bad870e21d167"
+    }
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -5990,7 +5994,7 @@
   },
   "current_working_source": {
     "version": "6.4.177",
-    "status": "PRIVATE_PAIRED_177_SDK_VALID_USER_REPORTED_SETUP_SUCCESS_SAME_BOOT_CAMERA_RETEST_PENDING",
+    "status": "PRIVATE_177_SCOPED_MEDIA_RECOVERY_TESTED_OPEN_WIFI_AND_LEGACY_OTA_FINDINGS",
     "artifact_source_commit": "ebb006726a81b947f13fc2dc500c3de9ffd66444",
     "artifact_source_firmware_tree": "3db9131c47a8a6da86b717b3710609425b96192d",
     "build_id": "6.4.177-20260917T063649Z-ebb006726a81",
@@ -6093,6 +6097,30 @@
       "source": "User message in the current task after 177 installation",
       "report": "nice! Worked really well.",
       "interpretation": "User-reported provisioning success; no separate instrumented setup/animation capture or explicit same-boot camera result accompanied the report."
+    },
+    "functional_campaign_20260917": {
+      "report": "docs/FUNCTIONAL_TEST_177_20260917.md",
+      "receipt": {
+        "path": "/Users/MattTaylor/halo-functional177-20260917/RESULT.json",
+        "sha256": "390d140bf97b0913f43829a2fede5821b50eec1e7831b2aa8c1bad870e21d167"
+      },
+      "host_distinct_suites_passed": 60,
+      "host_grouped_executions_passed": 63,
+      "real_saved_payloads_delivered": 4,
+      "independent_cloud_custody_confirmed": 4,
+      "user_priority_recovery_passed": true,
+      "final_pending_media": 0,
+      "preexisting_incomplete_image_retained": 1,
+      "runtime_changed": false,
+      "manual_no_update_qualified": false,
+      "findings": [
+        "Camera-cancelled asynchronous Wi-Fi attempt leaves inflight state;25s timeout plus4s backoff; unfixed.",
+        "Manual OTA refused by inherited unfinished coordinator state before manifest; same LEGACY refusal observed on175."
+      ],
+      "limits": [
+        "USB-connected, mostly console-injected actions; physical wake and one retry interruption.",
+        "No new paired OTA transfer, power cut, controlled weakRF, fresh provisioning, or full physical UI qualification."
+      ]
     }
   },
   "previous_verified_paired_health_158": {

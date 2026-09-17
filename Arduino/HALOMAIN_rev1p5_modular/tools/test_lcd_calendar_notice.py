@@ -56,6 +56,7 @@ struct LcdCoordCriticalGuard {};
 static struct {template<class...A>void printf(const char*,A...){}void println(const char*){}} Serial;
 static uint32_t get_next_msg_id(){static uint32_t n=0;return ++n;}
 static void request_sense_wake(const char*){++wake_calls;}
+static void lcd_media_retry_wait_release(const char*){}
 static void lcd_coord_cancel_preflight(bool only_expired){
  if(g_lcd_coord_lease_until_ms&&(!only_expired||int32_t(now_ms-g_lcd_coord_lease_until_ms)>=0)){
   ++cancel_calls;g_lcd_coord_lease_until_ms=0;ota_locked=false;
