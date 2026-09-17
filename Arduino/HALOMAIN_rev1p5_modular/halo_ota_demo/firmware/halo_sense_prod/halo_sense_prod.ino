@@ -491,6 +491,8 @@ static bool coord_credit_prepare_work(const char* reason);
 static uint32_t lcd_verified_arm_apply_budget();
 
 static volatile bool g_manual_ota_override = false;
+static bool g_manual_ota_joined_readiness = false;
+static void ota_set_last_result(const char* result);
 static unsigned long g_manual_ota_override_until_ms = 0;
 static const unsigned long MANUAL_OTA_OVERRIDE_TTL_MS = 5UL * 60UL * 1000UL;
 static unsigned long g_manual_ota_request_ms = 0;
@@ -910,6 +912,7 @@ static void manual_ota_override_set(const char* reason) {
 }
 
 static void manual_ota_override_clear(const char* reason) {
+  g_manual_ota_joined_readiness = false;
   if (!g_manual_ota_override) {
     return;
   }
@@ -924,14 +927,19 @@ bool halo_ota_manual_override_active() {
   if (!g_manual_ota_override) {
     return false;
   }
-  if (g_manual_ota_override_until_ms > 0 && millis() > g_manual_ota_override_until_ms) {
+  if ((int32_t)(millis() - g_manual_ota_override_until_ms) >= 0) {
     LOG_INFO("[OTA_MANUAL] override expired");
+    if (g_manual_ota_joined_readiness) ota_set_last_result("peer_unavailable");
     g_ota_check_requested = false;
     OtaIntent::clearForceAndCheck();
     manual_ota_override_clear("expired");
     return false;
   }
   return true;
+}
+
+static bool manual_ota_joined_readiness_active() {
+  return g_manual_ota_joined_readiness && halo_ota_manual_override_active();
 }
 
 #if OTA_TEST_BUILD
@@ -2165,8 +2173,33 @@ static bool ota_peer_accept_new_request() {
   return true;
 }
 
+static bool manual_ota_join_readiness(const char* reason) {
+  if (!nvs_capacity_image_valid() || !g_boot_ota_pending || g_peer_episode_finished ||
+      g_ota_check_done || g_peer_gate.entered || g_lcd_work_budget_live || g_peer_continue_work ||
+      g_ota_check_in_progress || g_ota_apply_in_progress || g_lcd_ota_task_running ||
+      g_lcd_ota_proxy_owns_uart) return false;
+  const uint32_t now = millis();
+  int32_t left = (int32_t)(g_boot_ota_deadline_ms - now);
+  if (g_peer_gate.active) {
+    const int32_t peer_left = (int32_t)(g_peer_gate.deadline_ms - now);
+    if (peer_left < left) left = peer_left;
+  }
+  if (left <= 0) return false;
+  // A repeated tap joins the same request; it cannot renew even its RAM latch.
+  if (g_manual_ota_override) return manual_ota_joined_readiness_active();
+  manual_ota_override_set(reason ? reason : "manual");
+  g_manual_ota_override_until_ms = now + (uint32_t)left;
+  g_manual_ota_joined_readiness = true;
+  const uint32_t ts = is_time_valid() ? (uint32_t)time(nullptr) : 0;
+  OtaIntent::updateDesired(nullptr, nullptr, true, false, ts, "manual");
+  ota_set_last_result("pending");
+  LOG_INFO("[OTA_MANUAL] attached to existing readiness remaining_ms=%lu", (unsigned long)left);
+  return true;
+}
+
 void halo_prod_request_manual_ota(const char* reason) {
   if (!ota_peer_accept_new_request()) {
+    if (manual_ota_join_readiness(reason)) return;
     LOG_INFO("[OTA_MANUAL] joined existing bounded OTA episode");
     return;
   }
@@ -3330,6 +3363,11 @@ static void boot_ota_queue(const char* reason) {
 }
 
 static void boot_ota_finish(const char* result) {
+  if (g_manual_ota_joined_readiness) {
+    g_ota_check_requested = false;
+    OtaIntent::clearForceAndCheck();
+    manual_ota_override_clear(result);
+  }
   // The readiness opportunity has ended even when user work prevented its
   // retry-admission hook from running. Never retain that per-boot gate forever.
   g_self_retry_boot = false;
@@ -3381,6 +3419,11 @@ static void ota_peer_send_lock(bool release) {
 }
 
 static void ota_peer_cancel(const char* reason) {
+  if ((g_manual_ota_override || g_manual_ota_joined_readiness) && reason) {
+    if (!strcmp(reason, "readiness_deadline")) ota_set_last_result("peer_unavailable");
+    else if (!strcmp(reason, "calendar_future_rearm") || !strcmp(reason, "policy_not_due"))
+      ota_set_last_result("policy_deferred");
+  }
   if (g_peer_gate.locked) ota_peer_send_lock(true);
   g_peer_gate.active = false;
   g_peer_gate.ready = false;
@@ -5243,6 +5286,21 @@ static bool halo_primary_user_work_busy() {
       (op_queue && uxQueueMessagesWaiting(op_queue)) || halo_provisioning_active();
 }
 
+static bool ota_primary_work_ready() {
+  if (!halo_primary_user_work_busy()) return true;
+  // Queued/parked captures can require sleep to drain. An OTA readiness lock
+  // must not hold that session open while waiting for its own prerequisite.
+  if (upload_worker_has_parked_job || upload_queue_count()!=0) {
+    ota_set_last_result("policy_deferred");
+    Serial.println("[OTA_POLICY] deferred reason=media_pending");
+    g_ota_check_requested=false;g_ota_check_done=true;
+    OtaIntent::clearForceAndCheck();manual_ota_override_clear("media_pending");
+    ota_peer_cancel("media_pending");g_peer_episode_finished=true;
+    if (g_boot_ota_pending) boot_ota_finish("media_pending");
+  }
+  return false;
+}
+
 #include "../shared/SenseDiagnosticIntegration.h"
 #include "../shared/SenseDiagnosticUart.h"
 #include "../../../Sense_Minimal/sense_diagnostic_transport.h"
@@ -5380,6 +5438,10 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
     return;
   }
 
+  // User/list/HTTP work may outlive the readiness reply. Wait inside that same
+  // original peer deadline, before credit admission or policy work is entered.
+  if (!ota_primary_work_ready()) return;
+
   if (!SenseOtaPolicy::allowOtaWorkNow(reason)) {
     static bool g_ota_policy_skip_logged_this_boot = false;
     if (!g_ota_policy_skip_logged_this_boot) {
@@ -5468,7 +5530,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
 #endif
   if (!coord_credit_prepare_work(reason)) return;
   // Admission persistence can block; recheck the original readiness deadline.
-  if (!ota_peer_ready()) return;
+  if (!ota_peer_ready() || !ota_primary_work_ready()) return;
   g_peer_gate.entered = true;
   OtaPeerTransactionCleanup peer_cleanup;
   if (g_peer_continue_work) {

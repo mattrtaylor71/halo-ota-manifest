@@ -340,6 +340,7 @@ static uint32_t normal_calendar_due(){return 0;}
     ))+r'''
 }
 static void halo_policy_note_readiness(const char*,durable_ota::Clock,uint32_t=0,bool=false){}
+static bool manual_ota_joined_readiness_active(){return false;}
 static bool halo_policy_accepted_lcd_origin(const char*){return false;}
 '''+definition(runtime,'static bool halo_policy_boot_ready()')+'\n'+definition(wrapper,'static bool self_retry_boot_admit()')+r'''
 static void maybeRunOtaCheck(const char*reason,bool){

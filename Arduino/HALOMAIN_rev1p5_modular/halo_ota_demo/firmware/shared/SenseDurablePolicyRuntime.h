@@ -240,7 +240,11 @@ static durable_ota::Admission reserve_proved_discovery_recovery(
     g_lcd_query_coord_lease_ms&&g_lcd_query_coord_lease_ms<=120000&&
     g_lcd_ota_query_resp_part_size==work.retry_baseline.part_size;
   proof.user_idle=!halo_primary_user_work_busy();
-  return durable_ota::reserve_recovery_discovery(r,c,proof,manual,candidate);
+  const auto result=durable_ota::reserve_recovery_discovery(r,c,proof,manual,candidate);
+  if(result!=durable_ota::Admission::ALLOWED)
+    Serial.printf("[OTA_POLICY] recovery_refused phase=%u admission=%u missing=0x%04x\n",
+      unsigned(r.phase),unsigned(result),unsigned(durable_ota::recovery_discovery_missing(r,c,proof)));
+  return result;
 }
 static bool enter(const char* reason,bool retained_legacy) {
   last_admission=durable_ota::Admission::NOT_DUE;
@@ -651,6 +655,12 @@ static bool halo_policy_boot_ready(){
   const auto c=fresh_clock(normal_entry());
   if(!r){halo_policy_note_readiness(absent()?"no_record":"storage_wait",c);return absent();}
   if(!durable_ota::clock_valid(*r,c)){halo_policy_note_readiness("clock_wait",c);return false;}
+  // Explicit input may join this still-unentered opportunity. Only bypass the
+  // automatic wake's due gate: enter() still proves ownership and charges the
+  // existing policy, including deferred/exact-target restrictions.
+  if(manual_ota_joined_readiness_active()){
+    halo_policy_note_readiness("manual",c);return true;
+  }
   bool wait=durable_ota::bench_active(*r)&&(!durable_ota::bench_live(*r,c)||r->phase==durable_ota::Phase::BENCH_READY||r->phase==durable_ota::Phase::BENCH_ABORTED||r->phase==durable_ota::Phase::RESOLVED);
   uint32_t due=0,expiry=0;bool accepted=false;
   const bool normal_deferred=!durable_ota::bench_active(*r)&&

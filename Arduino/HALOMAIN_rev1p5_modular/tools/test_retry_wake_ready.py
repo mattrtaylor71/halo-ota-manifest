@@ -93,6 +93,7 @@ static bool bench_deferred_request(const Record&,char (&)[64]){return false;}
         definition(runtime, 'struct PolicyReadinessObservation', True),
         'static PolicyReadinessObservation g_policy_readiness;',
         definition(runtime, 'static void halo_policy_note_readiness'),
+        'static bool manual_ota_joined_readiness_active(){return false;}',
         definition(runtime, 'static bool halo_policy_accepted_lcd_origin'),
         'namespace sense_policy {',
         definition(runtime, 'static uint32_t normal_calendar_due') if 'static uint32_t normal_calendar_due' in runtime else '',

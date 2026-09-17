@@ -170,7 +170,7 @@ int main(){
         entry = common.index('if (!coord_credit_prepare_work(reason)) return;')
         before, after = common[:entry], common[entry:]
         self.assertLess(before.index('if (!ota_clock_ready_before_work()) return;'), before.rindex('if (!ota_peer_ready()) return;'))
-        self.assertLess(after.index('if (!ota_peer_ready()) return;'), after.index('g_peer_gate.entered = true;'))
+        self.assertLess(after.index('if (!ota_peer_ready() || !ota_primary_work_ready()) return;'), after.index('g_peer_gate.entered = true;'))
         self.assertLess(after.index('g_peer_gate.entered = true;'), after.index('sense_policy::enter(reason,retained_legacy)'))
         service = definition(source, 'static void ota_peer_service()')
         self.assertLess(service.index('!coord_credit_future_notice_wait('), service.index('g_lcd_timer_notice.pending = false;'))
