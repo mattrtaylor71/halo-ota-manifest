@@ -1,3 +1,7 @@
+# 6.4.180 private LCD scroll cue — September 17, 2026
+
+Remove only the upper provisioning scroll arrow, retaining the lower arrow and text pixels. Canonical builds and exact snapshot pixel comparison passed. Installed LCD180 app0, retained Sense179 and LCD179 fallback. Fresh SDK health, live eight-item list refresh and paired sleep passed; no public OTA publication. The reported Chocolate voice request was correctly transcribed and independently confirmed in the actual shopping rows at10:33:43 Pacific; voice latency/refresh behavior is unchanged. [Evidence and limits](docs/PROVISION_SCROLL_180_20260917.md).
+
 # 6.4.179 private manual OTA readiness fix — September 17, 2026
 
 Retain an early manual request through startup readiness without renewing its deadline. Wait for active list/HTTP work before admission; promptly defer media that must wait for sleep. Preserve retry debt, targets, daily allowance and saved media. Both canonical builds/artifact checks and 30 snapshot suites passed; both boards run 179 app1 SDK VALID with 178 fallbacks. Two manual checks read both manifests and completed checked-pair bookkeeping. Truncated USB diagnostic lines stopped the strict controllers; independent cross-board reviews retain that limitation. A separate final wake stored the next 02:00 Pacific LCD arm and both boards slept. Public 162 remains older: the generic downgrade-refusal UI is not an equal-version UpToDate pass. No publication or paired firmware transfer. [Evidence and limits](docs/RECOVERY_179_20260917.md).
