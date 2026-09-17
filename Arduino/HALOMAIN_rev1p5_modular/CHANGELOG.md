@@ -1,3 +1,7 @@
+# September17 physical manual186 result
+
+Both185→186 OTA transfers and app0 SDKVALID boot checks passed after the user pressed the actual button. Native policy resolved; Home returned and both boards slept with02:00Pacific preserved. UI presentation failed: receive inhibition freezes the preceding Checking screen during LCD transfer. This is recorded separately and remains unfixed. [Evidence and scope](docs/MANUAL_OTA_186_20260917.md).
+
 # 6.4.186 published version-only manual-test bump — September 17, 2026
 
 Publish the canonical pair from `62c6864b4c15`, build `6.4.186-20260917T224600Z-62c6864b4c15`. All 1,138 non-generated production runtime files match sealed 185; only the three generated version headers differ. Both builds/artifact checks, all seven focused snapshot suites and exact paired public readback passed. Local tag `halo-v6.4.186` selects the artifact source; no Git remote push.

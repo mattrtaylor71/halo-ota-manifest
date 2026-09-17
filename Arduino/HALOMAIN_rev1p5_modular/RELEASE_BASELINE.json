@@ -6551,7 +6551,7 @@
   },
   "current_working_source": {
     "version": "6.4.186",
-    "status": "PUBLIC186_VERSION_ONLY_USER_MANUAL_OTA_PENDING",
+    "status": "PUBLIC186_INSTALLED_PAIRED_MANUAL_TRANSFER_BOOT_PASS_UI_PRESENTATION_FAIL",
     "artifact_source_commit": "62c6864b4c154ed6dc2cb2bc331f2afbd9f02bb2",
     "artifact_source_firmware_tree": "153c3cc3f87df60ad9490d23e03e7deb198f519c",
     "build_id": "6.4.186-20260917T224600Z-62c6864b4c15",
@@ -6610,37 +6610,39 @@
     "release_tag": "halo-v6.4.186",
     "release_tag_object": "8c3b762981ae0571a0106eba25d057a9e2541dc7",
     "git_remote_push_performed": false,
-    "installed": false,
-    "installed_boards": [],
-    "full186_pair_installed": false,
-    "last_verified_installed_version": "6.4.185 on both boards",
+    "installed": true,
+    "installed_boards": [
+      "sense",
+      "lcd"
+    ],
+    "full186_pair_installed": true,
+    "last_verified_installed_version": "6.4.186 on both boards",
     "last_verified_installed_configuration": {
-      "sense": "6.4.185 app1 running/boot SDK VALID; controlled USB service before manual003",
-      "sense_fallback": "6.4.183 app0 preserved by service",
-      "lcd": "6.4.185 app1 running/boot SDK VALID; actual manual003 LCD180 to185 OTA",
-      "lcd_prior_bank": "6.4.180 app0 was running before OTA; no post-OTA full flash dump"
+      "sense": "6.4.186 app0 SDKVALID via user manual OTA",
+      "lcd": "6.4.186 app0 SDKVALID via user manual OTA",
+      "fallback": "185 app1 was running on both before transfer; no new full flash dump"
     },
     "last_verified_device_acceptance": {
-      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/MANUAL185-ACCEPTANCE.json",
-      "sha256": "b869a20e1faa03d2d14fca1c19a3cedfa37b7c3059d8704a42b7e0cd017eaba8"
+      "path": "/Users/MattTaylor/halo-manual186-20260917/USER-MANUAL186-RESULT.json",
+      "sha256": "313166fd9cafe4314ac255c70bcc690cf4ae2fc5821a9437017173548088cd98"
     },
     "manual_ota_acceptance": false,
-    "sense_ota_transfer_acceptance": false,
+    "sense_ota_transfer_acceptance": true,
     "scheduled_ota_acceptance": false,
     "physical_acceptance": false,
-    "user_test_status": "PENDING_USER_PHYSICAL_MANUAL_OTA",
+    "user_test_status": "PAIRED_MANUAL_OTA_TRANSFER_AND_BOOT_PASS_UI_PRESENTATION_FAIL",
     "planned_capture_directory": "/Users/MattTaylor/halo-manual186-20260917/user-manual001",
-    "planned_capture_status": "PENDING_NOT_CLAIMED_ACTIVE",
+    "planned_capture_status": "CLOSED_CLEANLY_ZERO_COMMANDS",
     "allowance_status_at_publication": "separate external one-test grant in preparation; not yet executed",
     "schedule": "daily02:00Pacific unchanged; no schedule mutation for186 publication",
     "next_unused_version": "6.4.187",
     "next_version_requires_fresh_inventory_check": true,
     "handoff": "docs/MANUAL_OTA_186_20260917.md",
     "limits": [
-      "Publication and seven host suites do not establish186 installation or physical/manual OTA success.",
-      "Both boards last verified185 app1 SDK VALID;185 manual LCD transfer evidence remains in previous_working_source_185.",
-      "The separate one-test allowance operation is only in preparation at this publication checkpoint; no grant execution or reset is claimed.",
-      "No new scheduled OTA, USB-free, power-cut or broad product qualification. Existing185 DNS/SNTP and diagnostic-store limits remain."
+      "One USB-connected physical paired manual OTA with explicit external one-test allowance. Not scheduled, USB-free or power-cut qualification.",
+      "Live OTA display progress failed and is not fixed by186. Read-only proposal exists; no runtime patch or later release produced in this case.",
+      "Native cloud RESOLVED and direct SDK checks do not decode every hidden NVS key.",
+      "Historical diagnostic-store warnings remain outside this test."
     ],
     "test_readiness": {
       "path": "/Users/MattTaylor/halo-manual186-20260917/READY186.json",
@@ -6659,9 +6661,21 @@
       "collector": {
         "path": "/Users/MattTaylor/halo-upload181-20260917/tools/capture.py",
         "sha256": "4311f960bea98d7614b0e43d9c66b05d2ea43122c27da23452335459fbe781cf"
-      }
+      },
+      "status": "CLOSED_REAPED"
     },
-    "allowance_status": "ONE_TEST_GRANTED_VERIFIED_USER_OTA_PENDING"
+    "allowance_status": "GRANTED_TEST_COMPLETED_WINDOWS2_APPLIES2_REPORTED",
+    "manual_ota_transfer_acceptance": true,
+    "manual_ota_ui_acceptance": false,
+    "ui_known_issue": "FAIL: user saw frozen Checking for updates spinner through LCD transfer. Receive safety guard suppresses all rendering, leaving previous pixels visible.",
+    "cloud_correlation": {
+      "path": "/Users/MattTaylor/halo-manual186-20260917/cloud-user-manual001/CORRELATION.json",
+      "sha256": "4016236cde1eed3b6e4d615c6a64b8053de66b8253630077995f545b63a81989"
+    },
+    "independent_device_review": {
+      "path": "/Users/MattTaylor/halo-manual186-20260917/USER-MANUAL186-INDEPENDENT-REVIEW.json",
+      "sha256": "207f374f0dcde2613ac0191bb0501104e9cf73b9952aa45bc8553f8eb39ada5f"
+    }
   },
   "previous_verified_paired_health_158": {
     "version": "6.4.158",
