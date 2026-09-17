@@ -872,7 +872,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.184",
+  "current_production_latest_version": "6.4.185",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -5973,7 +5973,7 @@
       "sha256": "3baf3cd5938c93dc1508c30d84133bda12df739719e5237b65812b02bb6b7bd9"
     }
   },
-  "current_working_source": {
+  "previous_working_source_183": {
     "version": "6.4.183",
     "status": "PRIVATE_SENSE183_LCD180_PAIRED_VALID_SCOPED_CAMERA_VISIBLE_LIST_AND_CLOUD_PASS",
     "artifact_source_commit": "ad9eae59596131f501520c06cad7f3b4d98e9bfb",
@@ -6379,6 +6379,174 @@
     "published_version_only_descendant": {
       "path": "/Users/MattTaylor/halo-scheduled184-20260917/PUBLISHED184.json",
       "sha256": "101c4902da0cc39f43f1b70507b323a2635b8b9bf44fb2a998e2be3feed35c11"
+    }
+  },
+  "current_working_source": {
+    "version": "6.4.185",
+    "status": "PUBLIC185_MANUAL_HANDOFF_LCD_OTA_BOTH_BOARDS_VALID_PASS",
+    "artifact_source_commit": "5ce4b9615c8fdfa48a5a3f927e581c3ec1073c88",
+    "artifact_source_firmware_tree": "d9dabd3599764b3c3088a2492c5eda17411e3b1d",
+    "build_id": "6.4.185-20260917T213753Z-5ce4b9615c8f",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from5ce4b9615c8f or reviewed descendants.185 repairs explicit manual attachment to an unentered readiness episode after touch released the LCD preflight lease. Preserve183 upload/camera cleanup, earlier OTA/media fixes and immutable158 recovery.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/candidate185-001/RELEASE-PAIR.json",
+      "sha256": "01bce790d85da7bcbb79f410c899d33434aa1d91d4ea8678df137414fc9427b9"
+    },
+    "materialization": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/candidate185-001/snapshot/materialization.json",
+      "sha256": "58c879d96c2441052a3a61a622d2b53c2689ef252474c0efffd2a5c18f3a7210"
+    },
+    "source_scope": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/candidate185-001/SOURCE-SCOPE.json",
+      "sha256": "8333ccb2a0691270595a3ebafcdeb220236a29d01a0bec3d72eef86bb463a3ee"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/candidate185-001/host-final001/RESULT.json",
+      "sha256": "e4c65eae5256f75173cdc95eaa1a4273d0c65bcff460f4daa7b3f319240f84de"
+    },
+    "host_suite_count": 7,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/candidate185-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "1d9fcce41d9b0587fd5bae07a981678a35f9e57d71fff304fd9ca5b3690fd1b0"
+    },
+    "resource_delta_vs183": {
+      "sense": {
+        "size": 128,
+        "static_ram_bytes": 0,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": 136
+      },
+      "lcd": {
+        "size": 80,
+        "static_ram_bytes": 0,
+        "rtc_slow_bytes": 0,
+        "linked_program_bytes": 80
+      }
+    },
+    "stack_assessment": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/candidate185-001/STACK-REVIEW.json",
+      "sha256": "7e327ad25f2ab7eb1bd1505b5c7f16072f56c9f3f3d9792cb1843afc88a4a7e9"
+    },
+    "published": true,
+    "current_public_ota_version": "6.4.185",
+    "publication": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/PUBLISHED185.json",
+      "sha256": "db75ce52e9757adc3f9a3ac230d6e1c6d4a89a2271520a77f91346dd4626e628"
+    },
+    "installed": true,
+    "installed_boards": [
+      "sense",
+      "lcd"
+    ],
+    "full185_pair_installed": true,
+    "installed_configuration": {
+      "sense": "6.4.185 app1 running/boot SDK VALID; controlled USB service before manual003",
+      "sense_fallback": "6.4.183 app0 preserved by service",
+      "lcd": "6.4.185 app1 running/boot SDK VALID; actual manual003 LCD180 to185 OTA",
+      "lcd_prior_bank": "6.4.180 app0 was running before OTA; no post-OTA full flash dump"
+    },
+    "installation_receipt": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/service001/result.json",
+      "sha256": "b37a676b5ff07f7b6306f89acf60face6073068f982a5f27026b6bc069ff1153"
+    },
+    "sense_sdk_health_raw": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/service001/sense-released.raw",
+      "sha256": "5d98891f714a26fc4d131544c1659cc0d5d84228f21b309531334ea997037d2f"
+    },
+    "installation_scope": "Initial controlled Sense app1 USB service retained Sense183 app0, NVS/allowance/debt, bootloader, partition table and LCD180. Subsequent manual003 transferred LCD180 to185 over the production OTA path. Both boards now185 app1 SDK VALID. This is not a Sense OTA or scheduled transfer qualification.",
+    "manual_ota_acceptance": true,
+    "scheduled_ota_acceptance": false,
+    "physical_acceptance": false,
+    "captured183_failure": {
+      "capture_directory": "/Users/MattTaylor/halo-manual184-allowance-20260917/manual-repro001",
+      "capture_closure": {
+        "path": "/Users/MattTaylor/halo-manual184-allowance-20260917/manual-repro001/RESULT.json",
+        "sha256": "a983472518f41c63d6428fba6ae24396421bd2970a4ffb169a3f9f996c97b58c"
+      },
+      "detail": "Actual physically navigated manual request joined stale Sense-side peer-lock state after LCD released the lease on touch. Wi-Fi and fresh clock succeeded; no manifest/download began before original readiness deadline. Earlier user-reported attempt missed its start and is not assigned this cause retrospectively."
+    },
+    "external_allowance_grant": {
+      "receipt": {
+        "path": "/Users/MattTaylor/halo-manual184-allowance-20260917/grant001/result.json",
+        "sha256": "23e122fc9170bfd495f3c32aeb327a01d5dd1b52843650dbd03f5157ca696578"
+      },
+      "subsequent_cloud": {
+        "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual184-20260917/cloud-diagnostics003/CORRELATION.json",
+        "sha256": "2c3a767b738805aa5fe5f3c5bd87c6dd426dd5f3dab5dca60e6033271e85d2b3"
+      },
+      "scope": "Earlier explicit one-check grant on183; observed repro ledger generation9/network_windows1 remained unchanged with zero apply/write begins.185 service performed no NVS or allowance mutation. Accounting headroom does not independently prove future clock/peer admission."
+    },
+    "manual_setup_attempts": [
+      {
+        "case": "manual001",
+        "controller": {
+          "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/manual001/controller-result.json",
+          "sha256": "1aca992dee38a00e1648093be6db27855b79e2c93e70f88cb674fa173fad78cc"
+        },
+        "capture_closure": {
+          "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/manual001/RESULT.json",
+          "sha256": "b40de52c6ad1709a1c4f46743362443db24855de7e1b591bc1c80a16652a7748"
+        },
+        "classification": "SETUP_ONLY_CONSOLE_PARSER_FAILURE_ZERO_MANUAL_REQUESTS",
+        "manual_requests": 0,
+        "firmware_failure_claimed": false,
+        "detail": "Controller failed its identity/lock setup parse before sending OTA; descriptors closed cleanly. This is neither185 OTA failure nor success."
+      },
+      {
+        "case": "manual002",
+        "controller": {
+          "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/manual002/controller-result.json",
+          "sha256": "eb78e0b903f5e588626002ed725f94fb1685df389bf46f06785389a7b9e48300"
+        },
+        "capture_closure": {
+          "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/manual002/RESULT.json",
+          "sha256": "1d73421e6c5b94f9a7fbc5d55675c033979ffc78c2b793aab035aa2cc2f1b6e0"
+        },
+        "classification": "SETUP_ONLY_CONSOLE_PARSER_FAILURE_ZERO_MANUAL_REQUESTS",
+        "manual_requests": 0,
+        "firmware_failure_claimed": false,
+        "detail": "Interleaved serial JSON prevented strict setup identity parse. No OTA request; descriptors closed cleanly."
+      }
+    ],
+    "next_unused_version": "6.4.186",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/MANUAL_OTA_HANDOFF_185_20260917.md",
+    "limits": [
+      "Manual003 qualifies one real LCD180 to185 OTA after Sense185 was installed by USB. Both185 SDK VALID, verified completion bookkeeping, Home and sleep were observed.",
+      "The manual handlers were console-invoked after actuator wake; physical menu geometry was not requalified. Exact original lease/deadline bytes are partly missed; deadline preservation is host-tested.",
+      "Seven exact snapshot host suites passed; older whole-product qualification remains historical.",
+      "No185 Sense OTA transfer, scheduled OTA, USB-free, power-cut, measured task-stack or broad product qualification claimed.",
+      "Capture ended15 seconds after sleep without USB reopening. No long-term stability claim.",
+      "Cloud shows native RESOLVED state and zero reservation/retry times; no independent post-run raw NVS dump or further allowance grant.",
+      "Independent DNS/SNTP cancellation and historical diagnostic-store warnings are outside this narrow handoff correction."
+    ],
+    "sense_ota_transfer_acceptance": false,
+    "acceptance_receipt": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/MANUAL185-ACCEPTANCE.json",
+      "sha256": "b869a20e1faa03d2d14fca1c19a3cedfa37b7c3059d8704a42b7e0cd017eaba8"
+    },
+    "device_acceptance": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/manual003/INDEPENDENT-DEVICE-REVIEW.json",
+      "sha256": "e1f6de9b4d26c8333ed5fa705edf43a38a35b77fac7b430224acb270c5894c66"
+    },
+    "cloud_acceptance": {
+      "path": "/Users/MattTaylor/halo-device-analytics-2026-09-10/manual184-20260917/cloud-manual185-final001/CORRELATION.json",
+      "sha256": "ef766ee03cc705ca54a4d1fd06874d3f3a6d09efade559e3829f43e3fc7f4b90"
+    },
+    "manual_ota_scope": "One actuator wake, then ordinary LCD scroll and manual OTA UI handlers via USB console. No injected policy, quota or schedule changes. Scope: LCD180 to185 only; Sense already185.",
+    "cloud_native_policy_summary": {
+      "phase": "RESOLVED",
+      "generation": 14,
+      "network_windows": 2,
+      "apply_attempts": 1,
+      "lcd_begins": 1,
+      "sense_begins": 0,
+      "reserved_ms": 0,
+      "retry_due": 0,
+      "next_normal_epoch": 1789722000
     }
   },
   "previous_verified_paired_health_158": {
@@ -8903,5 +9071,27 @@
       "path": "/Users/MattTaylor/halo-scheduled184-20260917/CURRENT-STATE-REVIEW.json",
       "sha256": "92f6dfaf5270f0ccff9d7be2514435be57f7578469bfb0e5d9839d0ad38267bb"
     }
+  },
+  "published_manual_test_release_185": {
+    "version": "6.4.185",
+    "source_commit": "5ce4b9615c8fdfa48a5a3f927e581c3ec1073c88",
+    "build_id": "6.4.185-20260917T213753Z-5ce4b9615c8f",
+    "receipt": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/PUBLISHED185.json",
+      "sha256": "db75ce52e9757adc3f9a3ac230d6e1c6d4a89a2271520a77f91346dd4626e628"
+    },
+    "pair": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/candidate185-001/RELEASE-PAIR.json",
+      "sha256": "01bce790d85da7bcbb79f410c899d33434aa1d91d4ea8678df137414fc9427b9"
+    },
+    "manual_ota_acceptance": true,
+    "scheduled_ota_acceptance": false,
+    "git_remote_push": false,
+    "manual_ota_scope": "One actuator wake, then ordinary LCD scroll and manual OTA UI handlers via USB console. No injected policy, quota or schedule changes. Scope: LCD180 to185 only; Sense already185.",
+    "acceptance_receipt": {
+      "path": "/Users/MattTaylor/halo-manual-handoff185-20260917/MANUAL185-ACCEPTANCE.json",
+      "sha256": "b869a20e1faa03d2d14fca1c19a3cedfa37b7c3059d8704a42b7e0cd017eaba8"
+    },
+    "sense_ota_transfer_acceptance": false
   }
 }
