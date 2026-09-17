@@ -228,6 +228,16 @@ extern "C" void halo_tls_restore_dma_reserve() {
   camera_dma_reserve_acquire("provisioning_tls");
 }
 
+extern "C" void halo_provisioning_dma_reserve(bool active) {
+  // A failed startup/teardown can leave the AP driver enabled. Keep WPA's
+  // headroom until the interface is actually down, not just the manager flag.
+  wifi_mode_t mode = WIFI_MODE_NULL;
+  const esp_err_t result = esp_wifi_get_mode(&mode);
+  const bool ap_may_be_active = (result != ESP_OK && result != ESP_ERR_WIFI_NOT_INIT) ||
+                                (result == ESP_OK && (mode & WIFI_MODE_AP));
+  camera_dma_reserve_provisioning(active || ap_may_be_active);
+}
+
 // Shared RAII guard for outbound TLS in THIS translation unit: frees the 16KB
 // camera DMA reserve for the duration of an HTTPS handshake and ALWAYS restores
 // it on every scope exit (early returns included). Mirrors commit 809's
@@ -5499,12 +5509,7 @@ static void maybeRunOtaCheck(const char* reason, bool skip_boot_delay) {
   // was not enough: the provisioning TLS guard re-acquires on scope exit and runs
   // during the check, so by the time the applier tested the heap the 16KB was
   // back and the update was rejected every single time.
-  g_dma_reserve_suppressed = true;
-  if (g_camera_dma_reserve) {
-    heap_caps_free(g_camera_dma_reserve);
-    g_camera_dma_reserve = nullptr;
-    LOG_INFO("[OTA] Camera DMA reservation released for TLS headroom");
-  }
+  camera_dma_reserve_suppress_for_ota();
   ota_heap::sample(ota_heap::AfterDma);
   OtaIntent::recordOtaAttempt("begin");
   dump_system_truth("ota_check_begin");

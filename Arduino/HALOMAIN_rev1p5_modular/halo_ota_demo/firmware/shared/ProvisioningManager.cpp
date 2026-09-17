@@ -627,6 +627,8 @@ void ProvisioningManager::update() {
   }
 }
 
+extern "C" void halo_provisioning_dma_reserve(bool active);
+
 bool ProvisioningManager::startSetupMode() {
   if (setup_mode_active) {
     LOG_WARN("[PROVISION] Setup Mode already active");
@@ -634,6 +636,9 @@ bool ProvisioningManager::startSetupMode() {
   }
   
   LOG_INFO("[PROVISION] Starting Setup Mode...");
+  // WPA message 3 needs DMA allocations while the camera is idle. Release its
+  // reserve before scanning/AP startup, including warm setup entry.
+  halo_provisioning_dma_reserve(true);
   
   // Generate a fresh SoftAP session so phones do not reuse stale captive-portal heuristics.
   ProvisioningState::generateApSsid(ap_ssid, sizeof(ap_ssid));
@@ -646,6 +651,7 @@ bool ProvisioningManager::startSetupMode() {
   // Start SoftAP
   if (!startSoftAP()) {
     LOG_ERROR("[PROVISION] Failed to start SoftAP");
+    halo_provisioning_dma_reserve(false);
     return false;
   }
   
@@ -663,6 +669,7 @@ bool ProvisioningManager::startSetupMode() {
   if (!startHttpServer()) {
     LOG_ERROR("[PROVISION] Failed to start HTTP server");
     stopSoftAP();
+    halo_provisioning_dma_reserve(false);
     return false;
   }
   
@@ -722,6 +729,7 @@ void ProvisioningManager::stopSetupMode() {
   }
   
   setup_mode_active = false;
+  halo_provisioning_dma_reserve(false);
   connected_state_set_ms = 0;  // Reset connected state timestamp
   LOG_INFO("[PROVISION] Setup Mode stopped");
   

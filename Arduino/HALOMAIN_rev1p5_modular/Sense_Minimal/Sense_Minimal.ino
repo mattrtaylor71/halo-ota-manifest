@@ -290,7 +290,9 @@ static const int CAMERA_PREFLIGHT_LUMA_LOW = 60;
 static const int CAMERA_PREFLIGHT_LUMA_HIGH = 220;
 static const int CAMERA_PREFLIGHT_GREEN_RATIO_PCT = 140;  // G > 1.4x avg(R,B)
 static int32_t g_camera_last_init_err = 0;
-static uint8_t* g_camera_dma_reserve = nullptr;
+static std::atomic<uint8_t*> g_camera_dma_reserve{nullptr};
+static portMUX_TYPE g_camera_dma_reserve_mux = portMUX_INITIALIZER_UNLOCKED;
+static std::atomic<bool> g_camera_dma_provisioning{false};
 // While true, nothing may re-bank the 16KB camera reserve.
 //
 // The OTA path frees it deliberately to make room for the download, but other
@@ -301,7 +303,7 @@ static uint8_t* g_camera_dma_reserve = nullptr;
 // which is only ~3KB short of the 16KB that had just been handed back. The Sense
 // could update the LCD but could never update ITSELF -- a device in a home would
 // have been permanently un-updatable.
-static bool g_dma_reserve_suppressed = false;
+static std::atomic<bool> g_dma_reserve_suppressed{false};
 static const uint32_t CAMERA_UI_CAPTURE_DELAY_MS = 0;
 static const uint32_t CAMERA_PREFLIGHT_SETTLE_MS = 40;
 static const uint8_t CAMERA_PREFLIGHT_WARMUP_FRAMES = 2;
@@ -407,43 +409,69 @@ static const uint32_t CAMERA_DMA_RECOVER_MAX_MS = 500;
 // teardown frees internal SRAM slightly after the socket closes, so an
 // immediate retry often succeeds where the first attempt did not.
 static void camera_dma_reserve_release(const char* who) {
-  if (!g_camera_dma_reserve) return;
-  heap_caps_free(g_camera_dma_reserve);
-  g_camera_dma_reserve = nullptr;
+  uint8_t* held = g_camera_dma_reserve.exchange(nullptr);
+  if (!held) return;
+  heap_caps_free(held);
   Serial.printf("[DMA_RESERVE] released by=%s bytes=%u largest_now=%u\n",
                 who ? who : "?", (unsigned)CAMERA_DMA_RESERVE_BYTES,
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
 }
 
 static bool camera_dma_reserve_acquire(const char* who) {
-  if (g_camera_dma_reserve) return true;
-  if (g_dma_reserve_suppressed) {
-    // An OTA owns this memory right now. The device reboots when it finishes,
-    // and setup() re-banks the reserve, so refusing here costs nothing.
-    Serial.printf("[DMA_RESERVE] re-acquire SUPPRESSED by=%s (ota in progress)\n",
-                  who ? who : "?");
-    return false;
-  }
   for (int attempt = 1; attempt <= 3; ++attempt) {
-    g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
+    if (g_dma_reserve_suppressed.load() || g_camera_dma_provisioning.load()) return false;
+    if (g_camera_dma_reserve.load()) return true;
+    uint8_t* candidate = (uint8_t*)heap_caps_malloc(
         CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (g_camera_dma_reserve) {
-      if (attempt > 1) {
-        Serial.printf("[DMA_RESERVE] acquired by=%s at=%p attempt=%d\n",
-                      who ? who : "?", g_camera_dma_reserve, attempt);
+    if (candidate) {
+      // Setup/OTA may suppress the reserve while allocation runs. No heap,
+      // logging or delay work is allowed inside this publication gate.
+      portENTER_CRITICAL(&g_camera_dma_reserve_mux);
+      const bool allowed = !g_dma_reserve_suppressed.load() &&
+                           !g_camera_dma_provisioning.load();
+      bool published = false;
+      if (allowed && !g_camera_dma_reserve.load()) {
+        g_camera_dma_reserve.store(candidate);
+        published = true;
       }
-      return true;
+      portEXIT_CRITICAL(&g_camera_dma_reserve_mux);
+      if (!published) heap_caps_free(candidate);
+      if (published && attempt > 1) {
+        Serial.printf("[DMA_RESERVE] acquired by=%s at=%p attempt=%d\n",
+                      who ? who : "?", candidate, attempt);
+      }
+      return allowed;
     }
     if (attempt < 3) delay(20);
   }
-  // Loud on purpose. This is the state that makes the NEXT camera init fail,
-  // and it used to be completely invisible.
   Serial.printf("[DMA_RESERVE][WARN] re-acquire FAILED by=%s largest=%u need=%u "
                 "- next camera init is at risk\n",
                 who ? who : "?",
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
                 (unsigned)CAMERA_DMA_RESERVE_BYTES);
   return false;
+}
+
+static void camera_dma_reserve_provisioning(bool active) {
+  const size_t free_before = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+  const size_t largest_before = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+  portENTER_CRITICAL(&g_camera_dma_reserve_mux);
+  g_camera_dma_provisioning.store(active);
+  portEXIT_CRITICAL(&g_camera_dma_reserve_mux);
+  if (active) camera_dma_reserve_release("provisioning");
+  else camera_dma_reserve_acquire("provisioning_exit");
+  Serial.printf("[DMA_RESERVE] provisioning=%u held=%u free_before=%u largest_before=%u free_after=%u largest_after=%u\n",
+                active ? 1u : 0u, g_camera_dma_reserve.load() ? 1u : 0u,
+                (unsigned)free_before, (unsigned)largest_before,
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+}
+
+static void camera_dma_reserve_suppress_for_ota() {
+  portENTER_CRITICAL(&g_camera_dma_reserve_mux);
+  g_dma_reserve_suppressed.store(true);
+  portEXIT_CRITICAL(&g_camera_dma_reserve_mux);
+  camera_dma_reserve_release("ota");
 }
 
 
@@ -4108,12 +4136,9 @@ void setup() {
   // split the heap so no contiguous 16KB block remains for esp_camera_init().
   // By reserving first, WiFi allocates *around* this block, not *through* it.
   // Released in init_camera(), re-reserved in deinit_camera().
-  g_camera_dma_reserve = (uint8_t*)heap_caps_malloc(
-      CAMERA_DMA_RESERVE_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  if (g_camera_dma_reserve) {
-    Serial.printf("[SETUP] Camera DMA reserved %u bytes at %p\n",
-                  (unsigned)CAMERA_DMA_RESERVE_BYTES, g_camera_dma_reserve);
-  } else {
+  if (camera_dma_reserve_acquire("setup")) {
+    Serial.printf("[SETUP] Camera DMA reserved %u bytes\n", (unsigned)CAMERA_DMA_RESERVE_BYTES);
+  } else if (!g_camera_dma_provisioning.load()) {
     Serial.println("[SETUP] WARNING: Camera DMA reservation failed");
   }
 
