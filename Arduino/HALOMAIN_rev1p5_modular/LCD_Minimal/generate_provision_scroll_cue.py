@@ -42,11 +42,11 @@ def main():
         mask.paste(glyph, (round(x - 16 * scale), round(y - 16 * scale)), glyph)
         angle += half
     draw = ImageDraw.Draw(mask)
-    lo, hi = 90 - span / 2 - 7, 90 + span / 2 + 7
-    for begin, end in ((lo - 17, lo), (hi, hi + 17)):
+    hi = 90 + span / 2 + 7
+    for begin, end in ((hi, hi + 17),):
         pts = [point(begin + (end - begin) * i / 80, 168) for i in range(81)]
         draw.line(pts, fill=255, width=2 * scale, joint='curve')
-    for a, direction in ((lo - 17, -1), (hi + 17, 1)):
+    for a, direction in ((hi + 17, 1),):
         tip = point(a, 168)
         tail = point(a - direction * 2.8, 168)
         radial = (math.sin(math.radians(a)), -math.cos(math.radians(a)))
