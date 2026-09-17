@@ -1,6 +1,8 @@
-# LCD OTA installation-screen correction — candidate 6.4.187
+# 6.4.187 published LCD installation-screen correction — September17,2026
 
-Before receive inhibition, have the existing UI owner submit a static “Something new is coming” / “Installing update” frame. Preserve the flash/DMA protection and original handoff/attempt deadline; fail before writes if the frame or drain cannot finish. Sense runtime, policy, allowance and daily schedule are unchanged. Build and device acceptance are pending. [Design and evidence](docs/OTA_UI_HANDOFF_187_20260917.md).
+Draw a static “Something new is coming” / “Installing update” frame on the UI owner before receive inhibition. Preserve the original500ms handoff/attempt budget and real-DMA flash barrier. Source `6523648c4493`; only three LCD runtime headers changed. Both canonical builds/artifact checks,11 snapshot suites,76 focused sanitizer checks and actual-LVGL pixel review pass. Paired187 manifests/binaries are published and verified; local tag `halo-v6.4.187` selects the artifact source, with no Git remote push.
+
+Controlled USB service installed LCD187 app1 while retaining LCD186 app0/NVS and Sense186 app0. Fresh paired SDKVALID, actuator wake, live8-item list, automatic Home return, paired sleep and29seconds quiet passed. Incoming OTA frame visibility remains physically unqualified.02:00Pacific configuration is unchanged; the smoke used the existing Sense six-hour clock fallback. No quota/debt edits. [Evidence and scope](docs/OTA_UI_HANDOFF_187_20260917.md).
 
 # September17 physical manual186 result
 
