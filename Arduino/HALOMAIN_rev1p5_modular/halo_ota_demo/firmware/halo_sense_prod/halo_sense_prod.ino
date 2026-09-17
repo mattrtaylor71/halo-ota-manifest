@@ -1749,6 +1749,10 @@ bool halo_provisioning_active() {
   return g_provisioning_manager.isSetupModeActive();
 }
 
+void halo_prod_provision_diag() {
+  g_provisioning_manager.logApDiagnostics("console");
+}
+
 bool halo_get_provisioned_wifi(char* ssid, size_t ssid_sz, char* pass, size_t pass_sz) {
   if (!ssid || !pass) {
     return false;

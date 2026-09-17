@@ -166,6 +166,18 @@ static bool sleep_defer_for_media() {
   return true;
 }
 
+// A live setup session owns the display even if SYNC was missed or cached
+// sleep state is stale. Apply this at the sleep funnel, before the guardian's
+// denial-count escape, and throughout the handshake. An absent peer still
+// expires under the existing RX-stale bound; the guide alone creates no lease.
+static bool s_sleep_provision_deferred = false;
+static bool sleep_defer_for_provisioning() {
+  if (!provisioning_active || !last_sense_rx_ms ||
+      (uint32_t)((uint32_t)millis() - (uint32_t)last_sense_rx_ms) > SENSE_RX_STALE_MS) return false;
+  s_sleep_provision_deferred = true;
+  return true;
+}
+
 static void enterLightSleep() {
 #if HALO_DEV_NO_SLEEP
   // Bench builds never idle-sleep, so USB-CDC stays up and reflashing is instant.
@@ -189,6 +201,8 @@ static void enterLightSleep() {
   }
   s_sleep_media_deferred = false;
   if (sleep_defer_for_media()) return;
+  s_sleep_provision_deferred = false;
+  if (sleep_defer_for_provisioning()) return;
   sleep_cancelled_by_user_input = false;
 
   bool force_sleep = false;
@@ -204,8 +218,8 @@ static void enterLightSleep() {
   Serial.println("========================================");
   uint16_t dummy_x = 0, dummy_y = 0;
   if (!force_sleep && !notify_sense_sleep()) {
-    // Media admission is not a failed handshake or Sense denial.
-    if (s_sleep_media_deferred) return;
+    // Active ownership is not a failed handshake or Sense denial.
+    if (s_sleep_media_deferred || s_sleep_provision_deferred) return;
     if (sleep_cancelled_by_user_input) {
       Serial.println("[SLEEP] user_input cancelled pre_sleep");
       resetActivityTimer();
@@ -254,6 +268,7 @@ static void enterLightSleep() {
   // and retain this guard through the existing final sleep commit below.
   LcdMaintenanceStorageGuard sleep_arm_guard;
   if (sleep_defer_for_media()) return;
+  if (sleep_defer_for_provisioning()) return;
   if (sleep_blocked_for_ota()) { resetActivityTimer(); return; }
 
   sleep_handshake_fail_count = 0;
@@ -704,6 +719,8 @@ static bool notify_sense_sleep() {
   LcdSleepHandshakeScope handshake_scope;
   s_sleep_media_deferred = false;
   if (sleep_defer_for_media()) return false;
+  s_sleep_provision_deferred = false;
+  if (sleep_defer_for_provisioning()) return false;
   Serial.println("[LCD] Notifying Sense board to sleep...");
   // Send diagnostics BEFORE the sleep handshake. After SLEEP_READY the Sense is
   // already asleep and anything sent then is lost (measured: 1 of 19 delivered).
@@ -717,16 +734,6 @@ static bool notify_sense_sleep() {
   sleep_deny_active = false;
   sleep_fallback_timer_sec = 0;
   sleep_handshake_fail_link = false;
-  if (provisioning_active) {
-    unsigned long now_ms = millis();
-    unsigned long age_ms = last_sense_rx_ms > 0 ? (now_ms - last_sense_rx_ms) : 0;
-    bool sense_stale = (last_sense_rx_ms > 0 && age_ms > SENSE_RX_STALE_MS);
-    if (!(sense_state == SENSE_ASLEEP || sense_stale || !link_synced)) {
-      Serial.println("[LCD] Sleep suppressed (provisioning active)");
-      return false;
-    }
-    Serial.println("[LCD] provisioning_active but sense asleep/stale -> allow sleep");
-  }
   if (sleep_blocked_for_ota()) {
     Serial.println("[SLEEP] abort handshake (ota_pending)");
     return false;
@@ -750,11 +757,11 @@ static bool notify_sense_sleep() {
 
   if (sleep_ready_recent) {
     Serial.printf("[SLEEP] sense_ready_recent -> local sleep age_ms=%lu\n", age_ms);
-    return !sleep_defer_for_media();
+    return !sleep_defer_for_media() && !sleep_defer_for_provisioning();
   }
   if (sense_state == SENSE_ASLEEP) {
     Serial.printf("[SLEEP] sense_asleep -> local sleep rx_age=%lu\n", age_ms);
-    return !sleep_defer_for_media();
+    return !sleep_defer_for_media() && !sleep_defer_for_provisioning();
   }
 
   bool sense_probably_awake = (sense_state == SENSE_AWAKE) || sense_awake_estimate || sense_recent || grace_active;
@@ -763,7 +770,7 @@ static bool notify_sense_sleep() {
       sleep_fallback_timer_sec = SLEEP_FALLBACK_TIMER_SEC;
       Serial.printf("[SLEEP_PROTO] link_unsynced_stale rx_age=%lu -> fallback_timer_sleep\n",
                     age_ms);
-      return !sleep_defer_for_media();
+      return !sleep_defer_for_media() && !sleep_defer_for_provisioning();
     }
     if (!link_synced) {
       link_sync_pending = true;
@@ -789,9 +796,10 @@ static bool notify_sense_sleep() {
   const unsigned long ready_timeout_ms = 25000;
   for (uint8_t attempt = 1; attempt <= SLEEP_HANDSHAKE_MAX_ATTEMPTS; ++attempt) {
     if (sleep_defer_for_media()) return false;
+    if (sleep_defer_for_provisioning()) return false;
     if (sleep_ready_received) {
       Serial.println("[SLEEP_PROTO] got SLEEP_READY while waiting_for_sleep_result -> success");
-      return !sleep_defer_for_media();
+      return !sleep_defer_for_media() && !sleep_defer_for_provisioning();
     }
     sleep_ready_received = false;
     sleep_deny_received = false;
@@ -813,6 +821,7 @@ static bool notify_sense_sleep() {
                   (unsigned)ready_timeout_ms);
     while (millis() < deadline_ms) {
       if (sleep_defer_for_media()) return false;
+      if (sleep_defer_for_provisioning()) return false;
       if (sleep_blocked_for_ota()) {
         Serial.println("[SLEEP] abort wait (ota_pending)");
         return false;
@@ -867,7 +876,7 @@ static bool notify_sense_sleep() {
         Serial.println("[SLEEP_PROTO] got SLEEP_READY while waiting_for_sleep_result -> success");
         Serial.println("[SLEEP] got_ready -> sleeping");
         Serial.println("[SLEEP_PROTO] decision coordinated reason=ready");
-        return !sleep_defer_for_media();
+        return !sleep_defer_for_media() && !sleep_defer_for_provisioning();
       }
       if (ota_stay_awake_until_ms > deadline_ms) {
         deadline_ms = ota_stay_awake_until_ms;
@@ -892,7 +901,7 @@ static bool notify_sense_sleep() {
                     rx_age_ms,
                     sense_state_name(sense_state),
                     (unsigned)SLEEP_HANDSHAKE_MAX_ATTEMPTS);
-      return !sleep_defer_for_media();
+      return !sleep_defer_for_media() && !sleep_defer_for_provisioning();
     }
   }
   return false;

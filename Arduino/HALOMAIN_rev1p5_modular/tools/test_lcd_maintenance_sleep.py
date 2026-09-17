@@ -41,12 +41,13 @@ def harness(root):
     scope_anchor = 'struct LcdSleepHandshakeScope {'
     scope = definition(sleep, scope_anchor) + ';\n' if scope_anchor in sleep else ''
     media = ('static bool s_sleep_media_deferred=false;\n' + definition(sleep, 'static bool sleep_defer_for_media() {')) if 'static bool sleep_defer_for_media() {' in sleep else ''
+    provision = ('static bool s_sleep_provision_deferred=false;\n' + definition(sleep, 'static bool sleep_defer_for_provisioning() {')) if 'static bool sleep_defer_for_provisioning() {' in sleep else ''
     actual = '\n'.join((
         definition(activity, 'static void resetActivityTimer() {'),
         definition(main, 'static bool sleep_blocked_for_ota() {'),
         definition(main, 'static void cancel_pending_sleep_for_user_input(const char* reason) {'),
         definition(animation, 'static void abort_sleep_transition(const char* reason, bool user_input = true) {'),
-        arm, scope, media,
+        arm, scope, media, provision,
         definition(sleep, 'static bool notify_sense_sleep() {'),
     ))
     # Execute the actual teardown call arguments, including a coincident real

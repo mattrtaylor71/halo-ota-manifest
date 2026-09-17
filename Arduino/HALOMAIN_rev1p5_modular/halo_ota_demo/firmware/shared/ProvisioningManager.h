@@ -43,6 +43,10 @@ public:
   
   // Get current AP password (for QR code)
   const char* getApPassword() const { return ap_password; }
+
+  // Read the live driver configuration without starting/changing the radio.
+  // Passwords are compared locally and never included in this diagnostic.
+  void logApDiagnostics(const char* source) const;
   
   // Get device ID
   const char* getDeviceId() const { return device_id; }

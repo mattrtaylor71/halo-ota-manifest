@@ -16,6 +16,7 @@
 #include "NtpDnsGuard.h"
 #include <WiFiClientSecure.h>
 #include <esp_wifi.h>
+#include <esp_netif.h>
 #include <esp_heap_caps.h>
 #include <string.h>
 #include <ctype.h>
@@ -704,7 +705,66 @@ bool ProvisioningManager::startSoftAP() {
   }
   
   LOG_INFO("[PROVISION] SoftAP started: SSID=%s, IP=%s", ap_ssid, WiFi.softAPIP().toString().c_str());
+  logApDiagnostics("ap_started");
   return true;
+}
+
+void ProvisioningManager::logApDiagnostics(const char* source) const {
+  // Use SDK getters directly: Arduino AP accessors can lazily start an AP.
+  wifi_mode_t mode = WIFI_MODE_NULL;
+  wifi_config_t config = {};
+  wifi_sta_list_t stations = {};
+  uint8_t channel = 0;
+  wifi_second_chan_t secondary = WIFI_SECOND_CHAN_NONE;
+  esp_netif_ip_info_t ip = {};
+  const esp_err_t mode_err = esp_wifi_get_mode(&mode);
+  const esp_err_t config_err = esp_wifi_get_config(WIFI_IF_AP, &config);
+  const esp_err_t channel_err = esp_wifi_get_channel(&channel, &secondary);
+  const esp_err_t clients_err = esp_wifi_ap_get_sta_list(&stations);
+  esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+  const esp_err_t ip_err = netif ? esp_netif_get_ip_info(netif, &ip) : ESP_ERR_INVALID_STATE;
+
+  const size_t manager_ssid_len = strnlen(ap_ssid, sizeof(ap_ssid));
+  const size_t manager_password_len = strnlen(ap_password, sizeof(ap_password));
+  const size_t driver_ssid_len = config.ap.ssid_len ? config.ap.ssid_len :
+      strnlen(reinterpret_cast<const char*>(config.ap.ssid), sizeof(config.ap.ssid));
+  const size_t driver_password_len =
+      strnlen(reinterpret_cast<const char*>(config.ap.password), sizeof(config.ap.password));
+  const bool ssid_matches = config_err == ESP_OK && manager_ssid_len > 0 &&
+      driver_ssid_len <= sizeof(config.ap.ssid) && driver_ssid_len == manager_ssid_len &&
+      memcmp(config.ap.ssid, ap_ssid, manager_ssid_len) == 0;
+  const bool password_matches = config_err == ESP_OK && manager_password_len > 0 &&
+      manager_password_len < sizeof(ap_password) && driver_password_len == manager_password_len &&
+      memcmp(config.ap.password, ap_password, manager_password_len) == 0;
+  char driver_ssid[33] = {};
+  if (config_err == ESP_OK) {
+    const size_t printable_len = driver_ssid_len < sizeof(config.ap.ssid) ?
+        driver_ssid_len : sizeof(config.ap.ssid);
+    for (size_t i = 0; i < printable_len; ++i) {
+      const uint8_t c = config.ap.ssid[i];
+      driver_ssid[i] = c >= 32 && c <= 126 && c != '"' && c != '\\' ? (char)c : '?';
+    }
+  }
+  const unsigned long now = millis();
+  Serial.printf("[PROVISION_DIAG] source=%s t=%lu setup=%d mode=%d mode_err=%d config_err=%d channel=%d secondary=%d channel_err=%d clients=%d clients_err=%d ip=" IPSTR " ip_err=%d\n",
+                source ? source : "query", now, setup_mode_active ? 1 : 0,
+                mode_err == ESP_OK ? (int)mode : -1, (int)mode_err, (int)config_err,
+                channel_err == ESP_OK ? (int)channel : -1,
+                channel_err == ESP_OK ? (int)secondary : -1, (int)channel_err,
+                clients_err == ESP_OK ? stations.num : -1, (int)clients_err,
+                IP2STR(&ip.ip), (int)ip_err);
+  Serial.printf("[PROVISION_DIAG] source=%s t=%lu driver_ssid=\"%s\" ssid_len=%d ssid_matches_manager=%d password_matches_manager=%d auth=%d pairwise=%d configured_channel=%d pmf_capable=%d pmf_required=%d hidden=%d max_clients=%d beacon=%d\n",
+                source ? source : "query", now, driver_ssid,
+                config_err == ESP_OK ? (int)driver_ssid_len : -1,
+                ssid_matches ? 1 : 0, password_matches ? 1 : 0,
+                config_err == ESP_OK ? (int)config.ap.authmode : -1,
+                config_err == ESP_OK ? (int)config.ap.pairwise_cipher : -1,
+                config_err == ESP_OK ? (int)config.ap.channel : -1,
+                config_err == ESP_OK ? (int)config.ap.pmf_cfg.capable : -1,
+                config_err == ESP_OK ? (int)config.ap.pmf_cfg.required : -1,
+                config_err == ESP_OK ? (int)config.ap.ssid_hidden : -1,
+                config_err == ESP_OK ? (int)config.ap.max_connection : -1,
+                config_err == ESP_OK ? (int)config.ap.beacon_interval : -1);
 }
 
 void ProvisioningManager::stopSoftAP() {

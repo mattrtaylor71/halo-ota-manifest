@@ -48,8 +48,12 @@ def harness(source):
 // Deliberately enum names, matching Arduino-ESP32 3.3.8 (not #defines).
 enum WiFiEvent_t {ARDUINO_EVENT_WIFI_STA_START=110,
                  ARDUINO_EVENT_WIFI_STA_DISCONNECTED=113,
-                 ARDUINO_EVENT_WIFI_STA_GOT_IP=115};
-struct WiFiEventInfo_t {struct {uint8_t reason;} wifi_sta_disconnected;};
+                 ARDUINO_EVENT_WIFI_STA_GOT_IP=115,
+                 ARDUINO_EVENT_WIFI_AP_STADISCONNECTED=133};
+struct WiFiEventInfo_t {
+  struct {uint8_t reason;} wifi_sta_disconnected;
+  struct {uint16_t reason;} wifi_ap_stadisconnected;
+};
 enum wl_status_t {WL_IDLE_STATUS=0, WL_NO_SSID_AVAIL=1, WL_CONNECTED=3,
                  WL_CONNECT_FAILED=4, WL_CONNECTION_LOST=5, WL_DISCONNECTED=6};
 enum WifiGuardState {WIFI_STATE_DISCONNECTED, WIFI_STATE_CONNECTING,
@@ -163,7 +167,7 @@ static void reset(){
   wifi_events={};
 }
 static void emit(WiFiEvent_t id,uint8_t reason=0){
-  in_callback=true;handle_wifi_event(id,{{reason}});in_callback=false;
+  in_callback=true;handle_wifi_event(id,{{reason},{0}});in_callback=false;
 }
 static void tick(uint32_t advance=0){now_ms+=advance;service_wifi_maintenance(now_ms);}
 static void fail_attempt(){

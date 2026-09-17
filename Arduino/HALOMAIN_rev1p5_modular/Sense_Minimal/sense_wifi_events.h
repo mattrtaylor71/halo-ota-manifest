@@ -10,7 +10,7 @@ namespace sense_wifi_events {
 struct Event {
   int32_t id;
   uint32_t at_ms;
-  uint8_t reason;
+  uint16_t reason;
 };
 
 template <size_t Capacity> class Queue {

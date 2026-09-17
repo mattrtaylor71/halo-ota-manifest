@@ -74,3 +74,43 @@ of release archives/publication. Evidence root:
 Root also reran test_lcd_provision_flow.py and
 test_provisioning_display_status.py successfully. No new device acceptance or
 public OTA release is claimed.
+
+## Follow-up source for172: setup sleep and live driver diagnostics
+
+The phone also failed to join the later2752 session. Capture005 proves an
+intervening power-on reset; its cause is not established. The Mac remains on
+Garage Member and must not be switched for this test: the user will connect
+the phone. Capture005 ended with LCD USB disappearance/OSError at302 seconds;
+capture006 independently confirms Sense169 remained alive advertising2752.
+
+The LCD five-minute guardian bypassed ordinary setup gating. An unsynchronized
+link then admitted a sleep handshake despite fresh Sense traffic, and repeated
+provisioning denials exhausted the ten-denial escape. These paths were unchanged
+168 to169. The new guard protects live provisioning at sleep entry, throughout
+the handshake, and before UI teardown, while retaining the8-second stale-peer
+escape. The actual-function suite passes15/15; installed169 fails12/15. Its
+22-call negative control uses the real deny-max10 and produces20 requests and
+2 teardown admissions; the fixed source produces neither. Seven existing
+sleep/liveness/provisioning suites also pass. This explains disappearing setup
+UI, not the earlier authentication failure.
+
+Sense now logs read-only SDK AP configuration at startup and on
+INPUT_PROVISION_DIAG: driver/manager credential equality, auth/cipher/PMF,
+channel, IP and clients. No password is printed by this diagnostic. AP client
+disconnect reasons preserve16bits and are distinguished from home-STA reasons.
+The detailed output currently requires Sense USB, although the command can
+arrive through LCD forwarding.224 host checks pass under ASan/UBSan and four
+focused regressions pass. SDK getters are not an atomic snapshot; rejection
+before association may produce no AP-disconnect event.
+
+Evidence: join-failure-20260916/lcd-sleep-guard001/RESULT.json and
+/Users/MattTaylor/halo-wifi-recovery-2026-09-16/provisioning169-review/driver-diag002.
+Two bounded native JTAG observation attempts were closed without explicit halt,
+reset or flash commands; the live memory read refused because the CPU was not
+halted. Capture006 confirms continuous uptime afterward. No password was
+recovered that way; further diagnosis uses the firmware's SDK getters.
+
+These source changes retain all171 media/retry fixes and e58a4fb profile/STA
+ownership fixes.172 build, installation and actual phone association are still
+pending at this source commit. Preserve169 fallback banks and NVS. Do not claim
+a fixed authentication failure until the phone test establishes it.

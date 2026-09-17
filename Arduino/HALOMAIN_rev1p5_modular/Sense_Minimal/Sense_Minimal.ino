@@ -79,6 +79,7 @@ void halo_prod_setup();
 void halo_prod_loop();
 void halo_prod_pre_sleep();
 void halo_prod_reset_wifi();
+void halo_prod_provision_diag();
 bool halo_prod_should_delay_sleep();
 bool halo_prod_boot_ota_pending();
 void halo_prod_on_lcd_message(const char* type);
@@ -2691,6 +2692,12 @@ static bool parse_input_message(const char* json_str) {
     Serial.println("[UART] INPUT_RESET_WIFI received - resetting Wi-Fi credentials...");
     reset_wifi_requested = true;
     uart_send_ui_status("Resetting Wi-Fi...");
+  } else if (strcmp(type, "INPUT_PROVISION_DIAG") == 0) {
+#ifdef HALO_SENSE_PROD_WRAPPER
+    halo_prod_provision_diag();
+#else
+    Serial.println("[PROVISION_DIAG] unavailable (no prod wrapper)");
+#endif
   } else if (strcmp(type, "INPUT_FW_INFO") == 0) {
     unsigned long now_ms = millis();
     unsigned long wake_age_ms = last_input_wake_ms > 0 ? (now_ms - last_input_wake_ms) : 0xFFFFFFFFUL;

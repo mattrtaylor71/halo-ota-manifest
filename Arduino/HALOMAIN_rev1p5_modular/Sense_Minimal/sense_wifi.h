@@ -398,7 +398,9 @@ static void handle_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
   const sense_wifi_events::Event pending = {
       (int32_t)event, (uint32_t)millis(),
       event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED
-          ? (uint8_t)info.wifi_sta_disconnected.reason : (uint8_t)0};
+          ? (uint16_t)info.wifi_sta_disconnected.reason
+          : event == ARDUINO_EVENT_WIFI_AP_STADISCONNECTED
+              ? (uint16_t)info.wifi_ap_stadisconnected.reason : (uint16_t)0};
   portENTER_CRITICAL(&wifi_event_mux);
   wifi_events.push(pending);
   portEXIT_CRITICAL(&wifi_event_mux);
@@ -419,10 +421,12 @@ static void wifi_service_events() {
     portEXIT_CRITICAL(&wifi_event_mux);
     if (!available) break;
     const wl_status_t status = WiFi.status();
-    Serial.printf("[WIFI_EVENT] event=%ld t=%lu serviced=%lu status=%d inflight=%d state=%d reason=%u\n",
+    Serial.printf("[WIFI_EVENT] event=%ld t=%lu serviced=%lu status=%d inflight=%d state=%d reason=%u scope=%s\n",
                   (long)event.id, (unsigned long)event.at_ms, millis(),
                   (int)status, wifi_connect_inflight ? 1 : 0,
-                  (int)wifi_state, (unsigned)event.reason);
+                  (int)wifi_state, (unsigned)event.reason,
+                  event.id == ARDUINO_EVENT_WIFI_AP_STADISCONNECTED ? "ap_client" :
+                  event.id == ARDUINO_EVENT_WIFI_STA_DISCONNECTED ? "home_sta" : "other");
     if (event.id == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
       wifi_diag_note_disconnect();
       // A disconnect can be transient during association or deliberately

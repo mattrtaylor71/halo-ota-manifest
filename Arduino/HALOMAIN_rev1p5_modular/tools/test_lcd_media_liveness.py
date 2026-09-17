@@ -87,7 +87,8 @@ static void abort_sleep_transition(const char*,bool){}
 static void sleep_enter_wait_low_power(const char*){}
 static bool s_sleep_media_deferred=false;
 '''
-    sleep_actual=define(sleep,'static bool sleep_defer_for_media() {')+'\n'+define(sleep,'struct LcdSleepHandshakeScope {')+';\n'+define(sleep,'static bool notify_sense_sleep() {')
+    provision=('static bool s_sleep_provision_deferred=false;\n'+define(sleep,'static bool sleep_defer_for_provisioning() {')+'\n') if 'static bool sleep_defer_for_provisioning() {' in sleep else ''
+    sleep_actual=define(sleep,'static bool sleep_defer_for_media() {')+'\n'+provision+define(sleep,'struct LcdSleepHandshakeScope {')+';\n'+define(sleep,'static bool notify_sense_sleep() {')
     main=r'''
 static void poison_stale_sleep(){
  sense_state=SENSE_ASLEEP;sense_awake_estimate=false;sense_missed_pongs=2;
