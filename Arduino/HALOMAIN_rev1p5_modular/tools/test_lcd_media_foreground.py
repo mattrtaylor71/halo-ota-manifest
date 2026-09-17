@@ -92,6 +92,16 @@ def harness(root, media, negative=False):
     screens=(root/'LCD_Minimal/lcd_ship_screens.h').read_text()
     action=(root/'LCD_Minimal/lcd_ship_action.h').read_text()
     source=(voice if media=='voice' else image).HARNESS.split('int main(){')[0]
+    # Retention is a host audit, not another live replay operation. Its Store
+    # must not inherit the cancelled owner's budget (or mutate that callback).
+    retained=definition(source,'static bool retained(')
+    auditor='''static bool retained(const halo_MEDIA::Meta& m){
+ char payload[256];if(!g_MEDIA_store.payload_path(m.request_id,payload,sizeof(payload)))return false;
+ const auto root=std::filesystem::path(payload).parent_path().string();
+ halo_MEDIA::Store audit(root.c_str());halo_MEDIA::Meta observed;
+ return audit.lookup(m.request_id,m.owner_id,m.device_id,&observed)==halo_MEDIA::Result::Ok;
+}'''.replace('MEDIA',media)
+    source=source.replace(retained,auditor,1)
     # Use the full real SD header; add a deterministic interleaving at send_frame.
     source='#include <map>\n'+source
     source=source.replace('class UartOtaProtocol {','static void(*chunk_hook)()=nullptr;\nstatic void(*frame_hook)(uint8_t)=nullptr;\nclass UartOtaProtocol {')
