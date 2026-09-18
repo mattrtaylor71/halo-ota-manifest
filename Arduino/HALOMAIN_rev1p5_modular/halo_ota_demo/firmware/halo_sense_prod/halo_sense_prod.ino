@@ -479,6 +479,7 @@ static uint32_t g_lcd_work_peer_boot = 0;
 // an OTA request. One boot-local, query-only probe can restore normal UART.
 static bool g_control_probe_active = false, g_control_probe_finished = false;
 static bool g_control_probe_querying = false;
+static char g_control_probe_challenge[40] = {0};
 static uint32_t g_control_probe_deadline_ms = 0, g_control_probe_next_ms = 0;
 static void ota_peer_service();
 static bool ota_peer_accept_new_request();
@@ -4101,45 +4102,84 @@ static bool ota_peer_ready() {
          (int32_t)(millis() - g_peer_gate.deadline_ms) < 0;
 }
 
+// Release only this boot probe's mailbox. A request admitted after our timeout
+// owns its own nonce and must survive a delayed startup service invocation.
+static bool ota_control_probe_stop(bool finished) {
+  if (g_control_probe_querying && !sense_lcd_ota_query_cancel(g_control_probe_challenge)) return false;
+  g_control_probe_active = false;
+  g_control_probe_querying = false;
+  if (finished) g_control_probe_finished = true;
+  return true;
+}
+
 static void ota_control_probe_service() {
-  if (sense_lcd_ota_retry_safe()) { g_control_probe_active = false; return; }
+  if (sense_lcd_ota_retry_safe()) { ota_control_probe_stop(false); return; }
   if (g_peer_gate.active || g_boot_ota_pending || g_ota_check_requested ||
       g_ota_check_in_progress || g_ota_apply_in_progress || g_lcd_ota_task_running) {
     // A real request owns the same query mailbox and its own original budget.
-    if (g_control_probe_active) g_control_probe_finished = true;
-    g_control_probe_active = false; g_control_probe_querying = false;
+    ota_control_probe_stop(g_control_probe_active);
     return;
   }
-  if (g_control_probe_finished || g_peer_episode_finished) return;
+  if (g_control_probe_finished || g_peer_episode_finished) {
+    ota_control_probe_stop(true);
+    return;
+  }
   const uint32_t now = millis();
   if (!g_control_probe_active) {
     g_control_probe_active = true;
     g_control_probe_deadline_ms = now + 120000UL;
+    g_control_probe_next_ms = now;
+    Serial.println("[LCD_XFER] control_probe_started quarantine=1");
   }
   if ((int32_t)(now - g_control_probe_deadline_ms) >= 0) {
-    g_control_probe_active = false; g_control_probe_querying = false;
-    g_control_probe_finished = true;
-    set_lcd_ota_due_nvs(true);
+    if (ota_control_probe_stop(true))
+      Serial.println("[LCD_XFER] control_probe_timeout quarantine=1");
+    // Transport uncertainty is not evidence of owed firmware. Preserve every
+    // existing OTA obligation, but never create or clear debt for this probe.
     return;
   }
-  if (g_lcd_ota_proxy_owns_uart || sense_action_inflight() || foreground_active ||
-      voice_recording_active || g_list_screen_active || g_provisioning_manager.isSetupModeActive()) return;
   if (g_control_probe_querying) {
-    LcdOtaQuerySnapshot snapshot;
-    const LcdOtaQueryPoll result = sense_lcd_ota_query_poll(snapshot);
+    LcdOtaQuerySnapshot snapshot{};
+    const LcdOtaQueryPoll result = sense_lcd_ota_query_poll(snapshot, false, g_control_probe_challenge);
     if (result == LCD_QUERY_WAITING) return;
-    g_control_probe_querying = false; g_control_probe_next_ms = now + 200;
+    g_control_probe_querying = false;
+    g_control_probe_next_ms = millis() + 200;
+    bool confirmed = false;
     if (result == LCD_QUERY_READY) {
-      g_control_probe_active = false; g_control_probe_finished = true;
+      // Poll retains exclusive admission until stronger startup proof has been
+      // checked. No legacy reply, receive state, foreign owner or late response
+      // may open ordinary JSON. Query-only recovery is safe during provisioning.
+      struct ProofLease { ~ProofLease() { s_lcd_query_proof_held.store(false); } } proof;
+      UartJsonTxLock admission;
+      if (admission.held() && !strcmp(s_lcd_query_requested_id, g_control_probe_challenge) &&
+          snapshot.correlated && snapshot.recovery_idle && snapshot.peer_boot_id &&
+          snapshot.coord_reported && !snapshot.coord_waiting &&
+          !snapshot.coord_owner[0] && !snapshot.coord_lease_ms &&
+          !g_lcd_ota_proxy_owns_uart && !g_spool_owns_uart && !g_img_spool_tx_active &&
+          !g_img_spool_request_active.load() && !sense_img_spool_binary_pending() &&
+          (uint32_t)(millis() - s_lcd_query_started_ms) < s_lcd_query_timeout_ms &&
+          (int32_t)(millis() - g_control_probe_deadline_ms) < 0) {
+        // The fresh idle proof authorizes transport only. Marker-write failure
+        // keeps s_lcd_mode_marker_pending set, so the next boot probes again.
+        sense_lcd_mode_confirm();
+        confirmed = true;
+      }
+    }
+    if (confirmed) {
+      g_control_probe_active = false;
+      g_control_probe_finished = true;
+      Serial.println("[LCD_XFER] control_mode_confirmed quarantine=0");
+      uart_send_fw_info(false); // Restore identity even if the first Settings request was suppressed.
     }
     return;
   }
+  if (g_lcd_ota_proxy_owns_uart || sense_action_inflight() || foreground_active ||
+      voice_recording_active || g_list_screen_active) return;
   if ((int32_t)(now - g_control_probe_next_ms) < 0) return;
-  char challenge[40];
-  snprintf(challenge, sizeof(challenge), "%08lx%08lx",
+  snprintf(g_control_probe_challenge, sizeof(g_control_probe_challenge), "%08lx%08lx",
            (unsigned long)esp_random(), (unsigned long)esp_random());
   const uint32_t remaining = g_control_probe_deadline_ms - now;
-  g_control_probe_querying = sense_lcd_ota_query_start(challenge, remaining < 3000 ? remaining : 3000);
+  g_control_probe_querying = sense_lcd_ota_query_start(g_control_probe_challenge, remaining < 3000 ? remaining : 3000);
 }
 
 // Fresh captures normally wait for the sleep flush. End only an unentered

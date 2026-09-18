@@ -111,6 +111,7 @@ static std::atomic<bool> g_lcd_ota_uart_receiving{false};
 static bool g_lcd_ota_binary_mode=false;
 static unsigned s_lcd_ota_handle=0;
 static void* s_lcd_ota_protocol=nullptr;
+static bool g_img_rx_active=false,g_img_rx_binary_mode=false,g_spool_tx_pending=false,g_spool_tx_active=false,g_suppress_uart_json_tx=false;
 static bool query_recovery_idle(){return IDLE_EXPRESSION;}
 static uint32_t s_lcd_ota_started_ms=0,s_lcd_ota_budget_ms=1000,s_lcd_ota_session_id=42;
 static unsigned erased=0,clear_writes=0,restore_calls=0,ui_actions=0;
@@ -142,6 +143,9 @@ static void reset_attempt(){
 }
 int main(){
   assert(query_recovery_idle());
+  for(bool* owner : {&g_img_rx_active,&g_img_rx_binary_mode,&g_spool_tx_pending,&g_spool_tx_active,&g_suppress_uart_json_tx}){
+    *owner=true;assert(!query_recovery_idle());*owner=false;
+  }
   s_lcd_ota_state=LCD_OTA_RECEIVING;assert(!query_recovery_idle());s_lcd_ota_state=LCD_OTA_IDLE;
   s_lcd_ota_handle=1;assert(!query_recovery_idle());s_lcd_ota_handle=0;
   s_lcd_ota_protocol=(void*)1;assert(!query_recovery_idle());s_lcd_ota_protocol=nullptr;

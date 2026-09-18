@@ -180,7 +180,7 @@ static LcdOtaCleanupResult sense_lcd_abort_cleanup(Send send, Receive receive, R
 struct LcdOtaQuerySnapshot {
   char fw[32], running_part[16], running_state[20], boot_part[16], coord_owner[40];
   uint32_t part_size, peer_boot_id, coord_lease_ms;
-  bool boot_ready, correlated, coord_waiting, recovery_idle;
+  bool boot_ready, correlated, coord_waiting, recovery_idle, coord_reported;
 };
 enum LcdOtaQueryPoll { LCD_QUERY_WAITING, LCD_QUERY_READY, LCD_QUERY_TIMEOUT };
 static char g_lcd_query_coord_id[40] = {0};
@@ -189,6 +189,7 @@ static bool g_lcd_query_coord_waiting = false;
 static char g_lcd_query_coord_owner[40] = {0};
 static uint32_t g_lcd_query_coord_lease_ms = 0;
 static bool g_lcd_query_recovery_idle = false;
+static bool g_lcd_query_coord_reported = false;
 // An invocation-local proof, cleared when durable work starts. It deliberately
 // survives the existing second proxy attempt: the arm must re-query this exact
 // boot and prove idle again. It is neither a session ACK nor reset authority.
@@ -253,13 +254,30 @@ static bool sense_lcd_ota_query_start(const char* coord_id, uint32_t timeout_ms)
   String output;
   serializeJson(doc, output);
   admission.release(); // ordinary sender reacquires; pending still excludes image spooling
-  uart_send_json(output.c_str(), true);  // Explicit bounded readiness probe.
+  const bool sent = uart_send_json(output.c_str(), true);  // Explicit bounded readiness probe.
+  if (!sent) {
+    UartJsonTxLock cleanup;
+    // The original deadline may have expired while TX waited. Never cancel a
+    // newer caller that acquired the shared mailbox in that interval.
+    if (cleanup.held() && !strcmp(s_lcd_query_requested_id, coord_id)) s_lcd_query_pending = false;
+  }
+  return sent;
+}
+
+static bool sense_lcd_ota_query_cancel(const char* coord_id) {
+  UartJsonTxLock admission;
+  if (!admission.held()) return false;
+  if (coord_id && !strcmp(s_lcd_query_requested_id, coord_id)) s_lcd_query_pending = false;
   return true;
 }
 
-static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& snapshot, bool confirm_mode = true) {
+static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& snapshot, bool confirm_mode = true,
+                                             const char* expected_coord_id = nullptr) {
   UartJsonTxLock admission;
   if (!admission.held()) return LCD_QUERY_WAITING;
+  // A bounded owner can be preempted after expiry. It must not consume or
+  // cancel the replacement owner's response, even if its local flag is stale.
+  if (expected_coord_id && strcmp(expected_coord_id, s_lcd_query_requested_id)) return LCD_QUERY_TIMEOUT;
   if (!s_lcd_query_pending ||
       (uint32_t)(millis() - s_lcd_query_started_ms) >= s_lcd_query_timeout_ms) {
     s_lcd_query_pending = false;
@@ -282,6 +300,7 @@ static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& snapshot, b
   strlcpy(snapshot.coord_owner, g_lcd_query_coord_owner, sizeof(snapshot.coord_owner));
   snapshot.coord_lease_ms = g_lcd_query_coord_lease_ms;
   snapshot.recovery_idle = g_lcd_query_recovery_idle;
+  snapshot.coord_reported = g_lcd_query_coord_reported;
   if (!snapshot.fw[0] || !snapshot.part_size || !snapshot.boot_ready ||
       strcmp(snapshot.running_state, "VALID") != 0 || !snapshot.running_part[0] ||
       strcmp(snapshot.running_part, "?") == 0 ||
@@ -429,9 +448,11 @@ static bool sense_lcd_ota_query(char* lcd_fw_out, size_t fw_len,
 
     String output;
     serializeJson(doc, output);
-    uart_send_json(output.c_str(), expected_boot_fw != nullptr);
-    Serial.printf("[LCD_OTA_PROXY] TX LCD_OTA_QUERY (attempt %d/%d)\n",
+    const bool query_sent = uart_send_json(output.c_str(), expected_boot_fw != nullptr);
+    Serial.printf("[LCD_OTA_PROXY] LCD_OTA_QUERY %s (attempt %d/%d)\n",
+                  query_sent ? "sent" : "skipped",
                   attempt, LCD_OTA_QUERY_ATTEMPTS);
+    if (!query_sent) return false;
 
     // Wait for mailbox to be filled by parse_input_message dispatch
     unsigned long start = millis();

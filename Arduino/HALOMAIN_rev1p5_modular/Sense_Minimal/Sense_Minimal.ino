@@ -1292,7 +1292,11 @@ static void uart_send_fw_info(bool do_lcd_query = true) {
 
   String output;
   serializeJson(doc, output);
-  uart_send_json(output.c_str());
+  const bool sent = uart_send_json(output.c_str());
+  if (!sent) {
+    Serial.printf("[UART_TX] FW_INFO skipped (lcd_query=%d)\n", do_lcd_query ? 1 : 0);
+    return;
+  }
   if (do_lcd_query) {
     Serial.printf("[UART_TX] FW_INFO sent (lcd_ok=%d lcd_fw=%s state=%s)\n",
                   lcd_ok ? 1 : 0,
@@ -3244,6 +3248,7 @@ static bool parse_input_message(const char* json_str) {
     g_lcd_ota_query_resp_ready = false;
     g_lcd_query_boot_ready = false;
     g_lcd_query_recovery_idle = false;
+    g_lcd_query_coord_reported = false;
     if (!doc["lcd_fw"].is<const char*>() || !doc["ota_part_size"].is<uint32_t>() ||
         (!doc["running_part"].isUnbound() && !doc["running_part"].is<const char*>()) ||
         (!doc["running_state"].isUnbound() && !doc["running_state"].is<const char*>()) ||
@@ -3289,6 +3294,8 @@ static bool parse_input_message(const char* json_str) {
     strlcpy(g_lcd_query_coord_owner, owner, sizeof(g_lcd_query_coord_owner));
     g_lcd_query_coord_lease_ms = doc["coord_lease_ms"] | (uint32_t)0;
     g_lcd_query_recovery_idle = doc["recovery_idle"].is<bool>() && (doc["recovery_idle"] | false);
+    g_lcd_query_coord_reported = doc["coord_waiting"].is<bool>() &&
+        doc["coord_owner"].is<const char*>() && doc["coord_lease_ms"].is<uint32_t>();
     g_lcd_ota_query_resp_ready = true;
     (void)sense_lcd_query_proof_emit(Serial, coord_id, g_lcd_query_peer_boot_id,
         fw, running_part, boot_part, running_state, g_lcd_query_boot_ready, part_size);

@@ -49,12 +49,17 @@ static bool sense_uart_ordinary_tx_allowed() {
 static void sense_lcd_mode_restore() {
   Preferences prefs;
   bool unsafe = true;  // Missing/unreadable state requires a fresh mode probe.
+  const char* origin = "namespace_missing_or_unreadable";
   if (prefs.begin("lcd_xfer", true)) {
+    const bool present = prefs.isKey("unsafe");
     unsafe = prefs.getBool("unsafe", true);
+    origin = !present ? "marker_missing" : (unsafe ? "unsafe_or_unreadable" : "saved_safe");
     prefs.end();
   }
   s_lcd_mode_marker_pending = unsafe;
   g_lcd_ota_mode_unconfirmed.store(unsafe);
+  Serial.printf("[LCD_XFER] mode_restore origin=%s quarantine=%d marker_pending=%d\n",
+                origin, unsafe ? 1 : 0, s_lcd_mode_marker_pending ? 1 : 0);
 }
 
 static bool sense_lcd_mode_before_begin() {
@@ -191,7 +196,6 @@ static void initUarts() {
     return;
   }
   uart_json_tx_init();
-  sense_lcd_mode_restore();
   Serial.begin(115200);
   // Keep USB console backpressure bounded when a cable remains attached but
   // no host drains logs. Core3.3.8 HWCDC::write decrements its unsigned retry
@@ -201,6 +205,7 @@ static void initUarts() {
   // This is the SDK retry timeout, not a hard wall-clock deadline per write.
   Serial.setTxTimeoutMs(1);
   delay(50);
+  sense_lcd_mode_restore();
   // 1024, matching the LCD. Until the SD-spool drain existed the Sense only
   // ever RECEIVED small JSON lines and only ever SENT binary, so the 256-byte
   // default was enough. Receiving a ~521-byte COBS frame overflows it and drops
@@ -437,9 +442,10 @@ static bool validate_protocol_message(JsonDocument& doc) {
 
 // ── Core TX ──────────────────────────────────────────────────────────
 
-static void uart_send_json(const char* json_str, bool explicit_mode_probe = false,
+// True means this call admitted and wrote the complete frame, not peer receipt.
+static bool uart_send_json(const char* json_str, bool explicit_mode_probe = false,
                            bool explicit_img_begin = false) {
-  if (!json_str) return;
+  if (!json_str) return false;
   const size_t len = strlen(json_str);
   // Task context only; there are no callbacks or recursive sends in this scope.
   // A 12KB list occupies ~1.07s at 115200 baud. Bound contention at 2s, and keep
@@ -447,25 +453,25 @@ static void uart_send_json(const char* json_str, bool explicit_mode_probe = fals
   UartJsonTxLock tx_lock;
   if (!tx_lock.held()) {
     Serial.println("[UART_TX] json_skipped reason=tx_lock_unavailable");
-    return;
+    return false;
   }
   // The LCD may switch to binary as soon as it emits READY, before our RX
   // collector observes it. Reserve TX from BEGIN admission until explicit
   // refusal or transfer completion; only this request's own BEGIN may pass.
   if (g_img_spool_request_active.load() && s_img_ready_result.load() != 0) {
-    if (!explicit_img_begin || !sense_img_spool_begin_matches(json_str)) return;
+    if (!explicit_img_begin || !sense_img_spool_begin_matches(json_str)) return false;
   }
   // Block JSON TX while LCD OTA proxy owns the UART for binary COBS framing
   if (g_lcd_ota_proxy_owns_uart) {
-    return;
+    return false;
   }
   if (g_lcd_ota_mode_unconfirmed.load()) {
     // Only the bounded query APIs can opt in. No general producer can bypass
     // quarantine by choosing a type string or racing a global probe flag.
-    if (!explicit_mode_probe || !json_str || strlen(json_str) >= 256) return;
+    if (!explicit_mode_probe || !json_str || strlen(json_str) >= 256) return false;
     StaticJsonDocument<256> probe;
     if (deserializeJson(probe, json_str) != DeserializationError::Ok ||
-        strcmp(probe["type"] | "", "LCD_OTA_QUERY") != 0) return;
+        strcmp(probe["type"] | "", "LCD_OTA_QUERY") != 0) return false;
   }
   // Same rule for the SD-spool drain. The Sense emits SENSE_DIAG rssi reports
   // roughly every 2s; during a drain those land inside the LCD's ACK reads and
@@ -473,7 +479,7 @@ static void uart_send_json(const char* json_str, bool explicit_mode_probe = fals
   // ~18s of a transfer is free — they are periodic and the next one is along
   // shortly — whereas a corrupted frame costs the whole image.
   if (g_spool_owns_uart) {
-    return;
+    return false;
   }
   // And while the Sense is SENDING an image. This is the direction that was
   // missing: the RX pump was already guarded, so ACKs were not being stolen —
@@ -482,15 +488,19 @@ static void uart_send_json(const char* json_str, bool explicit_mode_probe = fals
   // (seq=5, 24, 34 across runs) because the interferer is periodic, not
   // positional.
   if (g_img_spool_tx_active || sense_img_spool_binary_pending()) {
-    return;
+    return false;
   }
   last_uart_tx_ms = millis();
   uart_tx_count++;
   uart_note_tx_type(json_str);
-  lcdSerial.print(json_str);
-  lcdSerial.print("\n");
+  const size_t payload_written = lcdSerial.print(json_str);
+  const size_t delimiter_written = lcdSerial.print("\n");
   lcdSerial.flush();
   tx_lock.release();
+  if (payload_written != len || delimiter_written != 1) {
+    Serial.println("[UART_TX] json_incomplete reason=short_write");
+    return false;
+  }
 #if HALO_DEBUG_SENSITIVE
   Serial.printf("[PROTO] TX: len=%d, %s\n", (int)len, json_str);
 #else
@@ -520,6 +530,7 @@ static void uart_send_json(const char* json_str, bool explicit_mode_probe = fals
     Serial.printf("[PROTO] TX: len=%d, %s\n", (int)len, redacted);
   }
 #endif
+  return true;
 }
 
 // ── Diagnostic sender ────────────────────────────────────────────────

@@ -1,3 +1,7 @@
+# Pending 6.4.197 — automatic blank-NVS UART recovery
+
+Fix the setup-mode deadlock without trusting absent state: require a fresh healthy/idle LCD proof before enabling ordinary Sense replies. Preserve interrupted-transfer quarantine and existing OTA debt. Make FW_INFO/query transmission logs truthful and add a composed factory-startup regression. Physical factory acceptance remains pending. See [cause and validation](docs/FACTORY_UART_STARTUP_197.md).
+
 # September18 bench tooling — actuator failure containment
 
 Replace the fixed-port blocking tap helper with exact-device discovery and bounded raw-serial workers. Require fresh readiness, preserve the calibrated stroke and distinguish completion from an observed Halo wake. Record and contain USB/cleanup failures; no automatic reset, stronger stroke or Halo firmware change. The intermittent controller fault is reproduced and remains under investigation. See [evidence and scope](docs/ACTUATOR_INVESTIGATION_20260918.md).

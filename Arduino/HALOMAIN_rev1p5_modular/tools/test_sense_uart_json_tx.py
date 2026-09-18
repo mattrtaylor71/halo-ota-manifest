@@ -105,18 +105,19 @@ static struct {
   }
 } Serial;
 static struct {
-  void print(const char* s) {
+  size_t print(const char* s) {
     if (fixed) assert(own_message_lock);
     {
       std::lock_guard<std::mutex> lock(wire_mutex); wire += s;
     }
-    if (!coordinate || !strcmp(s, "\n")) return;
+    if (!coordinate || !strcmp(s, "\n")) return strlen(s);
     std::unique_lock<std::mutex> lock(schedule_mutex);
     if (second_thread) {
-      second_payload = true; schedule_cv.notify_all(); return;
+      second_payload = true; schedule_cv.notify_all(); return strlen(s);
     }
     first_payload = true; schedule_cv.notify_all();
     assert(schedule_cv.wait_for(lock, 2s, [] { return second_attempted || second_payload; }));
+    return strlen(s);
   }
   void flush() { if (fixed) assert(own_message_lock); }
 } lcdSerial;
@@ -219,7 +220,7 @@ int main() {
   g_img_spool_request_active=false;s_img_ready_result=-2;
   puts("PASS pending READY reserves TX for exact own BEGIN; accepted blocks and explicit refusal restores ordinary JSON");
   clear_state(); inject_timeout = true;''')
-    return '\n'.join([prefix, state, begin_guard, definition(source, 'static void uart_send_json('), cases])
+    return '\n'.join([prefix, state, begin_guard, definition(source, 'static bool uart_send_json(' if 'static bool uart_send_json(' in source else 'static void uart_send_json('), cases])
 
 
 def main():

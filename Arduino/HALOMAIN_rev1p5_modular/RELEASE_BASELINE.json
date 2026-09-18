@@ -9947,5 +9947,19 @@
       "150s action/observation deadline; child cleanup has separate finite5/3s waits.",
       "No manual or scheduled OTA executed in this smoke; published196 remains uninstalled at this checkpoint."
     ]
+  },
+  "factory_startup_candidate_197": {
+    "status": "SOURCE_FIX_FOCUSED_TESTS_PASS_FULL_BUILD_AND_FACTORY_ACCEPTANCE_PENDING",
+    "version": "6.4.197",
+    "published": false,
+    "installed": false,
+    "handoff": "docs/FACTORY_UART_STARTUP_197.md",
+    "retained_public_version": "6.4.196",
+    "preserve_frozen_158": true,
+    "hardware_target": {
+      "sense": "10:20:ba:03:97:b8",
+      "lcd": "d0:cf:13:1e:19:bc"
+    },
+    "evidence_root": "/Users/MattTaylor/halo-factory-startup-20260918"
   }
 }

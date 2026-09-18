@@ -1,6 +1,9 @@
 # Actuator investigation — 18 September 2026
 
-The actuator is not yet qualified as reliable. One normal physical tap woke both
+After a full USB/12 V power removal, the actuator passed three consecutive
+physical wake/Home/sleep cycles and a final idle/reopen check. This is finite
+recovery evidence; the original intermittent fault is not proved permanently
+fixed. Earlier, one normal physical tap woke both
 Halo boards, but the following attempt stalled while opening the Uno's serial
 port, before any HELP or movement command. This is a reproduced USB/control
 failure, distinct from older completed strokes that did not prove screen contact.
@@ -39,8 +42,25 @@ separately. They are not successful Tapper/readiness receipts.
 The current evidence does not isolate the remaining cause among the Mac/USB
 serial path, bridge/data channel, or actuator power/wiring. Correct baud, a
 responsive control endpoint, and failed software recovery narrow the fault;
-they do not prove a motor-noise or firmware-corruption explanation. The cold-start USB-only baseline passed; the powered-idle comparison and
-post-motion check are pending confirmation that motor power is restored. Do not replace failed cases with later passes.
+they do not prove a motor-noise or firmware-corruption explanation. The cold-start USB-only and powered-idle baselines both passed. Three subsequent
+physical strokes also passed; these finite results do not establish an electrical
+root cause. Do not replace failed cases with later passes.
+
+## Powered comparison and physical recovery
+
+After the user restored12V with USB still connected, `powered-idle001/RESULT.json`
+passed nine nonmoving STATUS queries across120seconds, then STOP/close/reap.
+`powered-wakes001/RESULT.json` passed three unchanged strokes, each with fresh
+paired USB appearance, Home state, backlight255/panel-on and increasing LVGL
+heartbeats (52/49/47 samples), followed by fresh paired deep-sleep logs and
+USB closure. A final HELP/STATUS probe remained READY after60.145seconds quiet.
+There were no extra Halo opens, injected Halo commands, capture errors or crash
+markers; every descriptor/worker closed. Case SHA256:
+`4c54b2f286087cfd293eedb3eee1845db616b4550624f518093b7f8e2c62ceda`.
+
+The physical reset restored operation; software reset attempts before it did
+not. Host-tool hardening improves control and failure containment, but these
+results do not prove it cured the underlying intermittent USB fault.
 
 ## Host control correction
 

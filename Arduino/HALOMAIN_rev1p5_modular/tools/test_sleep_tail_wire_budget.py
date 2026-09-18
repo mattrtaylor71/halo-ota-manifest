@@ -33,7 +33,7 @@ def harness(root):
     assert "uart_send_wifi_diag_summary(" not in deep, "Optional summary returned to sleep path"
     # Keep the transport double honest about the production frame delimiter.
     uart = (root / "Sense_Minimal/sense_uart.h").read_text()
-    tx = definition(uart, "static void uart_send_json(")
+    tx = definition(uart, "static bool uart_send_json(" if "static bool uart_send_json(" in uart else "static void uart_send_json(")
     assert 'lcdSerial.print(json_str);' in tx
     assert 'lcdSerial.print("\\n");' in tx
     assert tx.index('lcdSerial.print(json_str);') < tx.index('lcdSerial.print("\\n");')

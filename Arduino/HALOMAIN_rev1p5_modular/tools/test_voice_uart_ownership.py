@@ -94,7 +94,7 @@ static bool parse_input_message(const char* line){
 ''' + funcs + r'''
 static const unsigned PROTOCOL_VERSION=1,LCD_OTA_PROXY_QUERY_TIMEOUT_MS=7000;
 static uint32_t get_next_msg_id(){static uint32_t id=0;return ++id;}
-static void uart_send_json(const char*,bool){assert(!uart_json_tx_mutex->held&&!uart_rx_mutex->held);++sends;if(on_send)on_send();}
+static bool uart_send_json(const char*,bool){assert(!uart_json_tx_mutex->held&&!uart_rx_mutex->held);++sends;if(on_send)on_send();return true;}
 static void sense_lcd_mode_confirm(){++confirms;if(on_confirm)on_confirm();g_lcd_ota_mode_unconfirmed=false;}
 static bool g_lcd_ota_query_resp_ready=false,g_lcd_query_boot_ready=true;
 static char g_lcd_ota_query_resp_fw[32]="6.4.host",g_lcd_query_running_part[16]="app0";

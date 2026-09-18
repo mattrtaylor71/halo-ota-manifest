@@ -493,7 +493,9 @@ static void lcd_ota_handle_query(const char* coord_id = nullptr) {
     // UART-owner snapshot; a new boot alone is not proof that binary cleanup
     // finished. Sense also binds this explicit idle proof to nonce/image/boot.
     doc["recovery_idle"] = s_lcd_ota_state == LCD_OTA_IDLE && s_lcd_ota_handle == 0 &&
-        !g_lcd_ota_binary_mode && !g_lcd_ota_uart_receiving && s_lcd_ota_protocol == nullptr;
+        !g_lcd_ota_binary_mode && !g_lcd_ota_uart_receiving && s_lcd_ota_protocol == nullptr &&
+        !g_img_rx_active && !g_img_rx_binary_mode && !g_spool_tx_pending &&
+        !g_spool_tx_active && !g_suppress_uart_json_tx;
 
     const char* last_result = lcd_ota_last_result_str();
     if (last_result && last_result[0]) {

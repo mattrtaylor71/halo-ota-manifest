@@ -1,3 +1,5 @@
+> Factory acceptance issue under investigation (September18): paired196 works on the retained-state bench but fails fresh erased-NVS startup on the EOL pair. Missing LCD-mode proof suppresses Sense replies during setup; do not claim factory acceptance from the prior OTA pass.
+
 > September 18 release: **196 is published and read back for Sense and LCD.** Both canonical builds/artifact checks and all 97 exact-snapshot suites passed. The user’s paired manual OTA passed: Sense 195/app0 → 196/app1 and LCD 191/app1 → 196/app0, both SDK VALID, with verified image hashes, observed target resolution, Home and paired sleep. Capture closed after 60.438 seconds without USB reopening. A further no-update request is untested; no new scheduled-OTA or full-product pass is claimed. See [release evidence and remaining steps](docs/MANUAL_OTA_196_20260918.md).
 
 # HALO Firmware Agent Guide
@@ -90,3 +92,7 @@ At that earlier178/179 checkpoint, public manifests remained162. The older-manif
 - First extract pure helpers and duplicated constants.
 - Next isolate protocol helpers and state-machine logic.
 - Leave hardware-heavy paths for later, smaller passes with explicit hardware validation.
+
+## Actuator bench control
+
+Use the bounded exact-device `tools/tapctl.py` for the current replacement Uno; preserve `PUSH:500,200,500` at speed128. `--action probe` is nonmoving; `--action wake` requires a fresh Sense USB transition. Inspect receipts and stop on uncertain worker ownership. The relay is absent from the current wiring; the old relay helper pins a different Uno. Three physical cycles plus a final idle/reopen passed after a full USB/12V reset, but the original intermittent fault is not proved permanently cured. See [current evidence](docs/ACTUATOR_INVESTIGATION_20260918.md).
