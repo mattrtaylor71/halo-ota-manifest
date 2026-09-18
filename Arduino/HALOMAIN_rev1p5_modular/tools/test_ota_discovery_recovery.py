@@ -46,6 +46,7 @@ static bool sense_lcd_ota_retry_safe(){return proxy_ok;}
 static bool commit(const durable_ota::Record&r){
  return commit_candidate(r,work.original_start,work.original_budget);
 }
+static bool commit(const durable_ota::Record&r,const void*){return commit(r);}
 ''')
     # This block runs in the completed production-function namespace, before
     # the existing host reset helpers. No framework/network implementation is
@@ -53,7 +54,7 @@ static bool commit(const durable_ota::Record&r){
     marker = '// Model the existing caller boundaries only:'
     pos = source.index(marker)
     extension = 'namespace sense_policy {\n'
-    for signature in ('static bool hex_sha(', 'static bool matches_sense(', 'static bool bind_pair('):
+    for signature in ('static bool hex_sha(', 'static bool matches_sense(', 'static bool bind_pair(', 'static bool reserve_board_begin('):
         extension += definition(runtime, signature) + '\n'
     extension += '}\n'
     for signature in ('static bool halo_policy_resolve_pair()',
@@ -187,6 +188,110 @@ static durable_ota::DiscoveryRecoveryProof proof(){
 static void next_invocation(){
  using namespace sense_policy;work={};g_lcd_work_budget_live=true;
  g_lcd_work_budget={now_ms,120000};g_peer_gate.proof_ms=now_ms;g_peer_gate.deadline_ms=now_ms+120000;
+}
+// Retained190 service metadata: settled188/gen27 belongs to0917, while a
+// different admitted0918 obligation remains due. Running pair is190/191.
+static void reset_completed_handoff(){
+ reset_recovery();using namespace durable_ota;using namespace sense_policy;
+ epoch=1789767600;kFirmwareVersion="6.4.190";strcpy(g_lcd_ota_query_resp_fw,"6.4.191");
+ Target completed{};strcpy(completed.version,"6.4.188");strcpy(completed.peer_version,"6.4.188");
+ strcpy(completed.url,"https://example.com/sense188.bin");completed.bytes=1800000;completed.peer_bytes=2029952;
+ completed.sha256[0]=1;completed.peer_sha256[0]=2;
+ Record initial,preflight,applied,settled;uint8_t campaign[16]={37};
+ CHECK(start(completed,"nightly_20260917",campaign,{1789635600,true,true},false,initial));
+ CHECK(reserve_preflight(initial,{1789635601,true,true},false,preflight)==Admission::ALLOWED);
+ CHECK(reserve_apply(preflight,{1789635602,true,true},1000,120000,true,applied));
+ CHECK(resolve(applied,{1789635610,true,true},completed,true,true,true,settled));
+ settled.generation=27;state_record=settled;
+ strcpy(g_coord_pending,"nightly_20260918");g_coord_completion_target[0]=0;
+ g_coord_credit={};strcpy(g_coord_credit.pending.id,g_coord_pending);
+ strcpy(g_coord_credit.pending.timezone,fixture_tz);g_coord_credit.pending.bound=true;
+ g_coord_credit.pending.target_epoch=g_coord_credit.admitted_epoch=1789722000;
+ g_coord_credit.pending_credit_admitted=true;
+ g_coord_credit.schedule=g_coord_credit.pending;g_coord_credit.schedule_observed=true;
+ CHECK(credit_state_shape(g_coord_credit));
+ done_ids={"nightly_20260917","nightly_20260916","nightly_20260915"};
+ uint8_t bytes[kRecordBytes];CHECK(encode(state_record,bytes));store.bytes.assign(bytes,bytes+sizeof(bytes));
+ store.wrote=false;work={};boot_reconciled=false;events.clear();
+}
+static void completed_handoff_cases(){
+ using namespace durable_ota;using namespace sense_policy;
+ reset_completed_handoff();const Record previous=state_record;const auto credit=g_coord_credit;
+ const auto history=done_ids;const auto pending=std::string(g_coord_pending);
+ CHECK(enter("manual",true));
+ CHECK(state_record.phase==Phase::DISCOVERY&&state_record.generation==28&&work.live);
+ CHECK(same_target(state_record.target,previous.target));
+ CHECK(strcmp(state_record.origin,previous.origin)&&!strcmp(state_record.origin,g_coord_pending));
+ CHECK(memcmp(state_record.campaign,previous.campaign,16)&&state_record.network_windows==1);
+ CHECK(!memcmp(&g_coord_credit,&credit,sizeof(credit))&&done_ids==history&&pending==g_coord_pending&&debt_value);
+ CHECK(legacy_commits==0&&at("policy_readback")<at("policy_published"));
+ CHECK(ota_peer_schedule_complete()==CoordCompletion::Deferred&&done_ids==history);
+ // No-update remains read-only, with complete pair verification before credit.
+ work.manifest=&sense_manifest;CHECK(complete_downgrade_policy_check("6.4.162","manual"));
+ CHECK(done_ids.size()==history.size()+1&&done_ids.back()=="nightly_20260918");
+ CHECK(!g_coord_pending[0]&&!debt_value&&state_record.phase==Phase::DISCOVERY);
+ CHECK(same_target(state_record.target,previous.target));
+ // A genuinely new paired193 manifest binds once, commits both BEGIN charges,
+ // and cannot complete until both running images have the exact target proof.
+ reset_completed_handoff();CHECK(enter("manual",true));events.clear();
+ OtaManifest new_sense=sense_manifest,new_lcd=lcd_manifest;
+ strcpy(new_sense.version,"6.4.193");strcpy(new_lcd.version,"6.4.193");
+ work.manifest=&new_sense;CHECK(bind_pair(new_lcd,"6.4.191"));
+ CHECK(state_record.phase==Phase::APPLY&&!strcmp(state_record.target.version,"6.4.193"));
+ CHECK(reserve_board_begin(0)&&reserve_board_begin(1));
+ CHECK(state_record.attempt_begins[0]==1&&state_record.attempt_begins[1]==1);
+ const Record bound=state_record;const auto bound_bytes=store.bytes;
+ CHECK(!halo_policy_resolve_pair()&&store.bytes==bound_bytes&&debt_value);
+ OtaManifest swapped=new_sense;swapped.sha256[0]='2';work.manifest=&swapped;
+ CHECK(!bind_pair(new_lcd,"6.4.191")&&same_target(state_record.target,bound.target));
+ work.manifest=&new_sense;kFirmwareVersion="6.4.193";strcpy(g_lcd_ota_query_resp_fw,"6.4.193");
+ CHECK(halo_policy_resolve_pair()&&state_record.phase==Phase::RESOLVED&&work.finished);
+ CHECK(done_ids.size()==3&&g_coord_pending[0]&&debt_value);
+ // Model only the existing verified receiver/known-clear debt boundary.
+ debt_value=false;CHECK(ota_peer_schedule_complete()==CoordCompletion::Credited);
+ CHECK(done_ids.size()==4&&done_ids.back()=="nightly_20260918"&&!g_coord_pending[0]);
+ CHECK(at("policy_readback")<at("done_ids"));
+ // Every existing ownership/proof requirement also guards this new handoff.
+ for(unsigned fault=0;fault<18;++fault){reset_completed_handoff();
+  switch(fault){
+   case 0:manual_request=false;break;
+   case 1:strcpy(g_coord_pending,"nightly_20260917");break;
+   case 2:g_coord_credit.pending_resolved=true;break;
+   case 3:g_coord_credit.pending_credit_admitted=false;g_coord_credit.admitted_epoch=0;break;
+   case 4:g_coord_credit_uncertain=true;break;
+   case 5:debt_read_ok=false;break;
+   case 6:local_valid=false;break;
+   case 7:strcpy(g_lcd_query_running_state,"INVALID");break;
+   case 8:strcpy(g_lcd_ota_query_resp_fw,"6.4.187");break;
+   case 9:kFirmwareVersion="6.4.187";break;
+   case 10:clock_fresh=false;break;
+   case 11:g_peer_gate.proof_ms=now_ms-2000;break;
+   case 12:strcpy(g_lcd_query_coord_owner,"different");break;
+   case 13:user_busy=true;break;
+   case 14:strcpy(g_coord_completion_target,"6.4.188");break;
+   case 15:g_coord_credit.admitted_epoch=state_record.high_water-1;break;
+   case 16:g_coord_credit.pending.target_epoch=epoch+86400;break;
+   case 17:tz_ok=false;break;
+  }
+  const auto before=store.bytes;const auto history_before=done_ids;const auto pending_before=std::string(g_coord_pending);
+  CHECK(!enter("manual",true)&&store.bytes==before&&done_ids==history_before&&pending_before==g_coord_pending&&debt_value);
+ }
+ // Pure admission cannot reinterpret unresolved, quarantined or same-origin
+ // records as completed handoffs. Missing/reused campaign also refuses.
+ reset_completed_handoff();auto evidence=proof();evidence.completed_comparison=true;
+ Record rejected;uint8_t fresh[16]={39};
+ CHECK(reserve_recovery_discovery(state_record,{epoch,true,false},evidence,false,rejected,fresh)==Admission::LEGACY);
+ CHECK(reserve_recovery_discovery(state_record,{epoch,true,false},evidence,true,rejected)==Admission::IDENTITY);
+ CHECK(reserve_recovery_discovery(state_record,{epoch,true,false},evidence,true,rejected,state_record.campaign)==Admission::IDENTITY);
+ for(auto phase:{Phase::FAST,Phase::DEFERRED,Phase::QUARANTINED}){
+  Record unresolved=state_record;unresolved.phase=phase;unresolved.not_before=epoch+86400;
+  CHECK(shape(unresolved));CHECK(reserve_recovery_discovery(unresolved,{epoch,true,false},evidence,true,rejected,fresh)==Admission::LEGACY);
+ }
+ // Failed canonical commit/readback never admits network work or writes credit.
+ for(unsigned fault=0;fault<2;++fault){reset_completed_handoff();if(fault)fail_readback=true;else fail_write=true;
+  CHECK(!enter("manual",true)&&!work.live&&!state_allowed&&done_ids.size()==3&&debt_value);
+ }
+ puts("PASS completed188 -> manual pending0918 handoff on190/191, checked no-update and full193 paired apply, ownership negatives and no early credit");
 }
 static void composition_cases(){
  using namespace durable_ota;using namespace sense_policy;
@@ -362,6 +467,7 @@ int main(){
  CHECK(closed.work_remaining_ms==granted.work_remaining_ms&&!active_phase(closed));
  CHECK(reserve_recovery_discovery(closed,{epoch+2,true,false},proof(),true,n)==Admission::ALLOWED);
  CHECK(n.network_windows==1);
+ completed_handoff_cases();
  composition_cases();
  printf("PASS %u recovery admission/ownership/accounting/commit checks\n",checks);
 }

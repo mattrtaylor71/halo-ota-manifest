@@ -23,11 +23,12 @@ enum RecoveryMissing : uint16_t {
   RECOVERY_COMPLETION_TARGET=1U<<12, RECOVERY_ORDER=1U<<13
 };
 inline uint16_t recovery_discovery_missing(const Record& old,Clock c,
-                                           const DiscoveryRecoveryProof& p) {
+                                           const DiscoveryRecoveryProof& p,bool explicit_manual=false) {
   uint16_t missing=0;
   const bool record_ok=shape(old);
-  if(!record_ok||old.phase!=Phase::DISCOVERY||active_phase(old)||bench_active(old)||
-     old.one_shot.phase!=OneShotPhase::NONE)missing|=RECOVERY_SHAPE;
+  const bool completed_handoff=explicit_manual&&old.phase==Phase::RESOLVED;
+  if(!record_ok||(old.phase!=Phase::DISCOVERY&&!completed_handoff)||active_phase(old)||bench_active(old)||
+     (old.one_shot.phase!=OneShotPhase::NONE&&!(completed_handoff&&old.one_shot.phase==OneShotPhase::CLOSED)))missing|=RECOVERY_SHAPE;
   if(!clock_valid(old,c))missing|=RECOVERY_CLOCK;
   if(!p.storage_ready)missing|=RECOVERY_STORAGE;
   if(!p.uncertainty_clear)missing|=RECOVERY_UNCERTAIN;
@@ -49,6 +50,9 @@ inline uint16_t recovery_discovery_missing(const Record& old,Clock c,
   if(!credit.pending.id[0]||!credit.pending.bound||credit.pending_resolved||
      !credit.pending_credit_admitted||!credit.admitted_epoch||
      credit.admitted_epoch>c.epoch||!p.pending||strcmp(p.pending,credit.pending.id))missing|=RECOVERY_PENDING;
+  // Same-origin settlement belongs to its original completion path. Only a
+  // different, later admitted calendar obligation may use this manual handoff.
+  if(completed_handoff&&!strcmp(old.origin,credit.pending.id))missing|=RECOVERY_PENDING;
   // The first adoption may replace only an older closed read-only origin.
   // After adoption, failures retain that exact origin. A fresh manual request
   // may grant work only after proving this same ownership again.
@@ -56,13 +60,13 @@ inline uint16_t recovery_discovery_missing(const Record& old,Clock c,
   return missing;
 }
 inline bool recovery_discovery_owned(const Record& old,Clock c,
-                                     const DiscoveryRecoveryProof& p) {
-  return recovery_discovery_missing(old,c,p)==0;
+                                     const DiscoveryRecoveryProof& p,bool explicit_manual=false) {
+  return recovery_discovery_missing(old,c,p,explicit_manual)==0;
 }
 
 inline Admission reserve_recovery_discovery(const Record& old,Clock c,
-    const DiscoveryRecoveryProof& proof,bool explicit_manual,Record& out) {
-  if(!recovery_discovery_owned(old,c,proof))return Admission::LEGACY;
+    const DiscoveryRecoveryProof& proof,bool explicit_manual,Record& out,const uint8_t* new_campaign=nullptr) {
+  if(!recovery_discovery_owned(old,c,proof,explicit_manual))return Admission::LEGACY;
   // A deliberate recovery receives the same finite user-authorized grant as
   // ordinary manual discovery, only after the full ownership proof above.
   // Automatic work still needs its real timer and never gains a manual grant.
@@ -70,8 +74,13 @@ inline Admission reserve_recovery_discovery(const Record& old,Clock c,
   if(explicit_manual&&!old.deferred_path&&c.epoch/86400UL>old.budget_day&&c.epoch>=old.not_before)
     charged.normal_maintenance=true;
   Record candidate{};
+  // RESOLVED means the old target is completed comparison evidence. A fresh
+  // manual campaign reads latest for the different pending obligation without
+  // crediting it or erasing its debt. No active/failed target is replaced here.
+  const bool completed_handoff=old.phase==Phase::RESOLVED;
   const Admission result=reserve_discovery(old,charged,false,false,candidate,
-                                           nullptr,nullptr,explicit_manual);
+      completed_handoff?proof.credit->pending.id:nullptr,
+      completed_handoff?new_campaign:nullptr,explicit_manual);
   if(result!=Admission::ALLOWED)return result;
   memset(candidate.origin,0,sizeof(candidate.origin));
   memcpy(candidate.origin,proof.credit->pending.id,strlen(proof.credit->pending.id));

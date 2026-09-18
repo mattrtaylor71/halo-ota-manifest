@@ -239,10 +239,13 @@ static durable_ota::Admission reserve_proved_discovery_recovery(
     g_lcd_query_coord_lease_ms&&g_lcd_query_coord_lease_ms<=120000&&
     g_lcd_ota_query_resp_part_size==work.retry_baseline.part_size;
   proof.user_idle=!halo_primary_user_work_busy();
-  const auto result=durable_ota::reserve_recovery_discovery(r,c,proof,manual,candidate);
+  uint8_t campaign[16]{};
+  if(r.phase==durable_ota::Phase::RESOLVED)
+    for(unsigned i=0;i<4;++i){const uint32_t value=esp_random();memcpy(campaign+i*4,&value,4);}
+  const auto result=durable_ota::reserve_recovery_discovery(r,c,proof,manual,candidate,campaign);
   if(result!=durable_ota::Admission::ALLOWED)
     Serial.printf("[OTA_POLICY] recovery_refused phase=%u admission=%u missing=0x%04x\n",
-      unsigned(r.phase),unsigned(result),unsigned(durable_ota::recovery_discovery_missing(r,c,proof)));
+      unsigned(r.phase),unsigned(result),unsigned(durable_ota::recovery_discovery_missing(r,c,proof,manual)));
   return result;
 }
 static bool enter(const char* reason,bool retained_legacy) {
@@ -301,7 +304,10 @@ static bool enter(const char* reason,bool retained_legacy) {
     }
     r=current();
   }
-  if(r&&r->phase==durable_ota::Phase::RESOLVED&&(resolved_now||retained_legacy)){
+  const bool manual_completed_handoff=r&&r->phase==durable_ota::Phase::RESOLVED&&
+    !resolved_now&&retained_legacy&&halo_ota_manual_override_active()&&
+    g_coord_pending[0]&&strcmp(g_coord_pending,r->origin);
+  if(r&&r->phase==durable_ota::Phase::RESOLVED&&(resolved_now||retained_legacy)&&!manual_completed_handoff){
     // Only the original checked coordinator resolves its legacy credit/debt.
     // A later discovery cannot silently replace that still-pending origin.
     if(g_coord_pending[0]&&!strcmp(g_coord_pending,r->origin)&&peer_valid(r->target.peer_version)&&

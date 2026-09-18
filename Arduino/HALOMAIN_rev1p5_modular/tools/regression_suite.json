@@ -336,7 +336,7 @@
         "--out",
         "{case_out}"
       ],
-      "timeout_seconds": 180
+      "timeout_seconds": 300
     },
     {
       "id": "test_media_network_corner_cases",

@@ -1,3 +1,7 @@
+# Manual OTA release work — private 193 bootstrap and paired 194 candidate
+
+Recover a manual request when an older completed OTA record coexists with a different due calendar obligation. The existing ownership, clock, current-board health and durable-write proof must pass before fresh discovery; only the new verified check/update completes that obligation. A private Sense193 USB bootstrap is planned for the old admission code, followed by public194 for a real two-board manual OTA. These are candidate roles, not claims of installation or publication. Candidate192 was retained unpublished after this admission blocker and an aggregate host-suite timeout were found.
+
 # 6.4.192 candidate — manual updates without a daily tap limit
 
 Each explicit Manual Update request grants a fresh bounded attempt. Automatic wakes retain their admission and retry limits. Retained target debt, busy/armed/quarantine checks, image validation, the existing policy codec and the 02:00 Pacific schedule remain protected. Includes the 190 voice/list and 191 immediate-delete UI fixes. See [manual allowance behavior](docs/MANUAL_OTA_ALLOWANCE.md); build, publication and physical OTA results are recorded separately when complete.
