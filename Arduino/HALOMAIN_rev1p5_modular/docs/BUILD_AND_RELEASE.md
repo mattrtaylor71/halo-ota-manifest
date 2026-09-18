@@ -17,7 +17,7 @@ Work on a clean, reviewed descendant of the frozen 158 source. Preserve unrelate
 python3 -B tools/verify_frozen_baseline.py
 ```
 
-Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run relevant host regressions, and commit the reviewed source before preparing release artifacts. The baseline guard verifies identity; it does not establish device acceptance of new code.
+Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run the complete [host regression gate](REGRESSION_TESTING.md), and commit the reviewed source before preparing release artifacts. The baseline guard verifies identity; it does not establish device acceptance of new code.
 
 Allocate an unused version **6.4.189 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
@@ -41,6 +41,15 @@ From the clean firmware root:
 ```
 
 The preparer extracts only the tracked firmware subtree, verifies required dependencies, rejects dirty/untracked source and local MQTT credential overrides, and generates exactly three version headers. Retain `snapshot/materialization.json`: it records the full source commit/tree, explicit build inputs, original source hashes and materialized hashes. Do not hand-edit generated headers or substitute repository source-only metadata.
+
+Run the complete offline gate from that immutable snapshot before publication:
+
+```sh
+env -u __PYVENV_LAUNCHER__ "$PY" -B \
+  "$OUT/snapshot/source/tools/run_regression_suite.py" --out "$OUT/regression"
+```
+
+Require `regression/RESULT.json` to pass with no skips and unchanged source. The publisher binds this result and its logs to both exact board proofs and rechecks it before remote writes. A working-tree pass cannot replace the snapshot result. This adds no device interaction; perform the finite physical checks relevant to the change separately.
 
 ## 2. Build the production profile
 
@@ -90,6 +99,7 @@ PUBLISHER="$OUT/snapshot/source/halo_ota_demo/tools/ota/publish_pair.py"
 "$PY" -B "$PUBLISHER" prepare --route production --version "$RELEASE_VERSION" \
   --sense-proof "$OUT/build/sense/artifacts/verified.json" \
   --lcd-proof "$OUT/build/lcd/artifacts/verified.json" \
+  --host-result "$OUT/regression/RESULT.json" \
   --baseline-sense "$OUT/predecessor/sense.json" \
   --baseline-lcd "$OUT/predecessor/lcd.json" --out "$OUT/publication"
 ```

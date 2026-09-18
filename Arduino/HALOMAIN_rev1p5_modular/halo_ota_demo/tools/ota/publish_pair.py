@@ -54,6 +54,66 @@ def save(path, value):
     return ref(path)
 
 
+def validate_host_result(path, proofs):
+    """Validate completed, source-bound host evidence; never run tests here."""
+    result_ref = ref(path)
+    result = json.loads(Path(path).read_text())
+    require(result.get('schema_version') == 1 and result.get('status') == 'PASS' and
+            result.get('scope') == 'full' and result.get('source_unchanged_after_tests') is True,
+            'Complete passing host regression result required')
+    materialization_ref = result.get('materialization')
+    require(all(p['source_manifest'] == materialization_ref for p in proofs.values()),
+            'Host result must match both artifact source manifests')
+    materialization = json.loads(pin(materialization_ref).read_text())
+    source = Path(materialization['source_root']).resolve()
+    require(all(Path(p['source_root']).resolve() == source and
+                p['build_id'] == materialization['build_id'] for p in proofs.values()),
+            'Host/artifact source root or build identity differs')
+    require(result.get('source_commit') == materialization['git_commit'] and
+            result.get('build_id') == materialization['build_id'], 'Host source identity differs')
+    hashes = materialization['source_snapshot']
+    require(isinstance(hashes, dict) and hashes and result.get('source_files') == hashes,
+            'Host result must cover the exact materialized source')
+    actual = {}
+    for file in source.rglob('*'):
+        relative = file.relative_to(source)
+        if any(part in ('.git', '__pycache__', '.DS_Store') for part in relative.parts) or file.suffix == '.pyc':
+            continue
+        require(not file.is_symlink(), 'Source symlink is not a frozen input')
+        if file.is_file():
+            actual[relative.as_posix()] = sha(file.read_bytes())
+    require(actual == hashes, 'Materialized source changed after host tests')
+    for name in hashes:
+        relative = Path(name)
+        require(not relative.is_absolute() and '..' not in relative.parts and
+                source in (source / relative).resolve().parents, 'Invalid host source path')
+    for key, relative in (('catalog', 'tools/regression_suite.json'),
+                          ('runner', 'tools/run_regression_suite.py')):
+        item = result.get(key)
+        require(isinstance(item, dict) and pin(item) == source / relative and
+                item['sha256'] == hashes.get(relative), 'Host ' + key + ' is not the snapshot version')
+    catalog = json.loads(pin(result['catalog']).read_text())
+    require(catalog.get('schema_version') == 1 and isinstance(catalog.get('suites'), list)
+            and catalog['suites'], 'Invalid full regression catalog')
+    suites, cases = catalog['suites'], result.get('cases')
+    require(isinstance(cases, list) and len(cases) == len(suites), 'Missing host regression cases')
+    required = {(s['id'], s['path']) for s in suites}
+    require(len({s['id'] for s in suites}) == len(suites) and
+            len({c['id'] for c in cases}) == len(cases) and
+            {(c['id'], c['path']) for c in cases} == required,
+            'Host case identities differ from full catalog')
+    for case in cases:
+        require(case.get('status') == 'PASS' and case.get('skipped', False) is False and
+                type(case.get('exit_code')) is int and
+                case['exit_code'] == 0, 'Failed, skipped or incomplete host case')
+        require(case.get('test_sha256') == hashes.get(case['path']) and case['path'] in hashes,
+                'Host case source hash differs')
+        log = Path(case['log'])
+        require(log.is_absolute() and sha(log.read_bytes()) == case.get('log_sha256'),
+                'Host regression log changed')
+    return result_ref
+
+
 def shipping_proof(path, board, version, route='production'):
     require(route in DESTINATIONS, 'Unknown release route')
     p = json.loads(Path(path).read_text())
@@ -98,9 +158,11 @@ def shipping_proof(path, board, version, route='production'):
     return p
 
 
-def prepare(version, sense_proof, lcd_proof, baseline_sense, baseline_lcd, out, route='production'):
+def prepare(version, sense_proof, lcd_proof, baseline_sense, baseline_lcd, out, route='production', host_result=None):
     require(re.fullmatch(r'\d+\.\d+\.\d+', version), 'Explicit release version required')
     proofs = {b: shipping_proof(p, b, version, route) for b, p in [('sense', sense_proof), ('lcd', lcd_proof)]}
+    require(host_result is not None, 'Full host regression result required')
+    host_ref = validate_host_result(host_result, proofs)
     bucket, root_prefix = DESTINATIONS[route]
     old_paths = {b: Path(p) if p else None for b, p in [('sense', baseline_sense), ('lcd', baseline_lcd)]}
     for board, path in old_paths.items():
@@ -136,7 +198,8 @@ def prepare(version, sense_proof, lcd_proof, baseline_sense, baseline_lcd, out, 
     plan = {'schema': 1, 'version': version, 'route': route, 'bucket': bucket, 'prefix': root_prefix,
             'region': 'us-east-1', 'objects': objects, 'previous_latest': previous,
             'publication_order': ['lcd', 'sense'], 'automatic_retries': 0, 'compiler_actions': 0,
-            'canonical_builder': ref(BUILDER), 'publisher': ref(__file__), 's3_guard': ref(Path(__file__).with_name('release_s3_guard.py')), 'created_epoch': time.time()}
+            'canonical_builder': ref(BUILDER), 'publisher': ref(__file__), 's3_guard': ref(Path(__file__).with_name('release_s3_guard.py')),
+            'host_result': host_ref, 'created_epoch': time.time()}
     return save(out / 'release.json', plan)
 
 
@@ -157,11 +220,13 @@ def load_plan(path, expected_sha):
         require(plan['route'] == 'private-canary', 'Only production-to-canary manifest bridge permitted')
         source = load_plan(pin(plan['bridge_source']), plan['bridge_source']['sha256'])
         require(source['route'] == 'production' and source['version'] == plan['version'], 'Bridge must retain exact production release')
+    proofs = {}
     for board in ('sense', 'lcd'):
         objects = [o for o in plan['objects'] if o['board'] == board]
         artifact, manifest = objects
         require('bucket' not in manifest, 'Manifest destination must match release route')
         p = shipping_proof(pin(artifact['proof']), board, plan['version'], 'production' if source else plan['route'])
+        proofs[board] = p
         require(artifact['proof'] == manifest['proof'], 'Conflicting paired proof')
         pin(artifact['file']); pin(manifest['file'])
         previous = plan['previous_latest'][board]['file']
@@ -185,6 +250,8 @@ def load_plan(path, expected_sha):
         require(all(m.get(k) == v for k, v in {'version': plan['version'], 'artifact_fw_version': plan['version'],
                     'board': board, 'build_id': p['build_id'], 'sha256': p['artifact']['sha256'], 'size': p['size'],
                     'bin_url': 'https://' + ('halo-ota-prod' if source else plan['bucket']) + '.s3.us-east-1.amazonaws.com/' + artifact['key']}.items()), 'Manifest/BIN identity mismatch')
+    require('host_result' in plan, 'Full host regression result required')
+    validate_host_result(pin(plan['host_result']), proofs)
     return plan
 
 
@@ -379,7 +446,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='phase', required=True)
     prep = sub.add_parser('prepare', help='Local only; validate and copy exact shipping artifacts')
-    for field in ('version', 'sense-proof', 'lcd-proof', 'out'):
+    for field in ('version', 'sense-proof', 'lcd-proof', 'host-result', 'out'):
         prep.add_argument('--' + field, required=True)
     for field in ('baseline-sense', 'baseline-lcd'):
         prep.add_argument('--' + field)
@@ -401,7 +468,7 @@ def main():
         print(json.dumps({'prepared_bridge': value, 'network_actions': 0, 'compiler_actions': 0}))
         return 0
     if args.phase == 'prepare':
-        value = prepare(args.version, args.sense_proof, args.lcd_proof, args.baseline_sense, args.baseline_lcd, args.out, args.route)
+        value = prepare(args.version, args.sense_proof, args.lcd_proof, args.baseline_sense, args.baseline_lcd, args.out, args.route, args.host_result)
         print(json.dumps({'prepared_release': value, 'network_actions': 0, 'compiler_actions': 0}))
         return 0
     plan = load_plan(args.release, args.release_sha256)

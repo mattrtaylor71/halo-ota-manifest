@@ -71,6 +71,8 @@ At that earlier178/179 checkpoint, public manifests remained162. The older-manif
 
 ## Validation
 
+- Run the complete offline regression gate after each firmware fix: `python3 -B tools/run_regression_suite.py --out /absolute/path/to/new-results`. See `docs/REGRESSION_TESTING.md` for prerequisites, coverage and finite device acceptance. Focused tests alone are not the release gate; skips and source changes fail it.
+- For a new release, rerun the gate using the materialized snapshot's own runner. The paired publisher requires its exact `--host-result` and revalidates it before stage/promote. Do not reuse working-tree or older-source evidence, edit old sealed releases, or bypass the gate.
 - Build the production OTA implementation with the canonical entry, which supplies and records the durable policy/diagnostic flags and verifies actual FQBN/partition/UI settings:
   - `python3 tools/build_ota_policy_production.py --out /absolute/path/to/new-build`
   - Add `--board sense` or `--board lcd` for one target; `--plan` prints the commands without compiling.

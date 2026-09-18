@@ -1,0 +1,614 @@
+{
+  "schema_version": 1,
+  "suites": [
+    {
+      "id": "test_publish_lcd_ota",
+      "path": "halo_ota_demo/tools/ota/test_publish_lcd_ota.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_publish_pair",
+      "path": "halo_ota_demo/tools/ota/test_publish_pair.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "stress_media_storage",
+      "path": "tools/stress_media_storage.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "stress_media_transport",
+      "path": "tools/stress_media_transport.py",
+      "args": [
+        "--out",
+        "{case_out}",
+        "--negative-source-root",
+        "{negative_source_root}"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_action_summary",
+      "path": "tools/test_action_summary.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_actuator_relay_reset",
+      "path": "tools/test_actuator_relay_reset.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_backup_diagnostic",
+      "path": "tools/test_backup_diagnostic.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_camera_dma_ownership",
+      "path": "tools/test_camera_dma_ownership.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_camera_retry_priority_corners",
+      "path": "tools/test_camera_retry_priority_corners.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_camera_transport_handoff",
+      "path": "tools/test_camera_transport_handoff.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_camera_wifi_interruption",
+      "path": "tools/test_camera_wifi_interruption.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_fresh_upload_user_priority",
+      "path": "tools/test_fresh_upload_user_priority.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_future_calendar_wait",
+      "path": "tools/test_future_calendar_wait.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_image_spool_store",
+      "path": "tools/test_image_spool_store.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_image_upload_contract",
+      "path": "tools/test_image_upload_contract.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_abort_cleanup",
+      "path": "tools/test_lcd_abort_cleanup.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_calendar_notice",
+      "path": "tools/test_lcd_calendar_notice.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_control_liveness",
+      "path": "tools/test_lcd_control_liveness.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_flash_quiescence",
+      "path": "tools/test_lcd_flash_quiescence.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_image_transport",
+      "path": "tools/test_lcd_image_transport.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_lvgl_memory",
+      "path": "tools/test_lcd_lvgl_memory.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_lcd_main_render_guard",
+      "path": "tools/test_lcd_main_render_guard.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_maintenance_sleep",
+      "path": "tools/test_lcd_maintenance_sleep.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_media_foreground",
+      "path": "tools/test_lcd_media_foreground.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_media_liveness",
+      "path": "tools/test_lcd_media_liveness.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_media_retry",
+      "path": "tools/test_lcd_media_retry.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_media_storage_priority",
+      "path": "tools/test_lcd_media_storage_priority.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_media_wake",
+      "path": "tools/test_lcd_media_wake.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_ota_display_owner",
+      "path": "tools/test_lcd_ota_display_owner.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_ota_install_frame",
+      "path": "tools/test_lcd_ota_install_frame.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_ota_presentation",
+      "path": "tools/test_lcd_ota_presentation.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_ota_uart_recovery",
+      "path": "tools/test_lcd_ota_uart_recovery.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_provision_flow",
+      "path": "tools/test_lcd_provision_flow.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_lcd_provision_profile_icon",
+      "path": "tools/test_lcd_provision_profile_icon.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_lcd_provision_progress_sleep",
+      "path": "tools/test_lcd_provision_progress_sleep.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_lcd_provision_sleep",
+      "path": "tools/test_lcd_provision_sleep.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_lcd_provision_success_motion",
+      "path": "tools/test_lcd_provision_success_motion.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_lcd_reboot_cleanup",
+      "path": "tools/test_lcd_reboot_cleanup.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_sleep_media_custody",
+      "path": "tools/test_lcd_sleep_media_custody.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_user_wake",
+      "path": "tools/test_lcd_user_wake.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_voice_status",
+      "path": "tools/test_lcd_voice_status.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_voice_transport",
+      "path": "tools/test_lcd_voice_transport.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_list_wifi_ready",
+      "path": "tools/test_list_wifi_ready.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_manual_ota",
+      "path": "tools/test_manual_ota.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_manual_ota_clock",
+      "path": "tools/test_manual_ota_clock.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_manual_ota_readiness_join",
+      "path": "tools/test_manual_ota_readiness_join.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_manual_ota_touch_handoff",
+      "path": "tools/test_manual_ota_touch_handoff.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_media_busy_custody",
+      "path": "tools/test_media_busy_custody.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_media_clock_retry",
+      "path": "tools/test_media_clock_retry.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_media_custody_corner_cases",
+      "path": "tools/test_media_custody_corner_cases.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_media_network_corner_cases",
+      "path": "tools/test_media_network_corner_cases.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_media_network_retry",
+      "path": "tools/test_media_network_retry.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_media_retry_corner_cases",
+      "path": "tools/test_media_retry_corner_cases.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_media_retry_policy",
+      "path": "tools/test_media_retry_policy.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_ota_discovery_recovery",
+      "path": "tools/test_ota_discovery_recovery.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_postboot_policy_settlement",
+      "path": "tools/test_postboot_policy_settlement.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_prepare_production_release",
+      "path": "tools/test_prepare_production_release.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_production_build_profile",
+      "path": "tools/test_production_build_profile.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_production_network_dns_patch",
+      "path": "tools/test_production_network_dns_patch.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_production_nvs_fixture",
+      "path": "tools/test_production_nvs_fixture.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_provisioning_ap_auth_events",
+      "path": "tools/test_provisioning_ap_auth_events.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_provisioning_ap_restart",
+      "path": "tools/test_provisioning_ap_restart.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_provisioning_claim_async",
+      "path": "tools/test_provisioning_claim_async.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_provisioning_crypto_diag",
+      "path": "tools/test_provisioning_crypto_diag.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_provisioning_display_status",
+      "path": "tools/test_provisioning_display_status.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_provisioning_dma_reserve",
+      "path": "tools/test_provisioning_dma_reserve.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_provisioning_driver_diag",
+      "path": "tools/test_provisioning_driver_diag.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_provisioning_overlap",
+      "path": "tools/test_provisioning_overlap.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_put_response_completion",
+      "path": "tools/test_put_response_completion.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_regression_runner",
+      "path": "tools/test_regression_runner.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_retry_peer_ready",
+      "path": "tools/test_retry_peer_ready.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_retry_wake_ready",
+      "path": "tools/test_retry_wake_ready.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_saved_media_user_priority",
+      "path": "tools/test_saved_media_user_priority.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_scan_choice_ui",
+      "path": "tools/test_scan_choice_ui.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_scheduled_ota_clock",
+      "path": "tools/test_scheduled_ota_clock.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sense_image_spool",
+      "path": "tools/test_sense_image_spool.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sense_img_query_ownership",
+      "path": "tools/test_sense_img_query_ownership.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sense_img_spool_rx",
+      "path": "tools/test_sense_img_spool_rx.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sense_media_retry_state",
+      "path": "tools/test_sense_media_retry_state.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sense_media_retry_transport",
+      "path": "tools/test_sense_media_retry_transport.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sense_uart_json_tx",
+      "path": "tools/test_sense_uart_json_tx.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_shopping_delete",
+      "path": "tools/test_shopping_delete.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_shopping_delete_lcd",
+      "path": "tools/test_shopping_delete_lcd.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_shopping_idle",
+      "path": "tools/test_shopping_idle.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sleep_flush_worker_custody",
+      "path": "tools/test_sleep_flush_worker_custody.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sleep_tail_wire_budget",
+      "path": "tools/test_sleep_tail_wire_budget.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sleep_upload_flush",
+      "path": "tools/test_sleep_upload_flush.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sleep_user_activity",
+      "path": "tools/test_sleep_user_activity.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_user_workflow_transitions",
+      "path": "tools/test_user_workflow_transitions.py",
+      "args": [
+        "--out",
+        "{case_out}",
+        "--negative-control"
+      ],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_voice_persistence",
+      "path": "tools/test_voice_persistence.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_voice_receipts",
+      "path": "tools/test_voice_receipts.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_voice_spool_store",
+      "path": "tools/test_voice_spool_store.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_voice_uart_ownership",
+      "path": "tools/test_voice_uart_ownership.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_wifi_provisioning_owner",
+      "path": "tools/test_wifi_provisioning_owner.py",
+      "args": [],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "test_wifi_recovery",
+      "path": "tools/test_wifi_recovery.py",
+      "args": [],
+      "timeout_seconds": 180
+    }
+  ]
+}

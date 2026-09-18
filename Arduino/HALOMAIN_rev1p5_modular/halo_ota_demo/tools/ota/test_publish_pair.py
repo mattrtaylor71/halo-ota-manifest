@@ -52,15 +52,41 @@ class ReleaseTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
+        self.source = self.root / 'source'
+        self.source.mkdir()
+        for name in ('halo_ota_demo/firmware/halo_sense_prod/partitions.csv',
+                     'halo_ota_demo/firmware/halo_lcd_prod/partitions.csv', 'LCD_Minimal/lv_conf.h'):
+            target = self.source / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((p.BUILDER.parent.parent / name).read_bytes())
+        (self.source / 'tools').mkdir()
+        (self.source / 'tools/test_synthetic.py').write_text('# explicitly synthetic offline host fixture\n')
+        (self.source / 'tools/run_regression_suite.py').write_text('# synthetic runner identity, never executed\n')
+        catalog = {'schema_version': 1, 'suites': [{'id': 'synthetic', 'path': 'tools/test_synthetic.py'}]}
+        catalog_ref = p.save(self.source / 'tools/regression_suite.json', catalog)
+        hashes = {f.relative_to(self.source).as_posix(): p.sha(f.read_bytes())
+                  for f in self.source.rglob('*') if f.is_file()}
+        self.materialization = p.save(self.root / 'materialization.json', {
+            'source_root': str(self.source), 'git_commit': 'a' * 40,
+            'build_id': 'synthetic-offline', 'source_snapshot': hashes})
+        log = self.root / 'host.log'; log.write_text('PASS synthetic offline fixture\n')
+        self.host = {'schema_version': 1, 'status': 'PASS', 'scope': 'full',
+            'source_unchanged_after_tests': True, 'materialization': self.materialization,
+            'source_commit': 'a' * 40, 'build_id': 'synthetic-offline', 'source_files': hashes,
+            'catalog': catalog_ref, 'runner': p.ref(self.source / 'tools/run_regression_suite.py'),
+            'cases': [{'id': 'synthetic', 'path': 'tools/test_synthetic.py',
+                       'test_sha256': hashes['tools/test_synthetic.py'], 'status': 'PASS', 'exit_code': 0,
+                       'log': str(log), 'log_sha256': p.sha(log.read_bytes())}]}
+        self.host_ref = p.save(self.root / 'host-result.json', self.host)
         self.proofs = {}
         self.old = {}
         for board in ('sense', 'lcd'):
             out = self.root / board; out.mkdir()
             artifact = out / 'image.bin'
             artifact.write_bytes(('HALO_FW_MARKER:6.4.104|BUILD_ID:synthetic-offline|BOARD:' + board + '\0').encode())
-            configuration = p.save(out / 'command.json', {'argv': p.canonical.command(board, p.BUILDER.parent.parent, out / 'compile', '/synthetic/arduino-cli')})
+            configuration = p.save(out / 'command.json', {'argv': p.canonical.command(board, self.source, out / 'compile', '/synthetic/arduino-cli')})
             generic = out / 'synthetic-provenance'; generic.write_bytes(b'explicitly synthetic offline fixture')
-            partition = p.BUILDER.parent.parent / ('halo_ota_demo/firmware/halo_' + board + '_prod/partitions.csv')
+            partition = self.source / ('halo_ota_demo/firmware/halo_' + board + '_prod/partitions.csv')
             expected = {'HALO_DURABLE_DIAGNOSTICS': '1', 'HALO_LCD_SLEEP_WITNESS': '1', 'HALO_OTA_ONE_SHOT': '0', 'HALO_OTA_BENCH_PROFILE': '0', 'HALO_DIAG_AUTH_PROVISIONING': '0'}
             if board == 'sense':
                 expected.update(HALO_DURABLE_OTA_POLICY='1', HALO_DIAGNOSTIC_ADMISSION='1', HALO_IDLE_NETWORK_RECOVERY='1', HALO_IDLE_NETWORK_PROBE='0')
@@ -71,12 +97,12 @@ class ReleaseTests(unittest.TestCase):
             proof = {'status': 'PASS_LOCAL_CANONICAL_PRODUCTION_ARTIFACTS', 'board': board, 'profile': 'shipping', 'version': '6.4.104',
                      'build_id': 'synthetic-offline', 'slot_bytes': p.SLOTS[board], 'size': artifact.stat().st_size,
                      'bench_profile': False, 'one_shot': False, 'private_route_override': False,
-                     'source_root': str(p.BUILDER.parent.parent), 'artifact': p.ref(artifact), 'elf': p.ref(generic),
-                     'partition': p.ref(partition), 'configuration': configuration, 'flags': flags, 'source_manifest': p.ref(generic), 'compiler_result': compiled}
+                     'source_root': str(self.source), 'artifact': p.ref(artifact), 'elf': p.ref(generic),
+                     'partition': p.ref(partition), 'configuration': configuration, 'flags': flags, 'source_manifest': self.materialization, 'compiler_result': compiled}
             self.proofs[board] = p.save(out / 'verified.json', proof)
             self.old[board] = p.save(out / 'old.json', {'board': board, 'version': '6.4.14'})
         self.plan_ref = p.prepare('6.4.104', self.proofs['sense']['path'], self.proofs['lcd']['path'],
-                                  self.old['sense']['path'], self.old['lcd']['path'], self.root / 'package')
+                                  self.old['sense']['path'], self.old['lcd']['path'], self.root / 'package', host_result=self.host_ref['path'])
         self.plan = p.load_plan(self.plan_ref['path'], self.plan_ref['sha256'])
 
     def mutate_proof(self, change):
@@ -86,6 +112,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_exact_packaged_bytes_and_no_compiler(self):
         self.assertEqual(self.plan['compiler_actions'], 0)
+        self.assertEqual(self.plan['host_result'], self.host_ref)
         for obj in self.plan['objects']:
             if obj['role'] == 'artifact':
                 self.assertEqual(obj['file']['sha256'], json.loads(p.pin(obj['proof']).read_text())['artifact']['sha256'])
@@ -123,8 +150,89 @@ class ReleaseTests(unittest.TestCase):
 
     def test_production_requires_predecessors(self):
         with self.assertRaises(ValueError):
-            p.prepare('6.4.104', self.proofs['sense']['path'], self.proofs['lcd']['path'], None, None, self.root / 'no-baseline')
+            p.prepare('6.4.104', self.proofs['sense']['path'], self.proofs['lcd']['path'], None, None, self.root / 'no-baseline', host_result=self.host_ref['path'])
         self.assertFalse((self.root / 'no-baseline').exists())
+
+    def test_missing_host_result_refused_before_packaging(self):
+        out = self.root / 'no-host'
+        with self.assertRaisesRegex(ValueError, 'host regression'):
+            p.prepare('6.4.104', self.proofs['sense']['path'], self.proofs['lcd']['path'],
+                      self.old['sense']['path'], self.old['lcd']['path'], out)
+        self.assertFalse(out.exists())
+
+    def test_failed_partial_skipped_or_mismatched_host_result_refused(self):
+        changes = [lambda r: r.update(status='FAIL'), lambda r: r.update(scope='focused'),
+            lambda r: r.update(source_unchanged_after_tests=False), lambda r: r.update(cases=[]),
+            lambda r: r['cases'].append(copy.deepcopy(r['cases'][0])),
+            lambda r: r['cases'][0].update(status='SKIP'),
+            lambda r: r['cases'][0].update(exit_code=1),
+            lambda r: r['cases'][0].update(exit_code=False),
+            lambda r: r['cases'][0].update(id='unlisted'),
+            lambda r: r['cases'][0].update(path='tools/unlisted.py'),
+            lambda r: r['cases'][0].update(test_sha256='0' * 64),
+            lambda r: r['cases'][0].update(log_sha256='0' * 64),
+            lambda r: r.update(source_commit='b' * 40), lambda r: r.update(build_id='another'),
+            lambda r: r.update(source_files={}),
+            lambda r: r.update(runner=r['catalog'])]
+        for i, change in enumerate(changes):
+            with self.subTest(i=i):
+                host = copy.deepcopy(self.host); change(host)
+                file = p.save(self.root / ('bad-host-%d.json' % i), host)
+                out = self.root / ('refused-%d' % i)
+                with self.assertRaises(ValueError):
+                    p.prepare('6.4.104', self.proofs['sense']['path'], self.proofs['lcd']['path'],
+                              self.old['sense']['path'], self.old['lcd']['path'], out,
+                              host_result=file['path'])
+                self.assertFalse(out.exists())
+
+    def test_host_result_must_bind_both_board_materializations(self):
+        proofs = {b: json.loads(p.pin(r).read_text()) for b, r in self.proofs.items()}
+        other = p.save(self.root / 'other-materialization.json', json.loads(p.pin(self.materialization).read_text()))
+        proofs['lcd']['source_manifest'] = other
+        with self.assertRaisesRegex(ValueError, 'both artifact'):
+            p.validate_host_result(self.host_ref['path'], proofs)
+
+    def test_passing_case_with_explicit_skip_blocks_packaging(self):
+        host = copy.deepcopy(self.host)
+        host['cases'][0]['skipped'] = True
+        file = p.save(self.root / 'skipped-host.json', host)
+        out = self.root / 'skipped-package'
+        with self.assertRaisesRegex(ValueError, 'skipped'):
+            p.prepare('6.4.104', self.proofs['sense']['path'], self.proofs['lcd']['path'],
+                      self.old['sense']['path'], self.old['lcd']['path'], out,
+                      host_result=file['path'])
+        self.assertFalse(out.exists())
+
+    def test_fixed_runner_cache_exclusions_do_not_invalidate_source(self):
+        for name in ('.git/config', 'tools/__pycache__/module.pyc',
+                     'tools/__pycache__/untracked-cache', '.DS_Store',
+                     'tools/.DS_Store', 'tools/standalone.pyc'):
+            file = self.source / name
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_bytes(b'cache generated after tests')
+        p.load_plan(self.plan_ref['path'], self.plan_ref['sha256'])
+        (self.source / 'tools/cache.py').write_bytes(b'not an excluded cache')
+        with self.assertRaisesRegex(ValueError, 'source changed'):
+            p.load_plan(self.plan_ref['path'], self.plan_ref['sha256'])
+
+    def test_source_change_after_host_run_blocks_plan_before_remote_work(self):
+        for name in ('tools/test_synthetic.py', 'tools/extra_runtime.h'):
+            with self.subTest(name=name):
+                file = self.source / name
+                original = file.read_bytes() if file.exists() else None
+                file.write_bytes(b'changed after tests')
+                with self.assertRaisesRegex(ValueError, 'source changed'):
+                    p.load_plan(self.plan_ref['path'], self.plan_ref['sha256'])
+                if original is None: file.unlink()
+                else: file.write_bytes(original)
+
+    def test_log_or_receipt_tamper_after_prepare_blocks_load(self):
+        for file in (Path(self.host['cases'][0]['log']), Path(self.host_ref['path'])):
+            with self.subTest(path=file.name):
+                original = file.read_bytes(); file.write_bytes(original + b'\n')
+                with self.assertRaises(ValueError):
+                    p.load_plan(self.plan_ref['path'], self.plan_ref['sha256'])
+                file.write_bytes(original)
 
     def test_stage_is_four_immutable_writes_no_latest(self):
         store = FakeStore(self.plan, self.root / 'stage')
@@ -182,7 +290,7 @@ class ReleaseTests(unittest.TestCase):
         for board in ('sense', 'lcd'):
             proof = json.loads(p.pin(self.proofs[board]).read_text())
             command = json.loads(p.pin(proof['configuration']).read_text())
-            command['argv'] = p.canonical.command(board, p.BUILDER.parent.parent, self.root / board / 'compile', '/synthetic/arduino-cli', True)
+            command['argv'] = p.canonical.command(board, self.source, self.root / board / 'compile', '/synthetic/arduino-cli', True)
             proof['configuration'] = p.save(self.root / (board + '-canary-command.json'), command)
             flags = json.loads(p.pin(proof['flags']).read_text()); flags.update(command=proof['configuration'], private_route_override=True)
             proof['flags'] = p.save(self.root / (board + '-canary-flags.json'), flags); proof['private_route_override'] = True
@@ -191,7 +299,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_fresh_canary_requires_actual_absence_and_shipping_flags(self):
         proofs = self.canary_proofs()
-        plan_ref = p.prepare('6.4.104', proofs['sense']['path'], proofs['lcd']['path'], None, None, self.root / 'canary-package', 'private-canary')
+        plan_ref = p.prepare('6.4.104', proofs['sense']['path'], proofs['lcd']['path'], None, None, self.root / 'canary-package', 'private-canary', self.host_ref['path'])
         plan = p.load_plan(plan_ref['path'], plan_ref['sha256'])
         store = FakeStore(plan, self.root / 'canary-stage')
         p.execute(plan, store, 'stage')
