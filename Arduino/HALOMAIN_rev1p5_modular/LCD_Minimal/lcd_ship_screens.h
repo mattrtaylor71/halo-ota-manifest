@@ -1235,7 +1235,36 @@ static void show_shopping_list_screen();
 static void shopping_list_screen_populate();
 static void shopping_list_dismiss_overlay();
 static void shopping_list_trigger_refresh(const char* reason);
-static void shopping_list_animate_card_removal(int idx);
+
+// A queued delete changes only the presentation until its matching result.
+// Keep the source rows/cache intact so failure or timeout can restore the item.
+static int shopping_list_pending_delete_index() {
+  if (!shopping_list_pending_delete_id[0]) return -1;
+  for (int i = 0; i < g_active.count; ++i)
+    if (strcmp(g_active.item_ids[i], shopping_list_pending_delete_id) == 0) return i;
+  return -1;
+}
+
+static int shopping_list_visible_count() {
+  return g_active.count - (shopping_list_pending_delete_index() >= 0 ? 1 : 0);
+}
+
+static int shopping_list_visible_index(int idx, int direction) {
+  if (g_active.count <= 0) return 0;
+  if (idx < 0) idx = 0;
+  if (idx >= g_active.count) idx = g_active.count - 1;
+  if (idx != shopping_list_pending_delete_index()) return idx;
+  const int next = idx + (direction < 0 ? -1 : 1);
+  if (next >= 0 && next < g_active.count) return next;
+  const int previous = idx - (direction < 0 ? -1 : 1);
+  return previous >= 0 && previous < g_active.count ? previous : idx;
+}
+
+static void shopping_list_refresh_delete_view() {
+  if (ui_screen_state != SCREEN_SHOPPING_LIST) return;
+  shopping_list_reveal_pending = false;
+  shopping_list_screen_populate();
+}
 
 // Keep the Delete/Back overlay above everything else on the list screen.
 // The refresh ring and error toast call lv_obj_move_foreground on themselves
@@ -1545,7 +1574,8 @@ static void shopping_list_build_refresh_ring(lv_obj_t* parent) {
 
 static void shopping_list_show_overlay() {
   if (!shopping_list_screen || shopping_list_overlay_visible || g_active.count == 0 ||
-      shopping_list_scroll_idx < 0 || shopping_list_scroll_idx >= g_active.count)
+      shopping_list_scroll_idx < 0 || shopping_list_scroll_idx >= g_active.count ||
+      shopping_list_scroll_idx == shopping_list_pending_delete_index())
     return;
   strncpy(shopping_list_overlay_item_id, g_active.item_ids[shopping_list_scroll_idx],
           sizeof(shopping_list_overlay_item_id) - 1);
@@ -1625,16 +1655,18 @@ static const char* shopping_list_delete_index(int idx, const char* expected_id =
   strcpy(shopping_list_pending_delete_id, requested_id);
   shopping_list_pending_delete_ms = millis();
   xSemaphoreGive(app_state_mutex);
+  shopping_list_refresh_delete_view();
   Serial.printf("[SHOP_LIST] Sent INPUT_DELETE for ID: %s; awaiting result\n", requested_id);
   return requested_id;
 }
 
 static void shopping_list_delete_failure_toast() {
+  shopping_list_refresh_delete_view();
   if (ui_screen_state == SCREEN_SHOPPING_LIST) shopping_list_toast_show("Couldn't delete. Try again");
   else show_auto_hiding_status_message("Couldn't delete. Try again", 2500);
 }
 
-// UI-task deadline: a lost backend result never hides the row or blocks a later action.
+// UI-task deadline: restore the provisional view if the backend result is lost.
 static void shopping_list_expire_pending_delete() {
   if (shopping_list_pending_delete_id[0] &&
       (unsigned long)(millis() - shopping_list_pending_delete_ms) >= 60000UL) {
@@ -1644,7 +1676,7 @@ static void shopping_list_expire_pending_delete() {
   }
 }
 
-// UI task only. Return the removed index for animation; unmatched/late results
+// UI task only. Return the removed index; unmatched/late results
 // and all failures leave the list and persistent cache unchanged.
 static int shopping_list_apply_delete_result(const char* id, bool ok) {
   shopping_list_expire_pending_delete();
@@ -1873,7 +1905,7 @@ static bool shopping_list_handle_touch(int x, int y) {
         }
         shopping_list_delete_index(del_idx, shopping_list_overlay_item_id);
 
-        // Keep the row until a matching positive backend result arrives.
+        // The queued row is hidden; its cached data waits for backend success.
         shopping_list_dismiss_overlay();
         return true;
       }
@@ -2035,67 +2067,6 @@ static void shopping_list_render_skeleton() {
   }
 }
 
-// ── Delete animation ─────────────────────────────────────────────────
-// Slide the removed card left + fade (~150ms), then collapse its height
-// (~120ms), then rebuild the list — deletion feels physical instead of an
-// instant rebuild. The data (g_active) is already updated by the caller; this
-// is purely the visual exit. If a fresh UI_LIST rebuilds the list mid-
-// animation, lv_obj_clean() deletes the card and its anims (the ready
-// callback simply never fires — the rebuild already happened).
-static void shopping_list_card_x_anim_cb(void* var, int32_t value) {
-  lv_obj_set_style_translate_x((lv_obj_t*)var, (lv_coord_t)value, 0);
-}
-
-static void shopping_list_card_h_anim_cb(void* var, int32_t value) {
-  lv_obj_set_height((lv_obj_t*)var, (lv_coord_t)value);
-}
-
-static void shopping_list_delete_anim_done(lv_anim_t* a) {
-  (void)a;
-  shopping_list_screen_populate();
-}
-
-static void shopping_list_animate_card_removal(int idx) {
-  lv_obj_t* card = (idx >= 0 && idx < shopping_list_rendered_count)
-                       ? shopping_list_items[idx]
-                       : NULL;
-  if (!card) {
-    shopping_list_screen_populate();  // nothing to animate — rebuild now
-    return;
-  }
-  shopping_list_items[idx] = NULL;  // selection restyle must not touch it anymore
-  lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
-  lv_coord_t h = lv_obj_get_height(card);
-  lv_obj_set_style_min_height(card, 0, LV_PART_MAIN);  // allow the collapse below 38px
-
-  lv_anim_t a;
-  // Phase 1: slide left + fade (simultaneous, ~150ms)
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, card);
-  lv_anim_set_exec_cb(&a, shopping_list_card_x_anim_cb);
-  lv_anim_set_values(&a, 0, -320);
-  lv_anim_set_time(&a, 150);
-  lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
-  lv_anim_start(&a);
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, card);
-  lv_anim_set_exec_cb(&a, shopping_list_card_opa_anim_cb);
-  lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
-  lv_anim_set_time(&a, 150);
-  lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
-  lv_anim_start(&a);
-  // Phase 2: collapse the row height, then rebuild from g_active
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, card);
-  lv_anim_set_exec_cb(&a, shopping_list_card_h_anim_cb);
-  lv_anim_set_values(&a, h, 0);
-  lv_anim_set_time(&a, 120);
-  lv_anim_set_delay(&a, 150);
-  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-  lv_anim_set_ready_cb(&a, shopping_list_delete_anim_done);
-  lv_anim_start(&a);
-}
-
 // Store-group header row — a small, dim, NON-selectable label inserted above
 // each contiguous group of same-store items. It is a separate LVGL object and
 // is deliberately NOT stored in shopping_list_items[] nor counted as an item:
@@ -2152,20 +2123,22 @@ static void shopping_list_screen_populate() {
   for (int k = 0; k < 50; k++) shopping_list_item_headers[k] = NULL;  // no stale header pointers
   bool reveal = shopping_list_reveal_pending;
   shopping_list_reveal_pending = false;
+  const int pending_delete_index = shopping_list_pending_delete_index();
+  const int visible_count = shopping_list_visible_count();
 
   if (shopping_list_title_label)
     lv_label_set_text(shopping_list_title_label, "Shopping list");
   if (shopping_list_count_label) {
     char count[28];
     if (g_active.count > 0 || g_list_refresh_completed_once)
-      snprintf(count, sizeof(count), "%d ITEMS", g_active.count);
+      snprintf(count, sizeof(count), "%d ITEMS", visible_count);
     else
       snprintf(count, sizeof(count), "%s",
                refresh_state == REFRESH_FAILED ? "NOT CONNECTED" : "LOADING YOUR LIST");
     lv_label_set_text(shopping_list_count_label, count);
   }
 
-  if (g_active.count == 0) {
+  if (visible_count == 0) {
     bool refresh_running = (refresh_state == REFRESH_WAKE_PENDING ||
                             refresh_state == REFRESH_INFLIGHT);
     // Honest failure beats an endless loader. If a refresh has NEVER completed
@@ -2252,14 +2225,17 @@ static void shopping_list_screen_populate() {
   // Clamp scroll index
   if (shopping_list_scroll_idx >= g_active.count) shopping_list_scroll_idx = g_active.count - 1;
   if (shopping_list_scroll_idx < 0) shopping_list_scroll_idx = 0;
+  shopping_list_scroll_idx = shopping_list_visible_index(shopping_list_scroll_idx, 1);
 
   // Create item cards — fixed-height rounded rows sized for the round
   // display (272px clears the circle at every height the cards reach)
+  int previous_visible = -1;
   for (int i = 0; i < g_active.count && i < 50; i++) {
+    if (i == pending_delete_index) continue;
     // Store-group header: items arrive pre-sorted by store (empty store last),
     // so a store change from the previous item starts a new group. The header
     // is a separate, non-selectable object — it does NOT consume an item index.
-    if (i == 0 || strcmp(g_active.stores[i], g_active.stores[i - 1]) != 0) {
+    if (previous_visible < 0 || strcmp(g_active.stores[i], g_active.stores[previous_visible]) != 0) {
       const char* store = g_active.stores[i];
       // Empty-store items sort last; label that trailing group "Other".
       // Track the header parallel to its item so selection scroll can reveal it.
@@ -2287,8 +2263,10 @@ static void shopping_list_screen_populate() {
     shopping_list_style_card(card, i);
 
     shopping_list_items[i] = card;
-    shopping_list_rendered_count++;
+    previous_visible = i;
   }
+  // Slots retain their source indices, including the hole for a pending delete.
+  shopping_list_rendered_count = g_active.count < 50 ? g_active.count : 50;
 
   // Reveal the selected card together with its store header, when present.
   shopping_list_reveal_selection(shopping_list_scroll_idx, LV_ANIM_OFF);

@@ -717,10 +717,11 @@ static void ui_task(void *arg) {
             int new_idx = shopping_list_scroll_idx + evt.data.scroll_delta;
             if (new_idx < 0) new_idx = 0;
             if (new_idx >= g_active.count) new_idx = g_active.count - 1;
+            new_idx = shopping_list_visible_index(new_idx, evt.data.scroll_delta);
             // Track overscroll at top for pull-to-refresh. Forgiving: ticks
             // only reset when the selection leaves the top, on a CW (down)
             // scroll, or when the last CCW tick is stale (>1.5s old).
-            if (shopping_list_scroll_idx == 0 && evt.data.scroll_delta < 0) {
+            if (shopping_list_scroll_idx == shopping_list_visible_index(0, 1) && evt.data.scroll_delta < 0) {
               unsigned long now_ticks = millis();
               if (shopping_list_last_ccw_tick_ms > 0 &&
                   (now_ticks - shopping_list_last_ccw_tick_ms) > SHOPPING_LIST_OVERSCROLL_WINDOW_MS) {
@@ -947,7 +948,7 @@ static void ui_task(void *arg) {
       } else if (evt.type == EVT_LIST_DELETE_RESULT) {
         int removed = shopping_list_apply_delete_result(evt.data.list_delete_result.id,
                                                        evt.data.list_delete_result.ok);
-        if (removed >= 0 && ui_screen_state == SCREEN_SHOPPING_LIST) shopping_list_animate_card_removal(removed);
+        if (removed >= 0) shopping_list_refresh_delete_view();
         resetActivityTimer();
         processed_anything = true;
       } else if (evt.type == EVT_LIST_REPLACED) {

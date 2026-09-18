@@ -1,3 +1,7 @@
+# 6.4.191 candidate — immediate shopping-list delete feedback
+
+Hide a shopping row as soon as its delete request is queued; retain data and NVS until confirmed, restoring the row on failure or timeout. Refreshes and encoder/touch navigation preserve item identity while pending. Remove the additional 270 ms confirmed-delete animation. LCD only; Sense and OTA behavior are unchanged. See [the change record](docs/SHOPPING_DELETE_RESPONSE.md).
+
 # 6.4.190 local voice/list candidate — September 17, 2026
 
 Allow one bounded fresh voice upload while the shopping list stays open; serialize voice and list HTTP ownership and coalesce refreshes. Actual189 device testing found that LCD scrolling emits `INPUT_USER_ACTIVE`, which still cancelled the upload.190 adds that list-only compatibility and regression coverage compiled from the real LCD producer; camera/new recording/manual OTA remain interrupting. Both production builds/artifact checks and all97 exact-snapshot suites pass. Sense static globals increase24bytes; LCD/OTA runtime is unchanged.
