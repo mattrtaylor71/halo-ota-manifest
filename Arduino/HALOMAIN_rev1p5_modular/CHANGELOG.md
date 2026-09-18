@@ -1,3 +1,7 @@
+# September18 bench tooling — actuator failure containment
+
+Replace the fixed-port blocking tap helper with exact-device discovery and bounded raw-serial workers. Require fresh readiness, preserve the calibrated stroke and distinguish completion from an observed Halo wake. Record and contain USB/cleanup failures; no automatic reset, stronger stroke or Halo firmware change. The intermittent controller fault is reproduced and remains under investigation. See [evidence and scope](docs/ACTUATOR_INVESTIGATION_20260918.md).
+
 # Pending next release — OTA instruction copy
 
 Replace the static installation screen's “Installing update” subtitle with “Keep Halo powered on.” Preserve the existing typography, layout, heading and transfer behavior. This copy change is not part of published 196.

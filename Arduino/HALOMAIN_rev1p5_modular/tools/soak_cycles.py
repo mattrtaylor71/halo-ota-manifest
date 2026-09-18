@@ -87,7 +87,9 @@ def wait_for_rig(max_wait=36000):
 
     It has died mid-run more than once, each time leaving its port enumerated
     while the sketch answers nothing -- so it LOOKS healthy. Only a physical
-    power cycle revives it. Waiting here means the run resumes by itself.
+    power cycle revives it. Ordinary no-reply failures may resume after recovery.
+    Uncertain USB-worker ownership stays latched: stop for receipt review and
+    restart the controller afterward instead of silently clearing that state.
     """
     t0 = time.time(); said = False
     while time.time() - t0 < max_wait:
@@ -98,6 +100,12 @@ def wait_for_rig(max_wait=36000):
                 return True
         except Exception:
             pass
+        result = getattr(_tap[0], "last_result", None) or {}
+        if result.get("status") == "REVIEW_REQUIRED":
+            print("  [RIG] Stopped: review actuator ownership/cleanup receipt before "
+                  "restarting this controller: " + result.get("receipt_dir", "unavailable"),
+                  flush=True)
+            return False
         if not said:
             print("  [RIG] *** TAP ACTUATOR NOT ANSWERING ***", flush=True)
             print("  [RIG] its port stays enumerated when this happens; this is NOT firmware.", flush=True)

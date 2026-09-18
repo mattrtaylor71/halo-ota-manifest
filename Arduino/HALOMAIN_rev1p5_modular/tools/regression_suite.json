@@ -627,6 +627,12 @@
       "path": "tools/test_wifi_recovery.py",
       "args": [],
       "timeout_seconds": 180
+    },
+    {
+      "id": "test_tapctl",
+      "path": "tools/test_tapctl.py",
+      "args": [],
+      "timeout_seconds": 30
     }
   ]
 }

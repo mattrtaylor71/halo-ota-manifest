@@ -1,142 +1,409 @@
 #!/usr/bin/env python3
-"""tapctl — the one tap primitive every HALO test should use.
+"""Bounded actuator control. A completed stroke is not proof of contact or wake.
 
-Earned the hard way. Each rule below exists because its absence cost a test run:
-
-  * NEVER strokes harder than the sketch default (500/200/500). A parameter sweep
-    up to 1400/600/1400 was driving the stylus into the panel; longer extend time
-    on this rig means more travel, not a better tap. Matt saw it and stopped it.
-    Harder is capped here so no caller can reintroduce it.
-
-  * tap.py is never invoked. It reopens the port per call (3s Uno reset), it has
-    hung >100s twice, and it prints "Sending: TAP" whether or not anything is
-    listening. This holds the port open and talks to the sketch directly.
-
-  * Only a board ENUMERATING counts as a wake. The sketch's "PUSH: Complete" and
-    "STYLUS: ON" are printed even with the stylus nowhere near the glass - that
-    misled a whole night's soak.
-
-  * Distinguishes SKETCH DEAD from MISSED CONTACT. They look identical from the
-    host, and conflating them nearly got LCD touch-wake firmware blamed for a
-    dead Arduino. If the sketch stops answering, stop tapping and say so.
-
-  * "Asleep" is judged by the SENSE port only. The LCD does not reliably
-    re-enumerate USB after a wake, so absence-of-LCD-USB is NOT sleep - assuming
-    it was produced a 5/5 "wake rate" against an already-awake device.
+Only the child opens USB; its supervisor bounds even a stuck macOS open/ioctl/
+close. No reset, relay, flash, stronger stroke or automatic recovery is issued.
+Each call retains a private receipt. USB transitions need accompanying Halo logs
+for physical sleep/wake acceptance; an already present board is not a new wake.
 """
-import serial, time, glob
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import select
+import signal
+import subprocess
+import sys
+import tempfile
+import termios
+import time
 
-ACT_PORT   = "/dev/cu.usbmodem21301"
-STROKE     = "PUSH:500,200,500"     # the sketch default. Do not raise.
-WAKE_WAIT  = 12                     # generous: boot + USB enumeration
-SETTLE     = 2.0
+ACTUATOR = ('03536373232351608112', 0x2341, 0x0043)
+SENSE = ('98:A3:16:F8:1A:6C', 0x303A, 0x1001)
+LCD = ('20:6E:F1:A1:2D:C4', 0x303A, 0x1001)
+STROKE = 'PUSH:500,200,500'  # Calibrated maximum; never raise travel/speed.
+WAKE_WAIT = 12
+SETTLE = 2.0
+BOUNDS = {'inventory': 8, 'probe': 25, 'stroke': 25, 'wake': 45}
+SUCCESSES = {'INVENTORY', 'READY', 'STROKE_COMPLETE', 'WAKE_OBSERVED', 'ALREADY_AWAKE'}
+_REVIEW_REQUIRED = None
+
 
 class TapError(RuntimeError):
-    pass
+    def __init__(self, message, result=None):
+        super().__init__(message)
+        self.result = result
 
-def ports():
-    g = glob.glob("/dev/cu.usbmodem*")
-    return (next((p for p in g if p.endswith("m101")), None),
-            next((p for p in g if p.endswith("1101")), None))
 
-def sense_up():   return ports()[1] is not None
-def lcd_up():     return ports()[0] is not None
-def any_up():     return sense_up() or lcd_up()
+class Failure(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
 
-class Tapper:
-    def __init__(self, verbose=True):
-        self.verbose = verbose
-        self.s = serial.Serial()
-        self.s.port = ACT_PORT; self.s.baudrate = 115200; self.s.timeout = 0.2
-        self.s.dtr = False; self.s.rts = False
-        self.s.open()
-        time.sleep(3.5)              # one-time boot after the open-reset
-        self.s.reset_input_buffer()
 
-    def _say(self, m):
-        if self.verbose: print(f"    [tap] {m}", flush=True)
+def inventory():
+    from serial.tools import list_ports
+    return [dict(port=p.device, serial=p.serial_number, vid=p.vid, pid=p.pid)
+            for p in list_ports.comports()]
+
+
+def exact_port(rows, identity):
+    found = [r['port'] for r in rows
+             if (r.get('serial'), r.get('vid'), r.get('pid')) == identity]
+    if len(found) > 1:
+        raise Failure('IDENTITY_AMBIGUOUS', 'Multiple ports match ' + identity[0])
+    return found[0] if found else None
+
+
+def raw_settings(current, flags=termios):
+    """Remove inherited software AND hardware flow control without modem ioctls."""
+    c = list(current); c[6] = list(current[6])
+    c[0] = c[1] = c[3] = 0
+    c[2] |= flags.CLOCAL | flags.CREAD
+    clear = flags.HUPCL | flags.PARENB | flags.CSTOPB | flags.CSIZE
+    for name in ('CRTSCTS', 'CCTS_OFLOW', 'CRTS_IFLOW', 'CDTR_IFLOW', 'CDSR_OFLOW', 'CCAR_OFLOW'):
+        clear |= getattr(flags, name, 0)
+    if sys.platform == 'darwin':
+        # Darwin sys/termios.h: Python may omit the DTR/DSR/DCD flow-control
+        # constants and CIGNORE even though the driver honors those bits.
+        clear |= 0x001F0001
+    c[2] = (c[2] & ~clear) | flags.CS8
+    c[4] = c[5] = flags.B115200
+    c[6][flags.VMIN] = c[6][flags.VTIME] = 0
+    return c
+
+
+def help_valid(reply):
+    lines = reply.replace('\r', '').splitlines()
+    return ('Commands:' in lines and
+            '  PUSH:e,h,r  - extend/hold/retract ms' in lines and
+            '  STATUS      - show state' in lines)
+
+
+def status_valid(reply):
+    lines = reply.replace('\r', '').splitlines()
+    return (all(x in lines for x in ('=== STATUS ===', 'PWM: 0',
+            'Target speed: 128', 'Hold time: 200ms', 'Stylus: OFF')) and
+            any(re.fullmatch(r'Pot: \d+', x) for x in lines))
+
+
+def unowned(port):
+    for path in (port, port.replace('/dev/cu.', '/dev/tty.')):
+        if os.path.exists(path):
+            p = subprocess.run(['lsof', '-nP', path], capture_output=True, timeout=2)
+            if p.returncode not in (0, 1) or p.stdout.strip():
+                raise Failure('PORT_OWNED', 'Ownership unavailable or port busy: ' + path)
+
+
+class RawPort:
+    def __init__(self, port, emit):
+        self.fd = None; self.emit = emit
+        try:
+            emit('open.before', port=port)
+            self.fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+            emit('open.after')
+            emit('configure.before')
+            current = termios.tcgetattr(self.fd)
+            configured = raw_settings(current)
+            emit('settings', before_cflag=current[2], after_cflag=configured[2])
+            termios.tcsetattr(self.fd, termios.TCSANOW, configured)
+            emit('configure.after')
+        except BaseException:
+            self.close()
+            raise
+
+    def read(self, seconds, complete=None):
+        data = b''; end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            if not select.select([self.fd], [], [], .05)[0]:
+                continue
+            try:
+                chunk = os.read(self.fd, 4096)
+            except BlockingIOError:
+                continue
+            if not chunk:
+                raise Failure('SERIAL_EOF', 'Actuator disconnected')
+            data += chunk
+            if len(data) > 8192:
+                raise Failure('SERIAL_OVERFLOW', 'Excess unsolicited actuator output')
+            text = data.decode(errors='replace')
+            if complete and text.endswith('\n') and complete(text):
+                break
+        return data.decode(errors='replace')
+
+    def exchange(self, command, seconds, complete=None):
+        if command not in ('HELP', 'STATUS', 'STOP', STROKE):
+            raise ValueError('Unapproved actuator command')
+        # Preserve discarded text; a previous reply cannot satisfy this request.
+        self.emit('drain', text=self.read(.1))
+        self.emit('write.before', command=command)
+        data = (command + '\n').encode(); end = time.monotonic() + 2
+        while data and time.monotonic() < end:
+            if not select.select([], [self.fd], [], .05)[1]:
+                continue
+            try:
+                count = os.write(self.fd, data)
+            except BlockingIOError:
+                continue
+            if count <= 0:
+                raise Failure('SERIAL_WRITE', 'Zero-byte write')
+            data = data[count:]
+        if data:
+            raise Failure('SERIAL_WRITE', 'Write deadline exceeded')
+        self.emit('write.after', command=command)
+        reply = self.read(seconds, complete)
+        self.emit('reply', command=command, text=reply)
+        return reply
 
     def close(self):
+        if self.fd is not None:
+            try:
+                self.emit('close.before')
+            finally:
+                os.close(self.fd); self.fd = None
+            self.emit('close.after')
+
+
+def episode(action, state, emit, scan=inventory, owner=unowned, connect=RawPort,
+            clock=time.monotonic, sleep=time.sleep):
+    """Actual worker logic, with inert dependency injection for host tests."""
+    link = None
+    try:
+        rows = scan(); state['inventory_before'] = rows
+        if action == 'inventory':
+            state['status'] = 'INVENTORY'; return
+        port = exact_port(rows, ACTUATOR)
+        if not port:
+            raise Failure('ACTUATOR_ABSENT', 'Exact replacement Uno is absent')
+        if action == 'wake':
+            if exact_port(rows, SENSE):
+                state['status'] = 'ALREADY_AWAKE'; return
+            if exact_port(rows, LCD):
+                raise Failure('BOARD_STATE_UNSAFE', 'LCD present without Sense; no blind tap')
+            sleep(SETTLE)
+            rows = scan()
+            if exact_port(rows, SENSE) or exact_port(rows, LCD):
+                raise Failure('BOARD_STATE_CHANGED', 'Halo appeared before stroke')
+            state['stable_usb_absence'] = True
+        owner(port); link = connect(port, emit)
+        emit('startup', text=link.read(3.5))
+        if not help_valid(link.exchange('HELP', 3, help_valid)):
+            raise Failure('NO_HELP', 'Fresh actuator HELP response missing')
+        if not status_valid(link.exchange('STATUS', 2, status_valid)):
+            raise Failure('NOT_READY', 'Actuator is not stopped at the unchanged calibration')
+        state['ready'] = True
+        if action == 'probe':
+            state['status'] = 'READY'
+        else:
+            if action == 'wake':
+                rows = scan()
+                if exact_port(rows, SENSE) or exact_port(rows, LCD):
+                    raise Failure('BOARD_STATE_CHANGED', 'Halo appeared during actuator readiness')
+            state['stroke_attempted'] = True
+            reply = link.exchange(STROKE, 8, lambda t: 'PUSH: Complete' in t.splitlines())
+            if 'PUSH: Complete' not in reply.splitlines():
+                raise Failure('NO_COMPLETION', 'Calibrated stroke did not acknowledge completion')
+            state['stroke_complete'] = True
+            if not status_valid(link.exchange('STATUS', 2, status_valid)):
+                raise Failure('POST_STROKE_NOT_READY', 'Stopped state missing after stroke')
+            state['status'] = 'STROKE_COMPLETE'
+    except BaseException as exc:
+        state['status'] = getattr(exc, 'status', 'SERIAL_ERROR'); state['error'] = repr(exc)
+    finally:
+        if link is not None:
+            try:
+                reply = link.exchange('STOP', 1, lambda t: 'CMD: STOP' in t.splitlines())
+                state['stop_ack'] = 'CMD: STOP' in reply.splitlines()
+                if not state['stop_ack'] and state['status'] in SUCCESSES:
+                    state['status'] = 'STOP_UNCONFIRMED'
+            except BaseException as exc:
+                state['stop_error'] = repr(exc)
+                if state['status'] in SUCCESSES: state['status'] = 'STOP_UNCONFIRMED'
+            finally:
+                try:
+                    link.close(); state['descriptor_closed'] = True
+                except BaseException as exc:
+                    state['close_error'] = repr(exc); state['status'] = 'CLOSE_FAILED'
+        emit('serial_finished', status=state['status'])
+    if action == 'wake' and state['status'] == 'STROKE_COMPLETE':
+        end = clock() + WAKE_WAIT
+        while clock() < end:
+            if exact_port(scan(), SENSE):
+                state['sense_usb_transition'] = True
+                state['status'] = 'WAKE_OBSERVED'; break
+            sleep(.25)
+        else:
+            state['status'] = 'NO_HALO_WAKE'
+        emit('wake_finished', status=state['status'])
+
+
+def group_exists(pid):
+    try: os.killpg(pid, 0); return True
+    except ProcessLookupError: return False
+    except OSError: return True  # Unknown is not proof of closure.
+
+
+def supervise(argv, out, timeout):
+    # An outer controller can terminate us while the USB worker is stuck. Reap
+    # that worker before returning; a second signal must not abort this cleanup.
+    previous = {}
+    def interrupt(signum, frame):
+        for sig in previous: signal.signal(sig, signal.SIG_IGN)
+        raise KeyboardInterrupt()
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                previous[sig] = signal.signal(sig, interrupt)
+            except ValueError:  # A library caller may be on a non-main thread.
+                break
+        return _supervise(argv, out, timeout)
+    finally:
+        for sig, handler in previous.items(): signal.signal(sig, handler)
+
+
+def _supervise(argv, out, timeout):
+    """Never let a kill/wait failure skip the caller's other resource cleanup."""
+    errors = []; timed_out = False
+    def stop(child, sig):
+        try: os.killpg(child.pid, sig)
+        except ProcessLookupError: pass
+        except OSError as exc: errors.append(repr(exc))
+    with (out / 'worker.log').open('w') as log:
+        child = subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            self.s.write(b"STOP\n"); self.s.flush(); time.sleep(0.3)
-            self.s.close()
-        except Exception:
-            pass
+            child.wait(timeout=timeout)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            timed_out = True
+            stop(child, signal.SIGTERM)
+            try: child.wait(timeout=2)
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                errors.append(repr(exc)); stop(child, signal.SIGKILL)
+                try: child.wait(timeout=2)
+                except (subprocess.TimeoutExpired, OSError) as exc: errors.append(repr(exc))
+        except OSError as exc:
+            errors.append(repr(exc)); stop(child, signal.SIGKILL)
+            try: child.wait(timeout=2)
+            except (subprocess.TimeoutExpired, OSError) as exc: errors.append(repr(exc))
+        if group_exists(child.pid):
+            stop(child, signal.SIGKILL)
+        try: result = json.loads((out / 'WORKER.json').read_text())
+        except (OSError, ValueError): result = {'status': 'WORKER_RECEIPT_MISSING'}
+        if not isinstance(result, dict): result = {'status': 'WORKER_RECEIPT_INVALID'}
+        result.update(worker_pid=child.pid, worker_exit_code=child.poll(),
+                      worker_reaped=child.poll() is not None, group_absent=not group_exists(child.pid),
+                      controller_timeout=timed_out, supervisor_errors=errors, receipt_dir=str(out))
+        if timed_out or child.returncode != 0 or not result['group_absent'] or errors:
+            result['worker_status'] = result.get('status')
+            result['status'] = 'CONTROLLER_TIMEOUT' if timed_out else 'CONTROLLER_FAILED'
+        elif result.get('status') in ('READY', 'STROKE_COMPLETE', 'WAKE_OBSERVED') and not (
+                result.get('descriptor_closed') and result.get('stop_ack')):
+            result['worker_status'] = result['status']; result['status'] = 'CLOSURE_UNPROVED'
+        try: (out / 'RESULT.json').write_text(json.dumps(result, indent=2) + '\n')
+        except OSError as exc:
+            result['receipt_error'] = repr(exc); result['status'] = 'RECEIPT_FAILED'
+        return result
 
-    def sketch_alive(self):
-        """A live sketch answers. Silence means the Uno is not running it."""
-        self.s.reset_input_buffer()
-        self.s.write(b"HELP\n"); self.s.flush()
-        t0 = time.time(); r = ""
-        while time.time() - t0 < 3:
-            n = self.s.in_waiting
-            if n: r += self.s.read(n).decode(errors="replace")
-            else: time.sleep(0.05)
-        return len(r) > 0
 
-    def stroke_once(self):
-        self.s.reset_input_buffer()
-        self.s.write((STROKE + "\n").encode()); self.s.flush()
-        t0 = time.time(); r = ""
-        while time.time() - t0 < 8:
-            n = self.s.in_waiting
-            if n: r += self.s.read(n).decode(errors="replace")
-            else: time.sleep(0.05)
-            if "Complete" in r: break
-        return "Complete" in r
+def run(action):
+    global _REVIEW_REQUIRED
+    if action != 'inventory' and _REVIEW_REQUIRED is not None:
+        return dict(status='REVIEW_REQUIRED', previous_result=_REVIEW_REQUIRED,
+                    receipt_dir=_REVIEW_REQUIRED['receipt_dir'])
+    out = Path(tempfile.mkdtemp(prefix='halo-tapctl-'))
+    result = supervise([sys.executable, '-B', str(Path(__file__).resolve()),
+                        '--worker', action, '--out', str(out)], out, BOUNDS[action])
+    if result['status'] in ('CONTROLLER_TIMEOUT', 'CONTROLLER_FAILED', 'CLOSURE_UNPROVED',
+                            'RECEIPT_FAILED', 'CLOSE_FAILED', 'STOP_UNCONFIRMED',
+                            'NO_COMPLETION', 'WORKER_ERROR', 'WORKER_RECEIPT_MISSING',
+                            'WORKER_RECEIPT_INVALID'):
+        _REVIEW_REQUIRED = result
+    return result
 
-    def wake(self, attempts=6, require="any"):
-        """Tap until the required board actually enumerates. Returns True/False.
 
-        require="lcd" matters more than it looks: the LCD does not reliably
-        re-enumerate USB after a wake, so "a board is up" is often the SENSE
-        only. A test that needs to inject commands must ask for the LCD
-        explicitly or it will sail past this check and then fail on a None port.
+def scanned_ports():
+    result = run('inventory')
+    if result['status'] != 'INVENTORY':
+        raise TapError('USB inventory failed', result)
+    return result['inventory_before']
 
-        Raises TapError if the sketch is dead — that needs a human, and
-        continuing to tap at it just wastes the run.
-        """
-        def satisfied():
-            if require == "lcd":   return lcd_up()
-            if require == "sense": return sense_up()
-            return any_up()
-        if satisfied():
-            self._say(f"already awake ({require})")
-            return True
-        if not self.sketch_alive():
-            raise TapError("actuator sketch is not running (no reply) — "
-                           "power-cycle the Uno / re-upload actuator_test.ino")
-        for i in range(1, attempts + 1):
-            self.stroke_once()
-            t0 = time.time()
-            while time.time() - t0 < WAKE_WAIT:
-                if satisfied():
-                    self._say(f"woke on stroke {i} after {time.time()-t0:.1f}s")
-                    return True
-                time.sleep(0.25)
-            self._say(f"stroke {i}: no wake")
-            if not self.sketch_alive():
-                raise TapError(f"sketch died after {i} strokes — power-cycle the Uno")
+
+def actuator_port(): return exact_port(scanned_ports(), ACTUATOR)
+def ports():
+    rows = scanned_ports()
+    return exact_port(rows, LCD), exact_port(rows, SENSE)
+def sense_up(): return ports()[1] is not None
+def lcd_up(): return ports()[0] is not None
+def any_up(): return any(ports())
+
+
+class Tapper:
+    """Compatibility API; each operation owns and closes its bounded worker."""
+    def __init__(self, verbose=True):
+        self.verbose = verbose; self.last_result = None; self.closed = False
+
+    def close(self):
+        self.closed = True  # There is no parent-owned serial descriptor.
+
+    def _run(self, action):
+        if self.closed: raise TapError('Tapper is closed')
+        self.last_result = run(action)
+        if self.verbose:
+            print('[tap] ' + self.last_result['status'] + ' — ' + self.last_result['receipt_dir'], flush=True)
+        return self.last_result['status']
+
+    def sketch_alive(self): return self._run('probe') == 'READY'
+    def stroke_once(self): return self._run('stroke') == 'STROKE_COMPLETE'
+
+    def wake(self, attempts=1, require='sense'):
+        if require not in ('any', 'sense', 'lcd') or not 1 <= attempts <= 6:
+            raise ValueError('require must be any/sense/lcd and attempts must be 1..6')
+        for _ in range(attempts):
+            status = self._run('wake')
+            if status in ('WAKE_OBSERVED', 'ALREADY_AWAKE'):
+                return require != 'lcd' or lcd_up()
+            if status != 'NO_HALO_WAKE':
+                raise TapError('Actuator wake stopped: ' + status, self.last_result)
         return False
 
     def wait_asleep(self, timeout=120):
-        """Sleep is judged by the SENSE port only (see module docstring)."""
-        t0 = time.time()
-        while time.time() - t0 < timeout:
-            if not sense_up():
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if not any_up():
                 time.sleep(SETTLE)
-                if not sense_up():
-                    return True
-            time.sleep(1)
+                if not any_up(): return True
+            time.sleep(.25)
         return False
 
-if __name__ == "__main__":
-    t = Tapper()
-    try:
-        print("  sketch alive:", t.sketch_alive())
-        print("  wake:", t.wake())
-        print("  ports:", ports())
-    except TapError as e:
-        print("  TAP ERROR:", e)
-    finally:
-        t.close()
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--worker', choices=BOUNDS, help=argparse.SUPPRESS)
+    parser.add_argument('--out', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--action', choices=('probe', 'stroke', 'wake'), default='probe')
+    args = parser.parse_args()
+    if not args.worker:
+        result = run(args.action); print(json.dumps(result, indent=2))
+        return 0 if result['status'] in SUCCESSES else 1
+    state = dict(status='RUNNING', action=args.worker, events=[], started_epoch=time.time(),
+                 actuator_serial=ACTUATOR[0], stroke=STROKE, stroke_attempted=False,
+                 stroke_complete=False, descriptor_closed=False, modem_line_operations=0)
+    def emit(kind, **values):
+        state['events'].append(dict(kind=kind, epoch=time.time(), **values))
+        tmp = args.out / 'WORKER.tmp'; tmp.write_text(json.dumps(state, indent=2) + '\n')
+        tmp.replace(args.out / 'WORKER.json')
+    def interrupted(signum, frame):
+        # Parent escalates if cleanup itself blocks; don't nest cleanup exceptions.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise Failure('INTERRUPTED', 'Signal ' + str(signum))
+    signal.signal(signal.SIGTERM, interrupted)
+    try: episode(args.worker, state, emit)
+    except BaseException as exc:
+        state['status'] = 'WORKER_ERROR'; state['error'] = repr(exc)
+    state['finished_epoch'] = time.time(); emit('finished', status=state['status'])
+    # Domain failures retain their exact category; nonzero means worker malfunction.
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

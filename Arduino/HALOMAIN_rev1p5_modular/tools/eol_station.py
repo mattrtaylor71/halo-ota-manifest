@@ -254,7 +254,7 @@ def main():
     try:
         sys.path.insert(0, os.path.join(REPO, "tools"))
         import tapctl
-        actuator = getattr(tapctl, "ACT_PORT", None) or "/dev/cu.usbmodem21301"
+        actuator = tapctl.actuator_port()
     except Exception:
         pass
 

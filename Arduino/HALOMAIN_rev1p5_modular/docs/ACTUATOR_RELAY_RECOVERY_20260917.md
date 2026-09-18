@@ -1,5 +1,7 @@
 # Actuator USB relay recovery, 17 September 2026
 
+Latest: the replacement controller reproduced a serial-open hang on September18. Cold power removal restored replies; cause and sustained recovery remain under test. See [the current investigation and bounded controller](ACTUATOR_INVESTIGATION_20260918.md). The entries below preserve earlier results.
+
 ## Current direct connection — 18 September
 
 The replacement Uno, serial `03536373232351608112`, is directly connected; the relay is absent from this wiring. Its existing sketch answered HELP and reported the calibrated stopped state, so no reflash was needed. [Nonmoving probe001](/Users/MattTaylor/halo-actuator-direct-20260918/probe001/RESULT.json) passed. [Tap001](/Users/MattTaylor/halo-actuator-direct-20260918/tap001/tap.json) completed one `PUSH:500,200,500`; the [closed paired capture](/Users/MattTaylor/halo-actuator-direct-20260918/tap001/RESULT.json) showed lit Home followed by both boards entering deep sleep.
