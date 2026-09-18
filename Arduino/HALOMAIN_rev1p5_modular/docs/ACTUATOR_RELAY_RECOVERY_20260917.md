@@ -58,3 +58,46 @@ no second stroke was sent. Pins under `/Users/MattTaylor/halo-upload181-20260917
 This establishes usable recovery for this recurrence. It does not prove the
 relay cures every USB failure, and does not turn the cycle004 helper timeout
 into a completed-stroke pass.
+
+## Voice/list189 campaign: recovery and recurring failures
+
+The eight later relay runs below used the same helper, confirmed COM/NC wiring
+and ten-second off hold. Every run received exact `OK+CH1=0`, closed the relay
+descriptor and reaped its worker; none sent an actuator command. Their receipts
+are under `/Users/MattTaylor/halo-voice-list189-20260917/`:
+
+| Receipts | Initial actuator BSD port | Observed result |
+| --- | --- | --- |
+| [relay001](</Users/MattTaylor/halo-voice-list189-20260917/relay001/RESULT.json>), [relay002](</Users/MattTaylor/halo-voice-list189-20260917/relay002/RESULT.json>) | Present | Disappearance and exact serial return proved; `BSD_DISAPPEAR_RETURN_PROVED`. |
+| [relay003](</Users/MattTaylor/halo-voice-list189-20260917/relay003/RESULT.json>), [relay005](</Users/MattTaylor/halo-voice-list189-20260917/relay005/RESULT.json>), [relay007](</Users/MattTaylor/halo-voice-list189-20260917/relay007/RESULT.json>) | Present | Disappeared, but exact serial did not return within the observation bound despite restore acknowledgement. Worker `USB_RETURN_NOT_PROVED`; supervisor `STOPPED_FOR_REVIEW`. |
+| [relay004](</Users/MattTaylor/halo-voice-list189-20260917/relay004/RESULT.json>), [relay006](</Users/MattTaylor/halo-voice-list189-20260917/relay006/RESULT.json>), [relay008](</Users/MattTaylor/halo-voice-list189-20260917/relay008/RESULT.json>) | Already absent; explicit degraded start | Exact serial returned after restore; `BSD_SERIAL_RETURNED_AFTER_RESTORE`. These prove recovery from absence, not a newly observed disappearance. |
+
+Separate subsequent strokes completed and closed cleanly in
+`identity188-005/wake.json` after relay004, `voice-list001/wake.json` after
+relay006, and `voice-list002/wake.json` after relay008, all under that campaign.
+Recovery was not permanent: `health189-001/wake.json`, between relay004 and
+relay005, records `No stroke completion` with `complete=false` and
+`descriptor_closed=false`. A recovered serial port can still be followed by a
+tap/helper hang. The relay receipts do not prove sketch responsiveness, a stroke,
+or measured power removal; these observations establish no electrical root cause.
+
+For another recurrence, close and reap existing owners before using the helper
+once with a new output directory. If it reports `STOPPED_FOR_REVIEW`, inspect
+`worker_status`, restore acknowledgement and exact serial inventory; do not
+advance to a stroke merely because restoration was acknowledged. After review,
+if the exact actuator BSD port remains absent, use a separately recorded
+`--degraded-start` recovery. Require its exact return result, then a bounded
+nonmoving `HELP` check before any separately authorized stroke. Bound the stroke
+helper to at most25seconds and retain its completion and closure result; an
+observed Halo wake does not erase a helper timeout. Do not automate repeated
+power cycles or infer that a successful degraded recovery fixes the recurrence.
+
+## 190 installation blocker: return is not command readiness
+
+In `/Users/MattTaylor/halo-voice-list189-20260917/`, relay009 and relay010 both proved exact actuator BSD disappearance/return and acknowledged power restore, but the subsequent bounded HELP checks failed. `identity189mixed-001`/`002` hit their25-second owner bounds with no stroke; `003`, after a targeted hub-port off/on, closed cleanly but still had no HELP. All three captures opened neither Halo board.190 was therefore not installed.
+
+The hub intervention targeted only the freshly observed actuator port2-1.3.3 using exact-location `uhubctl`, with no whole-hub or USB3-companion reset. Off/on commands returned0, but the exact BSD node did not disappear, so it is not proof of a physical power cut. This location is session-specific, not a reusable hard-coded command.
+
+A first actuator-only DTR diagnostic blocked on its initial clear ioctl; its parent failed to reap within three seconds after kill. Later process inspection confirmed no remaining child; clean descriptor closure is not claimed for that attempt. After the hub intervention, one complete DTR clear/assert150ms/release with hardware flow control disabled closed cleanly, but HELP remained empty. A20-second, non-writing `avrdude` signature probe (normal Arduino reset handshake, `-n -u -D`, no erase/upload/force flags) also failed and was killed/reaped. No actuator firmware was reflashed and none of these attempts sent a stroke.
+
+The final state and closed case references are in `CHECKPOINT190.json`. The current practical blocker is command/bootloader communication despite enumeration; its electrical or USB root cause is not established. Do not run an unbounded reset loop or infer that another firmware flash is possible. A manual Halo tap can bypass the actuator for the pending firmware install/test. Relay reset remains the documented first recovery attempt, not a guarantee.

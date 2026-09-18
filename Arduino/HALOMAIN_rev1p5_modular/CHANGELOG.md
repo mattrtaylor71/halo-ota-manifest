@@ -1,3 +1,9 @@
+# 6.4.190 local voice/list candidate — September 17, 2026
+
+Allow one bounded fresh voice upload while the shopping list stays open; serialize voice and list HTTP ownership and coalesce refreshes. Actual189 device testing found that LCD scrolling emits `INPUT_USER_ACTIVE`, which still cancelled the upload.190 adds that list-only compatibility and regression coverage compiled from the real LCD producer; camera/new recording/manual OTA remain interrupting. Both production builds/artifact checks and all97 exact-snapshot suites pass. Sense static globals increase24bytes; LCD/OTA runtime is unchanged.
+
+190 is **not installed or published**. Actuator HELP/bootloader silence blocks the remaining device tests despite bounded remote recovery. Last unit state is Sense189/LCD188 SDKVALID; public188 and02:00Pacific are unchanged. The automated test recording was nearly silent, so cloud202 alone is not claimed as a successful shopping-list mutation. [Evidence and remaining tests](docs/VOICE_LIST_UPLOAD_VALIDATION_190.md).
+
 # 6.4.188 user manual OTA and installation-screen result — September 17, 2026
 
 The user’s manual update installed both exact188 images, with Sense app1 / LCD app0 SDK VALID. The static “Something new is coming” frame was visible before flash; native policy resolved, Home returned and paired sleep followed after453.5seconds. Natural UTC-day rollover passed without an allowance reset. The02:00Pacific arm remains unchanged; capture closed after67seconds quiet. No new full-product or scheduled qualification is claimed. [Closed evidence](docs/MANUAL_OTA_188_20260917.md).

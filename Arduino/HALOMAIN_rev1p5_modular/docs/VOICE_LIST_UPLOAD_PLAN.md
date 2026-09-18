@@ -1,3 +1,5 @@
+> Execution checkpoint: corrected190 source and both images are built; all97 snapshot suites pass.190 installation is pending because the actuator no longer answers. Follow [the190 results and resume sequence](VOICE_LIST_UPLOAD_VALIDATION_190.md), which supersede prospective189 version/identity examples below. Public188 is unchanged. Service requires the pinned esptool virtual environment, not the host test Python.
+
 # Fresh voice → list refresh: bounded device acceptance plan
 
 Prepared September17,2026; this is a plan, not completed candidate acceptance.
@@ -110,7 +112,7 @@ The future reviewed Sense adapter must keep this interface. Run input validation
 first, then the identical arguments with `--execute` only after review:
 
 ```sh
-"$PY" -B "$SENSE_SERVICE_ADAPTER" \
+"/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/bench-recovery-install68-001/esptool53-env/bin/python" -B "$SENSE_SERVICE_ADAPTER" \
   --current-sense-pair "$CURRENT188_PAIR" --current-lcd-pair "$CURRENT188_PAIR" \
   --target-pair "$NEW_PAIR" --target-pair-sha256 "$NEW_PAIR_SHA256" \
   --identity "$FRESH_CLOSED_IDENTITY" --out "$OUT/service001"

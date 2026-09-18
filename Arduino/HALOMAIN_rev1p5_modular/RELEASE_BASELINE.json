@@ -872,7 +872,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.186",
+  "current_production_latest_version": "6.4.188",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -4836,21 +4836,13 @@
     }
   },
   "current_validation_blocker": {
-    "status": "COSMETIC180_COMPLETE_PRIOR_RUNTIME_LIMITS_RETAINED",
-    "detail": "LCD180 cosmetic installation, paired SDK health, eight-item real shopping-list fetch and coordinated sleep passed. Chocolate cloud transcript and actual shopping rows confirmed. Voice latency/refresh behavior is unchanged; exact original delay not measured. Prior179 qualification limits remain.",
+    "status": "190_BUILD_VERIFIED_DEVICE_TEST_BLOCKED_BY_ACTUATOR",
+    "detail": "Actuator USB enumerates but HELP and non-writing bootloader probe do not respond. Both HaloUSBports absent/asleep;190 not installed. Resume at fresh189/188 identity thenservice/SDKhealth/voice-list andcamera interruption.",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/postinstall001/REVIEW.json",
-      "sha256": "c37290ed7c9cea95d92d75978a545ab2c17bb62e71af0ded500ac57cf7ec9137"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/CHECKPOINT190.json",
+      "sha256": "7f4809a1ecf1ae7af4b14d0b7ca052830e935f866356fc93d920a9eb08539421"
     },
-    "candidate_installed": true,
-    "installed_scope": "OnlyLCD180 app0 installed;LCD179 app1 fallback retained. Sense179 app1 andSense178 app0 unchanged. NVS/partition table preserved.",
-    "known_separate_limits": [
-      "Public162 downgrade refusal uses generic failure UI; equal-version UpToDate presentation not exercised.",
-      "USB logging truncation caused strict controller failure despite cross-board completion evidence.",
-      "Prior provisioning, reserve and late setup/sleep limits remain as recorded.",
-      "LCD persisted the next nightly arm; Sense receipt of that late acknowledgment is not proved.",
-      "Exact final durable origin/counter bytes were not independently reread; no claim that all historical obligations are gone."
-    ],
+    "candidate_installed": false,
     "no_public_promotion": true
   },
   "diagnostic_candidate151": {
@@ -6550,105 +6542,62 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.188",
-    "status": "PUBLISHED188_USER_MANUAL_PAIRED_OTA_AND_UI_PASS",
-    "artifact_source_commit": "9f5cd2fa556c4cc0a471fd74043b7b62aaf950f0",
-    "artifact_source_firmware_tree": "6271eb1b32031ce8d32f00a132096c57b81a00a2",
-    "build_id": "6.4.188-20260917T235700Z-9f5cd2fa556c",
+    "version": "6.4.190",
+    "status": "BUILT_HOST97_PASS_NOT_INSTALLED_ACTUATOR_BLOCKED",
+    "artifact_source_commit": "ffe52bf27865645ec0ff2a000b51049b40bcd5b1",
+    "artifact_source_firmware_tree": "94b08341ceccc8e7d05b78281d712cdd531cbf90",
+    "build_id": "6.4.190-20260918T025500Z-ffe52bf27865",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from9f5cd2fa556c or reviewed descendants. Runtime is identical to187 apart from the three generated version headers; preserve frozen158 recovery.",
+    "source_selection": "Continue from ffe52bf27865645ec0ff2a000b51049b40bcd5b1 or reviewed descendants; do not drop the actual LCD INPUT_USER_ACTIVE compatibility fix. Retain188 published recovery and immutable158.",
     "candidate_receipt": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/RELEASE-PAIR.json",
-      "sha256": "76e8a29f0ebae795f9f19922e5b5609782ade7d863ee29ba773d93c0cfaa107c"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/RELEASE-PAIR.json",
+      "sha256": "4bf26cdba58a51bf954b57e28b7f4a89521e44516c91ba6b89818fef8196a060"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/host001/RESULT.json",
-      "sha256": "448cc942bd357b7b8f1e493302aff3748c69db3e58f5c2d9ebdfe99dc27bf6c7"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/host001/RESULT.json",
+      "sha256": "75a4182206d719b2a985929336662271774319077a7e993f3a20572dd53c37ad"
     },
-    "host_suite_count": 11,
-    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "host_suite_count": 97,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS_WITH_DOCUMENTED_HOST_DISK_RESERVE_EXCEPTION",
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "a0731d4e207af4b1fabe7cf615d26dc13c2fee0665273b7bceffdc173c645a7f"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "241a28009ba0f6fed63c1671b524b157e97880d12c9463361c2e478685779900"
     },
     "runtime_comparison": {
-      "baseline_version": "6.4.187",
-      "non_generated_runtime_files_identical": 1139,
-      "only_generated_version_headers_changed": true
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/SOURCE-COMPARISON.json",
+      "sha256": "f42ff2283b4c6e56eeacff96d765b2cad2b06ebf2a763389f0f2f41f8f8d96fa"
     },
-    "published": true,
+    "build_budget_exception": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/BUILD-BUDGET-EXCEPTION.json",
+      "sha256": "ce9e1e814e31719593748cc9c069cfaab165892b321c54af136b9d8eb23d629e"
+    },
+    "published": false,
     "current_public_ota_version": "6.4.188",
-    "publication": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/PUBLISHED188.json",
-      "sha256": "721a6ae155bb50276d751422b327615b774d1dfa345182b4eb1f579fd409ce07"
-    },
-    "publication_stage": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/stage001/result.json",
-      "sha256": "c58e5369c27c8d655d88248d81e650dc4ae2fa6c465904dd75108b00bac7994c"
-    },
-    "publication_promotion": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/promote001/result.json",
-      "sha256": "23c816b6b778f15557ceed8fc44541a82a8c1306cb6df9a8c7bcbcc017583cc2"
-    },
-    "release_tag": "halo-v6.4.188",
-    "release_tag_object": "36c2d100672f549466943cc40e5003f464227a4a",
     "git_remote_push_performed": false,
-    "installed": true,
-    "installed_boards": [
-      "sense",
-      "lcd"
-    ],
+    "installed": false,
+    "installed_boards": [],
     "last_observed_installed_configuration": {
-      "sense": "6.4.188 app1 SDKVALID via user manual OTA",
-      "lcd": "6.4.188 app0 SDKVALID via user manual OTA"
+      "sense": "6.4.189 app0 SDKVALID;190notinstalled",
+      "lcd": "6.4.188 app0 SDKVALID unchanged"
     },
     "last_observed_device_acceptance": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
-      "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/CHECKPOINT190.json",
+      "sha256": "7f4809a1ecf1ae7af4b14d0b7ca052830e935f866356fc93d920a9eb08539421"
     },
-    "manual_ota_acceptance": true,
-    "incoming_OTA_UI_hardware_acceptance": true,
+    "schedule": "02:00Pacific configuration unchanged; no schedule or quota/debt edits in this campaign",
+    "manual_ota_acceptance": false,
     "scheduled_ota_acceptance": false,
-    "physical_acceptance_scope": "One user-initiated USB-connected paired OTA passed exact hashes, SDK VALID, static incoming LCD frame, observed-pair native settlement, Home and paired sleep with67seconds quiet. No new full-product or scheduled qualification.",
-    "readiness_checkpoint": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/READY188.json",
-      "sha256": "b0237fb925053540b7ac364b65c0f2752e42ffc3f67525175c737e0c2686a762"
-    },
-    "passive_capture": {
-      "directory": "/Users/MattTaylor/halo-manual188-20260917/user-manual001",
-      "exec_session_id": 58942,
-      "pid": 65371,
-      "expires_epoch": 1789691354.352451,
-      "commands_sent_at_setup": 0,
-      "status_at_readiness_checkpoint": "RUNNING_AWAITING_USER_MANUAL_PRESS",
-      "status": "CLOSED_REAPED_EXIT0_NO_COMMANDS",
-      "completion_result": {
-        "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
-        "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
-      }
-    },
-    "schedule": "02:00 Pacific unchanged; final Sense selected exact1789722000 and LCD verified arm1789721985 (15seconds early). This manual test is not a new scheduled qualification.",
-    "allowance_status": "No service write/reset. Native rollover toUTCday20714 observed in cloud: windows1, applies1, reserved0, retries0, remainingwork17ms. This is not a promise of another immediate manual allowance.",
-    "current_boot_clock_fresh_verified": true,
-    "next_unused_version": "6.4.189",
+    "next_unused_version": "6.4.191",
     "next_version_requires_fresh_inventory_check": true,
-    "handoff": "docs/MANUAL_OTA_188_20260917.md",
+    "handoff": "docs/VOICE_LIST_UPLOAD_VALIDATION_190.md",
+    "plan": "docs/VOICE_LIST_UPLOAD_PLAN.md",
     "limits": [
-      "One USB-connected manual update and observed installation frame passed; no new full-product, power-cut or USB-free qualification.",
-      "Preserve historical186 transfer/UI failure and187 service smoke under their previous_working_source records.",
-      "Diagnostic export/context/orphan and LCD error-log persistence warnings remain recorded."
-    ],
-    "full188_pair_installed": true,
-    "last_verified_device_acceptance": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
-      "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
-    },
-    "hardware_resource_review": "docs/HARDWARE_RESOURCE_REVIEW_188_20260917.md",
-    "independent_review": {
-      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-INDEPENDENT-REVIEW.json",
-      "sha256": "124903811140d2092e003f0a22b639348c9b761925b8036bc6f98618daf4f918"
-    }
+      "190 device test pending: exact actuator HELP and bootloader signature unavailable despite bounded relay/hub/DTR recovery. No190 flash writes.",
+      "189 hardware test exposed actual LCD scroll message cancelling voice; corrected190 host test reproduces old failure and passes new source.",
+      "Automated acoustic fixture reached cloud almost silent; real spoken-item semantics unqualified.",
+      "Host regression and unchanged OTA runtime are not a newly executed physical OTA or full product qualification."
+    ]
   },
   "previous_working_source_187": {
     "version": "6.4.187",
@@ -9434,5 +9383,124 @@
       "path": "/Users/MattTaylor/halo-manual186-20260917/USER-MANUAL186-INDEPENDENT-REVIEW.json",
       "sha256": "207f374f0dcde2613ac0191bb0501104e9cf73b9952aa45bc8553f8eb39ada5f"
     }
+  },
+  "previous_working_source_188": {
+    "version": "6.4.188",
+    "status": "PUBLISHED188_USER_MANUAL_PAIRED_OTA_AND_UI_PASS",
+    "artifact_source_commit": "9f5cd2fa556c4cc0a471fd74043b7b62aaf950f0",
+    "artifact_source_firmware_tree": "6271eb1b32031ce8d32f00a132096c57b81a00a2",
+    "build_id": "6.4.188-20260917T235700Z-9f5cd2fa556c",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from9f5cd2fa556c or reviewed descendants. Runtime is identical to187 apart from the three generated version headers; preserve frozen158 recovery.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/RELEASE-PAIR.json",
+      "sha256": "76e8a29f0ebae795f9f19922e5b5609782ade7d863ee29ba773d93c0cfaa107c"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/host001/RESULT.json",
+      "sha256": "448cc942bd357b7b8f1e493302aff3748c69db3e58f5c2d9ebdfe99dc27bf6c7"
+    },
+    "host_suite_count": 11,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "a0731d4e207af4b1fabe7cf615d26dc13c2fee0665273b7bceffdc173c645a7f"
+    },
+    "runtime_comparison": {
+      "baseline_version": "6.4.187",
+      "non_generated_runtime_files_identical": 1139,
+      "only_generated_version_headers_changed": true
+    },
+    "published": true,
+    "current_public_ota_version": "6.4.188",
+    "publication": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/PUBLISHED188.json",
+      "sha256": "721a6ae155bb50276d751422b327615b774d1dfa345182b4eb1f579fd409ce07"
+    },
+    "publication_stage": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/stage001/result.json",
+      "sha256": "c58e5369c27c8d655d88248d81e650dc4ae2fa6c465904dd75108b00bac7994c"
+    },
+    "publication_promotion": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/promote001/result.json",
+      "sha256": "23c816b6b778f15557ceed8fc44541a82a8c1306cb6df9a8c7bcbcc017583cc2"
+    },
+    "release_tag": "halo-v6.4.188",
+    "release_tag_object": "36c2d100672f549466943cc40e5003f464227a4a",
+    "git_remote_push_performed": false,
+    "installed": true,
+    "installed_boards": [
+      "sense",
+      "lcd"
+    ],
+    "last_observed_installed_configuration": {
+      "sense": "6.4.188 app1 SDKVALID via user manual OTA",
+      "lcd": "6.4.188 app0 SDKVALID via user manual OTA"
+    },
+    "last_observed_device_acceptance": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
+      "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
+    },
+    "manual_ota_acceptance": true,
+    "incoming_OTA_UI_hardware_acceptance": true,
+    "scheduled_ota_acceptance": false,
+    "physical_acceptance_scope": "One user-initiated USB-connected paired OTA passed exact hashes, SDK VALID, static incoming LCD frame, observed-pair native settlement, Home and paired sleep with67seconds quiet. No new full-product or scheduled qualification.",
+    "readiness_checkpoint": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/READY188.json",
+      "sha256": "b0237fb925053540b7ac364b65c0f2752e42ffc3f67525175c737e0c2686a762"
+    },
+    "passive_capture": {
+      "directory": "/Users/MattTaylor/halo-manual188-20260917/user-manual001",
+      "exec_session_id": 58942,
+      "pid": 65371,
+      "expires_epoch": 1789691354.352451,
+      "commands_sent_at_setup": 0,
+      "status_at_readiness_checkpoint": "RUNNING_AWAITING_USER_MANUAL_PRESS",
+      "status": "CLOSED_REAPED_EXIT0_NO_COMMANDS",
+      "completion_result": {
+        "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
+        "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
+      }
+    },
+    "schedule": "02:00 Pacific unchanged; final Sense selected exact1789722000 and LCD verified arm1789721985 (15seconds early). This manual test is not a new scheduled qualification.",
+    "allowance_status": "No service write/reset. Native rollover toUTCday20714 observed in cloud: windows1, applies1, reserved0, retries0, remainingwork17ms. This is not a promise of another immediate manual allowance.",
+    "current_boot_clock_fresh_verified": true,
+    "next_unused_version": "6.4.189",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/MANUAL_OTA_188_20260917.md",
+    "limits": [
+      "One USB-connected manual update and observed installation frame passed; no new full-product, power-cut or USB-free qualification.",
+      "Preserve historical186 transfer/UI failure and187 service smoke under their previous_working_source records.",
+      "Diagnostic export/context/orphan and LCD error-log persistence warnings remain recorded."
+    ],
+    "full188_pair_installed": true,
+    "last_verified_device_acceptance": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
+      "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
+    },
+    "hardware_resource_review": "docs/HARDWARE_RESOURCE_REVIEW_188_20260917.md",
+    "independent_review": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-INDEPENDENT-REVIEW.json",
+      "sha256": "124903811140d2092e003f0a22b639348c9b761925b8036bc6f98618daf4f918"
+    }
+  },
+  "previous_current_validation_blocker_pre190": {
+    "status": "COSMETIC180_COMPLETE_PRIOR_RUNTIME_LIMITS_RETAINED",
+    "detail": "LCD180 cosmetic installation, paired SDK health, eight-item real shopping-list fetch and coordinated sleep passed. Chocolate cloud transcript and actual shopping rows confirmed. Voice latency/refresh behavior is unchanged; exact original delay not measured. Prior179 qualification limits remain.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/postinstall001/REVIEW.json",
+      "sha256": "c37290ed7c9cea95d92d75978a545ab2c17bb62e71af0ded500ac57cf7ec9137"
+    },
+    "candidate_installed": true,
+    "installed_scope": "OnlyLCD180 app0 installed;LCD179 app1 fallback retained. Sense179 app1 andSense178 app0 unchanged. NVS/partition table preserved.",
+    "known_separate_limits": [
+      "Public162 downgrade refusal uses generic failure UI; equal-version UpToDate presentation not exercised.",
+      "USB logging truncation caused strict controller failure despite cross-board completion evidence.",
+      "Prior provisioning, reserve and late setup/sleep limits remain as recorded.",
+      "LCD persisted the next nightly arm; Sense receipt of that late acknowledgment is not proved.",
+      "Exact final durable origin/counter bytes were not independently reread; no claim that all historical obligations are gone."
+    ],
+    "no_public_promotion": true
   }
 }
