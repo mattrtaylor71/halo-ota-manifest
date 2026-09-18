@@ -37,7 +37,9 @@ static uint32_t sense_user_interrupt_generation() {
 // fresh voice upload whose result the user is waiting to see in that list.
 static bool sense_voice_list_input_compatible(const char* type, bool list_active) {
   return list_active && type && (!strcmp(type, "INPUT_SCROLL") ||
-      !strcmp(type, "INPUT_WAKE") || !strcmp(type, "INPUT_TOUCH"));
+      !strcmp(type, "INPUT_WAKE") || !strcmp(type, "INPUT_TOUCH") ||
+      // LCD encoder activity is sent using this common wire notification.
+      !strcmp(type, "INPUT_USER_ACTIVE"));
 }
 
 static void sense_note_admitted_user_action(bool list_compatible = false) {

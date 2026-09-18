@@ -26,6 +26,10 @@ def harness(root, negative=False):
     definition = fresh.corners.network.definition
     main = (root / 'Sense_Minimal/Sense_Minimal.ino').read_text()
     ops = (root / 'Sense_Minimal/sense_op_queue.h').read_text()
+    activity = (root / 'Sense_Minimal/sense_user_activity.h').read_text()
+    # Inline the exact header so the regression mutation can remove only the
+    # newly observed wire event, without modifying repository/source inputs.
+    code = replace(code, '#include "Sense_Minimal/sense_user_activity.h"', activity)
     code = replace(code, 'static struct {bool active=false;uint32_t job_id=0;} current_job;', '')
     code = replace(code,
         'static bool foreground_priority_active(uint32_t,const char** reason){if(reason)*reason=foreground_reason;return foreground_active;}',
@@ -92,12 +96,77 @@ static void uart_send_ui_list(){++cached_sends;}
     offline = definition(worker, '      if (!wifi_is_connected() || !sense_time_has_fresh_sync()) {')
     code += '#define free worker_free\nstatic bool actual_worker_offline(const UploadJob& job){do{\n'
     code += offline + '\nreturn true;\n}while(false);return false;}\n#undef free\n'
+    anim = (root / 'LCD_Minimal/lcd_anim.h').read_text()
+    ui = (root / 'LCD_Minimal/lcd_ui_task.h').read_text()
+    menu = (root / 'LCD_Minimal/lcd_menu.h').read_text()
+    for callback in ('static void knob_left_cb(', 'static void knob_right_cb('):
+        producer = definition(menu, callback)
+        assert 'EVT_SCROLL_DELTA' in producer and 'xQueueSendFromISR(app_event_queue, &evt,' in producer
+    scroll = definition(ui, 'if (evt.type == EVT_SCROLL_DELTA) {')
+    scroll_prefix = scroll[:scroll.index('        if (scroll_wake_context ||')]
+    assert 'ensure_awake_for_ui("scroll_evt");' in scroll_prefix
+    admission_line = next(line.strip() for line in main.splitlines()
+                          if 'sense_note_admitted_user_action(sense_voice_list_input_compatible(type,' in line)
+    code += 'static void actual_sense_input(const char* type){' + admission_line + '}\n'
+    code += r'''
+namespace lcd_scroll_producer {
+static unsigned wake_notices=0,local_activity=0;
+static std::vector<std::string> wire_types;
+struct tx_msg_t{char type[24];};
+static bool uart_tx_enqueue(const tx_msg_t* msg,const char*){
+ ++wake_notices;wire_types.emplace_back(msg->type);actual_sense_input(msg->type);return true;
+}
+static void lcd_media_note_user_input(){++local_activity;}
+static void lcd_timer_receiver_wait_release(const char*){}
+static void lcd_rearm_sense_wake_for_user(uint32_t){}
+static void lcd_allow_visible_ui(const char*){}
+static void sleep_fallback_reset(const char*){}
+static void cancel_pending_sleep_for_user_input(const char*){}
+static bool g_ota_mode_active=false,g_lcd_maintenance_headless=false;
+static bool g_in_light_sleep=false,g_sleep_transition=false,g_idle_screen_dark=false;
+static bool g_panel_enabled=true,g_lvgl_running=true;
+static int g_backlight_duty=255;
+static void lcd_clear_maintenance_state(const char*,bool){}
+static void lcd_exit_ota_mode(const char*){}
+static void lcd_set_backlight_binary(bool,const char*){}
+static void lcd_panel_set_power(bool){}
+static bool lv_is_initialized(){return true;}
+static void* lv_scr_act(){return nullptr;}
+static void lv_obj_invalidate(void*){}
+static void* app_event_queue=nullptr;
+static struct{int count=0;}g_active;
+enum{EVT_SCROLL_DELTA,EVT_RENDER_ACTIVE_LIST,EVT_RESET_UI};
+struct app_event_t{int type=EVT_SCROLL_DELTA;struct{int scroll_delta=1,new_count=0;}data;};
+static int xQueueSend(void*,app_event_t*,unsigned){return 1;}
+static bool provisioning_input_locked(){return false;}
+static void provision_ui_handle_scroll(int){}
+static void resetActivityTimer(){}
+static void lv_timer_handler(){}
+static void example_lvgl_unlock(){}
+static void user_activity_bump(const char*){}
+'''
+    code += definition(anim, 'static void lcd_media_user_wake(') + '\n'
+    code += definition(anim, 'static void ensure_awake_for_ui(') + '\n'
+    # Execute the actual UI task's scroll path through its wake call. Rendering
+    # beyond that call and RTOS delivery are explicitly outside this test.
+    code += 'static void actual_scroll_event(){app_event_t evt{};do{\n' + scroll_prefix
+    code += '\n}\n}while(false);}\n}\n'
     if negative:
         # Generated host code only: restore the old all-input cancellation
         # decision for the list-compatible scope without changing firmware.
-        assert code.count('sense_user_interrupt_generation()') == 3
-        code = code.replace('sense_user_interrupt_generation()',
-                            'sense_user_action_generation()')
+        if negative == 'missing_activity':
+            compatible = definition(code, 'static bool sense_voice_list_input_compatible(')
+            old = replace(compatible, 'return list_active &&',
+                          'return (!type || strcmp(type,"INPUT_USER_ACTIVE")) && list_active &&')
+            code = replace(code, compatible, old)
+        else:
+            # Keep the real accessor declaration intact; mutate only the
+            # three scope/cancellation decisions back to all-input semantics.
+            declaration = definition(code, 'static uint32_t sense_user_interrupt_generation(')
+            code = replace(code, declaration, 'USER_INTERRUPT_ACCESSOR')
+            assert code.count('sense_user_interrupt_generation()') == 3
+            code = code.replace('sense_user_interrupt_generation()', 'sense_user_action_generation()')
+            code = replace(code, 'USER_INTERRUPT_ACCESSOR', declaration)
     return code + r'''
 static void workflow_reset(std::vector<int> codes={202}){
  fresh_reset(codes);g_sense_user_action_generation=17;
@@ -119,10 +188,33 @@ static void same_job(const UploadJob& expected,const UploadJob& actual){
 }
 int main(){
  unsigned scenarios=0;auto job=fixture();
+ // Physical encoder events and the debug-scroll event reach this actual UI
+ // path. Its wake helper emits INPUT_USER_ACTIVE once even when an independent
+ // INPUT_SCROLL is absent/suppressed; use the produced type, never assume it.
+ workflow_reset();bool lcd_activity_preserved_voice=false;
+ boundary_hook=[&](const char* at){if(!strcmp(at,"post_enter")){
+  lcd_scroll_producer::actual_scroll_event();
+  assert(lcd_scroll_producer::wire_types.size()==1&&lcd_scroll_producer::wire_types[0]=="INPUT_USER_ACTIVE");
+  lcd_activity_preserved_voice=!media_retry_network_cancelled();assert(lcd_activity_preserved_voice);
+  for(unsigned i=0;i<50;++i)lcd_scroll_producer::actual_scroll_event();
+  assert(lcd_scroll_producer::wake_notices==1&&lcd_scroll_producer::local_activity==51);
+ }};
+ {MediaRetryNetworkScope scope(job,true);assert(voice_upload_and_parse(job));actual_worker_voice_dispatch(job,true);}
+ assert(lcd_activity_preserved_voice&&delivered==1&&!upload_worker_parked_pending());released();++scenarios;
+ workflow_reset();bool capture_requested=false;
+ boundary_hook=[&](const char* at){if(!strcmp(at,"post_enter")){
+  actual_sense_input(lcd_scroll_producer::wire_types[0].c_str());assert(!media_retry_network_cancelled());
+ }else if(!strcmp(at,"sdk_write_done")){
+  actual_sense_input("INPUT_MENU_SELECT");capture_requested=true;
+ }};
+ {MediaRetryNetworkScope scope(job,true);assert(!voice_upload_and_parse(job));actual_worker_voice_dispatch(job,false);}
+ assert(capture_requested&&upload_worker_parked_pending()&&persisted==0&&worker_freed==0);
+ same_job(job,upload_worker_parked_job);released();++scenarios;
+ puts("PASS actual LCD scroll wake emits compatible INPUT_USER_ACTIVE; a following capture still cancels and retains voice custody");
  for(const char* type:{"INPUT_SCROLL","INPUT_WAKE","INPUT_TOUCH","INPUT_MENU_SELECT",
                       "INPUT_LONG_PRESS_START","INPUT_DELETE","INPUT_OTA_CHECK","INPUT_RESET_WIFI",
                       "INPUT_WIFI_SCAN","INPUT_USER_ACTIVE"}){
-  workflow_reset();bool compatible=!strcmp(type,"INPUT_SCROLL")||!strcmp(type,"INPUT_WAKE")||!strcmp(type,"INPUT_TOUCH");
+  workflow_reset();bool compatible=!strcmp(type,"INPUT_SCROLL")||!strcmp(type,"INPUT_WAKE")||!strcmp(type,"INPUT_TOUCH")||!strcmp(type,"INPUT_USER_ACTIVE");
   assert(sense_voice_list_input_compatible(type,true)==compatible);
   assert(!sense_voice_list_input_compatible(type,false));
   const auto before=sense_user_interrupt_generation();
@@ -329,13 +421,20 @@ def main():
         negative = execute(a.source_root, a.out / 'negative', True)
         negative['expected_assertion'] = bool(negative['compiled'] and
             negative['exit_code'] == -signal.SIGABRT and re.fullmatch(
-                r'FAIL line \d+: voice_upload_and_parse\(job\)\n', negative.get('stderr', '')))
+                r'FAIL line \d+: lcd_activity_preserved_voice\n', negative.get('stderr', '')))
         result['negative_all_input_cancellation'] = negative
         result['pass'] &= negative['expected_assertion']
+        missing = execute(a.source_root, a.out / 'negative_missing_activity', 'missing_activity')
+        missing['expected_assertion'] = bool(missing['compiled'] and
+            missing['exit_code'] == -signal.SIGABRT and re.fullmatch(
+                r'FAIL line \d+: lcd_activity_preserved_voice\n', missing.get('stderr', '')))
+        result['negative_missing_lcd_wire_activity'] = missing
+        result['pass'] &= missing['expected_assertion']
     paths = ['Sense_Minimal/Sense_Minimal.ino', 'Sense_Minimal/sense_ops.h',
              'Sense_Minimal/sense_media_retry.h', 'Sense_Minimal/sense_media_retry_client.h',
              'Sense_Minimal/sense_user_activity.h', 'Sense_Minimal/sense_voice.h',
              'Sense_Minimal/sense_upload.h', 'Sense_Minimal/sense_op_queue.h',
+             'LCD_Minimal/lcd_anim.h', 'LCD_Minimal/lcd_ui_task.h', 'LCD_Minimal/lcd_menu.h',
              'tools/test_voice_list_workflow.py', 'tools/test_fresh_upload_user_priority.py',
              'tools/test_media_network_corner_cases.py', 'tools/test_media_network_retry.py']
     result['source_sha256'] = {path: hashlib.sha256((a.source_root / path).read_bytes()).hexdigest()
