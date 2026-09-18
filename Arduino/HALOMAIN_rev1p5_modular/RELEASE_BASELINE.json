@@ -1759,26 +1759,25 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "Sense6.4.179/LCD6.4.180",
-    "status": "PASS_MIXED_PAIR_SDK_HEALTH_LIST_REFRESH_AND_SLEEP",
+    "version": "Sense6.4.195/LCD6.4.191",
+    "status": "PASS_SCOPED_SENSE195_LCD191_IDENTITY_LIST_HOME_AND_PAIRED_SLEEP",
     "installed": {
-      "sense": "6.4.179 app1 SDK VALID",
-      "lcd": "6.4.180 app0 SDK VALID"
+      "sense": "6.4.195 app0 SDKVALID",
+      "lcd": "6.4.191 app1 SDKVALID unchanged"
     },
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/postinstall001/REVIEW.json",
-      "sha256": "c37290ed7c9cea95d92d75978a545ab2c17bb62e71af0ded500ac57cf7ec9137"
+      "path": "/Users/MattTaylor/halo-manual195-20260918/health001/RESULT.json",
+      "sha256": "f0e16725fe3cadcab2daf8754fb3df0af951cbf478c7a0c45472da6711d3bd77"
     },
-    "installation_review": {
-      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/INSTALLATION-REVIEW.json",
-      "sha256": "8b6b9831de90b10cc1eae4dfa16c8131bd83fa356f69fa846d839499a286458d"
+    "installation": {
+      "path": "/Users/MattTaylor/halo-manual195-20260918/installation-001/service/result.json",
+      "sha256": "0ad60e604c91f578658691672327e88b4a02e35daf6fc0de5c735dc0037b9483"
     },
     "limits": [
-      "Cosmetic asset change only; no voice runtime fix or new voice recording in this campaign.",
-      "USB-connected console list smoke; physical provisioning arrow was verified by exact pixel comparison and installed-image identity, not panel photography.",
-      "No new OTA transfer, scheduled execution, phone provisioning, power-cut, USB-free or full-product qualification.",
-      "Prior179 and earlier runtime/acceptance limitations remain in previous_working_source_179 and linked reports.",
-      "Cloud confirms Chocolate insertion; original recording time and screen state were not captured, so exact delay/absence cause remains unproved."
+      "Read-only list/UI smoke check; no real item deleted and no delete latency/rollback device qualification.",
+      "USB console list and encoder events; no physical touch geometry or new OTA qualification.",
+      "150s action/observation deadline; child cleanup has separate finite5/3s waits.",
+      "No manual or scheduled OTA executed in this smoke; published196 remains uninstalled at this checkpoint."
     ]
   },
   "previous_development_baseline_124": {
@@ -4836,8 +4835,18 @@
     }
   },
   "current_validation_blocker": {
-    "status": "AWAITING_HALO_WAKE_FOR_ONE_TIME195_BOOTSTRAP_AND_USER196_OTA",
-    "details": "Only actuator enumerates after captured190/191 check timed out and slept.193 identity chain opened neither board and made no firmware/NVS writes.195 sealed installer requires fresh190/191 unlocked Home identity; no automatic retry. User wake requested."
+    "status": "USER196_MANUAL_OTA_ACCEPTANCE_PENDING",
+    "details": "Sense195 USB bootstrap and scoped195/191 SDKVALID/list/Home/paired-sleep health passed. Published196 remains uninstalled at this closed checkpoint. The user manual OTA and subsequent no-update request still need captured completion; no automatic schedule or new device qualification is claimed.",
+    "bootstrap_installed": true,
+    "published_release_installed": false,
+    "installation": {
+      "path": "/Users/MattTaylor/halo-manual195-20260918/installation-001/service/result.json",
+      "sha256": "0ad60e604c91f578658691672327e88b4a02e35daf6fc0de5c735dc0037b9483"
+    },
+    "health": {
+      "path": "/Users/MattTaylor/halo-manual195-20260918/health001/RESULT.json",
+      "sha256": "f0e16725fe3cadcab2daf8754fb3df0af951cbf478c7a0c45472da6711d3bd77"
+    }
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6537,7 +6546,7 @@
   },
   "current_working_source": {
     "version": "6.4.196",
-    "status": "PUBLISHED_PAIRED196_USB_BOOTSTRAP_AND_USER_OTA_PENDING",
+    "status": "PUBLISHED_PAIRED196_BOOTSTRAP195_INSTALLED_USER_OTA_PENDING",
     "artifact_source_commit": "26c5d713475dc0390c375a9b1e77d2e2ffaaa82a",
     "artifact_source_firmware_tree": "672353630dab3650e7f233a331eb4b989d8772b0",
     "build_id": "6.4.196-20260918T213712Z-26c5d713475d",
@@ -6594,14 +6603,14 @@
     "installed": false,
     "installed_boards": [],
     "last_observed_installed_configuration": {
-      "sense": "6.4.190 app1 SDKVALID unchanged",
-      "lcd": "6.4.191 app1 SDKVALID"
+      "sense": "6.4.195 app0 SDKVALID",
+      "lcd": "6.4.191 app1 SDKVALID unchanged"
     },
     "last_observed_device_acceptance": {
-      "path": "/Users/MattTaylor/halo-delete191-20260918/health001/RESULT.json",
-      "sha256": "66437dddfd6513ec654f4e47800598c56f59a569079b0a45020040e39bbf9df2"
+      "path": "/Users/MattTaylor/halo-manual195-20260918/health001/RESULT.json",
+      "sha256": "f0e16725fe3cadcab2daf8754fb3df0af951cbf478c7a0c45472da6711d3bd77"
     },
-    "schedule": "02:00 Pacific unchanged; no hardware NVS/debt/schedule changes in this release turn",
+    "schedule": "02:00 Pacific configuration unchanged; Sense-only USB service preserved NVS/debt/schedule byte-for-byte; no new scheduled execution acceptance",
     "manual_ota_acceptance": false,
     "scheduled_ota_acceptance": false,
     "delete_response_device_acceptance": false,
@@ -6615,13 +6624,14 @@
     "next_version_requires_fresh_inventory_check": true,
     "handoff": "docs/MANUAL_OTA_196_20260918.md",
     "limits": [
-      "Build/artifact validation, all97 snapshot suites and publication/readback passed; private195 USB bootstrap and user196 OTA remain pending.",
-      "Captured190/191 check lacked fresh clock, timed out, returned Home and slept. The initial time-sync failure was not captured. No firmware or service NVS writes occurred.",
+      "Build/artifact validation, all97 snapshot suites and publication/readback passed. Private195 USB bootstrap and scoped health passed; published196 installation and user manual OTA remain pending.",
+      "Installed Sense195/app0 and unchanged LCD191/app1 are SDKVALID. Nine-item list, two scroll events, unlocked Home and paired sleep plus20seconds quiet passed using USB console commands; zero OTA, delete or audio actions.",
+      "Sense USB service retained190/app1 and verified protected ranges; NVS, policy fixture, bootloader, current bank and LCD flash writes were zero. The original190/191 clock-failure capture and failed193 identity attempt remain historical evidence.",
       "Manual attempts retain readiness, ownership, storage, quarantine, target, transfer and rollback checks; automatic wakes do not replenish a manual grant.",
-      "No new physical196 OTA, scheduled OTA, full-product, USB-free or power-cut acceptance is claimed. Prior190/191 limits remain preserved."
+      "No physical196 OTA, repeated/no-update manual acceptance, new scheduled OTA, full-product, USB-free or power-cut acceptance is claimed. Prior190/191 limits remain preserved."
     ],
     "bootstrap195": {
-      "status": "BUILT_VERIFIED_NOT_INSTALLED",
+      "status": "INSTALLED_SDK_VALID_SCOPED_HEALTH_PASS",
       "sealed_installer": {
         "path": "/Users/MattTaylor/halo-manual195-20260918/tools/INSTALLER195-SEALED.json",
         "sha256": "8767875b9b272586a0e89d00224dc48cc8493d8433e1fbee4b847aaabddf5f4a"
@@ -6633,11 +6643,37 @@
       "artifact_check": {
         "path": "/Users/MattTaylor/halo-manual195-20260918/build/artifact-result-v2-sense.json",
         "sha256": "a7c7828707b5717cdfb6f07727a5499dd5f1a413679be9781fff0febb4235aa5"
-      }
+      },
+      "installed": true,
+      "installed_boards": [
+        "sense"
+      ],
+      "build_id": "6.4.195-20260918T213711Z-26c5d713475d",
+      "installed_configuration": {
+        "sense": "6.4.195 app0 SDKVALID",
+        "lcd": "6.4.191 app1 SDKVALID unchanged"
+      },
+      "installation_chain": {
+        "path": "/Users/MattTaylor/halo-manual195-20260918/installation-001/RESULT.json",
+        "sha256": "51900dc38a4524fe637bfd6572a820f2ebf07a761b6de1d7d7ff816544416df6"
+      },
+      "installation": {
+        "path": "/Users/MattTaylor/halo-manual195-20260918/installation-001/service/result.json",
+        "sha256": "0ad60e604c91f578658691672327e88b4a02e35daf6fc0de5c735dc0037b9483"
+      },
+      "health": {
+        "path": "/Users/MattTaylor/halo-manual195-20260918/health001/RESULT.json",
+        "sha256": "f0e16725fe3cadcab2daf8754fb3df0af951cbf478c7a0c45472da6711d3bd77"
+      },
+      "preserved_sense_fallback": "6.4.190 app1",
+      "NVS_writes": 0,
+      "LCD_flash_writes": 0,
+      "policy_fixture_writes": 0,
+      "scope": "Sense-only USB bootstrap followed by identity/list/scroll/Home/paired-sleep smoke; no OTA transfer or clock-retry device acceptance"
     },
     "last_observed_identity": {
-      "path": "/Users/MattTaylor/halo-manual194-20260918/manual-check001/REVIEW.json",
-      "sha256": "550a79db4ee02bdfb2a5c4f0f08b5cc154b70fa8ebeb94179c079f623a3960af"
+      "path": "/Users/MattTaylor/halo-manual195-20260918/health001/RESULT.json",
+      "sha256": "f0e16725fe3cadcab2daf8754fb3df0af951cbf478c7a0c45472da6711d3bd77"
     }
   },
   "previous_working_source_187": {
@@ -9829,6 +9865,29 @@
       "Last verified installed state is Sense190/app1 plus LCD191/app1 SDKVALID. Old NVS backup has a completed188 record plus a different admitted calendar obligation; no fresh current debt read was obtained.",
       "Manual attempts retain readiness, ownership, storage, quarantine, target, transfer and rollback protections. Automatic wakes do not replenish a manual grant.",
       "No new scheduled OTA, full-product, USB-free, or power-cut acceptance is claimed. Prior190/191 acceptance and limits are preserved separately."
+    ]
+  },
+  "previous_device_health_180": {
+    "version": "Sense6.4.179/LCD6.4.180",
+    "status": "PASS_MIXED_PAIR_SDK_HEALTH_LIST_REFRESH_AND_SLEEP",
+    "installed": {
+      "sense": "6.4.179 app1 SDK VALID",
+      "lcd": "6.4.180 app0 SDK VALID"
+    },
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/postinstall001/REVIEW.json",
+      "sha256": "c37290ed7c9cea95d92d75978a545ab2c17bb62e71af0ded500ac57cf7ec9137"
+    },
+    "installation_review": {
+      "path": "/Users/MattTaylor/halo-provision-cue180-20260917/INSTALLATION-REVIEW.json",
+      "sha256": "8b6b9831de90b10cc1eae4dfa16c8131bd83fa356f69fa846d839499a286458d"
+    },
+    "limits": [
+      "Cosmetic asset change only; no voice runtime fix or new voice recording in this campaign.",
+      "USB-connected console list smoke; physical provisioning arrow was verified by exact pixel comparison and installed-image identity, not panel photography.",
+      "No new OTA transfer, scheduled execution, phone provisioning, power-cut, USB-free or full-product qualification.",
+      "Prior179 and earlier runtime/acceptance limitations remain in previous_working_source_179 and linked reports.",
+      "Cloud confirms Chocolate insertion; original recording time and screen state were not captured, so exact delay/absence cause remains unproved."
     ]
   }
 }

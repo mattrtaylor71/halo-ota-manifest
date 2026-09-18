@@ -1,4 +1,4 @@
-> September 18 release: **196 is published and read back for Sense and LCD.** Both canonical builds/artifact checks and all 97 exact-snapshot suites passed. Last verified hardware remains Sense 190/app1 + LCD 191/app1 SDK VALID. Private Sense 195 is built and verified, but not installed; its USB bootstrap and the user’s 196 OTA are pending. No new physical OTA or scheduled-OTA pass is claimed. See [release evidence and remaining steps](Arduino/HALOMAIN_rev1p5_modular/docs/MANUAL_OTA_196_20260918.md).
+> September 18 release: **196 is published and read back for Sense and LCD.** Both canonical builds/artifact checks and all 97 exact-snapshot suites passed. Private Sense 195 is now USB-installed on app0 beside unchanged LCD 191/app1, both SDK VALID. The closed list/scroll/Home/paired-sleep smoke passed with 20 seconds quiet. Published 196 is not installed at this checkpoint; the user’s manual OTA remains pending. No new physical OTA or scheduled-OTA pass is claimed. See [release evidence and remaining steps](Arduino/HALOMAIN_rev1p5_modular/docs/MANUAL_OTA_196_20260918.md).
 
 # HALO workspace baseline
 
