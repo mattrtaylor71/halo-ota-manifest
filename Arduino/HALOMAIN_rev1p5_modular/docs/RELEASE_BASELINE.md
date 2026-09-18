@@ -1,6 +1,6 @@
-> September 18 checkpoint: **Sense190 is installed (app1 SDK VALID); voice upload while scrolling/refreshing the list passed on-device and in the cloud.** LCD188 is unchanged; public OTA remains188. One camera-priority check is pending because the actuator stopped answering. See the current section of docs/VOICE_LIST_UPLOAD_VALIDATION_190.md.
+> September 18 acceptance: **Sense190/app1 SDK VALID passed voice/list transport and urgent-camera priority with preserved voice custody and paired sleep.** LCD188/app0 SDK VALID is unchanged; public OTA remains188 and190 is not published. See `docs/VOICE_LIST_UPLOAD_VALIDATION_190.md` for the closed receipt and limits.
 
-Current source is190; continue from ffe52bf27865645ec0ff2a000b51049b40bcd5b1 or reviewed descendants. Use unused191+ for new firmware changes after inventory. RELEASE_BASELINE.json.current_working_source selects this code; current_baseline retains frozen158 recovery. The checkpoints below are historical, not current source selection.
+Current source is190; continue from ffe52bf27865645ec0ff2a000b51049b40bcd5b1 or reviewed descendants. Use unused191+ for new firmware changes after inventory. RELEASE_BASELINE.json.current_working_source selects this code; current_baseline retains frozen158 recovery. The closed scoped acceptance is [recorded here](VOICE_LIST_UPLOAD_VALIDATION_190.md). Speech/list mutation, physical gesture geometry and another same-wake camera after the DMA-reserve warning remain unqualified. The checkpoints below are historical, not current source selection.
 
 ## Historical release checkpoints
 

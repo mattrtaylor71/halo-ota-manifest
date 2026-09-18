@@ -1,5 +1,13 @@
 # Actuator USB relay recovery, 17 September 2026
 
+## Current direct connection — 18 September
+
+The replacement Uno, serial `03536373232351608112`, is directly connected; the relay is absent from this wiring. Its existing sketch answered HELP and reported the calibrated stopped state, so no reflash was needed. [Nonmoving probe001](/Users/MattTaylor/halo-actuator-direct-20260918/probe001/RESULT.json) passed. [Tap001](/Users/MattTaylor/halo-actuator-direct-20260918/tap001/tap.json) completed one `PUSH:500,200,500`; the [closed paired capture](/Users/MattTaylor/halo-actuator-direct-20260918/tap001/RESULT.json) showed lit Home followed by both boards entering deep sleep.
+
+[Probe002](/Users/MattTaylor/halo-actuator-direct-20260918/probe002/RESULT.json) then reopened the actuator after **186.4 seconds idle**, received HELP and calibrated stopped STATUS, and closed/reaped successfully without movement or firmware writes. This is a finite recovery check, not proof of a permanent cure: both the Uno and USB path changed, so a hub root cause is not established.
+
+The existing relay helper targets the **old** Uno serial `0353637333235110A2A3`. Do not silently reuse it for the replacement or the current direct wiring. The relay/reflash results below remain historical evidence, including their failures; current190 device acceptance is recorded separately in [the voice/list validation record](VOICE_LIST_UPLOAD_VALIDATION_190.md).
+
 The user wired only the actuator's USB power through COM/NC on a DSD TECH SH-UR01A. The relay's separate USB connection remains powered. The [manufacturer's command reference](https://www.deshide.com/product-details_SH-UR01A.html) specifies9600 baud,8N1 and AT/CH1 commands. In this confirmed NC wiring, `AT+CH1=1` interrupts actuator power and `AT+CH1=0` restores it. Do not reuse this mapping with different wiring or attached loads.
 
 The first private three-second test received exact relay replies and the actuator BSD serial disappeared, but did not return within12seconds. Its `NEEDS_REVIEW` receipt remains at `/Users/MattTaylor/halo-relay-20260917/cycle001/RESULT.json`. An Arduino USB registry node alone was insufficient evidence that its serial driver recovered.

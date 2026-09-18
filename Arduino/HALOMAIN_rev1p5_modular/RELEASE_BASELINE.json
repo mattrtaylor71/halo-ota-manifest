@@ -4836,11 +4836,11 @@
     }
   },
   "current_validation_blocker": {
-    "status": "CAMERA_PRIORITY_TEST_AWAKE_DEVICE_NEEDED",
-    "detail": "Sense190 is installed and SDK VALID. Voice/list transport passed. One camera-priority case could not start because actuator HELP failed; subsequent relay acknowledged restore but did not prove exact serial return. A manual LCD wake bypasses this bench blocker.",
+    "status": "NO_OPEN_BLOCKER_FOR_SCOPED_190_DEVICE_FIX_PUBLICATION_SEPARATE",
+    "detail": "Voice/list transport and urgent-camera interruption passed on installed Sense190/LCD188 with exact voice custody/resume, successful camera upload and paired sleep. Public190 publication remains separate; spoken-item semantics and another same-wake camera after the recorded DMA-reserve warning are not qualified.",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json",
-      "sha256": "37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-DEVICE-ACCEPTANCE-20260918.json",
+      "sha256": "2e7180e8cd8377cc48ad597f91fe7ac3dd4eb74882d1104c42885dab14dca093"
     },
     "candidate_installed": true,
     "no_public_promotion": true
@@ -6543,7 +6543,7 @@
   },
   "current_working_source": {
     "version": "6.4.190",
-    "status": "SENSE190_INSTALLED_HOST97_VOICE_LIST_TRANSPORT_PASS_CAMERA_PENDING",
+    "status": "PASS_SCOPED_190_VOICE_LIST_AND_CAMERA_PRIORITY_DEVICE_CHECKS",
     "artifact_source_commit": "ffe52bf27865645ec0ff2a000b51049b40bcd5b1",
     "artifact_source_firmware_tree": "94b08341ceccc8e7d05b78281d712cdd531cbf90",
     "build_id": "6.4.190-20260918T025500Z-ffe52bf27865",
@@ -6584,8 +6584,8 @@
       "lcd": "6.4.188 app0 SDKVALID unchanged"
     },
     "last_observed_device_acceptance": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json",
-      "sha256": "37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-DEVICE-ACCEPTANCE-20260918.json",
+      "sha256": "2e7180e8cd8377cc48ad597f91fe7ac3dd4eb74882d1104c42885dab14dca093"
     },
     "schedule": "02:00Pacific configuration unchanged; no schedule or quota/debt edits in this campaign",
     "manual_ota_acceptance": false,
@@ -6595,14 +6595,23 @@
     "handoff": "docs/VOICE_LIST_UPLOAD_VALIDATION_190.md",
     "plan": "docs/VOICE_LIST_UPLOAD_PLAN.md",
     "limits": [
-      "Real USB-connected voice/list transport and cloud receipt passed; urgent camera interruption remains pending because its wake helper failed before opening either board.",
-      "Quiet microphone fixture verifies transport scheduling, not speech transcription or shopping-row insertion. Mac afplay failed in the separately preserved spoken fixture case.",
-      "LCD188 runtime and OTA code are unchanged; no new paired190 OTA, schedule or full-product qualification."
+      "USB-connected voice/list transport and urgent camera priority passed using local UI/console events; physical gesture geometry is not qualified.",
+      "Quiet microphone fixtures verify transport and exact custody, not speech transcription or shopping-row insertion; the failed spoken fixture remains recorded.",
+      "Post-presign DMA-reserve reacquisition failed with largest9716<16384 after the successful camera; another same-wake camera was not tested. The same warning exists on188 (largest10228), so a new190 regression is not established.",
+      "LCD188 runtime and OTA code are unchanged; no new paired190 OTA, provisioning, schedule, power-cut or full-product qualification. Public188 remains unchanged."
     ],
     "full190_pair_installed": false,
     "voice_list_transport_acceptance": true,
-    "camera_interrupt_acceptance": false,
-    "spoken_item_semantic_acceptance": false
+    "camera_interrupt_acceptance": true,
+    "spoken_item_semantic_acceptance": false,
+    "voice_list_transport_checkpoint": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json",
+      "sha256": "37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f"
+    },
+    "camera_voice_cloud_discovery": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/cloud-camera190-manual001-discovery/RESULT.json",
+      "sha256": "85c3b10c9feaf6bb1b6528545f85942202b64ec0e1c8131380dfce3729d01deb"
+    }
   },
   "previous_working_source_187": {
     "version": "6.4.187",
@@ -9506,6 +9515,16 @@
       "LCD persisted the next nightly arm; Sense receipt of that late acknowledgment is not proved.",
       "Exact final durable origin/counter bytes were not independently reread; no claim that all historical obligations are gone."
     ],
+    "no_public_promotion": true
+  },
+  "previous_current_validation_blocker_190_transport": {
+    "status": "CAMERA_PRIORITY_TEST_AWAKE_DEVICE_NEEDED",
+    "detail": "Sense190 is installed and SDK VALID. Voice/list transport passed. One camera-priority case could not start because actuator HELP failed; subsequent relay acknowledged restore but did not prove exact serial return. A manual LCD wake bypasses this bench blocker.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json",
+      "sha256": "37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f"
+    },
+    "candidate_installed": true,
     "no_public_promotion": true
   }
 }

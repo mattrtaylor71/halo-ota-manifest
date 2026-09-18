@@ -1,6 +1,6 @@
 # Voice while browsing the shopping list — candidate 190
 
-Current status, September18: **Sense190 is installed in app1 and SDK VALID. The voice/list transport case passed on-device and was independently matched to cloud acceptance.** LCD188 is unchanged and public OTA remains188. One camera-priority case and real spoken-item semantics remain pending.
+Current status, September18: **Sense190/app1 SDK VALID passed the scoped voice/list and urgent-camera device checks.** LCD188/app0 SDK VALID is unchanged. Public OTA remains188;190 is not published. Spoken-item semantics and physical gesture geometry remain unqualified.
 
 ## September18 focused device acceptance
 
@@ -10,13 +10,13 @@ The successful case captured196,608 bytes from the real microphone with no speec
 
 This tests transport/list scheduling using injected UI/console events, not physical gesture geometry or spoken-item insertion. The separate speaker-based attempt stopped when Mac afplay timed out before list entry; recording finalized and its empty transcription is retained as a failed semantic test. Original Mac volume19/unmuted was subsequently restored and verified.
 
-The camera-priority attempt opened neither Halo board: its actuator HELP failed. One relay recovery received the restore acknowledgement and closed cleanly, but exact actuator serial return was not proved. Stop actuator investigation here; a manual LCD wake allows the single existing camera case to run.
+The later `camera-interrupt190-manual001` case passed after a manual wake. Camera input interrupted the actual POST of voice job28 (98,304 bytes); the same job was parked with `new_user_input`, resumed and received a validated202. Camera job54 captured141,508 JPEG bytes in1,648ms and returned PUT200. Both boards slept, followed by20seconds quiet and clean capture closure. Independent `cloud-camera190-manual001-discovery/RESULT.json` matched the exact voice job, reported completed. This does not establish spoken-item insertion or a semantic food effect.
 
-Current receipt: /Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json.
-Its SHA256 is 37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f.
-It binds service190-ship001, health190-ship001, voice-list190-transport-ship001, independent cloud evidence and both failed fixture/bench cases.
+After the camera upload, `[DMA_RESERVE][WARN] re-acquire FAILED by=presign_post` reported a9,716-byte largest block against the16,384-byte reserve. A further camera in that wake was not tested. [The same warning on188](/Users/MattTaylor/halo-manual188-20260917/functional-user001/sense.raw:428) reported10,228 bytes; this is a retained limitation, not a newly demonstrated190 regression.
 
-**Do not rerun the historical189-to190 service chain below on this already updated unit.** It remains historical reproducibility evidence. Resume only the finite camera interruption case against Sense190/LCD188 after a normal wake. Public190 publication remains separate; no new scheduled OTA campaign is needed for this narrow change.
+[Closed scoped acceptance](/Users/MattTaylor/halo-voice-list189-20260917/MVP190-DEVICE-ACCEPTANCE-20260918.json), SHA256 `2e7180e8cd8377cc48ad597f91fe7ac3dd4eb74882d1104c42885dab14dca093`, binds the camera overlap, exact-job custody, image result, sleep and limitations. The earlier [transport checkpoint](/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json), SHA256 `37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f`, preserves installation, the successful list case and failed fixture/actuator attempts. The initial camera attempt opened neither board; it is not the passing case.
+
+**Do not rerun the historical189-to190 service chain below on this updated unit.** No further firmware changes are needed for the tested handoff. Public190 publication remains separate; no new scheduled OTA campaign is implied by this narrow acceptance.
 
 ## Intended behavior and limits
 
@@ -83,10 +83,10 @@ cd /Users/MattTaylor/halo-voice-list189-20260917
 
 Only after actual successful service, `tools/health190_then_main.py` takes `--service-result <actual service/result.json> --out <new health directory> --main-out <new voice-list directory>`. It requires SDK VALID using the original boot receipt or LCD-only diagnostics, closes that owner, and immediately starts the bound main test. Its SHA256 is `dce8af1675b0bc3f761554e526784a182b8ace2cd864bdddd5e4e3925f958740`; main controller SHA256 is `f67802126b26ffeba2baae09a18f23c78399da317f71d9bb8eb385d25c1c4b59`. Verify these and review their receipts before execution. Run the separate prepared camera-interruption case after the main case closes. No existing case gets overwritten or silently rerun.
 
-## Pending device acceptance
+## Device acceptance status
 
 - Controlled installation and exact running partition/SDK VALID identities: **passed September18**.
 - Voice/list transport with visible browsing/refresh, exact voice acceptance and independent cloud evidence: **passed September18**; spoken-item insertion remains unqualified.
-- Urgent camera interruption, exact voice custody/resume, camera acceptance and return to paired sleep: **pending**.
+- Urgent camera interruption, exact voice custody/resume, camera acceptance and return to paired sleep: **passed September18**, with the DMA-reserve/next-camera limitation above.
 
-No full-product, physical touch-geometry, new provisioning, paired OTA transfer or scheduled-OTA qualification is claimed by this host/build checkpoint.
+No full-product, physical touch-geometry, new provisioning, paired OTA transfer or scheduled-OTA qualification is claimed by this scoped device acceptance.
