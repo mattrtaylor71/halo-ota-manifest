@@ -90,3 +90,9 @@ Only after actual successful service, `tools/health190_then_main.py` takes `--se
 - Urgent camera interruption, exact voice custody/resume, camera acceptance and return to paired sleep: **passed September18**, with the DMA-reserve/next-camera limitation above.
 
 No full-product, physical touch-geometry, new provisioning, paired OTA transfer or scheduled-OTA qualification is claimed by this scoped device acceptance.
+
+## Subsequent physical user voice test
+
+A later physical voice request, "Add gummy worms to my shopping list," was matched to backend insertion, LCD list display and the user's deletion. Its automatic saved retry received an accepted response with one cloud worker execution and dark LCD logs. See `/Users/MattTaylor/halo-voice-list189-20260917/MANUAL-USER190-FIRST-VOICE-REVIEW.json`; this is one manual case, not three repeated cases.
+
+The LCD acknowledgement initially timed out, but the exact request reached the backend. The request was preserved on the LCD and replayed automatically; the accepted retry then cleared the saved copy. Voice release to list render was 26.323 seconds. The exact cloud row remained removed after replay, and the worker execution count remained one. This supplements the earlier quiet-fixture acceptance without replacing its immutable receipt or claiming three manual repetitions.

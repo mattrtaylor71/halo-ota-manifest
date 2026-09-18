@@ -4836,13 +4836,13 @@
     }
   },
   "current_validation_blocker": {
-    "status": "NO_OPEN_BLOCKER_FOR_SCOPED_190_DEVICE_FIX_PUBLICATION_SEPARATE",
-    "detail": "Voice/list transport and urgent-camera interruption passed on installed Sense190/LCD188 with exact voice custody/resume, successful camera upload and paired sleep. Public190 publication remains separate; spoken-item semantics and another same-wake camera after the recorded DMA-reserve warning are not qualified.",
+    "status": "LCD191_DEVICE_ACCEPTANCE_PENDING",
+    "detail": "The exact191 snapshot passed all97 host suites and the canonical LCD build/artifact checks. Installation has not started at this checkpoint; installed Sense190/LCD188 and public188 are unchanged. LCD device response/rollback and any paired191 publication are separate unqualified steps.",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-DEVICE-ACCEPTANCE-20260918.json",
-      "sha256": "2e7180e8cd8377cc48ad597f91fe7ac3dd4eb74882d1104c42885dab14dca093"
+      "path": "/Users/MattTaylor/halo-delete191-20260918/host001/RESULT.json",
+      "sha256": "909c34b3002fe046d2fd0c0eb4003819c8484b42ef10e8cfa02aaa68d19d02f8"
     },
-    "candidate_installed": true,
+    "candidate_installed": false,
     "no_public_promotion": true
   },
   "diagnostic_candidate151": {
@@ -6542,43 +6542,44 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.190",
-    "status": "PASS_SCOPED_190_VOICE_LIST_AND_CAMERA_PRIORITY_DEVICE_CHECKS",
-    "artifact_source_commit": "ffe52bf27865645ec0ff2a000b51049b40bcd5b1",
-    "artifact_source_firmware_tree": "94b08341ceccc8e7d05b78281d712cdd531cbf90",
-    "build_id": "6.4.190-20260918T025500Z-ffe52bf27865",
+    "version": "6.4.191",
+    "status": "PASS_HOST97_AND_CANONICAL_LCD_ARTIFACTS_DEVICE_ACCEPTANCE_PENDING",
+    "artifact_source_commit": "6f3bc970385d6905f1f9723c8d89cb7669c4c148",
+    "artifact_source_firmware_tree": "cbcec189d1b3d5652020746542ff35db313ba7a5",
+    "build_id": "6.4.191-20260918T192530Z-6f3bc970385d",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from ffe52bf27865645ec0ff2a000b51049b40bcd5b1 or reviewed descendants; do not drop the actual LCD INPUT_USER_ACTIVE compatibility fix. Retain188 published recovery and immutable158.",
-    "candidate_receipt": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/RELEASE-PAIR.json",
-      "sha256": "4bf26cdba58a51bf954b57e28b7f4a89521e44516c91ba6b89818fef8196a060"
+    "source_selection": "Continue from 6f3bc970385d6905f1f9723c8d89cb7669c4c148 or reviewed descendants. Retain the190 voice/list and INPUT_USER_ACTIVE fixes, published188 recovery and immutable158. The complete190 source/acceptance record is previous_working_source_190.",
+    "materialization": {
+      "path": "/Users/MattTaylor/halo-delete191-20260918/snapshot/materialization.json",
+      "sha256": "7a01dba9ae6b8ca02eb037a1fabe4376b2f069c5563a16bb1c96b3e9b8402235"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/host001/RESULT.json",
-      "sha256": "75a4182206d719b2a985929336662271774319077a7e993f3a20572dd53c37ad"
+      "path": "/Users/MattTaylor/halo-delete191-20260918/host001/RESULT.json",
+      "sha256": "909c34b3002fe046d2fd0c0eb4003819c8484b42ef10e8cfa02aaa68d19d02f8"
     },
     "host_suite_count": 97,
-    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS_WITH_DOCUMENTED_HOST_DISK_RESERVE_EXCEPTION",
+    "build_status": "LCD_ONLY_CANONICAL_BUILD_AND_ARTIFACT_CHECKS_PASS",
+    "built_boards": [
+      "lcd"
+    ],
+    "build_closure": {
+      "path": "/Users/MattTaylor/halo-delete191-20260918/build/lcd/result.json",
+      "sha256": "a8fdd2647829a417997adfea91c98ee5a951649a4dc9a8b25b283821e448dc9f"
+    },
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "241a28009ba0f6fed63c1671b524b157e97880d12c9463361c2e478685779900"
+      "path": "/Users/MattTaylor/halo-delete191-20260918/build/artifact-result-v2-lcd.json",
+      "sha256": "8556f774114df3ee3e0eae7ecbf460304bf9a22bb765db9ec66a608aa1dddbda"
     },
-    "runtime_comparison": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/SOURCE-COMPARISON.json",
-      "sha256": "f42ff2283b4c6e56eeacff96d765b2cad2b06ebf2a763389f0f2f41f8f8d96fa"
-    },
-    "build_budget_exception": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/BUILD-BUDGET-EXCEPTION.json",
-      "sha256": "ce9e1e814e31719593748cc9c069cfaab165892b321c54af136b9d8eb23d629e"
+    "lcd_artifact": {
+      "path": "/Users/MattTaylor/halo-delete191-20260918/build/lcd/artifacts/verified.json",
+      "sha256": "67114c0819479bf865dacdc51fa9e14d5c00872fb2e665db8380ce9cbc33f58b"
     },
     "published": false,
     "current_public_ota_version": "6.4.188",
     "git_remote_push_performed": false,
-    "installed": true,
-    "installed_boards": [
-      "sense"
-    ],
+    "installed": false,
+    "installed_boards": [],
     "last_observed_installed_configuration": {
       "sense": "6.4.190 app1 SDKVALID",
       "lcd": "6.4.188 app0 SDKVALID unchanged"
@@ -6590,28 +6591,17 @@
     "schedule": "02:00Pacific configuration unchanged; no schedule or quota/debt edits in this campaign",
     "manual_ota_acceptance": false,
     "scheduled_ota_acceptance": false,
-    "next_unused_version": "6.4.191",
+    "paired191_qualification": false,
+    "delete_response_device_acceptance": false,
+    "next_unused_version": "6.4.192",
     "next_version_requires_fresh_inventory_check": true,
-    "handoff": "docs/VOICE_LIST_UPLOAD_VALIDATION_190.md",
-    "plan": "docs/VOICE_LIST_UPLOAD_PLAN.md",
+    "handoff": "docs/SHOPPING_DELETE_RESPONSE.md",
     "limits": [
-      "USB-connected voice/list transport and urgent camera priority passed using local UI/console events; physical gesture geometry is not qualified.",
-      "Quiet microphone fixtures verify transport and exact custody, not speech transcription or shopping-row insertion; the failed spoken fixture remains recorded.",
-      "Post-presign DMA-reserve reacquisition failed with largest9716<16384 after the successful camera; another same-wake camera was not tested. The same warning exists on188 (largest10228), so a new190 regression is not established.",
-      "LCD188 runtime and OTA code are unchanged; no new paired190 OTA, provisioning, schedule, power-cut or full-product qualification. Public188 remains unchanged."
-    ],
-    "full190_pair_installed": false,
-    "voice_list_transport_acceptance": true,
-    "camera_interrupt_acceptance": true,
-    "spoken_item_semantic_acceptance": false,
-    "voice_list_transport_checkpoint": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json",
-      "sha256": "37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f"
-    },
-    "camera_voice_cloud_discovery": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/cloud-camera190-manual001-discovery/RESULT.json",
-      "sha256": "85c3b10c9feaf6bb1b6528545f85942202b64ec0e1c8131380dfce3729d01deb"
-    }
+      "191 is an uninstalled LCD-only candidate; Sense was not rebuilt and no paired191 release/OTA or device acceptance is claimed.",
+      "Host UI, queue, storage and clock boundaries are modeled; immediate physical display timing and device rollback remain untested.",
+      "The previous190 manual/cloud acceptance and its speech, physical-gesture and DMA-reserve limits remain in previous_working_source_190.",
+      "Public188, the installed Sense190/LCD188 configuration, production02:00Pacific schedule, quota and debt are unchanged."
+    ]
   },
   "previous_working_source_187": {
     "version": "6.4.187",
@@ -9526,5 +9516,99 @@
     },
     "candidate_installed": true,
     "no_public_promotion": true
+  },
+  "previous_working_source_190": {
+    "version": "6.4.190",
+    "status": "PASS_SCOPED_190_VOICE_LIST_AND_CAMERA_PRIORITY_DEVICE_CHECKS",
+    "artifact_source_commit": "ffe52bf27865645ec0ff2a000b51049b40bcd5b1",
+    "artifact_source_firmware_tree": "94b08341ceccc8e7d05b78281d712cdd531cbf90",
+    "build_id": "6.4.190-20260918T025500Z-ffe52bf27865",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from ffe52bf27865645ec0ff2a000b51049b40bcd5b1 or reviewed descendants; do not drop the actual LCD INPUT_USER_ACTIVE compatibility fix. Retain188 published recovery and immutable158.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/RELEASE-PAIR.json",
+      "sha256": "4bf26cdba58a51bf954b57e28b7f4a89521e44516c91ba6b89818fef8196a060"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/host001/RESULT.json",
+      "sha256": "75a4182206d719b2a985929336662271774319077a7e993f3a20572dd53c37ad"
+    },
+    "host_suite_count": 97,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS_WITH_DOCUMENTED_HOST_DISK_RESERVE_EXCEPTION",
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "241a28009ba0f6fed63c1671b524b157e97880d12c9463361c2e478685779900"
+    },
+    "runtime_comparison": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/SOURCE-COMPARISON.json",
+      "sha256": "f42ff2283b4c6e56eeacff96d765b2cad2b06ebf2a763389f0f2f41f8f8d96fa"
+    },
+    "build_budget_exception": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/candidate190-001/BUILD-BUDGET-EXCEPTION.json",
+      "sha256": "ce9e1e814e31719593748cc9c069cfaab165892b321c54af136b9d8eb23d629e"
+    },
+    "published": false,
+    "current_public_ota_version": "6.4.188",
+    "git_remote_push_performed": false,
+    "installed": true,
+    "installed_boards": [
+      "sense"
+    ],
+    "last_observed_installed_configuration": {
+      "sense": "6.4.190 app1 SDKVALID",
+      "lcd": "6.4.188 app0 SDKVALID unchanged"
+    },
+    "last_observed_device_acceptance": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-DEVICE-ACCEPTANCE-20260918.json",
+      "sha256": "2e7180e8cd8377cc48ad597f91fe7ac3dd4eb74882d1104c42885dab14dca093"
+    },
+    "schedule": "02:00Pacific configuration unchanged; no schedule or quota/debt edits in this campaign",
+    "manual_ota_acceptance": false,
+    "scheduled_ota_acceptance": false,
+    "next_unused_version": "6.4.191",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/VOICE_LIST_UPLOAD_VALIDATION_190.md",
+    "plan": "docs/VOICE_LIST_UPLOAD_PLAN.md",
+    "limits": [
+      "USB-connected voice/list transport and urgent camera priority passed using local UI/console events; physical gesture geometry is not qualified.",
+      "Quiet microphone fixtures verify transport and exact custody, not speech transcription or shopping-row insertion; the failed spoken fixture remains recorded.",
+      "Post-presign DMA-reserve reacquisition failed with largest9716<16384 after the successful camera; another same-wake camera was not tested. The same warning exists on188 (largest10228), so a new190 regression is not established.",
+      "LCD188 runtime and OTA code are unchanged; no new paired190 OTA, provisioning, schedule, power-cut or full-product qualification. Public188 remains unchanged."
+    ],
+    "full190_pair_installed": false,
+    "voice_list_transport_acceptance": true,
+    "camera_interrupt_acceptance": true,
+    "spoken_item_semantic_acceptance": false,
+    "voice_list_transport_checkpoint": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json",
+      "sha256": "37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f"
+    },
+    "camera_voice_cloud_discovery": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/cloud-camera190-manual001-discovery/RESULT.json",
+      "sha256": "85c3b10c9feaf6bb1b6528545f85942202b64ec0e1c8131380dfce3729d01deb"
+    }
+  },
+  "previous_current_validation_blocker_190": {
+    "status": "NO_OPEN_BLOCKER_FOR_SCOPED_190_DEVICE_FIX_PUBLICATION_SEPARATE",
+    "detail": "Voice/list transport and urgent-camera interruption passed on installed Sense190/LCD188 with exact voice custody/resume, successful camera upload and paired sleep. Public190 publication remains separate; spoken-item semantics and another same-wake camera after the recorded DMA-reserve warning are not qualified.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-DEVICE-ACCEPTANCE-20260918.json",
+      "sha256": "2e7180e8cd8377cc48ad597f91fe7ac3dd4eb74882d1104c42885dab14dca093"
+    },
+    "candidate_installed": true,
+    "no_public_promotion": true
+  },
+  "manual_voice_followup_190": {
+    "status": "ONE_PHYSICAL_VOICE_TO_LIST_CASE_WITH_DARK_RETRY_OBSERVED",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MANUAL-USER190-FIRST-VOICE-REVIEW.json",
+      "sha256": "3bd140281dc32e1fe5e6954e9fcaef925980c6a7f515a29744832f042a273a9a"
+    },
+    "three_repetitions_completed": false,
+    "delete_tap_to_confirm_s": 1.144,
+    "voice_release_to_list_render_s": 26.323,
+    "installed_configuration": "Sense190/LCD188",
+    "scope": "Exact backend insertion, user deletion, same recording saved replay accepted and no resurrection of the exact deleted row; limited to this observed case."
   }
 }
