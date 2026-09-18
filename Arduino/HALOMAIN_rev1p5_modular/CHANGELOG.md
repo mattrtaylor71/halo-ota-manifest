@@ -1,3 +1,7 @@
+# Manual clock recovery correction — candidate after194
+
+An explicit manual request joined to existing recovery now reaches its single bounded time-sync retry before the policy fresh-clock gate. Preserve the original readiness deadlines and foreground/peer/network checks. A healthy peer waiting on time is reported as a clock failure instead of peer unavailable. The captured190/191 attempt returned Home and slept without starting a transfer; no195/196 installation or publication is claimed by this entry. See [the diagnosis and validation record](docs/MANUAL_CLOCK_JOIN_20260918.md).
+
 # 6.4.194 published — explicit manual updates without a daily tap limit
 
 Every fresh Manual Update request grants a bounded attempt; scheduled and background retries keep their limits and02:00Pacific remains unchanged. Recover a completed older OTA record with a different due calendar obligation only through full ownership, clock, storage and paired-health proof; only a newly verified check/update settles that obligation. Includes190 voice/list and191 immediate delete feedback. Both canonical builds/artifact checks and all97 snapshot suites passed; paired production manifests and binaries were published and verified. Physical193Sense USB bootstrap and the user’s194OTA remain pending because board USB is unavailable. No device writes this turn. [Release evidence and remaining steps](docs/MANUAL_OTA_194_20260918.md).

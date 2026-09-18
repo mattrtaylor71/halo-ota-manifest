@@ -21,7 +21,7 @@ def harness(root, negative=False):
     wrapper = (root / WRAPPER).read_text()
     lcd = (root / 'LCD_Minimal/LCD_Minimal.ino').read_text()
     rx = (root / 'LCD_Minimal/lcd_uart_rx.h').read_text()
-    source = joined.harness(root).split('int main(){', 1)[0]
+    source = joined.harness(root, with_clock=False).split('int main(){', 1)[0]
     source = '#include <atomic>\n#include <ArduinoJson.h>\nusing String=std::string;\n' + source
     source = source.replace('proof_ms=10000,peer_boot=12;', 'proof_ms=10000,peer_boot=12,next_query_ms=0;')
     source = source.replace(definition(source, 'static void ota_peer_service()'), 'static void ota_peer_service();')

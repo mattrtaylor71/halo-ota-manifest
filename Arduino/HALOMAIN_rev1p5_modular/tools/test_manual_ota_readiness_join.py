@@ -16,7 +16,7 @@ from test_manual_ota_clock import definition
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def harness(root, negative=None):
+def harness(root, negative=None, clock_source=None, with_clock=True):
     wrapper = (root / 'halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.ino').read_text()
     runtime = (root / 'halo_ota_demo/firmware/shared/SenseDurablePolicyRuntime.h').read_text()
     request_source = wrapper if negative is None else (negative / 'halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.ino').read_text()
@@ -50,6 +50,8 @@ static bool g_ota_simple_proof_started=false,g_ota_simple_proof_done=false;
 static bool g_self_retry_boot=false,g_self_retry_execution=false,g_ota_skip_logged=false,g_lcd_ota_done=false,g_lcd_ota_attempted_this_window=false;
 static char g_lcd_work_schedule[64]{},g_last_ota_result[32]="none";
 static bool g_maintenance_mode=false,g_maintenance_handled=false;
+static bool g_boot_ota_time_sync_started=false;
+static bool sense_time_has_fresh_sync(){return clock_fresh;}
 static const char* g_boot_ota_reason="coord_recovery";
 static std::string wire_result;
 static bool is_time_valid(){return clock_fresh;}
@@ -127,6 +129,7 @@ static void manual_pipeline(){
 }
 static void reset_join(){
  reset_recovery();g_manual_ota_override=g_manual_ota_joined_readiness=false;
+ g_boot_ota_time_sync_started=false;
  g_manual_ota_override_until_ms=g_manual_ota_request_ms=g_manual_ota_wifi_retry_ms=0;
  g_ota_check_requested=g_ota_check_in_progress=g_ota_apply_in_progress=false;
  g_lcd_ota_task_running=g_lcd_ota_proxy_owns_uart=false;g_self_retry_boot=g_self_retry_execution=false;
@@ -182,6 +185,8 @@ static void reset_automatic(){reset_join();queue_head={};peek_fails=false;peek_c
 }
 '''
 
+    if with_clock:
+        source = add_clock_cases(source, clock_source or wrapper)
     if negative is not None:
         return source + r'''
 int main(){reset_join();const auto before=sense_policy::store.bytes;halo_prod_request_manual_ota("manual");
@@ -191,6 +196,7 @@ int main(){reset_join();const auto before=sense_policy::store.bytes;halo_prod_re
 '''
     return source + r'''
 int main(){using namespace sense_policy;using namespace durable_ota;
+ test_joined_clock();
  // Unentered automatic readiness yields before unrelated peer/clock work,
  // including an unavailable peer, stale clock, and an existing bounded lock.
  for(unsigned ready=0;ready<2;++ready){for(unsigned fresh=0;fresh<2;++fresh){
@@ -328,6 +334,124 @@ int main(){using namespace sense_policy;using namespace durable_ota;
  reset_join();g_peer_gate.entered=true;g_lcd_work_budget_live=true;current_job.active=true;
  CHECK(!enter("manual",true));bool named=false;for(const auto&e:events)if(e.find("missing=0x0100")!=std::string::npos)named=true;CHECK(named);
  printf("PASS %u manual/readiness/owner/deadline/policy/diagnostic checks\n",checks);
+}
+'''
+
+
+def add_clock_cases(source, wrapper):
+    # Reuse the real request/latch/policy/deadline composition above. Only the
+    # asynchronous network boundary is modeled; test_manual_ota_clock.py runs
+    # the actual DNS/SNTP generation implementation and its finite retry cap.
+    source = source.replace(definition(source, 'static void nightly_maintenance_tick(){'),
+                            'static void nightly_maintenance_tick();')
+    source = source.replace('static bool is_time_valid(){return clock_fresh;}',
+                            'static bool is_time_valid(){return true;}')
+    source = source.replace('static void clearForceAndCheck(){++clears;force=false;}',
+                            'static bool cooldownAllows(){return true;}\n static void clearForceAndCheck(){++clears;force=false;}')
+    source = source.replace('struct Preferences{bool begin(const char*,bool){return true;}void remove(const char*){}void end(){}};',
+                            'struct String{size_t length()const{return 0;}const char*c_str()const{return "";}};\n'
+                            'struct Preferences{bool begin(const char*,bool){return true;}void remove(const char*){}void end(){}String getString(const char*,const char*){return {};}};')
+    source = source.replace('struct{char detail[64]{},reason[64]{};int code=0;bool repeat_pending=false,noop_reported=false;}g_boot_ota_begin_record;',
+                            'struct{char detail[64]{},reason[64]{};const char*event="begin";int code=0;bool repeat_pending=false,noop_reported=false;}g_boot_ota_begin_record;')
+    source = source.replace('struct{uint32_t boot_id=0;int wake=0;char schedule[64]{};}g_lcd_timer_origin;',
+                            'struct{uint32_t boot_id=0,epoch=0;int wake=0,reset=0;bool resumed=false;char schedule[64]{};}g_lcd_timer_origin;')
+    source += r'''
+#define LOG_ERROR(...) do{}while(0)
+static bool wifi_ready=true,setup_busy=false,mqtt_connected=false;
+static bool ntp_pending=false,ntp_secondary_used=false,ntp_manual_requested=false;
+static uint32_t ntp_deadline=0,g_boot_ota_next_try_ms=0;
+static unsigned ntp_starts=0,clock_work_entries=0;
+static struct{bool isSetupModeActive(){return setup_busy;}}g_provisioning_manager;
+namespace ProvisioningState{
+static constexpr int STATE_CONNECTED=1;
+static bool isProvisioned(){return true;}
+static int getState(){return STATE_CONNECTED;}
+}
+static bool wifiReadyForHttps(){return wifi_ready;}
+static bool ota_peer_continuation(){return false;}
+static bool sense_action_inflight(){return current_job.active;}
+static unsigned ota_scheduled_clock_retry_deadline(){return 0;}
+static bool ota_scheduled_clock_peer_refresh_pending(){return false;}
+static void sense_ntp_request_scheduled_retry(unsigned){CHECK(false);}
+static void diag_record_error_persistent(const char*,int,const char*){}
+static void sense_ntp_request_manual_retry(){ntp_manual_requested=true;}
+static void sense_ntp_service(){if(ntp_pending&&(int32_t)(now_ms-ntp_deadline)>=0)ntp_pending=false;}
+static void sense_ntp_begin(){
+ if(clock_fresh||ntp_pending)return;
+ if(!ntp_starts){++ntp_starts;ntp_pending=true;ntp_deadline=now_ms+15000;}
+ else if(ntp_manual_requested&&!ntp_secondary_used){
+  ++ntp_starts;ntp_secondary_used=true;ntp_pending=true;ntp_deadline=now_ms+40000;
+ }
+}
+static bool sense_ntp_attempt_pending(){sense_ntp_service();return ntp_pending;}
+static void halo_prod_kick_time_sync(const char*){sense_ntp_service();sense_ntp_begin();}
+static void maybeRunOtaCheck(const char*,bool){
+ CHECK(clock_fresh&&!mqtt_connected);
+ CHECK(int32_t(g_boot_ota_deadline_ms-now_ms)>0&&int32_t(g_peer_gate.deadline_ms-now_ms)>0);
+ ++clock_work_entries;manual_ota_override_clear("ota_check_begin");g_ota_check_done=true;
+}
+'''
+    for signature in ('static bool ota_clock_ready_before_work()',
+                      'static bool self_retry_boot_admit()',
+                      'static void nightly_maintenance_tick()'):
+        source += definition(wrapper, signature) + '\n'
+    return source + r'''
+static void reset_clock_join(){
+ reset_join();clock_fresh=false;g_boot_ota_begin_reported=true;g_boot_ota_next_try_ms=0;
+ g_boot_ota_deadline_ms=g_peer_gate.deadline_ms=now_ms+120000;
+ wifi_ready=true;setup_busy=false;mqtt_connected=false;g_list_screen_active=false;
+ ntp_pending=ntp_secondary_used=ntp_manual_requested=false;ntp_starts=clock_work_entries=0;
+ nightly_maintenance_tick();CHECK(ntp_starts==1&&ntp_pending);
+ now_ms=ntp_deadline;sense_ntp_service();CHECK(!ntp_pending);
+}
+static void join_clock(){halo_prod_request_manual_ota("manual");confirm_peer();CHECK(g_manual_ota_joined_readiness&&!g_ota_check_requested);}
+static void test_joined_clock(){
+ // Failed first NTP + actual manual request joining recovery, with no MQTT
+ // loop or separate request flag, must reach one secondary and the real policy.
+ reset_clock_join();join_clock();const auto boot=g_boot_ota_deadline_ms,peer=g_peer_gate.deadline_ms;
+ const auto latch=g_manual_ota_override_until_ms;nightly_maintenance_tick();
+ CHECK(ntp_starts==2&&ntp_secondary_used&&ntp_pending&&clock_work_entries==0);
+ for(unsigned i=0;i<5;++i){now_ms+=1000;halo_prod_request_manual_ota("manual");confirm_peer();nightly_maintenance_tick();}
+ CHECK(ntp_starts==2&&g_boot_ota_deadline_ms==boot&&g_peer_gate.deadline_ms==peer&&g_manual_ota_override_until_ms==latch);
+ clock_fresh=true;ntp_pending=false;now_ms+=1000;confirm_peer();nightly_maintenance_tick();
+ CHECK(clock_work_entries==1&&!g_boot_ota_pending&&!g_manual_ota_joined_readiness&&wire_result.empty());
+ // Secondary failure is terminal before the original readiness deadline.
+ reset_clock_join();join_clock();nightly_maintenance_tick();now_ms=ntp_deadline;confirm_peer();nightly_maintenance_tick();
+ CHECK(ntp_starts==2&&wire_result=="clock_unconfirmed"&&!g_boot_ota_pending&&!g_manual_ota_override&&debt_value&&clock_work_entries==0);
+ CHECK(at("result:clock_unconfirmed")<at("terminal_unlock"));
+ // A secondary already spent by another owner cannot grant a third attempt.
+ reset_clock_join();ntp_secondary_used=true;ntp_starts=2;join_clock();nightly_maintenance_tick();
+ CHECK(ntp_starts==2&&wire_result=="clock_unconfirmed"&&!g_boot_ota_pending&&!g_manual_ota_override);
+ // Late joins retain both original deadlines. Both actual expiry branches
+ // keep the truthful result; stale/missing/legacy peers remain peer failures.
+ for(unsigned use_peer=0;use_peer<2;++use_peer){for(unsigned proof=0;proof<5;++proof){
+  reset_clock_join();now_ms=g_boot_ota_deadline_ms-3000;join_clock();nightly_maintenance_tick();
+  CHECK(ntp_starts==2&&ntp_deadline>g_boot_ota_deadline_ms);
+  now_ms=g_boot_ota_deadline_ms;confirm_peer();
+  if(proof==1)g_peer_gate.proof_ms=now_ms-2000;
+  if(proof==2)g_peer_gate.ready=false;
+  if(proof==3)g_peer_gate.peer_boot=0;
+  if(proof==4)g_peer_gate.legacy=true;
+  const auto bytes=sense_policy::store.bytes;
+  if(use_peer)peer_deadline();else nightly_maintenance_tick();
+  CHECK(wire_result==(proof?"peer_unavailable":"clock_unconfirmed")&&wire_result==g_last_ota_result);
+  CHECK(!g_manual_ota_override&&!g_manual_ota_joined_readiness&&debt_value&&clock_work_entries==0&&bytes==sense_policy::store.bytes);
+ }}
+ // Automatic recovery without a user request still gets no manual retry.
+ reset_clock_join();confirm_peer();nightly_maintenance_tick();
+ CHECK(ntp_starts==1&&!ntp_secondary_used&&clock_work_entries==0&&g_boot_ota_pending);
+ now_ms=g_boot_ota_deadline_ms;confirm_peer();nightly_maintenance_tick();CHECK(wire_result=="peer_unavailable");
+ // Existing primary-user, provisioning, UART/apply and network gates run
+ // before the new clock hook, so it cannot start work over an active user.
+ for(unsigned owner=0;owner<10;++owner){reset_clock_join();join_clock();switch(owner){
+  case 0:current_job.active=true;break;case 1:foreground_active=true;break;
+  case 2:voice_recording_active=true;break;case 3:g_list_screen_active=true;break;
+  case 4:op_queue=(void*)1;op_count=1;break;case 5:setup_busy=true;break;
+  case 6:wifi_ready=false;break;case 7:g_ota_apply_in_progress=true;break;
+  case 8:g_lcd_ota_task_running=true;break;case 9:g_lcd_ota_proxy_owns_uart=true;break;}
+  nightly_maintenance_tick();CHECK(ntp_starts==1&&!ntp_secondary_used&&clock_work_entries==0);
+ }
+ reset_join();g_list_screen_active=false;
 }
 '''
 

@@ -3428,9 +3428,15 @@ static void ota_peer_send_lock(bool release) {
 }
 
 static void ota_peer_cancel(const char* reason) {
-  if ((g_manual_ota_override || g_manual_ota_joined_readiness) && reason) {
-    if (!strcmp(reason, "readiness_deadline")) ota_set_last_result("peer_unavailable");
-    else if (!strcmp(reason, "calendar_future_rearm") || !strcmp(reason, "policy_not_due"))
+  if (reason && !strcmp(reason, "readiness_deadline")) {
+    // A current healthy peer does not make a missing fresh clock a peer fault.
+    // This changes the terminal explanation only, never readiness admission.
+    const bool clock_wait = g_manual_ota_joined_readiness && g_boot_ota_time_sync_started &&
+        g_peer_gate.ready && g_peer_gate.peer_boot && !g_peer_gate.legacy &&
+        uint32_t(millis() - g_peer_gate.proof_ms) < 2000 && !sense_time_has_fresh_sync();
+    ota_set_last_result(clock_wait ? "clock_unconfirmed" : "peer_unavailable");
+  } else if ((g_manual_ota_override || g_manual_ota_joined_readiness) && reason) {
+    if (!strcmp(reason, "calendar_future_rearm") || !strcmp(reason, "policy_not_due"))
       ota_set_last_result("policy_deferred");
   }
   if (g_peer_gate.locked) ota_peer_send_lock(true);
@@ -4248,10 +4254,9 @@ static void ota_peer_service() {
     g_peer_episode_finished = true;
     set_lcd_ota_due_nvs(true);
     OtaIntent::clearForceAndCheck();
-    ota_set_last_result("peer_unavailable");
     g_ota_check_done = true;
     g_ota_check_requested = false;
-    manual_ota_override_clear("peer_unavailable");
+    manual_ota_override_clear(g_last_ota_result);
     return;
   }
   if (sense_action_inflight() || foreground_active || voice_recording_active ||
@@ -4465,6 +4470,11 @@ static void nightly_maintenance_tick() {
     g_boot_ota_time_sync_started = true;
     halo_prod_kick_time_sync(g_boot_ota_reason);
   }
+  // A manual tap joined to this automatic readiness must reach its existing
+  // one-shot clock retry before the policy's fresh-clock gate. MQTT is not a
+  // prerequisite. All preceding user/peer/Wi-Fi guards and original deadlines
+  // remain in force; pending clock work simply yields to the regular loop.
+  if (manual_ota_joined_readiness_active() && !ota_clock_ready_before_work()) return;
   // Give the nonblocking fresh-time attempt its bounded chance before long
   // HTTPS work. The common entrypoint requires an actual fresh reply; a
   // retained TLS clock alone cannot authorize the paired absolute sleep arm.
