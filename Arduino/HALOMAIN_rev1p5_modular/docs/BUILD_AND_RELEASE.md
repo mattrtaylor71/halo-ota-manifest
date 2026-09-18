@@ -1,4 +1,5 @@
-> Current release: **188 is published; the user’s physical manual OTA is pending.** All 1,139 non-generated runtime files match187; only the three generated version headers differ. Both canonical builds/artifact checks,11 snapshot suites and paired publication readbacks passed. Last observed: Sense186 app0 and LCD187 app1 SDK VALID. Incoming LCD OTA visibility remains physically unqualified. See `docs/MANUAL_OTA_188_20260917.md`.
+> Current release: **188 is published and installed on both boards; the user’s manual OTA passed.** Exact image hashes, Sense app1 / LCD app0 SDK VALID, the static installation frame, native settlement, Home and paired sleep were verified. No new full-product or scheduled qualification is implied. See `docs/MANUAL_OTA_188_20260917.md`.
+
 
 # Build and release from the frozen 6.4.158 baseline
 

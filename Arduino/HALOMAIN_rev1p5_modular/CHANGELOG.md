@@ -1,3 +1,9 @@
+# 6.4.188 user manual OTA and installation-screen result — September 17, 2026
+
+The user’s manual update installed both exact188 images, with Sense app1 / LCD app0 SDK VALID. The static “Something new is coming” frame was visible before flash; native policy resolved, Home returned and paired sleep followed after453.5seconds. Natural UTC-day rollover passed without an allowance reset. The02:00Pacific arm remains unchanged; capture closed after67seconds quiet. No new full-product or scheduled qualification is claimed. [Closed evidence](docs/MANUAL_OTA_188_20260917.md).
+
+Read-only [hardware/resource review](docs/HARDWARE_RESOURCE_REVIEW_188_20260917.md) confirms the current two-chip split and distinguishes the new PCB and future P4 work. No memory redistribution or other runtime change was made; everyday-function reliability and a finite shipping check take priority.
+
 # 6.4.188 published version-only manual-test bump — September 17, 2026
 
 Publish source `9f5cd2fa556c`, build `6.4.188-20260917T235700Z-9f5cd2fa556c`. All1,139 non-generated runtime files match187; only three generated version headers differ. Both canonical builds/artifact checks,11 snapshot suites and paired public readbacks passed. Local tag `halo-v6.4.188` identifies the source; no Git remote push.

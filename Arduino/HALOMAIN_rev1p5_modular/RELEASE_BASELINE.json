@@ -6551,7 +6551,7 @@
   },
   "current_working_source": {
     "version": "6.4.188",
-    "status": "PUBLISHED188_USER_MANUAL_TEST_PENDING",
+    "status": "PUBLISHED188_USER_MANUAL_PAIRED_OTA_AND_UI_PASS",
     "artifact_source_commit": "9f5cd2fa556c4cc0a471fd74043b7b62aaf950f0",
     "artifact_source_firmware_tree": "6271eb1b32031ce8d32f00a132096c57b81a00a2",
     "build_id": "6.4.188-20260917T235700Z-9f5cd2fa556c",
@@ -6594,21 +6594,23 @@
     "release_tag": "halo-v6.4.188",
     "release_tag_object": "36c2d100672f549466943cc40e5003f464227a4a",
     "git_remote_push_performed": false,
-    "installed": false,
-    "installed_boards": [],
+    "installed": true,
+    "installed_boards": [
+      "sense",
+      "lcd"
+    ],
     "last_observed_installed_configuration": {
-      "sense": "6.4.186 app0 SDKVALID retained",
-      "lcd": "6.4.187 app1 SDKVALID via controlled USB service",
-      "fallback": "LCD186 app0 verified preserved; Sense unchanged"
+      "sense": "6.4.188 app1 SDKVALID via user manual OTA",
+      "lcd": "6.4.188 app0 SDKVALID via user manual OTA"
     },
     "last_observed_device_acceptance": {
-      "path": "/Users/MattTaylor/halo-ota-ui187-20260917/UI187-RESULT.json",
-      "sha256": "c7f176ca1c70894e9b2927e7ae7f46cc765ec179705bec7d82d90ea0490efac1"
+      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
+      "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
     },
-    "manual_ota_acceptance": false,
-    "incoming_OTA_UI_hardware_acceptance": false,
+    "manual_ota_acceptance": true,
+    "incoming_OTA_UI_hardware_acceptance": true,
     "scheduled_ota_acceptance": false,
-    "physical_acceptance_scope": "No188 installation or physical acceptance yet; user manual OTA is pending. Prior187 service smoke remains historical.",
+    "physical_acceptance_scope": "One user-initiated USB-connected paired OTA passed exact hashes, SDK VALID, static incoming LCD frame, observed-pair native settlement, Home and paired sleep with67seconds quiet. No new full-product or scheduled qualification.",
     "readiness_checkpoint": {
       "path": "/Users/MattTaylor/halo-manual188-20260917/READY188.json",
       "sha256": "b0237fb925053540b7ac364b65c0f2752e42ffc3f67525175c737e0c2686a762"
@@ -6619,19 +6621,34 @@
       "pid": 65371,
       "expires_epoch": 1789691354.352451,
       "commands_sent_at_setup": 0,
-      "status_at_readiness_checkpoint": "RUNNING_AWAITING_USER_MANUAL_PRESS"
+      "status_at_readiness_checkpoint": "RUNNING_AWAITING_USER_MANUAL_PRESS",
+      "status": "CLOSED_REAPED_EXIT0_NO_COMMANDS",
+      "completion_result": {
+        "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
+        "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
+      }
     },
-    "schedule": "02:00 Pacific configuration unchanged; no new scheduled qualification.",
-    "allowance_status": "No allowance writes or reset for188 setup. Natural UTC-day rollover requires fresh clock/readiness and must be verified in actual manual test logs.",
-    "current_boot_clock_fresh_verified": false,
+    "schedule": "02:00 Pacific unchanged; final Sense selected exact1789722000 and LCD verified arm1789721985 (15seconds early). This manual test is not a new scheduled qualification.",
+    "allowance_status": "No service write/reset. Native rollover toUTCday20714 observed in cloud: windows1, applies1, reserved0, retries0, remainingwork17ms. This is not a promise of another immediate manual allowance.",
+    "current_boot_clock_fresh_verified": true,
     "next_unused_version": "6.4.189",
     "next_version_requires_fresh_inventory_check": true,
     "handoff": "docs/MANUAL_OTA_188_20260917.md",
     "limits": [
-      "Last observed Sense186 app0 and LCD187 app1 SDKVALID; expected188 slots are not installation evidence.",
-      "Incoming LCD OTA visibility of the187 static frame remains physically unqualified.",
-      "Preserve historical186 transfer/UI failure and187 service smoke under their previous_working_source records."
-    ]
+      "One USB-connected manual update and observed installation frame passed; no new full-product, power-cut or USB-free qualification.",
+      "Preserve historical186 transfer/UI failure and187 service smoke under their previous_working_source records.",
+      "Diagnostic export/context/orphan and LCD error-log persistence warnings remain recorded."
+    ],
+    "full188_pair_installed": true,
+    "last_verified_device_acceptance": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-RESULT.json",
+      "sha256": "d8cecf4cb884b3e0741677f1fb51ca95d2620559481e6496421103966d0c94f4"
+    },
+    "hardware_resource_review": "docs/HARDWARE_RESOURCE_REVIEW_188_20260917.md",
+    "independent_review": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/USER-MANUAL188-INDEPENDENT-REVIEW.json",
+      "sha256": "124903811140d2092e003f0a22b639348c9b761925b8036bc6f98618daf4f918"
+    }
   },
   "previous_working_source_187": {
     "version": "6.4.187",
