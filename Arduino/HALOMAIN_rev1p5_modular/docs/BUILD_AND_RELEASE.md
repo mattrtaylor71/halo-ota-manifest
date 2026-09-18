@@ -1,4 +1,6 @@
-> September18 release: **194 is published for Sense and LCD**, with manual requests no longer limited per day. Both canonical builds/artifact checks and all97 exact-snapshot suites passed. Last verified hardware remains Sense190/app1 + LCD191/app1 SDKVALID. Sense193 USB bootstrap and the user’s194 OTA are pending USB access; no new hardware or scheduled-OTA pass is claimed. See `docs/MANUAL_OTA_194_20260918.md`.
+> September 18 release: **196 is published and read back for Sense and LCD.** Both canonical builds/artifact checks and all 97 exact-snapshot suites passed. Last verified hardware remains Sense 190/app1 + LCD 191/app1 SDK VALID. Private Sense 195 is built and verified, but not installed; its USB bootstrap and the user’s 196 OTA are pending. No new physical OTA or scheduled-OTA pass is claimed. See [release evidence and remaining steps](MANUAL_OTA_196_20260918.md).
+
+Current source is `26c5d713475dc0390c375a9b1e77d2e2ffaaa82a`, firmware tree `672353630dab3650e7f233a331eb4b989d8772b0`, build `6.4.196-20260918T213712Z-26c5d713475d`. Continue from this release or reviewed descendants. It retains 190 voice/list and 191 immediate-delete behavior, explicit manual grants and the completed-calendar handoff, and adds the bounded clock retry for a manual request joined to recovery. Use an unused 197+ after fresh inventory. Frozen 158 remains the immutable recovery reference below.
 
 
 # Build and release from the frozen 6.4.158 baseline
@@ -19,13 +21,13 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run the complete [host regression gate](REGRESSION_TESTING.md), and commit the reviewed source before preparing release artifacts. The baseline guard verifies identity; it does not establish device acceptance of new code.
 
-Allocate an unused version **6.4.195 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.197 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.195>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.197>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"

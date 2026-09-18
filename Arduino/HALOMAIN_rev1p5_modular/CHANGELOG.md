@@ -1,6 +1,6 @@
-# Manual clock recovery correction — candidate after194
+# 6.4.196 published — manual clock recovery correction
 
-An explicit manual request joined to existing recovery now reaches its single bounded time-sync retry before the policy fresh-clock gate. Preserve the original readiness deadlines and foreground/peer/network checks. A healthy peer waiting on time is reported as a clock failure instead of peer unavailable. The captured190/191 attempt returned Home and slept without starting a transfer; no195/196 installation or publication is claimed by this entry. See [the diagnosis and validation record](docs/MANUAL_CLOCK_JOIN_20260918.md).
+An explicit manual request joined to existing recovery now reaches its single bounded time-sync retry before the policy fresh-clock gate. Preserve the original readiness deadlines and foreground/peer/network checks. A healthy peer waiting on time is reported as a clock failure instead of peer unavailable. The captured190/191 attempt returned Home and slept; no transfer was observed in the captured interval. Both196 canonical builds/artifact checks and all97 exact-snapshot suites passed, followed by paired publication/readback. Private195Sense also passed its build/checks and97 suites, but USB installation remains pending a user wake. Last observed hardware is still190/191; no physical196 OTA or new scheduled acceptance is claimed. See [release evidence and remaining device step](docs/MANUAL_OTA_196_20260918.md) and [the diagnosis](docs/MANUAL_CLOCK_JOIN_20260918.md).
 
 # 6.4.194 published — explicit manual updates without a daily tap limit
 

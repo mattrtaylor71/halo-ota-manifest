@@ -872,7 +872,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.194",
+  "current_production_latest_version": "6.4.196",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -4836,8 +4836,8 @@
     }
   },
   "current_validation_blocker": {
-    "status": "AWAITING_HALO_USB_FOR_ONE_TIME193_BOOTSTRAP_AND_USER194_OTA",
-    "details": "Only actuator enumerates. Initial actuator stroke completed but no board USB appeared; capture closed with0opens/0bytes. No automatic repeat or firmware/NVS writes. Preserve saved debt. Prepared193installer requires actual fresh190/191Home identity."
+    "status": "AWAITING_HALO_WAKE_FOR_ONE_TIME195_BOOTSTRAP_AND_USER196_OTA",
+    "details": "Only actuator enumerates after captured190/191 check timed out and slept.193 identity chain opened neither board and made no firmware/NVS writes.195 sealed installer requires fresh190/191 unlocked Home identity; no automatic retry. User wake requested."
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6536,21 +6536,21 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.194",
-    "status": "PUBLISHED_PAIRED194_USB_BOOTSTRAP_AND_USER_OTA_PENDING",
-    "artifact_source_commit": "05f7c4a2c71bb8785b66a241d0b1739234e0e464",
-    "artifact_source_firmware_tree": "afcc0eb5eb79ec81df6338ac64eb997f7cb9409c",
-    "build_id": "6.4.194-20260918T203113Z-05f7c4a2c71b",
+    "version": "6.4.196",
+    "status": "PUBLISHED_PAIRED196_USB_BOOTSTRAP_AND_USER_OTA_PENDING",
+    "artifact_source_commit": "26c5d713475dc0390c375a9b1e77d2e2ffaaa82a",
+    "artifact_source_firmware_tree": "672353630dab3650e7f233a331eb4b989d8772b0",
+    "build_id": "6.4.196-20260918T213712Z-26c5d713475d",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from05f7c4a2c71bb8785b66a241d0b1739234e0e464 or reviewed descendants. Retain190 voice/list,191 immediate delete, explicit manual grants and completed-calendar handoff. Frozen158 remains immutable recovery.",
+    "source_selection": "Continue from26c5d713475dc0390c375a9b1e77d2e2ffaaa82a or reviewed descendants. Retain190 voice/list,191 immediate delete, explicit manual grants, completed-calendar handoff and joined-manual clock retry. Frozen158 stays immutable.",
     "materialization": {
-      "path": "/Users/MattTaylor/halo-manual194-20260918/snapshot/materialization.json",
-      "sha256": "aaa6ec447a611614d23ef6ded43fdf972291bb8c13c1ed3d7c16e9ab8f854004"
+      "path": "/Users/MattTaylor/halo-manual196-20260918/snapshot/materialization.json",
+      "sha256": "c2d7184cc65d6b811a3b097d1299c5c500733ffa774591980ee6805f2d906f16"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-manual194-20260918/host001/RESULT.json",
-      "sha256": "ce7e0192f3dd3d997c206d90017e4823278f308c3d866080d6fa7cb0c1765b63"
+      "path": "/Users/MattTaylor/halo-manual196-20260918/host001/RESULT.json",
+      "sha256": "02c492fddf10aba865d1f6e341d36a934b8eb53ff54e68774a1792b6a0a49a39"
     },
     "host_suite_count": 97,
     "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
@@ -6559,35 +6559,37 @@
       "lcd"
     ],
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-manual194-20260918/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "c29bf70b5e6976892f5da1687728818b528c85ec348296d9651e82804c59624a"
+      "path": "/Users/MattTaylor/halo-manual196-20260918/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "db2d328e973078a6ba9ab1e21ecf7db8c82a1f60a3ca854b3abd07e72d4d54a3"
     },
     "board_proofs": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-manual194-20260918/build/sense/artifacts/verified.json",
-        "sha256": "d776042e774f841fbae037b66a8e1ea90cde0416d2780470d92a271243666b27"
+        "path": "/Users/MattTaylor/halo-manual196-20260918/build/sense/artifacts/verified.json",
+        "sha256": "75e15c821dd9e83c6b42084709020e01038ad96db5c46bda0cf1b58d69f76c67"
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-manual194-20260918/build/lcd/artifacts/verified.json",
-        "sha256": "3736cdad22d9fdb97499f6ea2d1a9ab7f9a353a052cfe41cd90e737e7db6bc5b"
+        "path": "/Users/MattTaylor/halo-manual196-20260918/build/lcd/artifacts/verified.json",
+        "sha256": "e935c7dbc6319bfc2db209d20d0ea981104ceb4b351faf223b848edef3799546"
       }
     },
     "applications": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-manual194-20260918/build/sense/artifacts/halo_sense_prod.ino.bin",
-        "sha256": "0c1678c4f0b8a118cc98fc57300bf723c7987a5a513f18b48e8f38c186eecfcc"
+        "path": "/Users/MattTaylor/halo-manual196-20260918/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "281ddbc3345536fba561b815d7bc40adb9eb754ba406a3ff72cc299dbeda7b2c",
+        "bytes": 1867216
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-manual194-20260918/build/lcd/artifacts/halo_lcd_prod.ino.bin",
-        "sha256": "6eca09de0a7bf0704bd7a12e864833555b2add96c0599232d3a95ddb300c4ed1"
+        "path": "/Users/MattTaylor/halo-manual196-20260918/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "d3f3e13b20d262ced732f2a978b6affa11b3ea4a222970d391dd9dfa9a298b0e",
+        "bytes": 2029952
       }
     },
     "published": true,
     "publication": {
-      "path": "/Users/MattTaylor/halo-manual194-20260918/PUBLISHED194.json",
-      "sha256": "e0ea530f60e60e9e42f6e2897d562a8227e0d82f5ef75f16d9583990dcc19c54"
+      "path": "/Users/MattTaylor/halo-manual196-20260918/PUBLISHED196.json",
+      "sha256": "3802894fd176784cb0c59703da7ac720cb2166295ca202e4415521c162842953"
     },
-    "current_public_ota_version": "6.4.194",
+    "current_public_ota_version": "6.4.196",
     "git_remote_push_performed": false,
     "installed": false,
     "installed_boards": [],
@@ -6603,32 +6605,40 @@
     "manual_ota_acceptance": false,
     "scheduled_ota_acceptance": false,
     "delete_response_device_acceptance": false,
-    "bootstrap193": {
-      "status": "BUILT_VERIFIED_NOT_INSTALLED",
-      "sealed_installer": {
-        "path": "/Users/MattTaylor/halo-manual193-20260918/tools/INSTALLER193-SEALED.json",
-        "sha256": "ee7837d83784d2cbff120a132c07438d49b2fca2da80d2cce1e2e1e9c3e3ff81"
-      },
-      "host_result": {
-        "path": "/Users/MattTaylor/halo-manual193-20260918/host001/RESULT.json",
-        "sha256": "cb041b33681f05c56136d41be91b280fc8de29350d948856dfeeeed3634f6da6"
-      }
-    },
     "release_tag": {
-      "name": "halo-v6.4.194",
-      "object": "be565b76b48bebf421b597f338459206bb41e9b6",
-      "commit": "05f7c4a2c71bb8785b66a241d0b1739234e0e464",
+      "name": "halo-v6.4.196",
+      "object": "f9545d5914f397e06855e3440437e6a5765a981f",
+      "commit": "26c5d713475dc0390c375a9b1e77d2e2ffaaa82a",
       "remote_push": false
     },
-    "next_unused_version": "6.4.195",
+    "next_unused_version": "6.4.197",
     "next_version_requires_fresh_inventory_check": true,
-    "handoff": "docs/MANUAL_OTA_194_20260918.md",
+    "handoff": "docs/MANUAL_OTA_196_20260918.md",
     "limits": [
-      "Publication and97-suite host checks are complete; physical193 bootstrap and194 user OTA remain pending because neither Halo board enumerates over USB.",
-      "Last verified installed state is Sense190/app1 plus LCD191/app1 SDKVALID. Old NVS backup has a completed188 record plus a different admitted calendar obligation; no fresh current debt read was obtained.",
-      "Manual attempts retain readiness, ownership, storage, quarantine, target, transfer and rollback protections. Automatic wakes do not replenish a manual grant.",
-      "No new scheduled OTA, full-product, USB-free, or power-cut acceptance is claimed. Prior190/191 acceptance and limits are preserved separately."
-    ]
+      "Build/artifact validation, all97 snapshot suites and publication/readback passed; private195 USB bootstrap and user196 OTA remain pending.",
+      "Captured190/191 check lacked fresh clock, timed out, returned Home and slept. The initial time-sync failure was not captured. No firmware or service NVS writes occurred.",
+      "Manual attempts retain readiness, ownership, storage, quarantine, target, transfer and rollback checks; automatic wakes do not replenish a manual grant.",
+      "No new physical196 OTA, scheduled OTA, full-product, USB-free or power-cut acceptance is claimed. Prior190/191 limits remain preserved."
+    ],
+    "bootstrap195": {
+      "status": "BUILT_VERIFIED_NOT_INSTALLED",
+      "sealed_installer": {
+        "path": "/Users/MattTaylor/halo-manual195-20260918/tools/INSTALLER195-SEALED.json",
+        "sha256": "8767875b9b272586a0e89d00224dc48cc8493d8433e1fbee4b847aaabddf5f4a"
+      },
+      "host_result": {
+        "path": "/Users/MattTaylor/halo-manual195-20260918/host001/RESULT.json",
+        "sha256": "642ab0cf6cf8a174b87a1276411e8f3f976b661bf19568648c1c564db5153ac4"
+      },
+      "artifact_check": {
+        "path": "/Users/MattTaylor/halo-manual195-20260918/build/artifact-result-v2-sense.json",
+        "sha256": "a7c7828707b5717cdfb6f07727a5499dd5f1a413679be9781fff0febb4235aa5"
+      }
+    },
+    "last_observed_identity": {
+      "path": "/Users/MattTaylor/halo-manual194-20260918/manual-check001/REVIEW.json",
+      "sha256": "550a79db4ee02bdfb2a5c4f0f08b5cc154b70fa8ebeb94179c079f623a3960af"
+    }
   },
   "previous_working_source_187": {
     "version": "6.4.187",
@@ -9725,5 +9735,100 @@
   "published_manual_test_release_194": {
     "path": "/Users/MattTaylor/halo-manual194-20260918/PUBLISHED194.json",
     "sha256": "e0ea530f60e60e9e42f6e2897d562a8227e0d82f5ef75f16d9583990dcc19c54"
+  },
+  "previous_working_source_194": {
+    "version": "6.4.194",
+    "status": "PUBLISHED_PAIRED194_USB_BOOTSTRAP_AND_USER_OTA_PENDING",
+    "artifact_source_commit": "05f7c4a2c71bb8785b66a241d0b1739234e0e464",
+    "artifact_source_firmware_tree": "afcc0eb5eb79ec81df6338ac64eb997f7cb9409c",
+    "build_id": "6.4.194-20260918T203113Z-05f7c4a2c71b",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from05f7c4a2c71bb8785b66a241d0b1739234e0e464 or reviewed descendants. Retain190 voice/list,191 immediate delete, explicit manual grants and completed-calendar handoff. Frozen158 remains immutable recovery.",
+    "materialization": {
+      "path": "/Users/MattTaylor/halo-manual194-20260918/snapshot/materialization.json",
+      "sha256": "aaa6ec447a611614d23ef6ded43fdf972291bb8c13c1ed3d7c16e9ab8f854004"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-manual194-20260918/host001/RESULT.json",
+      "sha256": "ce7e0192f3dd3d997c206d90017e4823278f308c3d866080d6fa7cb0c1765b63"
+    },
+    "host_suite_count": 97,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "built_boards": [
+      "sense",
+      "lcd"
+    ],
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-manual194-20260918/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "c29bf70b5e6976892f5da1687728818b528c85ec348296d9651e82804c59624a"
+    },
+    "board_proofs": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-manual194-20260918/build/sense/artifacts/verified.json",
+        "sha256": "d776042e774f841fbae037b66a8e1ea90cde0416d2780470d92a271243666b27"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-manual194-20260918/build/lcd/artifacts/verified.json",
+        "sha256": "3736cdad22d9fdb97499f6ea2d1a9ab7f9a353a052cfe41cd90e737e7db6bc5b"
+      }
+    },
+    "applications": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-manual194-20260918/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "0c1678c4f0b8a118cc98fc57300bf723c7987a5a513f18b48e8f38c186eecfcc"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-manual194-20260918/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "6eca09de0a7bf0704bd7a12e864833555b2add96c0599232d3a95ddb300c4ed1"
+      }
+    },
+    "published": true,
+    "publication": {
+      "path": "/Users/MattTaylor/halo-manual194-20260918/PUBLISHED194.json",
+      "sha256": "e0ea530f60e60e9e42f6e2897d562a8227e0d82f5ef75f16d9583990dcc19c54"
+    },
+    "current_public_ota_version": "6.4.194",
+    "git_remote_push_performed": false,
+    "installed": false,
+    "installed_boards": [],
+    "last_observed_installed_configuration": {
+      "sense": "6.4.190 app1 SDKVALID unchanged",
+      "lcd": "6.4.191 app1 SDKVALID"
+    },
+    "last_observed_device_acceptance": {
+      "path": "/Users/MattTaylor/halo-delete191-20260918/health001/RESULT.json",
+      "sha256": "66437dddfd6513ec654f4e47800598c56f59a569079b0a45020040e39bbf9df2"
+    },
+    "schedule": "02:00 Pacific unchanged; no hardware NVS/debt/schedule changes in this release turn",
+    "manual_ota_acceptance": false,
+    "scheduled_ota_acceptance": false,
+    "delete_response_device_acceptance": false,
+    "bootstrap193": {
+      "status": "BUILT_VERIFIED_NOT_INSTALLED",
+      "sealed_installer": {
+        "path": "/Users/MattTaylor/halo-manual193-20260918/tools/INSTALLER193-SEALED.json",
+        "sha256": "ee7837d83784d2cbff120a132c07438d49b2fca2da80d2cce1e2e1e9c3e3ff81"
+      },
+      "host_result": {
+        "path": "/Users/MattTaylor/halo-manual193-20260918/host001/RESULT.json",
+        "sha256": "cb041b33681f05c56136d41be91b280fc8de29350d948856dfeeeed3634f6da6"
+      }
+    },
+    "release_tag": {
+      "name": "halo-v6.4.194",
+      "object": "be565b76b48bebf421b597f338459206bb41e9b6",
+      "commit": "05f7c4a2c71bb8785b66a241d0b1739234e0e464",
+      "remote_push": false
+    },
+    "next_unused_version": "6.4.195",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/MANUAL_OTA_194_20260918.md",
+    "limits": [
+      "Publication and97-suite host checks are complete; physical193 bootstrap and194 user OTA remain pending because neither Halo board enumerates over USB.",
+      "Last verified installed state is Sense190/app1 plus LCD191/app1 SDKVALID. Old NVS backup has a completed188 record plus a different admitted calendar obligation; no fresh current debt read was obtained.",
+      "Manual attempts retain readiness, ownership, storage, quarantine, target, transfer and rollback protections. Automatic wakes do not replenish a manual grant.",
+      "No new scheduled OTA, full-product, USB-free, or power-cut acceptance is claimed. Prior190/191 acceptance and limits are preserved separately."
+    ]
   }
 }
