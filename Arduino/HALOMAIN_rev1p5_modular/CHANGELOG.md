@@ -1,3 +1,7 @@
+# Pending next release — OTA instruction copy
+
+Replace the static installation screen's “Installing update” subtitle with “Keep Halo powered on.” Preserve the existing typography, layout, heading and transfer behavior. This copy change is not part of published 196.
+
 # 6.4.196 published — manual clock recovery correction
 
 An explicit manual request joined to existing recovery now reaches its single bounded time-sync retry before the policy fresh-clock gate. Preserve the original readiness deadlines and foreground/peer/network checks. A healthy peer waiting on time is reported as a clock failure instead of peer unavailable. The captured190/191 attempt returned Home and slept; no transfer was observed in the captured interval. Both196 canonical builds/artifact checks and all97 exact-snapshot suites passed, followed by paired publication/readback. Private195Sense also passed its build/checks and97 suites, then USB installation toapp0 with190/app1 fallback and NVS/debt preserved. Fresh195/191 SDKVALID, nine-item list/scroll, Home, paired sleep and20seconds quiet passed with zero OTA/delete/audio actions. Published196 remains uninstalled at this checkpoint; the user's manual OTA and no-update check are pending. No physical196 OTA or new scheduled acceptance is claimed. See [release evidence and remaining device step](docs/MANUAL_OTA_196_20260918.md) and [the diagnosis](docs/MANUAL_CLOCK_JOIN_20260918.md).
