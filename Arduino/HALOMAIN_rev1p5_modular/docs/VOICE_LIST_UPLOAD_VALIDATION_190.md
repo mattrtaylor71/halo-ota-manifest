@@ -1,6 +1,22 @@
 # Voice while browsing the shopping list — candidate 190
 
-Status at this checkpoint: committed source, all 97 snapshot host suites, both production builds and artifact checks passed. **190 device acceptance is pending. Public 188 is unchanged.** This record does not claim installation, device health or a successful 190 voice/list/camera run.
+Current status, September18: **Sense190 is installed in app1 and SDK VALID. The voice/list transport case passed on-device and was independently matched to cloud acceptance.** LCD188 is unchanged and public OTA remains188. One camera-priority case and real spoken-item semantics remain pending.
+
+## September18 focused device acceptance
+
+The original source and sealed binaries below were used without new firmware edits. Fresh identity, inactive Sense-only service/readback and LCD-forwarded SDK health passed. Sense189 fallback, LCD188, NVS, quota/debt and02:00Pacific configuration were preserved.
+
+The successful case captured196,608 bytes from the real microphone with no speech playback. Its single POST returned202 in5.408seconds while the LCD list stayed lit and accepted five scroll events during the POST. Over30seconds it accepted8refreshes and28scroll events. A fresh post-accept list response returned200 in642ms. Both boards then slept, followed by20seconds quiet. Exact session/device/time/byte cloud correlation independently confirmed acceptance and processing completion.
+
+This tests transport/list scheduling using injected UI/console events, not physical gesture geometry or spoken-item insertion. The separate speaker-based attempt stopped when Mac afplay timed out before list entry; recording finalized and its empty transcription is retained as a failed semantic test. Original Mac volume19/unmuted was subsequently restored and verified.
+
+The camera-priority attempt opened neither Halo board: its actuator HELP failed. One relay recovery received the restore acknowledgement and closed cleanly, but exact actuator serial return was not proved. Stop actuator investigation here; a manual LCD wake allows the single existing camera case to run.
+
+Current receipt: /Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json.
+Its SHA256 is 37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f.
+It binds service190-ship001, health190-ship001, voice-list190-transport-ship001, independent cloud evidence and both failed fixture/bench cases.
+
+**Do not rerun the historical189-to190 service chain below on this already updated unit.** It remains historical reproducibility evidence. Resume only the finite camera interruption case against Sense190/LCD188 after a normal wake. Public190 publication remains separate; no new scheduled OTA campaign is needed for this narrow change.
 
 ## Intended behavior and limits
 
@@ -44,7 +60,7 @@ The initial 3 GiB CLI request was rejected because the canonical CLI requires an
 
 Space recovery is separately recorded in `object-cache-compression001/RESULT.json` and `object-cache-compression002/RESULT.json`: historical compiler `.o/.d` bytes were archived and verified before removal (673,624,080→188,451,657 bytes and 1,258,305,717→367,022,334 bytes). Sources, binaries, ELF/map/static-library/stack-usage files, logs, device backups and receipts were preserved. These were reversible cache compression operations, not deletion of release evidence.
 
-## Hardware checkpoint and resume
+## Historical pre-installation checkpoint and resume
 
 `CHECKPOINT190.json`, SHA256 `7f4809a1ecf1ae7af4b14d0b7ca052830e935f866356fc93d920a9eb08539421`, closes three fresh-identity attempts (`identity189mixed-001` through `003`). All had zero Halo USB opens and zero actuator strokes; the actuator did not answer HELP. **No190 service ran.** Last confirmed installation remains Sense189 app0 and LCD188 app0, both SDK VALID. All hardware owners are absent; no automatic retry loop is running.
 
@@ -69,8 +85,8 @@ Only after actual successful service, `tools/health190_then_main.py` takes `--se
 
 ## Pending device acceptance
 
-- Controlled installation and exact running partition/SDK VALID identities: **pending**.
-- Fresh voice followed by visible list browsing/refresh, exact voice acceptance and independent cloud/list evidence: **pending**.
+- Controlled installation and exact running partition/SDK VALID identities: **passed September18**.
+- Voice/list transport with visible browsing/refresh, exact voice acceptance and independent cloud evidence: **passed September18**; spoken-item insertion remains unqualified.
 - Urgent camera interruption, exact voice custody/resume, camera acceptance and return to paired sleep: **pending**.
 
 No full-product, physical touch-geometry, new provisioning, paired OTA transfer or scheduled-OTA qualification is claimed by this host/build checkpoint.

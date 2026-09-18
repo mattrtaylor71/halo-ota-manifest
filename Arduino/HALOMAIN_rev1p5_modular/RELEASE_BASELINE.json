@@ -4836,13 +4836,13 @@
     }
   },
   "current_validation_blocker": {
-    "status": "190_BUILD_VERIFIED_DEVICE_TEST_BLOCKED_BY_ACTUATOR",
-    "detail": "Actuator USB enumerates but HELP and non-writing bootloader probe do not respond. Both HaloUSBports absent/asleep;190 not installed. Resume at fresh189/188 identity thenservice/SDKhealth/voice-list andcamera interruption.",
+    "status": "CAMERA_PRIORITY_TEST_AWAKE_DEVICE_NEEDED",
+    "detail": "Sense190 is installed and SDK VALID. Voice/list transport passed. One camera-priority case could not start because actuator HELP failed; subsequent relay acknowledged restore but did not prove exact serial return. A manual LCD wake bypasses this bench blocker.",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/CHECKPOINT190.json",
-      "sha256": "7f4809a1ecf1ae7af4b14d0b7ca052830e935f866356fc93d920a9eb08539421"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json",
+      "sha256": "37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f"
     },
-    "candidate_installed": false,
+    "candidate_installed": true,
     "no_public_promotion": true
   },
   "diagnostic_candidate151": {
@@ -6543,7 +6543,7 @@
   },
   "current_working_source": {
     "version": "6.4.190",
-    "status": "BUILT_HOST97_PASS_NOT_INSTALLED_ACTUATOR_BLOCKED",
+    "status": "SENSE190_INSTALLED_HOST97_VOICE_LIST_TRANSPORT_PASS_CAMERA_PENDING",
     "artifact_source_commit": "ffe52bf27865645ec0ff2a000b51049b40bcd5b1",
     "artifact_source_firmware_tree": "94b08341ceccc8e7d05b78281d712cdd531cbf90",
     "build_id": "6.4.190-20260918T025500Z-ffe52bf27865",
@@ -6575,15 +6575,17 @@
     "published": false,
     "current_public_ota_version": "6.4.188",
     "git_remote_push_performed": false,
-    "installed": false,
-    "installed_boards": [],
+    "installed": true,
+    "installed_boards": [
+      "sense"
+    ],
     "last_observed_installed_configuration": {
-      "sense": "6.4.189 app0 SDKVALID;190notinstalled",
+      "sense": "6.4.190 app1 SDKVALID",
       "lcd": "6.4.188 app0 SDKVALID unchanged"
     },
     "last_observed_device_acceptance": {
-      "path": "/Users/MattTaylor/halo-voice-list189-20260917/CHECKPOINT190.json",
-      "sha256": "7f4809a1ecf1ae7af4b14d0b7ca052830e935f866356fc93d920a9eb08539421"
+      "path": "/Users/MattTaylor/halo-voice-list189-20260917/MVP190-CHECKPOINT-20260918.json",
+      "sha256": "37585b7915c07d0dce770d70e957c75599ee8c7b05c686b1870d415ad8d4148f"
     },
     "schedule": "02:00Pacific configuration unchanged; no schedule or quota/debt edits in this campaign",
     "manual_ota_acceptance": false,
@@ -6593,11 +6595,14 @@
     "handoff": "docs/VOICE_LIST_UPLOAD_VALIDATION_190.md",
     "plan": "docs/VOICE_LIST_UPLOAD_PLAN.md",
     "limits": [
-      "190 device test pending: exact actuator HELP and bootloader signature unavailable despite bounded relay/hub/DTR recovery. No190 flash writes.",
-      "189 hardware test exposed actual LCD scroll message cancelling voice; corrected190 host test reproduces old failure and passes new source.",
-      "Automated acoustic fixture reached cloud almost silent; real spoken-item semantics unqualified.",
-      "Host regression and unchanged OTA runtime are not a newly executed physical OTA or full product qualification."
-    ]
+      "Real USB-connected voice/list transport and cloud receipt passed; urgent camera interruption remains pending because its wake helper failed before opening either board.",
+      "Quiet microphone fixture verifies transport scheduling, not speech transcription or shopping-row insertion. Mac afplay failed in the separately preserved spoken fixture case.",
+      "LCD188 runtime and OTA code are unchanged; no new paired190 OTA, schedule or full-product qualification."
+    ],
+    "full190_pair_installed": false,
+    "voice_list_transport_acceptance": true,
+    "camera_interrupt_acceptance": false,
+    "spoken_item_semantic_acceptance": false
   },
   "previous_working_source_187": {
     "version": "6.4.187",

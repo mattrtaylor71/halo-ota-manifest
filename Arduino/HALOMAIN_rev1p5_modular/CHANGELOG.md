@@ -2,7 +2,7 @@
 
 Allow one bounded fresh voice upload while the shopping list stays open; serialize voice and list HTTP ownership and coalesce refreshes. Actual189 device testing found that LCD scrolling emits `INPUT_USER_ACTIVE`, which still cancelled the upload.190 adds that list-only compatibility and regression coverage compiled from the real LCD producer; camera/new recording/manual OTA remain interrupting. Both production builds/artifact checks and all97 exact-snapshot suites pass. Sense static globals increase24bytes; LCD/OTA runtime is unchanged.
 
-190 is **not installed or published**. Actuator HELP/bootloader silence blocks the remaining device tests despite bounded remote recovery. Last unit state is Sense189/LCD188 SDKVALID; public188 and02:00Pacific are unchanged. The automated test recording was nearly silent, so cloud202 alone is not claimed as a successful shopping-list mutation. [Evidence and remaining tests](docs/VOICE_LIST_UPLOAD_VALIDATION_190.md).
+September18: Sense190 is now installed/app1 SDKVALID; LCD188 remains unchanged. A real6s microphone upload returned202 in5.408s while list scrolling continued, followed by a fresh list200,8refreshes,28scroll events and paired sleep/20squiet. Independent cloud correlation passed. Spoken-item insertion is not claimed for the quiet fixture. The camera-priority case could not start because the actuator failed; that check remains pending.190 is not published; public188/02:00Pacific/quota/debt are unchanged. [Evidence](docs/VOICE_LIST_UPLOAD_VALIDATION_190.md).
 
 # 6.4.188 user manual OTA and installation-screen result — September 17, 2026
 

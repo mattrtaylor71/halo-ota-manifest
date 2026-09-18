@@ -1,3 +1,9 @@
+> September 18 checkpoint: **Sense190 is installed (app1 SDK VALID); voice upload while scrolling/refreshing the list passed on-device and in the cloud.** LCD188 is unchanged; public OTA remains188. One camera-priority check is pending because the actuator stopped answering. See the current section of docs/VOICE_LIST_UPLOAD_VALIDATION_190.md.
+
+Current source is190; continue from ffe52bf27865645ec0ff2a000b51049b40bcd5b1 or reviewed descendants. Use unused191+ for new firmware changes after inventory. RELEASE_BASELINE.json.current_working_source selects this code; current_baseline retains frozen158 recovery. The checkpoints below are historical, not current source selection.
+
+## Historical release checkpoints
+
 > September17 user test: **both boards completed the physical185→186 manual OTA and run app0 / SDK VALID**. Exact hashes passed; native policy resolved, Home returned and both boards slept. **OTA presentation failed:** the user saw a frozen Checking for updates screen during LCD transfer because the flash-safety guard suppresses rendering. This remains unfixed; do not call186 full UI acceptance. The final02:00 Pacific schedule is verified unchanged. See `docs/MANUAL_OTA_186_20260917.md` and the current release record.
 
 > September 17 release update: **6.4.186 is public; the last verified installed pair remains185 app1 SDK VALID.**186 is a version-only bump from `62c6864b4c15`, build `6.4.186-20260917T224600Z-62c6864b4c15`. All 1,138 non-generated runtime files match sealed 185; both canonical builds/artifact checks and seven exact-snapshot suites passed. Public paired readback passed. The user will perform the physical manual OTA;186 installation and acceptance are pending. One external test allowance is granted and verified; the schedule is unchanged. Continue from186 or reviewed descendants; use unused **187 or later** after fresh inventory. Frozen158 remains unchanged.
