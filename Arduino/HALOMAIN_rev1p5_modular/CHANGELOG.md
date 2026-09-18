@@ -1,12 +1,14 @@
-# 6.4.191 candidate — immediate shopping-list delete feedback
+# 6.4.191 LCD installed — immediate shopping-list delete feedback
 
 Hide a shopping row as soon as its delete request is queued; retain data and NVS until confirmed, restoring the row on failure or timeout. Refreshes and encoder/touch navigation preserve item identity while pending. Remove the additional 270 ms confirmed-delete animation. LCD only; Sense and OTA behavior are unchanged. See [the change record](docs/SHOPPING_DELETE_RESPONSE.md).
+
+September18: LCD191/app1 SDK VALID is installed beside unchanged Sense190/app1. The 97-suite snapshot gate and LCD canonical build/artifact checks passed. USB service retained settings and LCD188/app0; fresh identity, list/scroll, Home and paired sleep with 20 seconds quiet passed with zero deletions. Delete latency/rollback remains untested; 191 is unpublished and public188 is unchanged. See the change record for the closed service/health receipts.
 
 # 6.4.190 local voice/list candidate — September 17, 2026
 
 Allow one bounded fresh voice upload while the shopping list stays open; serialize voice and list HTTP ownership and coalesce refreshes. Actual189 device testing found that LCD scrolling emits `INPUT_USER_ACTIVE`, which still cancelled the upload.190 adds that list-only compatibility and regression coverage compiled from the real LCD producer; camera/new recording/manual OTA remain interrupting. Both production builds/artifact checks and all97 exact-snapshot suites pass. Sense static globals increase24bytes; LCD/OTA runtime is unchanged.
 
-September18: Sense190 is now installed/app1 SDKVALID; LCD188 remains unchanged. A real6s microphone upload returned202 in5.408s while list scrolling continued, followed by a fresh list200,8refreshes,28scroll events and paired sleep/20squiet. Independent cloud correlation passed. Spoken-item insertion is not claimed for the quiet fixture. The later camera case interrupted the actual voice POST, preserved/resumed the same98,304-byte job to202, captured141,508 JPEG bytes in1,648ms and returned PUT200, then paired sleep/20squiet. A post-presign DMA-reserve warning remains a limitation: another same-wake camera was not tested; the same warning is recorded on188.190 is not published; public188/02:00Pacific/quota/debt are unchanged. [Evidence](docs/VOICE_LIST_UPLOAD_VALIDATION_190.md).
+September18: Sense190 is now installed/app1 SDKVALID; LCD188 remains unchanged. A real6s microphone upload returned202 in5.408s while list scrolling continued, followed by a fresh list200,8refreshes,28scroll events and paired sleep with 20 seconds quiet. Independent cloud correlation passed. Spoken-item insertion is not claimed for the quiet fixture. The later camera case interrupted the actual voice POST, preserved/resumed the same98,304-byte job to202, captured141,508 JPEG bytes in1,648ms and returned PUT200, then paired sleep with 20 seconds quiet. A post-presign DMA-reserve warning remains a limitation: another same-wake camera was not tested; the same warning is recorded on188.190 is not published; public188/02:00Pacific/quota/debt are unchanged. [Evidence](docs/VOICE_LIST_UPLOAD_VALIDATION_190.md).
 
 # 6.4.188 user manual OTA and installation-screen result — September 17, 2026
 

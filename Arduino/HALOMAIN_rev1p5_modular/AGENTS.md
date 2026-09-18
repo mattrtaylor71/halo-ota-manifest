@@ -1,4 +1,4 @@
-> September 18 source checkpoint: **191 passed all 97 snapshot host suites and the canonical LCD build/artifact checks.** This is an uninstalled LCD-only candidate for immediate shopping-list delete feedback. Installed Sense190/app1 and LCD188/app0 remain SDK VALID; public OTA remains188. No paired191 device qualification or publication is claimed.
+> September 18 installed checkpoint: **LCD191/app1 and unchanged Sense190/app1 are SDK VALID.** The LCD-only service preserved settings and the old LCD188/app0 bank. Fresh identity, list/scroll, Home and paired sleep with 20 seconds quiet passed; the smoke check made zero deletions. Public OTA remains 188. 191 delete latency/rollback and paired191 OTA qualification remain untested.
 
 # HALO Firmware Agent Guide
 
