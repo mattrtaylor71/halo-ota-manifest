@@ -6550,6 +6550,90 @@
     }
   },
   "current_working_source": {
+    "version": "6.4.188",
+    "status": "PUBLISHED188_USER_MANUAL_TEST_PENDING",
+    "artifact_source_commit": "9f5cd2fa556c4cc0a471fd74043b7b62aaf950f0",
+    "artifact_source_firmware_tree": "6271eb1b32031ce8d32f00a132096c57b81a00a2",
+    "build_id": "6.4.188-20260917T235700Z-9f5cd2fa556c",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from9f5cd2fa556c or reviewed descendants. Runtime is identical to187 apart from the three generated version headers; preserve frozen158 recovery.",
+    "candidate_receipt": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/RELEASE-PAIR.json",
+      "sha256": "76e8a29f0ebae795f9f19922e5b5609782ade7d863ee29ba773d93c0cfaa107c"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/host001/RESULT.json",
+      "sha256": "448cc942bd357b7b8f1e493302aff3748c69db3e58f5c2d9ebdfe99dc27bf6c7"
+    },
+    "host_suite_count": 11,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "a0731d4e207af4b1fabe7cf615d26dc13c2fee0665273b7bceffdc173c645a7f"
+    },
+    "runtime_comparison": {
+      "baseline_version": "6.4.187",
+      "non_generated_runtime_files_identical": 1139,
+      "only_generated_version_headers_changed": true
+    },
+    "published": true,
+    "current_public_ota_version": "6.4.188",
+    "publication": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/PUBLISHED188.json",
+      "sha256": "721a6ae155bb50276d751422b327615b774d1dfa345182b4eb1f579fd409ce07"
+    },
+    "publication_stage": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/stage001/result.json",
+      "sha256": "c58e5369c27c8d655d88248d81e650dc4ae2fa6c465904dd75108b00bac7994c"
+    },
+    "publication_promotion": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/candidate188-001/promote001/result.json",
+      "sha256": "23c816b6b778f15557ceed8fc44541a82a8c1306cb6df9a8c7bcbcc017583cc2"
+    },
+    "release_tag": "halo-v6.4.188",
+    "release_tag_object": "36c2d100672f549466943cc40e5003f464227a4a",
+    "git_remote_push_performed": false,
+    "installed": false,
+    "installed_boards": [],
+    "last_observed_installed_configuration": {
+      "sense": "6.4.186 app0 SDKVALID retained",
+      "lcd": "6.4.187 app1 SDKVALID via controlled USB service",
+      "fallback": "LCD186 app0 verified preserved; Sense unchanged"
+    },
+    "last_observed_device_acceptance": {
+      "path": "/Users/MattTaylor/halo-ota-ui187-20260917/UI187-RESULT.json",
+      "sha256": "c7f176ca1c70894e9b2927e7ae7f46cc765ec179705bec7d82d90ea0490efac1"
+    },
+    "manual_ota_acceptance": false,
+    "incoming_OTA_UI_hardware_acceptance": false,
+    "scheduled_ota_acceptance": false,
+    "physical_acceptance_scope": "No188 installation or physical acceptance yet; user manual OTA is pending. Prior187 service smoke remains historical.",
+    "readiness_checkpoint": {
+      "path": "/Users/MattTaylor/halo-manual188-20260917/READY188.json",
+      "sha256": "b0237fb925053540b7ac364b65c0f2752e42ffc3f67525175c737e0c2686a762"
+    },
+    "passive_capture": {
+      "directory": "/Users/MattTaylor/halo-manual188-20260917/user-manual001",
+      "exec_session_id": 58942,
+      "pid": 65371,
+      "expires_epoch": 1789691354.352451,
+      "commands_sent_at_setup": 0,
+      "status_at_readiness_checkpoint": "RUNNING_AWAITING_USER_MANUAL_PRESS"
+    },
+    "schedule": "02:00 Pacific configuration unchanged; no new scheduled qualification.",
+    "allowance_status": "No allowance writes or reset for188 setup. Natural UTC-day rollover requires fresh clock/readiness and must be verified in actual manual test logs.",
+    "current_boot_clock_fresh_verified": false,
+    "next_unused_version": "6.4.189",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/MANUAL_OTA_188_20260917.md",
+    "limits": [
+      "Last observed Sense186 app0 and LCD187 app1 SDKVALID; expected188 slots are not installation evidence.",
+      "Incoming LCD OTA visibility of the187 static frame remains physically unqualified.",
+      "Preserve historical186 transfer/UI failure and187 service smoke under their previous_working_source records."
+    ]
+  },
+  "previous_working_source_187": {
     "version": "6.4.187",
     "status": "PUBLISHED187_LCD_INSTALLED_SDKVALID_HOST_UI_AND_DEVICE_SMOKE_PASS_INCOMING_OTA_UI_PENDING",
     "artifact_source_commit": "6523648c44938a339d0342e4fa14c185ac3bc3ba",

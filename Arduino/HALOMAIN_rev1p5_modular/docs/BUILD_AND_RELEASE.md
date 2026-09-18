@@ -1,4 +1,4 @@
-> Current release: **187 is published; LCD187 app1 and retained Sense186 app0 are SDK VALID**. The LCD now submits a static installation frame before its existing flash-safety guard. Eleven snapshot suites,76 focused checks, actual LVGL pixels and controlled LCD install/wake/list/sleep smoke passed. **A subsequent incoming LCD OTA has not yet physically qualified the new frame.** See `docs/OTA_UI_HANDOFF_187_20260917.md`.
+> Current release: **188 is published; the user’s physical manual OTA is pending.** All 1,139 non-generated runtime files match187; only the three generated version headers differ. Both canonical builds/artifact checks,11 snapshot suites and paired publication readbacks passed. Last observed: Sense186 app0 and LCD187 app1 SDK VALID. Incoming LCD OTA visibility remains physically unqualified. See `docs/MANUAL_OTA_188_20260917.md`.
 
 # Build and release from the frozen 6.4.158 baseline
 
@@ -18,13 +18,13 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run relevant host regressions, and commit the reviewed source before preparing release artifacts. The baseline guard verifies identity; it does not establish device acceptance of new code.
 
-Allocate an unused version **6.4.188 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.189 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.188>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.189>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"

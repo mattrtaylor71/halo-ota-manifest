@@ -1,3 +1,9 @@
+# 6.4.188 published version-only manual-test bump — September 17, 2026
+
+Publish source `9f5cd2fa556c`, build `6.4.188-20260917T235700Z-9f5cd2fa556c`. All1,139 non-generated runtime files match187; only three generated version headers differ. Both canonical builds/artifact checks,11 snapshot suites and paired public readbacks passed. Local tag `halo-v6.4.188` identifies the source; no Git remote push.
+
+The user’s physical manual OTA is pending. Last observed Sense186 app0 and LCD187 app1 remain SDK VALID;188 installation and incoming LCD OTA frame visibility are not yet qualified. No allowance reset or schedule change was made; fresh clock and native day rollover remain to be observed. [Receipts and scope](docs/MANUAL_OTA_188_20260917.md).
+
 # 6.4.187 published LCD installation-screen correction — September17,2026
 
 Draw a static “Something new is coming” / “Installing update” frame on the UI owner before receive inhibition. Preserve the original500ms handoff/attempt budget and real-DMA flash barrier. Source `6523648c4493`; only three LCD runtime headers changed. Both canonical builds/artifact checks,11 snapshot suites,76 focused sanitizer checks and actual-LVGL pixel review pass. Paired187 manifests/binaries are published and verified; local tag `halo-v6.4.187` selects the artifact source, with no Git remote push.
