@@ -1,10 +1,8 @@
-# Manual OTA release work — private 193 bootstrap and paired 194 candidate
+# 6.4.194 published — explicit manual updates without a daily tap limit
 
-Recover a manual request when an older completed OTA record coexists with a different due calendar obligation. The existing ownership, clock, current-board health and durable-write proof must pass before fresh discovery; only the new verified check/update completes that obligation. A private Sense193 USB bootstrap is planned for the old admission code, followed by public194 for a real two-board manual OTA. These are candidate roles, not claims of installation or publication. Candidate192 was retained unpublished after this admission blocker and an aggregate host-suite timeout were found.
+Every fresh Manual Update request grants a bounded attempt; scheduled and background retries keep their limits and02:00Pacific remains unchanged. Recover a completed older OTA record with a different due calendar obligation only through full ownership, clock, storage and paired-health proof; only a newly verified check/update settles that obligation. Includes190 voice/list and191 immediate delete feedback. Both canonical builds/artifact checks and all97 snapshot suites passed; paired production manifests and binaries were published and verified. Physical193Sense USB bootstrap and the user’s194OTA remain pending because board USB is unavailable. No device writes this turn. [Release evidence and remaining steps](docs/MANUAL_OTA_194_20260918.md).
 
-# 6.4.192 candidate — manual updates without a daily tap limit
-
-Each explicit Manual Update request grants a fresh bounded attempt. Automatic wakes retain their admission and retry limits. Retained target debt, busy/armed/quarantine checks, image validation, the existing policy codec and the 02:00 Pacific schedule remain protected. Includes the 190 voice/list and 191 immediate-delete UI fixes. See [manual allowance behavior](docs/MANUAL_OTA_ALLOWANCE.md); build, publication and physical OTA results are recorded separately when complete.
+Candidate192 remains unpublished with both aggregate media-suite timeout receipts; final193/194 suites passed with a300-second aggregate bound, unchanged1106 assertions and child bounds. Private193Sense is built/verified and retained for bootstrap, not public.
 
 # 6.4.191 LCD installed — immediate shopping-list delete feedback
 

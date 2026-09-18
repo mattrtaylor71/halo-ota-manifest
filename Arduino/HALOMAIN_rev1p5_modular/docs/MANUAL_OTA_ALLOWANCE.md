@@ -12,4 +12,4 @@ That old-state combination requires a separately recorded Sense USB bootstrap be
 
 The unchanged 1,106-case media custody suite previously passed in 173.6 seconds under its 180-second aggregate timeout. Two candidate192 runs exceeded that bound without reporting assertion failures. Its aggregate limit is now 300 seconds; individual child bounds, test cases and assertions are unchanged. Both failed192 receipts are retained; a complete passing gate on the final snapshot is still required.
 
-Release and validation receipts will be added after the new paired build and publication complete. This design note does not claim a completed device OTA.
+Paired194 is published and read back. Both canonical builds/artifact checks and all97 final-snapshot suites passed. PrivateSense193 also passed its Sense build/artifact check and97-suite gate, but its USB bootstrap remains pending because neither board enumerates. See [the actual release receipts and remaining device test](MANUAL_OTA_194_20260918.md). No completed physical194 OTA is claimed.

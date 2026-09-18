@@ -1,3 +1,11 @@
+> September18 release: **194 is published for Sense and LCD**, with manual requests no longer limited per day. Both canonical builds/artifact checks and all97 exact-snapshot suites passed. Last verified hardware remains Sense190/app1 + LCD191/app1 SDKVALID. Sense193 USB bootstrap and the user’s194 OTA are pending USB access; no new hardware or scheduled-OTA pass is claimed. See `docs/MANUAL_OTA_194_20260918.md`.
+
+Current source is `05f7c4a2c71bb8785b66a241d0b1739234e0e464`, firmware tree `afcc0eb5eb79ec81df6338ac64eb997f7cb9409c`, build `6.4.194-20260918T203113Z-05f7c4a2c71b`. Continue from this release or reviewed descendants. It retains190 voice/list and191 immediate-delete behavior, adds explicit manual grants and a proven handoff for completed policy plus different pending calendar work. Use unused195+ after fresh inventory. The following191/190 paragraphs preserve historical acceptance and limits.
+
+`RELEASE_BASELINE.json.current_working_source` now selects194; `previous_working_source_191` retains the prior LCD-only installed checkpoint. [Publication, behavior and remaining USB bootstrap](MANUAL_OTA_194_20260918.md).
+
+## Previous191 installed checkpoint
+
 > September 18 installed checkpoint: **LCD191/app1 and unchanged Sense190/app1 are SDK VALID.** The LCD-only service preserved settings and the old LCD188/app0 bank. Fresh identity, list/scroll, Home and paired sleep with 20 seconds quiet passed; the smoke check made zero deletions. Public OTA remains 188. 191 delete latency/rollback and paired191 OTA qualification remain untested.
 
 Current source is191: continue from `6f3bc970385d6905f1f9723c8d89cb7669c4c148` or reviewed descendants. The exact materialization uses firmware tree `cbcec189d1b3d5652020746542ff35db313ba7a5` and build `6.4.191-20260918T192530Z-6f3bc970385d`. [Delete response validation](SHOPPING_DELETE_RESPONSE.md) records the 97-suite host pass, LCD-only canonical artifact checks and closed USB installation/list/Home/sleep smoke check. Delete latency and rollback are still untested. Sense was not rebuilt for191. Use an unused192+ for subsequent firmware changes after fresh inventory.
