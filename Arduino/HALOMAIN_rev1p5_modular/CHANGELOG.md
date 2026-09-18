@@ -1,6 +1,6 @@
-# Pending 6.4.197 — automatic blank-NVS UART recovery
+# 6.4.197 factory candidate — automatic blank-NVS UART recovery
 
-Fix the setup-mode deadlock without trusting absent state: require a fresh healthy/idle LCD proof before enabling ordinary Sense replies. Preserve interrupted-transfer quarantine and existing OTA debt. Make FW_INFO/query transmission logs truthful and add a composed factory-startup regression. Physical factory acceptance remains pending. See [cause and validation](docs/FACTORY_UART_STARTUP_197.md).
+Fix the setup-mode deadlock without trusting absent state: require a fresh healthy/idle LCD proof before enabling ordinary Sense replies. Preserve interrupted-transfer quarantine and existing OTA debt. Make FW_INFO/query transmission logs truthful and add a composed factory-startup regression. Both 99-suite gates, canonical paired builds and full factory write/readback passed. After correcting the test harness reset/capture sequence and rechecking pristine NVS/selectors, automatic startup and fresh paired SDK VALID communication passed. Physical power-cycle, Settings and sleep/wake remain pending; public 196 is unchanged. See [cause and validation](docs/FACTORY_UART_STARTUP_197.md).
 
 # September18 bench tooling — actuator failure containment
 
