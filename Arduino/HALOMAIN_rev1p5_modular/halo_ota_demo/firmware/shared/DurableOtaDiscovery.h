@@ -45,11 +45,11 @@ inline Admission reserve_discovery(const Record& old,Clock c,bool legacy_debt,
   if(legacy_debt)return Admission::LEGACY;
   if(busy || active_phase(old))return Admission::BUSY;
   if(old.phase!=Phase::RESOLVED && old.phase!=Phase::DISCOVERY)return Admission::IDENTITY;
-  // A deliberate user check may spend the remaining ordinary discovery budget.
-  // Automatic wakes, legacy slow-path discovery and bench campaigns keep their
-  // cooldown. This grants no new allowance and cannot replace unresolved debt.
-  const bool manual_discovery=explicit_manual&&!bench&&!old.deferred_path&&
-      c.epoch/86400UL==old.budget_day;
+  // Each deliberate user check grants a fresh finite invocation, regardless of
+  // today's previous checks. Automatic wakes, unbound legacy slow-path debt
+  // and bench campaigns retain their existing cooldown and caps.
+  const bool manual_discovery=explicit_manual&&!bench&&
+      (old.phase==Phase::RESOLVED||!old.deferred_path);
   if(old.phase==Phase::DISCOVERY && !manual_discovery &&
       (!c.normal_maintenance || c.epoch<old.not_before))return Admission::NOT_DUE;
   if(old.phase==Phase::RESOLVED && (!new_origin || !*new_origin || strnlen(new_origin,64)>=64 ||
@@ -58,11 +58,17 @@ inline Admission reserve_discovery(const Record& old,Clock c,bool legacy_debt,
   if(old.phase==Phase::RESOLVED) {
     // A newly completed-target discovery is a new campaign, not a mutation of
     // the completed target's identity. Preserve its target only for comparison.
-    out.one_shot=OneShot{}; // completed campaign only; no allowance reset
+    out.one_shot=OneShot{}; // completed campaign only
     memset(out.origin,0,sizeof(out.origin));memcpy(out.origin,new_origin,strlen(new_origin));
     memcpy(out.campaign,new_campaign,16);
   }
-  if(!bench&&c.epoch/86400UL>old.budget_day) {
+  if(manual_discovery) {
+    replenish_manual_budget(out,c);
+    // These records have no unfinished target. A newly bound update gets the
+    // ordinary finite fast retry opportunities; no historical target is erased.
+    out.fast_opportunities=0;out.fast_start=out.fast_due=out.fast_expiry=0;
+    out.deferred_path=false;
+  } else if(!bench&&c.epoch/86400UL>old.budget_day) {
     // A deliberate request may open the new day only after completed work.
     // Failed, deferred and read-only campaigns keep their original schedule/debt.
     if(!c.normal_maintenance && !(explicit_manual&&old.phase==Phase::RESOLVED))return Admission::NOT_DUE;

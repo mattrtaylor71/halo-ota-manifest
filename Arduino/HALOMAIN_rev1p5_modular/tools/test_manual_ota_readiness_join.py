@@ -310,16 +310,20 @@ int main(){using namespace sense_policy;using namespace durable_ota;
   case 5:g_lcd_work_budget_live=true;break;case 6:g_peer_continue_work=true;break;}
   halo_prod_request_manual_ota("manual");CHECK(!g_manual_ota_override&&OtaIntent::updates==0);
  }
- // Fresh readiness cannot waive exhausted allowance or unresolved target due.
+ // Fresh explicit readiness grants bounded work despite exhausted counters;
+ // retained target recovery keeps its exact target and consumes the manual latch.
  reset_join();halo_prod_request_manual_ota("manual");confirm_peer();state_record.budget_day=epoch/86400;state_record.budget_granted=state_record.high_water=epoch;strcpy(state_record.origin,g_coord_pending);
  uint8_t raw[kRecordBytes];CHECK(encode(state_record,raw));store.bytes.assign(raw,raw+sizeof(raw));
- CHECK(halo_policy_boot_ready());manual_pipeline();CHECK(wire_result=="policy_daily_limit"&&!OtaIntent::force&&!g_manual_ota_joined_readiness);
+ CHECK(halo_policy_boot_ready());manual_pipeline();
+ CHECK(work.live&&state_record.network_windows==1&&state_record.work_remaining_ms==kDailyWorkMs-kPreflightMs);
+ CHECK(!g_manual_ota_override&&!g_manual_ota_joined_readiness&&wire_result.empty());
  reset_join();Record target_fixture;reset();target_fixture=state_record;reset_join();
  Record deferred;CHECK(finish(target_fixture,{epoch,true,false},target_fixture.reserved_work_ms,true,Failure::TEMPORARY,0,0,epoch+86400,nullptr,deferred));state_record=deferred;
  CHECK(encode(state_record,raw));store.bytes.assign(raw,raw+sizeof(raw));const auto target_before=state_record.target;
  halo_prod_request_manual_ota("manual");confirm_peer();CHECK(halo_policy_boot_ready());manual_pipeline();
- CHECK(!work.live&&wire_result=="policy_deferred"&&!OtaIntent::force);
- CHECK(!memcmp(&target_before,&state_record.target,sizeof(target_before))&&state_record.phase==Phase::DEFERRED);
+ CHECK(work.live&&wire_result.empty()&&!g_manual_ota_override&&!g_manual_ota_joined_readiness);
+ CHECK(!memcmp(&target_before,&state_record.target,sizeof(target_before))&&state_record.phase==Phase::PREFLIGHT&&state_record.deferred_path);
+ CHECK(state_record.network_windows==1&&state_record.day_attempts==0);
  // Named missing proof reports actual busy owner; success stays mask0.
  reset_join();g_peer_gate.entered=true;g_lcd_work_budget_live=true;current_job.active=true;
  CHECK(!enter("manual",true));bool named=false;for(const auto&e:events)if(e.find("missing=0x0100")!=std::string::npos)named=true;CHECK(named);

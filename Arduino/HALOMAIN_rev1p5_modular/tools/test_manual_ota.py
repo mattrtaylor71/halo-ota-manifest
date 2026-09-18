@@ -32,113 +32,109 @@ def policy_harness():
 #include <cstring>
 #include "DurableOtaDiscovery.h"
 using namespace durable_ota;
+static void roundtrip(const Record& r) {
+  uint8_t bytes[kRecordBytes],same[kRecordBytes];Record decoded{};
+  assert(encode(r,bytes)&&decode(bytes,sizeof(bytes),decoded)&&encode(decoded,same));
+  assert(!memcmp(bytes,same,sizeof(bytes))&&bytes[4]<=3&&bytes[7]==0);
+}
+static Record exhausted(Record r) {
+  r.network_windows=2;r.day_attempts=2;r.begins[0]=r.begins[1]=4;
+  r.work_remaining_ms=0;assert(shape(r));return r;
+}
 int main() {
-  constexpr uint32_t prior=20706UL*86400+86000, today=20707UL*86400+600;
-  Target target{};strcpy(target.version,"6.4.114");strcpy(target.peer_version,"6.4.114");
-  strcpy(target.url,"https://example.com/sense114.bin");target.bytes=1803312;target.peer_bytes=1877264;
+  constexpr uint32_t today=20707UL*86400+600, normal_due=today+86400;
+  Target target{};strcpy(target.version,"6.4.192");strcpy(target.peer_version,"6.4.192");
+  strcpy(target.url,"https://example.com/sense192.bin");target.bytes=1803312;target.peer_bytes=1877264;
   target.sha256[0]=1;target.peer_sha256[0]=2;
-  uint8_t campaign[16]={1}, newer[16]={2};Record r{},n{};
-  assert(start_discovery("nightly_20260910",campaign,{prior,true,true},false,false,r));
-  assert(bind_discovery(r,{prior+1,true,true},target,true,true,n));r=n;
-  assert(reserve_apply(r,{prior+2,true,true},2000,kDailyWorkMs,true,n));r=n;
-  assert(reserve_begin(r,{prior+3,true,true},0,n));r=n;
-  assert(reserve_begin(r,{prior+4,true,true},1,n));r=n;
-  assert(resolve(r,{prior+5,true,true},target,true,true,true,n));r=n;
-  // Actual completed114 ledger shape: one window/apply/begin each,13ms left.
-  r.work_remaining_ms=13;assert(shape(r));
-  uint8_t before[kRecordBytes],after[kRecordBytes];assert(encode(r,before));
-  assert(reserve_discovery(r,{today,true,false},false,false,n,"manual",newer,true)==Admission::ALLOWED);
-  assert(n.phase==Phase::DISCOVERY&&n.budget_day==20707&&n.network_windows==1);
-  assert(n.work_remaining_ms==kDailyWorkMs-kPreflightMs&&n.reserved_work_ms==kPreflightMs);
-  assert(n.day_attempts==0&&n.begins[0]==0&&n.begins[1]==0&&same_target(n.target,r.target));
-  assert(strcmp(n.origin,"manual")==0&&memcmp(n.campaign,newer,16)==0);
-  Record decoded;assert(encode(n,after)&&decode(after,sizeof(after),decoded));
-  // Neither an automatic wake nor force/reason text supplies the explicit latch.
-  assert(reserve_discovery(r,{today,true,false},false,false,n,"manual",newer)==Admission::NOT_DUE);
-  assert(reserve_discovery(r,{prior+10,true,false},false,false,n,"manual",newer,true)==Admission::BUDGET);
-  assert(reserve_discovery(r,{today,false,false},false,false,n,"manual",newer,true)==Admission::CLOCK);
-  assert(reserve_discovery(r,{today,true,false},true,false,n,"manual",newer,true)==Admission::LEGACY);
-  assert(reserve_discovery(r,{today,true,false},false,true,n,"manual",newer,true)==Admission::BUSY);
-  assert(reserve_discovery(r,{prior-1,true,false},false,false,n,"manual",newer,true)==Admission::CLOCK);
-  assert(reserve_discovery(r,{today,true,true},false,false,n,"nightly",newer)==Admission::ALLOWED);
-  Record failed=r;failed.phase=Phase::DEFERRED;failed.deferred_path=true;failed.not_before=today+86400;
-  assert(shape(failed));uint8_t debt[kRecordBytes];assert(encode(failed,debt));
-  assert(reserve_discovery(failed,{today,true,false},false,false,n,"manual",newer,true)==Admission::IDENTITY);
-  assert(encode(failed,after)&&memcmp(debt,after,sizeof(debt))==0);
-  failed.phase=Phase::QUARANTINED;assert(shape(failed));
-  assert(reserve_discovery(failed,{today,true,false},false,false,n,"manual",newer,true)==Admission::IDENTITY);
-  // A closed read-only check may spend a remaining same-day window, without
-  // replacing its retained target or refreshing any daily allowance.
-  assert(reserve_discovery(r,{today,true,false},false,false,n,"manual",newer,true)==Admission::ALLOWED);
-  Record discovery=n,closed;
-  assert(reserve_discovery(discovery,{today+1,true,false},false,false,n,"manual",campaign,true)==Admission::BUSY);
-  assert(close_discovery(discovery,{today+2,true,false},2000,true,today+86400,closed,true));
-  assert(reserve_discovery(closed,{today+3,true,false},false,false,n,"manual",campaign,true)==Admission::ALLOWED);
-  assert(same_target(n.target,closed.target)&&n.network_windows==closed.network_windows+1);
-  assert(reserve_discovery(closed,{today+86401,true,false},false,false,n,"manual",campaign,true)==Admission::NOT_DUE);
-  // Actual138-style no-update ledger: generation2, phase9, one network window,
-  // no bound target, no apply/begin attempts, and a future normal-maintenance due.
-  Record initial,empty_closed,reopened,finished;
-  constexpr uint32_t normal_due=today+600;
-  assert(start_discovery("manual_138",campaign,{today,true,false},false,false,initial));
-  assert(close_discovery(initial,{today+2,true,false},2000,true,normal_due,empty_closed,true));
-  assert(empty_closed.generation==2&&empty_closed.phase==Phase::DISCOVERY&&target_empty(empty_closed.target));
-  assert(empty_closed.network_windows==1&&!empty_closed.day_attempts&&!empty_closed.begins[0]&&!empty_closed.begins[1]);
-  uint8_t closed_bytes[kRecordBytes];assert(encode(empty_closed,closed_bytes));
-  assert(reserve_discovery(empty_closed,{today+3,true,false},false,false,reopened,"manual_again",newer,true)==Admission::ALLOWED);
-  assert(reopened.generation==3&&reopened.network_windows==2&&reopened.reserved_work_ms==kPreflightMs);
-  assert(reopened.work_remaining_ms+kPreflightMs==empty_closed.work_remaining_ms);
-  assert(reopened.budget_day==empty_closed.budget_day&&reopened.budget_granted==empty_closed.budget_granted);
-  assert(reopened.created==empty_closed.created&&reopened.not_before==normal_due);
-  assert(strcmp(reopened.origin,empty_closed.origin)==0&&!memcmp(reopened.campaign,empty_closed.campaign,16));
-  assert(target_empty(reopened.target)&&!reopened.day_attempts&&!reopened.begins[0]&&!reopened.begins[1]&&!reopened.fast_opportunities);
-  assert(encode(reopened,after)&&decode(after,sizeof(after),decoded));
-  assert(decoded.network_windows==2&&decoded.reserved_work_ms==kPreflightMs&&target_empty(decoded.target));
-  // A duplicate cannot allocate while the first explicit check still owns work.
-  assert(reserve_discovery(reopened,{today+4,true,false},false,false,n,"duplicate",campaign,true)==Admission::BUSY);
-  assert(close_discovery(reopened,{today+5,true,false},2000,true,normal_due,finished,true));
-  assert(finished.network_windows==2&&!finished.reserved_work_ms);
-  assert(reserve_discovery(finished,{today+6,true,false},false,false,n,"third",campaign,true)==Admission::BUDGET);
-  // Neither automatic wakes nor the word "manual" bypasses the existing due gate.
-  assert(reserve_discovery(empty_closed,{today+3,true,false},false,false,n,"manual",newer)==Admission::NOT_DUE);
-  assert(reserve_discovery(empty_closed,{normal_due-1,true,true},false,false,n,"nightly",newer)==Admission::NOT_DUE);
-  assert(reserve_discovery(empty_closed,{normal_due,true,true},false,false,n,"nightly",newer)==Admission::ALLOWED);
-  assert(n.network_windows==2&&n.work_remaining_ms+kPreflightMs==empty_closed.work_remaining_ms);
-  // Production previously persisted no distinction for successful and failed
-  // unbound reads. An explicit retry of either is charged; automatic cooldown stays.
-  Record failed_read;
-  assert(close_discovery(initial,{today+2,true,false},2000,true,normal_due,failed_read,false));
-  assert(encode(failed_read,after)&&!memcmp(closed_bytes,after,sizeof(after)));
-  assert(reserve_discovery(failed_read,{today+3,true,false},false,false,n,"retry",newer,true)==Admission::ALLOWED);
-  assert(n.network_windows==2&&n.work_remaining_ms+kPreflightMs==failed_read.work_remaining_ms);
-  assert(reserve_discovery(failed_read,{today+3,true,false},false,false,n,"automatic",newer)==Admission::NOT_DUE);
-  // A reset during discovery remains fully charged; an explicit retry cannot refund it.
-  Record interrupted;
-  assert(reconcile_reset(initial,{today+2,true,false},normal_due,interrupted));
-  assert(interrupted.work_remaining_ms==initial.work_remaining_ms&&!interrupted.reserved_work_ms);
-  assert(reserve_discovery(interrupted,{today+3,true,false},false,false,n,"retry",newer,true)==Admission::ALLOWED);
-  assert(n.network_windows==2&&n.work_remaining_ms+kPreflightMs==interrupted.work_remaining_ms);
-  // Remaining work is independently bounded even when a network window remains.
-  Record low=empty_closed;low.work_remaining_ms=999;assert(shape(low));
-  assert(reserve_discovery(low,{today+3,true,false},false,false,n,"manual",newer,true)==Admission::BUDGET);
-  low.work_remaining_ms=1000;assert(shape(low));
-  assert(reserve_discovery(low,{today+3,true,false},false,false,n,"manual",newer,true)==Admission::ALLOWED);
-  assert(n.reserved_work_ms==1000&&n.work_remaining_ms==0&&n.network_windows==2);
-  // No new-day refill, legacy slow-path escape, stale clock or target-debt bypass.
-  assert(reserve_discovery(empty_closed,{today+86401,true,false},false,false,n,"manual",newer,true)==Admission::NOT_DUE);
-  Record later_due=empty_closed;later_due.not_before=today+2*86400;assert(shape(later_due));
-  assert(reserve_discovery(later_due,{today+86401,true,true},false,false,n,"manual",newer,true)==Admission::NOT_DUE);
-  assert(reserve_discovery(empty_closed,{today+3,true,false},true,false,n,"manual",newer,true)==Admission::LEGACY);
-  assert(reserve_discovery(empty_closed,{today+3,false,false},false,false,n,"manual",newer,true)==Admission::CLOCK);
-  assert(reserve_discovery(empty_closed,{today+1,true,false},false,false,n,"manual",newer,true)==Admission::CLOCK);
-  Record slow=empty_closed;slow.deferred_path=true;assert(shape(slow));
-  assert(reserve_discovery(slow,{today+3,true,false},false,false,n,"manual",newer,true)==Admission::NOT_DUE);
-  Record target_debt;
-  assert(bind_discovery(initial,{today+1,true,false},target,true,true,target_debt));
-  assert(reserve_discovery(target_debt,{today+3,true,false},false,false,n,"manual",newer,true)==Admission::BUSY);
-  assert(encode(empty_closed,after)&&!memcmp(closed_bytes,after,sizeof(after)));
-  assert(encode(r,after)&&memcmp(before,after,sizeof(before))==0);
-  puts("PASS charged same-day manual discovery retry, duplicate/work/network bounds, normal cooldown and pending debt preserved");
+  uint8_t campaign[16]={1}, newer[16]={2};Record initial{},closed{},n{},r{};
+  assert(start_discovery("nightly",campaign,{today,true,true},false,false,initial));
+  assert(close_discovery(initial,{today+1,true,true},1000,true,normal_due,closed));
+  closed=exhausted(closed);roundtrip(closed);
+  const Record retained=closed;
+  // Same exhausted record: scheduled work remains capped; every actual new tap
+  // gets a finite reservation. Reason strings or automatic wakes grant nothing.
+  assert(reserve_discovery(closed,{normal_due,true,true},false,false,n,"manual",newer)==Admission::ALLOWED);
+  assert(reserve_discovery(closed,{today+2,true,false},false,false,n,"manual",newer)==Admission::NOT_DUE);
+  closed.not_before=today+2;
+  assert(reserve_discovery(closed,{today+2,true,true},false,false,n,"nightly",newer)==Admission::BUDGET);
+  for(unsigned i=0;i<12;++i) {
+    const uint32_t when=today+3+i*3;
+    assert(reserve_discovery(closed,{when,true,false},false,false,r,"manual",newer,true)==Admission::ALLOWED);
+    assert(r.network_windows==1&&r.day_attempts==0&&!r.begins[0]&&!r.begins[1]);
+    assert(r.work_remaining_ms==kDailyWorkMs-kPreflightMs&&r.reserved_work_ms==kPreflightMs);
+    assert(!strcmp(r.origin,closed.origin)&&!memcmp(r.campaign,closed.campaign,16));
+    assert(target_empty(r.target));roundtrip(r);
+    assert(reserve_discovery(r,{when,true,false},false,false,n,"duplicate",newer,true)==Admission::BUSY);
+    assert(close_discovery(r,{when+1,true,false},1000,true,normal_due,closed,true));roundtrip(closed);
+  }
+  // Reset retains the spent, compatible reservation; only another explicit
+  // request grants more work. No target or successful completion is invented.
+  assert(reserve_discovery(closed,{today+50,true,false},false,false,r,"manual",newer,true)==Admission::ALLOWED);
+  assert(reconcile_reset(r,{today+51,true,false},normal_due,n));
+  assert(n.work_remaining_ms==r.work_remaining_ms&&!active_phase(n)&&target_empty(n.target));
+  assert(reserve_discovery(n,{today+52,true,false},false,false,r,"manual",newer)==Admission::NOT_DUE);
+  assert(reserve_discovery(n,{today+52,true,false},false,false,r,"manual",newer,true)==Admission::ALLOWED);
+  // Actual discovery -> bind -> APPLY -> both board BEGINs -> resolve, repeated
+  // for distinct target releases, then a no-update check on the same day.
+  assert(close_discovery(r,{today+53,true,false},1000,true,normal_due,closed));
+  for(unsigned i=0;i<4;++i) {
+    const uint32_t when=today+60+i*10;newer[0]=uint8_t(i+3);
+    snprintf(target.version,sizeof(target.version),"6.4.%u",192+i);
+    snprintf(target.peer_version,sizeof(target.peer_version),"6.4.%u",192+i);
+    target.sha256[0]=uint8_t(i+5);target.peer_sha256[0]=uint8_t(i+9);
+    closed=exhausted(closed);
+    assert(reserve_discovery(closed,{when,true,false},false,false,r,"new_manual",newer,true)==Admission::ALLOWED);
+    assert(bind_discovery(r,{when+1,true,false},target,true,true,n));r=n;roundtrip(r);
+    assert(reserve_apply(r,{when+2,true,false},2000,kDailyWorkMs,true,n));r=n;
+    assert(r.day_attempts==1&&r.attempt_ordinal==i+1);roundtrip(r);
+    for(unsigned board=0;board<2;++board) {
+      assert(reserve_begin(r,{when+3,true,false},board,n));r=n;
+      assert(reserve_begin(r,{when+3,true,false},board,n));r=n;
+      assert(!reserve_begin(r,{when+3,true,false},board,n));
+    }
+    roundtrip(r);
+    assert(resolve(r,{when+4,true,false},target,true,true,true,closed));roundtrip(closed);
+  }
+  newer[0]=9;
+  assert(reserve_discovery(exhausted(closed),{today+110,true,false},false,false,r,"manual_no_update",newer,true)==Admission::ALLOWED);
+  assert(same_target(r.target,closed.target));
+  assert(close_discovery(r,{today+111,true,false},1000,true,normal_due,n,true));roundtrip(n);
+  assert(same_target(n.target,closed.target)&&n.phase==Phase::DISCOVERY);
+  // Same-target manual recovery retains all identity/validation evidence and
+  // may retry exhausted DEFERRED debt without replacing it with latest.
+  Record debt=exhausted(closed);debt.phase=Phase::DEFERRED;debt.deferred_path=true;
+  debt.not_before=normal_due;debt.validation_repeats=1;debt.validation_stage=7;debt.validation_error=-42;
+  assert(shape(debt));const Record original_debt=debt;
+  assert(reserve_preflight(debt,{today+120,true,false},false,n)==Admission::NOT_DUE);
+  assert(reserve_discovery(debt,{today+120,true,false},false,false,n,"manual",newer,true)==Admission::IDENTITY);
+  assert(reserve_manual_preflight(debt,{today+120,true,false},false,r)==Admission::ALLOWED);
+  assert(same_target(r.target,debt.target)&&!strcmp(r.origin,debt.origin)&&!memcmp(r.campaign,debt.campaign,16));
+  assert(r.validation_repeats==1&&r.validation_stage==7&&r.validation_error==-42&&r.deferred_path);
+  assert(r.network_windows==1&&r.day_attempts==0&&r.work_remaining_ms==kDailyWorkMs-kPreflightMs);roundtrip(r);
+  assert(reserve_apply(r,{today+121,true,false},1000,120000,true,n));r=n;
+  assert(reserve_begin(r,{today+122,true,false},0,n));r=n;
+  assert(reserve_begin(r,{today+122,true,false},1,n));r=n;
+  assert(finish(r,{today+123,true,false},2000,true,Failure::TEMPORARY,0,0,normal_due,nullptr,debt));
+  assert(debt.phase==Phase::DEFERRED&&same_target(debt.target,original_debt.target));
+  assert(reserve_preflight(debt,{today+124,true,false},false,n)==Admission::NOT_DUE);
+  assert(reserve_manual_preflight(debt,{today+124,true,false},false,r)==Admission::ALLOWED);
+  assert(reconcile_reset(r,{today+125,true,false},normal_due,n)&&n.phase==Phase::DEFERRED);
+  assert(same_target(n.target,original_debt.target)&&n.work_remaining_ms==r.work_remaining_ms);roundtrip(n);
+  // Neither manual entry bypasses clock, storage, busy, legacy, quarantine,
+  // active/armed work or an unbound legacy slow-path discovery.
+  assert(reserve_manual_preflight(debt,{today+126,false,false},false,n)==Admission::CLOCK);
+  assert(reserve_manual_preflight(debt,{today+126,true,false},true,n)==Admission::BUSY);
+  assert(reserve_manual_preflight(r,{today+126,true,false},false,n)==Admission::BUSY);
+  debt.phase=Phase::QUARANTINED;assert(reserve_manual_preflight(debt,{today+126,true,false},false,n)==Admission::QUARANTINED);
+  Record slow=retained;slow.deferred_path=true;
+  assert(reserve_discovery(slow,{today+2,true,false},false,false,n,"manual",newer,true)==Admission::NOT_DUE);
+  assert(reserve_discovery(retained,{today+2,false,false},false,false,n,"manual",newer,true)==Admission::CLOCK);
+  assert(reserve_discovery(retained,{today-1,true,false},false,false,n,"manual",newer,true)==Admission::CLOCK);
+  assert(reserve_discovery(retained,{today+2,true,false},true,false,n,"manual",newer,true)==Admission::LEGACY);
+  assert(reserve_discovery(retained,{today+2,true,false},false,true,n,"manual",newer,true)==Admission::BUSY);
+  Record full=retained;full.generation=UINT32_MAX;
+  assert(reserve_discovery(full,{today+2,true,false},false,false,n,"manual",newer,true)==Admission::STORAGE);
+  puts("PASS repeated explicit manual grants, full paired apply, codec compatibility, no-update/reset and exact-target recovery; automatic caps and safety guards retained");
 }
 '''
 
@@ -178,12 +174,12 @@ int main(){
       auto reason=Admission(value);
       assert(admission_allowed(reason)==(reason==Admission::ALLOWED));
       assert(last_admission==reason);
-      assert(!strcmp(refusal_result(true),reason==Admission::BUDGET?"policy_daily_limit":"policy_deferred"));
+      assert(!strcmp(refusal_result(true),"policy_deferred"));
       assert(!strcmp(refusal_result(false),phase==durable_ota::Phase::RESOLVED?"policy_target_valid":"policy_deferred"));
     }
   }
   observed=nullptr;assert(!admission_allowed(Admission::BUDGET));
-  assert(!strcmp(refusal_result(true),"policy_daily_limit"));
+  assert(!strcmp(refusal_result(true),"policy_deferred"));
   assert(!strcmp(refusal_result(false),"policy_deferred"));
   observed=&record;record.phase=durable_ota::Phase::RESOLVED;
   // Each actual early return must discard a previous invocation's BUDGET result.

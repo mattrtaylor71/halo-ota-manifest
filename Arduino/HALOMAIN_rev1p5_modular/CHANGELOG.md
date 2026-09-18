@@ -1,3 +1,7 @@
+# 6.4.192 candidate — manual updates without a daily tap limit
+
+Each explicit Manual Update request grants a fresh bounded attempt. Automatic wakes retain their admission and retry limits. Retained target debt, busy/armed/quarantine checks, image validation, the existing policy codec and the 02:00 Pacific schedule remain protected. Includes the 190 voice/list and 191 immediate-delete UI fixes. See [manual allowance behavior](docs/MANUAL_OTA_ALLOWANCE.md); build, publication and physical OTA results are recorded separately when complete.
+
 # 6.4.191 LCD installed — immediate shopping-list delete feedback
 
 Hide a shopping row as soon as its delete request is queued; retain data and NVS until confirmed, restoring the row on failure or timeout. Refreshes and encoder/touch navigation preserve item identity while pending. Remove the additional 270 ms confirmed-delete animation. LCD only; Sense and OTA behavior are unchanged. See [the change record](docs/SHOPPING_DELETE_RESPONSE.md).

@@ -50,7 +50,8 @@ inline uint16_t recovery_discovery_missing(const Record& old,Clock c,
      !credit.pending_credit_admitted||!credit.admitted_epoch||
      credit.admitted_epoch>c.epoch||!p.pending||strcmp(p.pending,credit.pending.id))missing|=RECOVERY_PENDING;
   // The first adoption may replace only an older closed read-only origin.
-  // After adoption, failures retain that exact origin and its spent allowance.
+  // After adoption, failures retain that exact origin. A fresh manual request
+  // may grant work only after proving this same ownership again.
   if(record_ok&&strcmp(old.origin,credit.pending.id)&&credit.admitted_epoch<old.high_water)missing|=RECOVERY_ORDER;
   return missing;
 }
@@ -62,9 +63,9 @@ inline bool recovery_discovery_owned(const Record& old,Clock c,
 inline Admission reserve_recovery_discovery(const Record& old,Clock c,
     const DiscoveryRecoveryProof& proof,bool explicit_manual,Record& out) {
   if(!recovery_discovery_owned(old,c,proof))return Admission::LEGACY;
-  // A deliberate recovery may open a genuinely later UTC day, using the same
-  // ordinary daily accounting as maintenance. It never renews the current day
-  // or advances a future not-before. Automatic work still needs its real timer.
+  // A deliberate recovery receives the same finite user-authorized grant as
+  // ordinary manual discovery, only after the full ownership proof above.
+  // Automatic work still needs its real timer and never gains a manual grant.
   Clock charged=c;
   if(explicit_manual&&!old.deferred_path&&c.epoch/86400UL>old.budget_day&&c.epoch>=old.not_before)
     charged.normal_maintenance=true;

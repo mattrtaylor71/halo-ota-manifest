@@ -40,7 +40,6 @@ static bool admission_allowed(durable_ota::Admission result) {
   return result==durable_ota::Admission::ALLOWED;
 }
 static const char* refusal_result(bool manual) {
-  if(manual&&last_admission==durable_ota::Admission::BUDGET)return "policy_daily_limit";
   if(!manual&&current()&&current()->phase==durable_ota::Phase::RESOLVED)return "policy_target_valid";
   return "policy_deferred";
 }
@@ -322,7 +321,8 @@ static bool enter(const char* reason,bool retained_legacy) {
       durable_ota::start_discovery(origin,campaign,c,false,false,candidate);
   } else if(r) {
     // Keep the original unresolved identity regardless of a newer latest file
-    // or a manual trigger. Only normal maintenance can replenish a new day.
+    // or a manual trigger. Automatic day replenishment still requires normal
+    // maintenance; a fresh explicit tap has its own bounded grant below.
     if(r->phase==durable_ota::Phase::DEFERRED&&!durable_ota::bench_active(*r)&&c.normal_maintenance&&c.epoch/86400UL>r->budget_day){
       if(!durable_ota::rollover(*r,c,candidate)||!commit_candidate(candidate,work.original_start,work.original_budget))return false;
       r=current();
@@ -342,6 +342,8 @@ static bool enter(const char* reason,bool retained_legacy) {
       }
       admitted=admission_allowed(result);
     }
+    else if(halo_ota_manual_override_active()&&!durable_ota::bench_active(*r))
+      admitted=admission_allowed(durable_ota::reserve_manual_preflight(*r,c,false,candidate));
     else if(r->one_shot.phase==durable_ota::OneShotPhase::ARMED)
       admitted=admission_allowed(durable_ota::one_shot_reserve(*r,c,g_coord_sense_boot_id,true,false,candidate));
     else admitted=admission_allowed(durable_ota::reserve_preflight(*r,c,false,candidate));
@@ -349,6 +351,9 @@ static bool enter(const char* reason,bool retained_legacy) {
   if(!admitted||!commit_candidate(candidate,work.original_start,work.original_budget,first)){
     Serial.printf("[OTA_POLICY] defer phase=%u storage=%u normal=%u admission=%u\n",current()?unsigned(current()->phase):255,unsigned(state_status),unsigned(work.normal),unsigned(last_admission));return false;
   }
+  if(halo_ota_manual_override_active()&&!durable_ota::bench_active(candidate))
+    Serial.printf("[OTA_POLICY] explicit_manual_grant phase=%u network_windows=%u apply_attempts=%u reserved_ms=%lu\n",
+      unsigned(candidate.phase),unsigned(candidate.network_windows),unsigned(candidate.day_attempts),(unsigned long)candidate.reserved_work_ms);
   // This reservation was created in this boot, after checked settlement.
   if(bench_manual)boot_reconciled=true;
   work.live=true;work.phase_start=millis();work.phase_budget=current()->reserved_work_ms;

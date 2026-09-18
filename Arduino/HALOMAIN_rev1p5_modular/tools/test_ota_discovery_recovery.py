@@ -201,13 +201,12 @@ static void composition_cases(){
  // snapshot was false BEFORE prepare. The real enter must still adopt0916.
  ++epoch;++now_ms;next_invocation();CHECK(coord_credit_prepare_work("manual"));
  CHECK(!strcmp(g_coord_pending,"nightly_20260916")&&g_coord_credit.admitted_epoch==epoch);
- CHECK(enter("manual",false));CHECK(!strcmp(state_record.origin,g_coord_pending)&&state_record.network_windows==2);
+ CHECK(enter("manual",false));CHECK(!strcmp(state_record.origin,g_coord_pending)&&state_record.network_windows==1);
  work.manifest=&sense_manifest;CHECK(complete_downgrade_policy_check("6.4.162","manual"));
  CHECK(done_ids.size()==2&&!g_coord_pending[0]);
  epoch=1789635601;++now_ms;next_invocation();CHECK(coord_credit_prepare_work("manual"));
  CHECK(!strcmp(g_coord_pending,"nightly_20260917"));
- CHECK(!enter("manual",false)&&last_admission==Admission::BUDGET);CHECK(done_ids.size()==2);
- epoch+=86400;++now_ms;next_invocation();CHECK(enter("manual",true));
+ CHECK(enter("manual",false));CHECK(done_ids.size()==2);
  CHECK(state_record.network_windows==1&&!strcmp(state_record.origin,"nightly_20260917"));
  work.manifest=&sense_manifest;CHECK(complete_downgrade_policy_check("6.4.162","manual"));CHECK(done_ids.size()==3);
  // Failed accounting cannot complete pending. This uses actual readback commit.
@@ -216,13 +215,14 @@ static void composition_cases(){
   CHECK(!complete_downgrade_policy_check("6.4.162","manual"));CHECK(done_ids.empty()&&g_coord_pending[0]);
  }
  // Cut after checked close but before coordinator write: no postboot credit,
- // retain spent window and recheck both manifests within second charged grant.
+ // retain the same origin and recheck both manifests within a fresh explicit grant.
  reset_recovery();CHECK(enter("manual",true));work.manifest=&sense_manifest;legacy_write_ok=false;
  CHECK(!complete_downgrade_policy_check("6.4.162","manual"));
  CHECK(work.finished&&!active_phase(state_record)&&done_ids.empty()&&g_coord_pending[0]);
  const auto cut_record=state_record;work={};boot_reconciled=false;legacy_write_ok=true;next_invocation();++epoch;
  CHECK(!postboot_completion_ready());CHECK(enter("manual",true));
- CHECK(state_record.network_windows==2&&state_record.work_remaining_ms==cut_record.work_remaining_ms-kPreflightMs);
+ CHECK(state_record.network_windows==1&&state_record.work_remaining_ms==kDailyWorkMs-kPreflightMs);
+ CHECK(state_record.attempt_ordinal==cut_record.attempt_ordinal);
  work.manifest=&sense_manifest;CHECK(complete_downgrade_policy_check("6.4.162","manual"));
  CHECK(done_ids.size()==1);
  // No pair/clock/proof or mismatched identity can close the accounting/credit.
@@ -250,6 +250,7 @@ static void composition_cases(){
   CHECK(resolve(begun,{epoch-86415,true,true},begun.target,true,true,true,previous));
   CHECK(reserve_discovery(previous,{epoch,true,true},false,false,opened,"completed_comparison",campaign,true)==Admission::ALLOWED);
   CHECK(close_discovery(opened,{epoch+1,true,false},1000,true,epoch+86400,closed));
+  if(fault==3)closed.deferred_path=true; // retained historical slow-path comparison
   state_record=closed;uint8_t bytes[kRecordBytes];CHECK(encode(closed,bytes));store.bytes.assign(bytes,bytes+sizeof(bytes));
   epoch+=2;g_coord_credit.admitted_epoch=epoch;
   if(fault==1)flash_hash_matches=false;
@@ -268,7 +269,7 @@ static void composition_cases(){
     CHECK(!memcmp(&state_record.target,&closed.target,sizeof(closed.target))&&done_ids.size()==1);
    }
   }
-  else {CHECK(enter("manual",false));CHECK(state_record.network_windows==2);
+  else {CHECK(enter("manual",false));CHECK(state_record.network_windows==1);
    CHECK(!memcmp(&closed.target,&state_record.target,sizeof(closed.target)));
    CHECK(state_record.attempt_ordinal==closed.attempt_ordinal&&state_record.day_attempts==closed.day_attempts);
    work.manifest=&sense_manifest;CHECK(complete_downgrade_policy_check("6.4.162","manual"));
@@ -296,18 +297,21 @@ int main(){
  CHECK(!memcmp(&credit_before,&g_coord_credit,sizeof(credit_before))&&debt_value&&g_coord_pending[0]);
  CHECK(at("policy_write")<at("policy_readback")&&at("policy_readback")<at("policy_published"));
  CHECK(legacy_commits==0);
- // Close/retry uses the adopted origin, preserving spent same-day windows.
+ // Close/retry keeps the adopted origin; each fresh manual request grants bounded work.
  Record closed;CHECK(close_discovery(state_record,{epoch+1,true,false},1000,true,epoch+86400,closed));
  CHECK(reserve_recovery_discovery(closed,{epoch+2,true,false},proof(),true,n)==Admission::ALLOWED);
- CHECK(n.network_windows==2&&n.work_remaining_ms==closed.work_remaining_ms-kPreflightMs);
+ CHECK(n.network_windows==1&&n.work_remaining_ms==kDailyWorkMs-kPreflightMs);
  CHECK(close_discovery(n,{epoch+3,true,false},1000,true,epoch+86400,closed));
- const Record spent=closed;CHECK(reserve_recovery_discovery(spent,{epoch+4,true,false},proof(),true,n)==Admission::BUDGET);
+ const Record spent=closed;CHECK(reserve_recovery_discovery(spent,{epoch+4,true,false},proof(),true,n)==Admission::ALLOWED);
+ CHECK(n.network_windows==1&&n.work_remaining_ms==kDailyWorkMs-kPreflightMs);
  CHECK(!memcmp(&spent,&closed,sizeof(spent)));
  // Real calendar versus explicit manual: no generic automatic day renewal.
  reset_recovery();CHECK(reserve_recovery_discovery(state_record,{epoch,true,false},proof(),false,n)==Admission::NOT_DUE);
  CHECK(reserve_recovery_discovery(state_record,{epoch,true,true},proof(),false,n)==Admission::ALLOWED);
  auto future=state_record;future.not_before=epoch+100;
- CHECK(reserve_recovery_discovery(future,{epoch,true,false},proof(),true,n)==Admission::NOT_DUE);
+ CHECK(reserve_recovery_discovery(future,{epoch,true,false},proof(),true,n)==Admission::ALLOWED);
+ CHECK(n.not_before==future.not_before); // manual grant does not change automatic due time
+ CHECK(reserve_recovery_discovery(future,{epoch,true,false},proof(),false,n)==Admission::NOT_DUE);
  // Admission cannot erase target-bearing, destructive, uncertain or other-owner debt.
  for(unsigned fault=0;fault<29;++fault){
   reset_recovery();const auto before=store.bytes;
@@ -357,7 +361,7 @@ int main(){
  CHECK(!strcmp(closed.origin,g_coord_pending)&&closed.network_windows==1);
  CHECK(closed.work_remaining_ms==granted.work_remaining_ms&&!active_phase(closed));
  CHECK(reserve_recovery_discovery(closed,{epoch+2,true,false},proof(),true,n)==Admission::ALLOWED);
- CHECK(n.network_windows==2);
+ CHECK(n.network_windows==1);
  composition_cases();
  printf("PASS %u recovery admission/ownership/accounting/commit checks\n",checks);
 }

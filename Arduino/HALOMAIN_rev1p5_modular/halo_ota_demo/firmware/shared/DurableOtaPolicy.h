@@ -325,6 +325,35 @@ inline bool rollover(const Record& old,Clock c,Record& out) {
   out.attempt_begins[0]=out.attempt_begins[1]=0;out.work_remaining_ms=kDailyWorkMs;
   return shape(out);
 }
+// Deliberate user intent authorizes one fresh bounded invocation. Keep the
+// existing codec/accounting so rollback firmware can safely reconcile it.
+// Call only after admission has proved a settled record or exact-target retry;
+// automatic wakes never call this helper. This is not an unlimited retry loop.
+inline void replenish_manual_budget(Record& r,Clock c) {
+  r.budget_day=c.epoch/86400UL;r.budget_granted=c.epoch;
+  r.network_windows=r.day_attempts=r.begins[0]=r.begins[1]=0;
+  r.attempt_begins[0]=r.attempt_begins[1]=0;r.work_remaining_ms=kDailyWorkMs;
+}
+// Retry retained target debt without waiting for another daily allowance.
+// Active writes, armed peer timers, quarantine and uncertain identity still
+// refuse. A manual retry retains target/origin/campaign/validation evidence and
+// takes the slow path: at most one apply and two begins per board this grant.
+inline Admission reserve_manual_preflight(const Record& old,Clock c,bool busy,Record& out) {
+  if(!shape(old))return Admission::IDENTITY;
+  if(!clock_valid(old,c))return Admission::CLOCK;
+  if(busy||active_phase(old))return Admission::BUSY;
+  if(old.phase==Phase::QUARANTINED)return Admission::QUARANTINED;
+  if(bench_active(old)||old.phase==Phase::ARMED||old.phase==Phase::ARM_PENDING||
+      (old.one_shot.phase!=OneShotPhase::NONE&&old.one_shot.phase!=OneShotPhase::CLOSED))return Admission::NOT_DUE;
+  if(old.phase!=Phase::FAST&&old.phase!=Phase::DEFERRED)return Admission::IDENTITY;
+  if(uint64_t(c.epoch)+kPreflightMs/1000>UINT32_MAX)return Admission::BUDGET;
+  if(!next(old,c,out))return Admission::STORAGE;
+  replenish_manual_budget(out,c);
+  out.phase=Phase::PREFLIGHT;out.deferred_path=true;out.network_windows=1;
+  out.work_remaining_ms-=kPreflightMs;out.reserved_work_ms=kPreflightMs;
+  out.active_started=c.epoch;out.active_deadline=c.epoch+kPreflightMs/1000;
+  return shape(out)?Admission::ALLOWED:Admission::IDENTITY;
+}
 // Internal shared reservation mechanics; one-shot admission must first prove
 // its immutable arm and new boot in one_shot_reserve(). Normal callers use
 // reserve_preflight(), which never consumes an armed one-shot implicitly.
