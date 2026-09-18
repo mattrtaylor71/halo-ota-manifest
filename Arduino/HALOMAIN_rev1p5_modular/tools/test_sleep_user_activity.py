@@ -21,6 +21,7 @@ def main():
  assert ino.index('if (!validate_protocol_message(doc))',ino.index('static bool parse_input_message(const char* json_str) {'))<start
  prefix=r'''
 #include <cstdio>
+static bool g_list_screen_active=false;
 #include <cstdlib>
 #include <vector>
 #include <string>
@@ -38,6 +39,7 @@ void check(bool ok,const char* msg){++checks;if(!ok){std::fprintf(stderr,"FAIL %
 '''
  code=prefix+'\n'+dedupe+'\nbool admit(const char* type,uint32_t id){Doc doc{id};\n'+block+'\nreturn true;\n}\n'+r'''
 int main(){
+ (void)sense_user_interrupt_generation();
  (void)&sense_note_admitted_user_action; // Keep old admission compilable for the behavioral negative control.
  const char* passive[]={"INPUT_PING","INPUT_SLEEP","INPUT_SENSE_FW","INPUT_FW_INFO","INPUT_TEST_ERRORS","INPUT_MAINT_TEST","LINK_HB","LCD_DIAG","UNKNOWN","INPUT_NOT_A_COMMAND"};
  uint32_t id=100;

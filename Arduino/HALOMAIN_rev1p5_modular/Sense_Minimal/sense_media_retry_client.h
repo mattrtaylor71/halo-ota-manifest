@@ -14,6 +14,12 @@ class SenseMediaRetryClient : public WiFiClientSecure {
   int connect(const char* host, uint16_t port, int32_t timeout_ms) override {
     if (cancel_now()) return 0;
     if (background_ && (timeout_ms <= 0 || timeout_ms > 8000)) timeout_ms = 8000;
+    if (media_voice_list_active()) {
+      const uint32_t remaining = media_voice_list_remaining_ms();
+      if (remaining < 1000) { WiFiClientSecure::stop(); return 0; }
+      if (uint32_t(timeout_ms) > remaining) timeout_ms = remaining;
+      setHandshakeTimeout(remaining < 8000 ? remaining / 1000 : 8);
+    }
     const int connected = WiFiClientSecure::connect(host, port, timeout_ms);
     // DNS/TCP/handshake are synchronous SDK phases. They cannot be stopped
     // safely by another task; close here before sending any request bytes.

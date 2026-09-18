@@ -22,6 +22,9 @@ static std::atomic<bool> g_media_retry_user_paused{false};
 static std::atomic<TaskHandle_t> g_media_retry_network_owner{nullptr};
 static std::atomic<bool> g_media_retry_network_saved{false};
 static std::atomic<uint32_t> g_media_retry_network_generation{0};
+static std::atomic<bool> g_media_voice_list_mode{false};
+static std::atomic<uint32_t> g_media_voice_list_started_ms{0};
+static constexpr uint32_t VOICE_LIST_UPLOAD_BUDGET_MS = 12000;
 
 // Socket cancellation is performed only by the task that owns that socket.
 // A foreground request on another task must never inherit background cancel.
@@ -34,23 +37,43 @@ static bool media_upload_network_active() {
 static bool media_retry_network_active() {
   return media_upload_network_active() && g_media_retry_network_saved.load();
 }
+static bool media_voice_list_active() {
+  return media_upload_network_active() && g_media_voice_list_mode.load();
+}
+static uint32_t media_voice_list_remaining_ms() {
+  if (!media_voice_list_active()) return UINT32_MAX;
+  const uint32_t age = uint32_t(millis()) - g_media_voice_list_started_ms.load();
+  return age < VOICE_LIST_UPLOAD_BUDGET_MS ? VOICE_LIST_UPLOAD_BUDGET_MS - age : 0;
+}
+static bool media_voice_list_timed_out() {
+  return media_voice_list_active() && media_voice_list_remaining_ms() == 0;
+}
+static bool media_voice_list_user_interrupted() {
+  return media_voice_list_active() && sense_user_interrupt_generation() !=
+      g_media_retry_network_generation.load();
+}
 static bool media_retry_network_cancelled() {
   return media_upload_network_active() &&
       ((g_media_retry_network_saved.load() && g_media_retry_user_paused.load()) ||
-       sense_user_action_generation() != g_media_retry_network_generation.load());
+       media_voice_list_timed_out() ||
+       (media_voice_list_active() ? sense_user_interrupt_generation() :
+                                  sense_user_action_generation()) != g_media_retry_network_generation.load());
 }
 class MediaRetryNetworkScope {
  public:
-  explicit MediaRetryNetworkScope(const UploadJob& job) {
+  explicit MediaRetryNetworkScope(const UploadJob& job, bool list_interactive = false) {
     const TaskHandle_t task = xTaskGetCurrentTaskHandle();
-    const uint32_t generation = sense_user_action_generation();
     const bool saved = job.from_voice_sd || job.from_image_sd || job.from_persisted;
+    const bool list_voice = list_interactive && job.is_voice && !saved;
+    const uint32_t generation = list_voice ? sense_user_interrupt_generation() : sense_user_action_generation();
     TaskHandle_t expected = nullptr;
     if (task && g_media_retry_network_owner.compare_exchange_strong(expected, task)) {
       // Only this task consults these fields after publishing its ownership.
       // Snapshot before claiming so an input racing admission is not lost.
       g_media_retry_network_generation.store(generation);
       g_media_retry_network_saved.store(saved);
+      g_media_voice_list_mode.store(list_voice);
+      g_media_voice_list_started_ms.store(uint32_t(millis()));
       active_ = outermost_ = true;
     } else if (task && expected == task) {
       // Nested work inherits the original input generation; opening a nested
@@ -66,6 +89,7 @@ class MediaRetryNetworkScope {
     if (!active_) return;
     if (outermost_) {
       g_media_retry_network_saved.store(false);
+      g_media_voice_list_mode.store(false);
       g_media_retry_network_generation.store(0);
       g_media_retry_network_owner.store(nullptr);
     } else {

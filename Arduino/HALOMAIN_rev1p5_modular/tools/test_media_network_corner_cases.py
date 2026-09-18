@@ -40,7 +40,8 @@ static std::function<void(const char*)> boundary_hook;
 static void boundary(const char* name){if(boundary_hook)boundary_hook(name);}
 static constexpr uint32_t portMAX_DELAY=UINT32_MAX;
 static int xSemaphoreTake(void*,uint32_t timeout){
-  assert(timeout==portMAX_DELAY);boundary("lock_wait");
+  assert(timeout==portMAX_DELAY||timeout==0);boundary("lock_wait");
+  if(timeout==0&&semaphore_held)return 0;
   assert(!semaphore_held);semaphore_held=true;++semaphore_acquires;return 1;
 }
 static void xSemaphoreGive(void*){assert(semaphore_held);semaphore_held=false;++semaphore_releases;}
@@ -50,10 +51,11 @@ static std::string input_bytes,reply_body;
 static size_t input_offset=0;
 static unsigned ack_checks=0;
 ''')
-    source = replace_once(source, 'static bool media_retry_network_active(){return background&&task==owner;}\nstatic bool media_retry_network_cancelled(){return media_retry_network_active()&&paused;}\nstatic bool media_upload_network_active(){return media_retry_network_active();}', r'''
+    source = replace_once(source, 'static bool media_retry_network_active(){return background&&task==owner;}\nstatic bool media_retry_network_cancelled(){return media_retry_network_active()&&paused;}\nstatic bool media_upload_network_active(){return media_retry_network_active();}\nstatic bool media_voice_list_active(){return false;}\nstatic uint32_t media_voice_list_remaining_ms(){return UINT32_MAX;}\nstatic bool media_voice_list_timed_out(){return false;}', r'''
 #include "Sense_Minimal/sense_user_activity.h"
 using TaskHandle_t=void*;
 static TaskHandle_t xTaskGetCurrentTaskHandle(){return reinterpret_cast<void*>(static_cast<uintptr_t>(task));}
+static uint32_t millis();
 ''' + owner)
     source = replace_once(source, 'static bool sense_voice_backend_ack(const UploadJob&,int code,JsonDocument&){return code==202&&receipt_ok;}', r'''
 static int mbedtls_sha256(const unsigned char* data,size_t len,uint8_t* digest,int mode){
@@ -64,8 +66,9 @@ static int mbedtls_sha256(const unsigned char* data,size_t len,uint8_t* digest,i
 ''' + network.definition(voice, 'static bool sense_voice_backend_ack('))
     source = replace_once(source, 'static void uart_send_sense_diag(const char*,const char*,const char*,int32_t,const char*){}',
                           'static void uart_send_sense_diag(const char*,const char* event,const char*,int32_t,const char*){boundary(event);}')
-    source = replace_once(source, 'static void http_queue_lock(const char*,uint32_t){++locks;}\nstatic void http_queue_unlock(const char*,uint32_t){++unlocks;}',
-                          'static void http_queue_lock(const char*,uint32_t);\nstatic void http_queue_unlock(const char*,uint32_t);')
+    lock_type = 'bool' if 'static bool http_queue_lock(' in upload else 'void'
+    source = replace_once(source, 'static bool http_queue_lock(const char*,uint32_t){++locks;return true;}\nstatic void http_queue_unlock(const char*,uint32_t){++unlocks;}',
+                          f'static {lock_type} http_queue_lock(const char*,uint32_t);\nstatic void http_queue_unlock(const char*,uint32_t);')
     source = replace_once(source, 'in_sdk=true;last_connect=timeout;if(cancel_connect)paused=true;in_sdk=false;return transport_ok;',
                           'in_sdk=true;last_connect=timeout;boundary("sdk_connect");in_sdk=false;return transport_ok;')
     source = replace_once(source, 'virtual size_t write(const uint8_t*,size_t n){\n    in_sdk=true;++io_writes;write_sizes.push_back(n);\n    if(cancel_write&&io_writes==cancel_write)paused=true;in_sdk=false;return n;\n  }', r'''
@@ -113,7 +116,7 @@ int getSize(){boundary("reply_size");return reply_body.size();}
     original = network.definition(source, 'static void production_http_queue_unlock(')
     source = source[:start] + source[start:].replace(original, '', 1)
     marker = 'static bool voice_upload_and_parse('
-    source = source.replace(marker, network.definition(upload, 'static void http_queue_lock(') + '\n' +
+    source = source.replace(marker, network.definition(upload, f'static {lock_type} http_queue_lock(') + '\n' +
                             network.definition(upload, 'static void http_queue_unlock(') + '\n' + marker, 1)
     digest = hashlib.sha256(b'request:test-owner|test-device|test-session|0123456789abcdef0123456789abcdef').hexdigest()
     return source + r'''

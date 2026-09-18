@@ -72,7 +72,7 @@ static LcdOtaQueryPoll sense_lcd_ota_query_poll(LcdOtaQuerySnapshot& s){s=reply;
  if(r==LCD_QUERY_READY){strcpy(g_lcd_query_coord_id,g_peer_gate.challenge);strcpy(g_lcd_query_coord_owner,s.coord_owner);
   g_lcd_query_coord_lease_ms=s.coord_lease_ms;g_lcd_query_peer_boot_id=s.peer_boot_id;}
  return r;}
-static bool action_busy=false,g_list_screen_active=false,setup_active=false;
+static bool action_busy=false,setup_active=false;
 static bool sense_action_inflight(){return action_busy;}
 static struct{bool isSetupModeActive(){return setup_active;}}g_provisioning_manager;
 '''

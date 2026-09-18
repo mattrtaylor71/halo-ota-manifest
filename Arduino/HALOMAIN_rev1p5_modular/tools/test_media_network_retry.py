@@ -66,6 +66,7 @@ def harness(root):
 #include "Sense_Minimal/sense_ops.h"
 #include "Sense_Minimal/sense_media_network.h"
 using String=std::string;
+static constexpr int pdTRUE=1;
 static uint32_t clock_ms,delay_ms,reset_budget,last_handshake,last_connect,last_stream_timeout;
 static unsigned posts,resets,locks,unlocks,dma_releases,dma_acquires;
 static bool connected=true,identity_ok=true,age_ok=true,receipt_ok=true,begin_ok=true;
@@ -80,6 +81,9 @@ static std::vector<size_t> write_sizes;
 static bool media_retry_network_active(){return background&&task==owner;}
 static bool media_retry_network_cancelled(){return media_retry_network_active()&&paused;}
 static bool media_upload_network_active(){return media_retry_network_active();}
+static bool media_voice_list_active(){return false;}
+static uint32_t media_voice_list_remaining_ms(){return UINT32_MAX;}
+static bool media_voice_list_timed_out(){return false;}
 static bool foreground_active=false,dish_scan_inflight=false,voice_recording_active=false;
 static bool upload_worker_holding_in_place=false,g_upload_flush_requested=false;
 static const char* foreground_reason="foreground_active";
@@ -126,7 +130,7 @@ static bool wifi_is_connected(){return connected;}
 static void scan_ui_status_emit(const char*,const char*,const char*,uint32_t,bool){}
 static void log_wifi_snapshot(const char*){}
 static void wifi_recover_if_needed(const char*,int){++recoveries;}
-static void http_queue_lock(const char*,uint32_t){++locks;}
+static bool http_queue_lock(const char*,uint32_t){++locks;return true;}
 static void http_queue_unlock(const char*,uint32_t){++unlocks;}
 static bool wifi_hard_reset_and_reconnect(const char*,uint32_t budget){++resets;reset_budget=budget;return connected;}
 struct Stream {

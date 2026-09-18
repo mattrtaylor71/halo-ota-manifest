@@ -147,12 +147,18 @@ static void reset_join(){
 static bool g_upload_flush_requested=false;
 static unsigned long g_upload_hold_since_ms=0,UPLOAD_HOLD_MAX_MS=600000;
 static const uint32_t UPLOAD_HOLD_HIGHWATER=8;
-struct UploadJob{bool from_voice_sd=false,from_image_sd=false,from_persisted=false;};
+struct UploadJob{bool from_voice_sd=false,from_image_sd=false,from_persisted=false,is_voice=false;uint32_t job_id=0;};
 static void* upload_queue=(void*)1;static constexpr int pdTRUE=1;
 static UploadJob queue_head{};static bool peek_fails=false;
 static unsigned peek_calls=0;
 static int xQueuePeek(void*,UploadJob*job,int){++peek_calls;if(!upload_count||peek_fails)return 0;*job=queue_head;return pdTRUE;}
 static struct{bool load(){return false;}}g_media_retry_user_paused;
+// This OTA fixture exercises ordinary held media, not the interactive-list
+// voice transport. Its new admission dependencies remain inactive here.
+static bool g_list_screen_active=false;
+static struct{uint32_t load(){return 0;}}g_voice_list_attempted_job;
+static bool upload_worker_peek_parked_job(UploadJob&){return false;}
+static bool voice_list_pending(){return false;}
 static bool foreground_priority_active(uint32_t,const char**){return false;}
 ''' + definition(worker, 'static bool uploads_held_for_session(') + '\n'
     source += definition(wrapper, 'static bool ota_yield_automatic_readiness_to_fresh_media()') + '\n'

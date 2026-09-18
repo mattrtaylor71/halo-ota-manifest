@@ -38,6 +38,7 @@ static unsigned persisted=0,delivered=0,deleted=0;
 static unsigned worker_freed=0,worker_errors=0,phase_continued=0,spool_success=0,spool_failure=0;
 static uint16_t g_cycle_uploads_fail=0,g_cycle_uploads_ok=0;
 static bool upload_inflight=false;
+static std::atomic<bool> g_voice_list_followup{false};
 static UploadJob retained={};
 static std::vector<uint8_t> retained_bytes;
 static unsigned g_upload_persist_cached_count=0;
@@ -74,7 +75,7 @@ static uint32_t upload_queue_count(){return 0;}
     helper = (corners.network.definition(worker, 'auto park_cancelled_fresh =') + ';\n'
               if 'auto park_cancelled_fresh =' in worker else
               'auto park_cancelled_fresh = [&](const char*){return false;};\n')
-    source += '#define free worker_free\nstatic void actual_worker_voice_dispatch(const UploadJob& job,bool accepted){do{\n' + helper
+    source += '#define free worker_free\nstatic void actual_worker_voice_dispatch(const UploadJob& job,bool accepted){const bool list_voice=media_voice_list_active();do{\n' + helper
     start = worker.index('        if (accepted) {', worker.index('static void upload_worker_task('))
     end = worker.index('        continue;', worker.index('        free(job.image_buf);', start)) + len('        continue;')
     source += worker[start:end] + '\n}while(false);}\n'

@@ -22,6 +22,7 @@
 #define SENSE_LIST_H
 
 #include "sense_action_summary.h"
+#include "sense_list_transport.h"
 
 // Forward declarations for .ino functions called by list API code
 static void uart_send_ui_list();
@@ -244,15 +245,20 @@ static void remove_item_from_ram_list_locked(int list_index) {
   }
 }
 
-static void delete_item_from_api(const char* requested_item_id) {
+static ListRequestResult delete_item_from_api(const char* requested_item_id) {
   if (requested_item_id == NULL || strlen(requested_item_id) == 0 ||
       strlen(requested_item_id) >= 64) {
     Serial.println("✗ Cannot delete item: invalid ID!");
-    return;
+    return ListRequestResult::Failed;
   }
   // Keep this request's identity stable while the HTTP operation is running.
   char item_id[64];
   strncpy(item_id, requested_item_id, sizeof(item_id));
+
+  SenseListTransportLease transport("delete");
+  if (!transport) return ListRequestResult::Deferred;
+  SenseBackupWifiCall backup_call;
+  if (!backup_call) return ListRequestResult::Deferred;
 
   Serial.printf("\n=== Deleting Item ID: %s ===\n", item_id);
 
@@ -276,7 +282,7 @@ static void delete_item_from_api(const char* requested_item_id) {
   if (item_huuid[0] == '\0') {
     Serial.printf("[DELETE] fail reason=missing_uuid id=%s\n", item_id);
     shopping_list_delete_failed(item_id, "missing_uuid");
-    return;
+    return ListRequestResult::Failed;
   }
 
   // Match the phone's shared-UUID remove operation.
@@ -284,7 +290,7 @@ static void delete_item_from_api(const char* requested_item_id) {
   load_owner_id_or_default(owner_id, sizeof(owner_id));
   if (!owner_id[0]) {
     shopping_list_delete_failed(item_id, "owner_unavailable");
-    return;
+    return ListRequestResult::Failed;
   }
   String request_body = "{";
   request_body += "\"operation\":\"remove\",";
@@ -368,11 +374,13 @@ static void delete_item_from_api(const char* requested_item_id) {
     }
     shopping_list_send_delete_result(item_id, true, "removed");
     uart_send_ui_status("Item deleted");
+    return ListRequestResult::Completed;
   } else {
     const char* reason = httpResponseCode == 200 ? "not_confirmed" : "http";
     Serial.printf("[DELETE] fail code=%d reason=%s id=%s\n", httpResponseCode, reason, item_id);
     shopping_list_delete_failed(item_id, reason);
   }
+  return ListRequestResult::Failed;
 }
 
 // ── Fetch shopping list from API ───────────────────────────────────
@@ -456,9 +464,13 @@ static bool list_ensure_wifi_ready() {
   }
 }
 
-static bool fetch_shopping_list_from_api() {
+static ListRequestResult fetch_shopping_list_from_api() {
+  SenseListTransportLease transport("fetch");
+  if (!transport) return ListRequestResult::Deferred;
+  SenseBackupWifiCall backup_call;
+  if (!backup_call) return ListRequestResult::Deferred;
   sense_action_summary::ListAttempt action_attempt;
-  if (!list_ensure_wifi_ready()) return false;
+  if (!list_ensure_wifi_ready()) return ListRequestResult::Failed;
 
   Serial.println("\n=== Fetching Shopping List from Trepo API ===");
 
@@ -467,7 +479,7 @@ static bool fetch_shopping_list_from_api() {
   load_owner_id_or_default(owner_id, sizeof(owner_id));
   if (!owner_id[0]) {
     list_refresh_fail("owner_unavailable");
-    return false;
+    return ListRequestResult::Failed;
   }
   String request_body = "{";
   request_body += "\"operation\":\"view\",";
@@ -481,7 +493,7 @@ static bool fetch_shopping_list_from_api() {
   if (!extract_host_from_url(list_url, list_host)) {
     Serial.println("✗ List fetch: Failed to parse host from URL");
     list_refresh_fail("host_parse_fail");
-    return false;
+    return ListRequestResult::Failed;
   }
   bool wifi_ok = (WiFi.status() == WL_CONNECTED);
   IPAddress ip = WiFi.localIP();
@@ -489,7 +501,7 @@ static bool fetch_shopping_list_from_api() {
   if (!wifi_ok || !ip_ok) {
     Serial.println("[NET] not ready - skipping list fetch");
     list_refresh_fail("net_not_ready");
-    return false;
+    return ListRequestResult::Failed;
   }
   HaloNtpDnsGuard ntp_dns_guard;
   bool dns_ok = ensure_dns_ready(list_host.c_str());
@@ -591,7 +603,7 @@ static bool fetch_shopping_list_from_api() {
                           heap_admitted, tls_err, tls_err_str);
       if (!heap_admitted) {
         list_refresh_fail("low_internal_heap");
-        return false;  // No handshake occurred; do not enter the network retry path.
+        return ListRequestResult::Failed;  // No handshake occurred; do not enter the network retry path.
       }
       Serial.print("HTTP Response code: ");
       Serial.println(httpResponseCode);
@@ -614,14 +626,14 @@ static bool fetch_shopping_list_from_api() {
             list_refresh_fail("json_parse");
           }
           action_attempt.complete(parse_ok);
-          return parse_ok;
+          return parse_ok ? ListRequestResult::Completed : ListRequestResult::Failed;
         } else {
           Serial.println("⚠ Response doesn't look like JSON");
           Serial.print("First 100 chars: ");
           Serial.println(response_json.substring(0, 100));
           list_refresh_fail("json_parse");
         }
-        return false;
+        return ListRequestResult::Failed;
       }
       if (httpResponseCode > 0) {
         Serial.printf("[NET] fetch_fail kind=HTTP code=%d errno=%d duration_ms=%lu\n",
@@ -629,7 +641,7 @@ static bool fetch_shopping_list_from_api() {
                       errno,
                       request_duration_ms);
         list_refresh_fail("http_error");
-        return false;
+        return ListRequestResult::Failed;
       }
 
       String err_lower = err_str;
@@ -668,7 +680,7 @@ static bool fetch_shopping_list_from_api() {
         } else {
           list_refresh_fail("network_fail");
         }
-        return false;
+        return ListRequestResult::Failed;
       }
     }  // Destroy response/error/JSON temporaries, then restore the camera reserve.
     if (retry) {
@@ -677,7 +689,7 @@ static bool fetch_shopping_list_from_api() {
       vTaskDelay(pdMS_TO_TICKS(backoff_ms));
     }
   }
-  return false;
+  return ListRequestResult::Failed;
 }
 
 #endif // SENSE_LIST_H

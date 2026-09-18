@@ -24,11 +24,13 @@ def definition(text, signature):
 
 def harness(source):
     text = source.read_text()
-    fetch = text[text.index('static bool fetch_shopping_list_from_api()'):]
+    signature = ('static ListRequestResult fetch_shopping_list_from_api()' if 'static ListRequestResult fetch_shopping_list_from_api()' in text else 'static bool fetch_shopping_list_from_api()')
+    fetch = text[text.index(signature):]
     # Stop exactly where network request construction begins. This retains the
     # real caller's early return, and also supports the pre-fix inline guard.
     preamble = fetch[fetch.index('{') + 1:
                      fetch.index('Serial.println("\\n=== Fetching Shopping List')]
+    preamble = preamble.replace('return ListRequestResult::Failed;', 'return false;').replace('return ListRequestResult::Deferred;', 'return false;')
     helper = (definition(text, 'static bool list_ensure_wifi_ready()')
               if 'static bool list_ensure_wifi_ready()' in text else '')
     budget = text[text.index('static const uint32_t LIST_FETCH_WIFI_BUDGET_MS'):]
@@ -45,6 +47,9 @@ def harness(source):
 #define portENTER_CRITICAL(mux) (mux)->lock()
 #define portEXIT_CRITICAL(mux) (mux)->unlock()
 #define HALO_SENSE_PROD_WRAPPER 1
+// Wi-Fi wait behavior only; actual transport admission has its own regression.
+struct SenseListTransportLease {explicit SenseListTransportLease(const char*){} explicit operator bool()const{return true;}};
+struct SenseBackupWifiCall {explicit operator bool()const{return true;}};
 static constexpr int WL_CONNECTED=3, WL_DISCONNECTED=6;
 static uint32_t now_ms;
 static uint64_t elapsed, connect_at, fail_at, provisioning_at;

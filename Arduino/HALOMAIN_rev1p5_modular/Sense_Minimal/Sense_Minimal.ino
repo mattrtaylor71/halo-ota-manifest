@@ -796,6 +796,11 @@ static bool list_refresh_inflight = false;
 static volatile bool g_list_screen_active = false;
 static unsigned long last_list_active_ms = 0;
 static const unsigned long LIST_ACTIVE_STALE_MS = 30000;
+static std::atomic<bool> g_voice_list_refresh_pending{false};
+static std::atomic<bool> g_voice_list_followup{false};
+static std::atomic<uint32_t> g_voice_list_attempted_job{0};
+static bool voice_list_pending();
+static std::atomic<bool> list_transport_refresh_deferred{false};
 static unsigned long list_refresh_start_ms = 0;
 static unsigned long list_refresh_cooldown_until_ms = 0;
 // Last SUCCESSFUL list fetch (set in parse_and_update_shopping_list). Used by
@@ -990,6 +995,11 @@ static void request_list_refresh(const char* reason, bool send_status) {
   if (lcd_ota_in_progress()) {
     Serial.printf("[LIST_REFRESH] deferred (lcd_ota_in_progress) reason=%s — will resume after OTA\n",
                   reason ? reason : "unknown");
+    return;
+  }
+  if (g_list_screen_active && (voice_list_pending() || g_media_voice_list_mode.load())) {
+    // One deferred request, regardless of how often the user refreshes.
+    g_voice_list_refresh_pending.store(true);
     return;
   }
   unsigned long now = millis();
@@ -1890,6 +1900,32 @@ static bool sense_backup_diagnostic_busy() {
 // sense_can_sleep_now() -- that guard needs it and is ~400 lines earlier.)
 
 // (g_upload_flush_requested is declared near the top of this file -- see there.)
+static bool voice_list_job_eligible(const UploadJob& job) {
+  if (!job.is_voice || job.from_voice_sd || job.from_image_sd || job.from_persisted ||
+      !g_list_screen_active || job.job_id == g_voice_list_attempted_job.load() ||
+      !wifi_is_connected() || !sense_time_has_fresh_sync() ||
+      foreground_active || scan_ui_inflight || dish_scan_inflight || voice_recording_active ||
+      g_camera_radio_off_owned.load() ||
+      (current_job.active && current_job.pri == PRI_USER)) return false;
+#ifdef HALO_SENSE_PROD_WRAPPER
+  if (halo_provisioning_active() || halo_prod_boot_ota_pending() || lcd_ota_in_progress()) return false;
+#endif
+  if (op_queue) {
+    OpJob next = {};
+    if (xQueuePeek(op_queue, &next, 0) == pdTRUE && next.pri == PRI_USER) return false;
+  }
+  return true;
+}
+
+static bool voice_list_pending() {
+  UploadJob next = {};
+  // Preserve the existing parked owner and FIFO order. Never bypass an image
+  // or saved replay merely to find a later voice note.
+  if (upload_worker_peek_parked_job(next)) return voice_list_job_eligible(next);
+  return upload_queue && xQueuePeek(upload_queue, &next, 0) == pdTRUE &&
+         voice_list_job_eligible(next);
+}
+
 static unsigned long g_upload_hold_since_ms = 0;
 
 // Never hold so long, or so many, that we risk losing the user's captures:
@@ -1903,6 +1939,18 @@ static bool uploads_held_for_session(const char** why_out) {
   return false;
 #else
   if (g_upload_flush_requested) { if (why_out) *why_out = "flush_requested"; return false; }
+  if (g_list_screen_active) {
+    UploadJob parked = {};
+    if (upload_worker_peek_parked_job(parked) && parked.is_voice &&
+        parked.job_id == g_voice_list_attempted_job.load()) {
+      if (why_out) *why_out = "voice_list_attempt_used";
+      return true;
+    }
+    if (voice_list_pending()) {
+      if (why_out) *why_out = "fresh_voice_for_list";
+      return http_inflight;
+    }
+  }
   const uint32_t n = upload_queue_count();
   if (n == 0) { g_upload_hold_since_ms = 0; if (why_out) *why_out = "empty"; return false; }
   // A previously durable replay is background recovery, not a new capture.
@@ -1981,10 +2029,17 @@ static void upload_worker_task(void *arg) {
       vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (got_job) {
-      MediaRetryNetworkScope retry_network(job);
+      const bool list_voice = voice_list_job_eligible(job);
+      MediaRetryNetworkScope retry_network(job, list_voice);
+      if (list_voice) {
+        g_voice_list_attempted_job.store(job.job_id);
+        Serial.printf("[VOICE_LIST] start job=%lu budget_ms=%lu\n", (unsigned long)job.job_id,
+                      (unsigned long)VOICE_LIST_UPLOAD_BUDGET_MS);
+      }
       auto park_cancelled_fresh = [&](const char* stage) {
         if (job.from_voice_sd || job.from_image_sd || job.from_persisted ||
-            !media_retry_network_cancelled()) return false;
+            !media_retry_network_cancelled() ||
+            (media_voice_list_timed_out() && !media_voice_list_user_interrupted())) return false;
         // A new input ended this transport attempt, not the capture's custody.
         // Preserve its exact RAM envelope before storage-busy retries can hold
         // up that gesture. A full parked slot leaves the existing save path.
@@ -2038,6 +2093,7 @@ static void upload_worker_task(void *arg) {
         const bool accepted = wifi_is_connected() && !media_retry_network_cancelled() &&
                               sense_voice_prepare_first_attempt(job) && voice_upload_and_parse(job);
         if (accepted) {
+          if (list_voice) g_voice_list_followup.store(true);
           media_retry_delivered();
           Serial.println("[VOICE_QUEUE] async accept complete; backend owns completion");
           if (job.from_voice_sd) {
@@ -2466,7 +2522,7 @@ static bool parse_input_message(const char* json_str) {
     }
     sense_input_mark_seen(in_msg_id);
     if (sense_user_action_cancels_flush(type)) {
-      sense_note_admitted_user_action();
+      sense_note_admitted_user_action(sense_voice_list_input_compatible(type, g_list_screen_active));
       g_media_retry_user_paused.store(true);
       cancel_pending_sleep_for_user_action(type);
       // Yield background work only for a new user action, not a repeated ACK
@@ -3303,6 +3359,7 @@ static bool parse_input_message(const char* json_str) {
         Serial.println("[LIST_ACTIVE] state=1 (refresh)");
       }
     } else {
+      if (g_list_screen_active) sense_note_admitted_user_action();
       g_list_screen_active = false;
       Serial.println("[LIST_ACTIVE] state=0");
     }
@@ -3855,11 +3912,19 @@ scan_exit:
         Serial.println("[LIST_REFRESH] awake_proof_sent path=fetch");
         // The parser publishes exactly once after a valid backend response.
         // Failed fetches retain the cache and must not turn boot count=0 into UI_LIST[].
-        bool fetch_ok = fetch_shopping_list_from_api();
+        const auto fetch_result = voice_list_pending() || g_media_voice_list_mode.load()
+            ? ListRequestResult::Deferred : fetch_shopping_list_from_api();
+        const bool fetch_ok = fetch_result == ListRequestResult::Completed;
         Serial.printf("[LIST_REFRESH] total_ms=%lu fetch_ms=%lu ok=%d\n",
                       (unsigned long)(millis() - job.created_ts),
                       (unsigned long)(millis() - deq_ms), fetch_ok ? 1 : 0);
-        list_refresh_mark_complete(fetch_ok ? "done" : "failed");
+        if (fetch_result == ListRequestResult::Deferred) {
+          list_transport_refresh_deferred = true;
+          list_refresh_inflight = false;
+          list_refresh_start_ms = 0;
+        } else {
+          list_refresh_mark_complete(fetch_ok ? "done" : "failed");
+        }
       }
       
       // Job complete
@@ -4630,7 +4695,19 @@ void loop() {
   }
   
   // Check for delete work request (from INPUT_DELETE)
-  if (delete_requested) {
+  if (g_voice_list_followup.exchange(false)) {
+    list_last_fetch_ok_ms = 0;
+    list_refresh_cooldown_until_ms = 0;
+    g_voice_list_refresh_pending.store(true);
+  }
+  if ((g_voice_list_refresh_pending.load() || list_transport_refresh_deferred.load()) &&
+      !g_media_voice_list_mode.load() && !voice_list_pending() && !http_inflight) {
+    g_voice_list_refresh_pending.store(false);
+    list_transport_refresh_deferred.store(false);
+    if (g_list_screen_active) request_list_refresh("voice_or_transport_followup", false);
+  }
+
+  if (delete_requested && !http_inflight && !g_media_voice_list_mode.load()) {
     delete_requested = false;  // Clear flag immediately
     
     Serial.printf("[LOOP] Processing delete request for ID: %s\n", delete_item_id);
@@ -4648,7 +4725,8 @@ void loop() {
     
     // Delete item from AWS. Shopping list refresh is disabled.
     if (WiFi.status() == WL_CONNECTED) {
-      delete_item_from_api(delete_item_id);
+      if (delete_item_from_api(delete_item_id) == ListRequestResult::Deferred)
+        delete_requested = true;
     }
   }
   

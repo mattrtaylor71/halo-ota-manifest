@@ -369,6 +369,14 @@ static bool sense_voice_backend_ack(const UploadJob& job, int code, JsonDocument
 // Backend now accepts raw PCM sample-rate via header, so firmware sends original 16 kHz capture directly.
 static bool voice_upload_and_parse(const UploadJob& job) {
   if (media_retry_network_cancelled()) return false;
+  // Own the full transport lifetime: a list request cannot release/reacquire
+  // the same camera reserve while this voice client's TLS objects are alive.
+  if (!http_queue_lock("VOICE_POST", job.job_id)) return false;
+  struct VoiceHttpLease {
+    uint32_t job;
+    ~VoiceHttpLease() { http_queue_unlock("VOICE_POST", job); }
+  } http_lease{job.job_id};
+  if (media_retry_network_cancelled()) return false;
   SenseBackupWifiCall backup_call; if (!backup_call) return false;
   const uint8_t* audio_buf = job.image_buf;
   const size_t audio_size = job.image_len;
@@ -423,26 +431,20 @@ static bool voice_upload_and_parse(const UploadJob& job) {
   Serial.println("[VOICE] client_surface=halo");
 
   HaloNtpDnsGuard ntp_dns_guard;
-  const uint8_t max_attempts = 2;
-  uint32_t voice_http_job = voice_job_id;
+  const uint8_t max_attempts = media_voice_list_active() ? 1 : 2;
   bool accepted = false;
   for (uint8_t attempt = 1; attempt <= max_attempts; ++attempt) {
     if (media_retry_network_cancelled()) break;
     SenseMediaRetryClient client;
     HTTPClient http;
-    bool http_locked = false;
     client.setInsecure();
-    client.setTimeout(15000);
-    client.setHandshakeTimeout(sense_media_network::handshake_timeout_seconds(UINT32_MAX));
+    client.setTimeout(media_voice_list_active() ? 1500 : 15000);
+    client.setHandshakeTimeout(sense_media_network::handshake_timeout_seconds(media_voice_list_remaining_ms()));
 
-    http_queue_lock("VOICE_POST", voice_http_job);
-    http_locked = true;
 
     if (!http.begin(client, quick_ack_url)) {
       Serial.printf("[VOICE] http.begin failed attempt=%u\n", (unsigned)attempt);
       log_http_failure_details("VOICE_QUICK_ACK_BEGIN", quick_ack_url.c_str(), HTTPC_ERROR_CONNECTION_REFUSED, &client);
-      http_queue_unlock("VOICE_POST", voice_http_job);
-      http_locked = false;
       if (attempt < max_attempts) {
         if (!media_retry_network_wait(250)) break;
         continue;
@@ -451,8 +453,8 @@ static bool voice_upload_and_parse(const UploadJob& job) {
     }
 
     http.setReuse(false);
-    http.setTimeout(60000);
-    http.setConnectTimeout(sense_media_network::connect_timeout_ms(UINT32_MAX));
+    http.setTimeout(media_voice_list_active() ? 1500 : 60000);
+    http.setConnectTimeout(sense_media_network::connect_timeout_ms(media_voice_list_remaining_ms()));
     http.addHeader("Content-Type", "audio/pcm");  // Raw PCM, not WAV
     http.addHeader("x-owner-id", owner_id);
     http.addHeader("x-device-id", device_id[0] ? device_id : TREPO_DEVICE_ID);
@@ -466,7 +468,7 @@ static bool voice_upload_and_parse(const UploadJob& job) {
     int httpResponseCode = http.POST((uint8_t*)audio_buf, audio_size);
     Serial.printf("[VOICE] HTTP Response: %d\n", httpResponseCode);
     if (media_retry_network_cancelled()) {
-      http.end(); client.stop(); http_queue_unlock("VOICE_POST", voice_http_job);
+      http.end(); client.stop();
       break;
     }
 
@@ -483,8 +485,6 @@ static bool voice_upload_and_parse(const UploadJob& job) {
       uart_send_sense_diag("voice", "upload_ok", "VOICE_POST", (int32_t)httpResponseCode, "accepted");
       http.end();
       client.stop();
-      http_queue_unlock("VOICE_POST", voice_http_job);
-      http_locked = false;
       accepted = true;
       break;
     }
@@ -504,10 +504,6 @@ static bool voice_upload_and_parse(const UploadJob& job) {
 
     http.end();
     client.stop();
-    if (http_locked) {
-      http_queue_unlock("VOICE_POST", voice_http_job);
-      http_locked = false;
-    }
     if (media_retry_network_cancelled()) break;
 
     if (attempt < max_attempts && sense_media_network::transient_http_status(httpResponseCode)) {

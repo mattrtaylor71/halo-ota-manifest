@@ -23,13 +23,27 @@ static bool sense_user_action_cancels_flush(const char* type) {
 }
 
 static std::atomic<uint32_t> g_sense_user_action_generation{0};
+static std::atomic<uint32_t> g_sense_user_interrupt_generation{0};
 
 static uint32_t sense_user_action_generation() {
   return g_sense_user_action_generation.load(std::memory_order_relaxed);
 }
 
-static void sense_note_admitted_user_action() {
+static uint32_t sense_user_interrupt_generation() {
+  return g_sense_user_interrupt_generation.load(std::memory_order_relaxed);
+}
+
+// List browsing still renews activity/cancels sleep, but need not restart the
+// fresh voice upload whose result the user is waiting to see in that list.
+static bool sense_voice_list_input_compatible(const char* type, bool list_active) {
+  return list_active && type && (!strcmp(type, "INPUT_SCROLL") ||
+      !strcmp(type, "INPUT_WAKE") || !strcmp(type, "INPUT_TOUCH"));
+}
+
+static void sense_note_admitted_user_action(bool list_compatible = false) {
   g_sense_user_action_generation.fetch_add(1, std::memory_order_relaxed);
+  if (!list_compatible)
+    g_sense_user_interrupt_generation.fetch_add(1, std::memory_order_relaxed);
 }
 
 #endif

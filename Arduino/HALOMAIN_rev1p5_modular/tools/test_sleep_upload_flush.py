@@ -29,7 +29,7 @@ def harness(source):
     parked_source = (ROOT / 'Sense_Minimal/sense_op_queue.h').read_text()
     parked = ''
     if 'upload_worker_parked_pending(' in source:
-        signatures = ['static bool upload_worker_parked_pending(']
+        signatures = ['static bool upload_worker_parked_pending(', 'static bool upload_worker_peek_parked_job(']
         if 'upload_worker_take_parked_job(' in source:
             signatures.append('static bool upload_worker_take_parked_job(')
         parked = '\n'.join(definition(parked_source, sig) for sig in signatures)
@@ -56,7 +56,7 @@ struct SerialType {template<class... A> void printf(const char*,A...){}
 struct UploadJob {
  uint32_t job_id=0; char mode[16]="discard"; uint8_t* image_buf=nullptr;
  size_t image_len=0; uint8_t retries=0;
- bool from_voice_sd=false,from_image_sd=false,from_persisted=false;
+ bool from_voice_sd=false,from_image_sd=false,from_persisted=false,is_voice=false;
 };
 static std::vector<UploadJob> queue;
 static void* upload_queue=&queue;
@@ -64,6 +64,11 @@ static uint32_t upload_queue_count(){return queue.size();}
 static const int pdTRUE=1;
 static int xQueuePeek(void*,UploadJob* out,int){if(queue.empty())return 0;*out=queue.front();return pdTRUE;}
 static bool foreground_busy=false;
+// This fixture exercises ordinary pre-sleep flush; live-list admission has
+// its own composed regression using the actual eligibility function.
+static bool g_list_screen_active=false,http_inflight=false;
+static std::atomic<uint32_t> g_voice_list_attempted_job{0};
+static bool voice_list_pending(){return false;}
 static std::atomic<bool> g_media_retry_user_paused{false};
 static bool foreground_priority_active(unsigned long,const char**){return foreground_busy;}
 static bool guardian_force_sleep=false,g_upload_flush_requested=false;

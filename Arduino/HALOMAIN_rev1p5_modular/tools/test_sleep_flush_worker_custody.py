@@ -63,6 +63,7 @@ static bool upload_worker_holding_in_place=false,upload_worker_has_parked_job=fa
 static UploadJob parked_job;
 static std::atomic<bool> upload_worker_claim_active{false};
 static std::atomic<bool> g_media_retry_user_paused{false};
+static std::atomic<uint32_t> g_voice_list_attempted_job{0};
 static std::atomic<uint32_t> g_media_custody_waiters{0};
 static bool g_spool_owns_uart=false,g_img_spool_tx_active=false,g_spool_drain_wake=false;
 static bool http_inflight=false,background_sleep_bypass_active=false,g_list_screen_active=false;
@@ -74,6 +75,11 @@ static const unsigned long PRE_SLEEP_BLOCK_MAX_MS=10000;
 static bool sleep_block_should_log(const char*,const char*,const char*){return false;}
 static bool sense_ntp_attempt_pending(){return false;}
 static bool upload_worker_parked_pending(){return upload_worker_has_parked_job;}
+static bool upload_worker_peek_parked_job(UploadJob& out){
+ if(!upload_worker_has_parked_job)return false;out=parked_job;return true;
+}
+// These sleep cases never open the interactive shopping-list voice path.
+static bool voice_list_pending(){return false;}
 static bool upload_worker_take_parked_job(UploadJob& out,const char** stage=nullptr,unsigned long* at=nullptr){
  if(!upload_worker_has_parked_job)return false;
  out=parked_job;upload_worker_has_parked_job=false;if(stage)*stage="test";if(at)*at=0;return true;

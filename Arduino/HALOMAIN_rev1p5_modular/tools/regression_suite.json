@@ -280,6 +280,14 @@
       "timeout_seconds": 180
     },
     {
+      "id": "test_list_transport_serialization",
+      "path": "tools/test_list_transport_serialization.py",
+      "args": [
+        "--sanitize"
+      ],
+      "timeout_seconds": 180
+    },
+    {
       "id": "test_list_wifi_ready",
       "path": "tools/test_list_wifi_ready.py",
       "args": [],
@@ -567,6 +575,16 @@
     {
       "id": "test_user_workflow_transitions",
       "path": "tools/test_user_workflow_transitions.py",
+      "args": [
+        "--out",
+        "{case_out}",
+        "--negative-control"
+      ],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_voice_list_workflow",
+      "path": "tools/test_voice_list_workflow.py",
       "args": [
         "--out",
         "{case_out}",

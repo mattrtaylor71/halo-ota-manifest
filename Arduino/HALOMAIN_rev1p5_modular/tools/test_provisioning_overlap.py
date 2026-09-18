@@ -116,6 +116,9 @@ static struct {
  void println(const char*){}
 } Serial;
 namespace sense_action_summary {struct ListAttempt{};}
+// Owner/NVS boundary only; actual transport admission is covered separately.
+struct SenseListTransportLease {explicit SenseListTransportLease(const char*){} explicit operator bool()const{return true;}};
+struct SenseBackupWifiCall {explicit operator bool()const{return true;}};
 static bool list_ensure_wifi_ready(){return true;}
 static std::string list_failure,delete_failure;
 static void list_refresh_fail(const char*r){list_failure=r;}
@@ -179,14 +182,15 @@ def harness(source_root, preferences_source):
         'void ProvisioningState::clearOwnerCode(',
     ]]
     functions.append(definition((source_root/'Sense_Minimal/Sense_Minimal.ino').read_text(), 'static void load_owner_id_or_default('))
-    fetch=definition(shopping,'static bool fetch_shopping_list_from_api()')
+    fetch=definition(shopping, 'static ListRequestResult fetch_shopping_list_from_api()' if 'static ListRequestResult fetch_shopping_list_from_api()' in shopping else 'static bool fetch_shopping_list_from_api()')
     preamble=fetch[fetch.index('{')+1:fetch.index('  String request_body =')]
+    preamble=preamble.replace('return ListRequestResult::Failed;', 'return false;').replace('return ListRequestResult::Deferred;', 'return false;')
     functions.append('static bool production_view_admission(){'+preamble+'\nreturn true;\n}')
-    deletion=definition(shopping,'static void delete_item_from_api(')
+    deletion=definition(shopping, 'static ListRequestResult delete_item_from_api(' if 'static ListRequestResult delete_item_from_api(' in shopping else 'static void delete_item_from_api(')
     start=deletion.index('  char owner_id[64]')
     preamble=deletion[start:deletion.index('  String request_body =',start)]
     # Same owner boundary; void fail-return becomes false in this admission probe.
-    preamble=preamble.replace('return;', 'return false;')
+    preamble=preamble.replace('return;', 'return false;').replace('return ListRequestResult::Failed;', 'return false;')
     functions.append('static bool production_delete_admission(){const char*item_id="fixture-item";\n'+preamble+'\nreturn true;\n}')
     return PREFIX+'\n'+'\n'.join(functions)+'\n'+TESTS
 

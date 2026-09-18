@@ -35,7 +35,7 @@ def harness(root):
         'static int shopping_list_cmp_by_store(',
         'static bool parse_and_update_shopping_list(',
         'static void remove_item_from_ram_list_locked(',
-        'static void delete_item_from_api(')]
+        ('static ListRequestResult delete_item_from_api(' if 'static ListRequestResult delete_item_from_api(' in text else 'static void delete_item_from_api('))]
     return r'''
 #include <ArduinoJson.h>
 #include <cstdio>
@@ -45,6 +45,11 @@ def harness(root):
 #include <string>
 #include <vector>
 using String=std::string;
+// This suite isolates parsing/delete responses. Transport ownership is exercised
+// with the actual lease in test_list_transport_serialization.py.
+enum class ListRequestResult : uint8_t {Completed,Failed,Deferred};
+struct SenseListTransportLease {explicit SenseListTransportLease(const char*){} explicit operator bool()const{return true;}};
+struct SenseBackupWifiCall {explicit operator bool()const{return true;}};
 static int failures, checks;
 static void check(bool ok,const char* label){
   ++checks;if(!ok){++failures;std::fprintf(stderr,"FAIL %s\n",label);}

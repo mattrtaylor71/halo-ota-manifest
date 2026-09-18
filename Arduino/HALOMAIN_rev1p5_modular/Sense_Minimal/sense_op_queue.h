@@ -68,6 +68,9 @@ static bool foreground_priority_active(unsigned long now_ms, const char** reason
       reason = "queued_user_job";
     }
   }
+  // Only a fresh voice already admitted for list use ignores soft activity
+  // windows. Captures, recordings and queued user work still win above.
+  if (reason == NULL && media_voice_list_active()) return false;
   if (reason == NULL && last_input_wake_ms > 0 && (now_ms - last_input_wake_ms) < 2500UL) {
     reason = "recent_input_wake";
   }
@@ -158,6 +161,14 @@ static portMUX_TYPE upload_worker_parked_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool upload_worker_parked_pending() {
   portENTER_CRITICAL(&upload_worker_parked_mux);
   const bool pending = upload_worker_has_parked_job;
+  portEXIT_CRITICAL(&upload_worker_parked_mux);
+  return pending;
+}
+
+static bool upload_worker_peek_parked_job(UploadJob& out) {
+  portENTER_CRITICAL(&upload_worker_parked_mux);
+  const bool pending = upload_worker_has_parked_job;
+  if (pending) out = upload_worker_parked_job;
   portEXIT_CRITICAL(&upload_worker_parked_mux);
   return pending;
 }

@@ -72,18 +72,27 @@ static bool net_ready_for_tls(char* why, size_t why_len) {
 
 // ── HTTP queue serialization ────────────────────────────────────────
 
-static void http_queue_lock(const char* label, uint32_t job_id) {
+static bool http_queue_lock(const char* label, uint32_t job_id) {
   Serial.printf("[HTTP_QUEUE] enqueue label=%s job=%lu\n",
                 label ? label : "http",
                 (unsigned long)job_id);
   if (http_mutex) {
-    xSemaphoreTake(http_mutex, portMAX_DELAY);
+    if (media_voice_list_active()) {
+      for (;;) {
+        if (media_retry_network_cancelled()) return false;
+        if (xSemaphoreTake(http_mutex, 0) == pdTRUE) break;
+        if (!media_retry_network_wait(20)) return false;
+      }
+    } else {
+      xSemaphoreTake(http_mutex, portMAX_DELAY);
+    }
   }
   http_inflight = true;
   Serial.printf("[HTTP_QUEUE] start label=%s job=%lu\n",
                 label ? label : "http",
                 (unsigned long)job_id);
   uart_send_sense_diag("http", "start", label, (int32_t)job_id, "queue_lock");
+  return true;
 }
 
 static void http_queue_unlock(const char* label, uint32_t job_id) {
@@ -99,7 +108,7 @@ static void http_queue_unlock(const char* label, uint32_t job_id) {
     wifi_recover_requested = false;
     // Saved recovery and an upload cancelled by new input must not start a
     // blocking radio reset during cleanup. The Wi-Fi owner can retry later.
-    if (!media_retry_network_active() && !media_retry_network_cancelled())
+    if (!media_retry_network_active() && !media_voice_list_active() && !media_retry_network_cancelled())
       wifi_hard_reset_and_reconnect("deferred_recover", 15000);
   }
 }
