@@ -101,3 +101,49 @@ The hub intervention targeted only the freshly observed actuator port2-1.3.3 usi
 A first actuator-only DTR diagnostic blocked on its initial clear ioctl; its parent failed to reap within three seconds after kill. Later process inspection confirmed no remaining child; clean descriptor closure is not claimed for that attempt. After the hub intervention, one complete DTR clear/assert150ms/release with hardware flow control disabled closed cleanly, but HELP remained empty. A20-second, non-writing `avrdude` signature probe (normal Arduino reset handshake, `-n -u -D`, no erase/upload/force flags) also failed and was killed/reaped. No actuator firmware was reflashed and none of these attempts sent a stroke.
 
 The final state and closed case references are in `CHECKPOINT190.json`. The current practical blocker is command/bootloader communication despite enumeration; its electrical or USB root cause is not established. Do not run an unbounded reset loop or infer that another firmware flash is possible. A manual Halo tap can bypass the actuator for the pending firmware install/test. Relay reset remains the documented first recovery attempt, not a guarantee.
+
+
+## User-requested actuator reflash: verified, recurrence remains
+
+At the user's request on 17 September, a fresh ten-second relay reset restored
+the exact Uno identity. A bounded avrdude probe read the ATmega328P signature
+(0x1e950f) and backed up all 32768 flash bytes. The backup was copied to the Mac
+mini and its SHA256 read back before flashing. The existing 9036-byte application
+already matched the saved calibrated image; no application corruption was found.
+
+The same saved application was rewritten with automatic verification enabled.
+All 9036 bytes verified, a full flash readback matched the application, and the
+bootloader region remained identical to the backup. No fuse, EEPROM, bootloader,
+calibration or Halo firmware change was made.
+
+Two separately recorded calibrated taps subsequently completed and woke Halo.
+The first helper closed successfully; a later nonmoving HELP session stalled
+and was killed/reaped. After another successful relay reset, the second tap
+passed HELP, initial STATUS, PUSH completion and immediate stopped STATUS.
+Keeping its descriptor open through 30 seconds of inactivity did not prevent
+failure: the next STATUS and STOP were unanswered, then close took 17.26 seconds.
+Thus a serial close/reopen alone does not explain the recurrence. The paired
+Halo captures showed normal Home and intentional sleep, with Sense189/LCD188.
+
+The last relay reset received exact power-restore acknowledgement and closed
+cleanly, but the exact Uno serial did not return within 30 seconds. Subsequent
+enumeration exposed Arduino VID/PID with a missing serial. A prepared keepalive
+test was therefore **not run**. No command was sent to that incomplete identity.
+The electrical/USB cause remains unresolved; neither repeated reflash nor a
+persistent connection is established as a fix. Candidate190 remains uninstalled.
+
+Evidence is archived and independently SHA256-read back on mac-mini:
+
+- Root: /Users/mikehunt/halo-bench-receipts/actuator-reflash-1789709068/
+- Original backup: original-flash.bin, SHA256
+  dd7271d5b00dfe0e16775cfc0db4c7259f49f5e939c4890a10e90e28f1f568f0.
+- Case: evidence/VERDICT.json; all 51 case files are indexed by
+  evidence/MANIFEST.json, SHA256
+  c1dbee357d869eebda6a4bce50869a552bb1f97d5df11ec1634faf9ec8e1e90e.
+- Saved Intel HEX SHA256:
+  49a0fa47a9f8670bf7f65526da6d2f11bd6df55202af75a8ac7954eac684c2df.
+
+The local Mac had only about 329 MiB available and had already produced ENOSPC;
+this case used a temporary RAM disk, archived before removal. Archive paths
+above belong to the Mac mini, not the laptop. All capture/actuator child processes
+were closed or killed and reaped. Failed cases are preserved alongside passes.
