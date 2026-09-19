@@ -14,6 +14,9 @@ import time
 _patch_spec = importlib.util.spec_from_file_location('production_dns_patch', Path(__file__).with_name('production_network_dns_patch.py'))
 sdk_patch = importlib.util.module_from_spec(_patch_spec)
 _patch_spec.loader.exec_module(sdk_patch)
+_guard_spec = importlib.util.spec_from_file_location('production_source_guard', Path(__file__).with_name('production_source_guard.py'))
+source_guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(source_guard)
 
 BASE_FLAGS = '-DARDUINO_HOST_OS="{runtime.os}" -DARDUINO_FQBN="{build.fqbn}" -DESP32=ESP32 -DCORE_DEBUG_LEVEL={build.code_debug} {build.loop_core} {build.event_core} {build.defines} {build.extra_flags.{build.mcu}} {build.zigbee_mode}'
 FQBNS = {
@@ -118,8 +121,14 @@ def min_free_gib(value):
     return value
 
 
+def launch_compiler(argv, source, log):
+    return subprocess.Popen(argv, cwd=source, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+
+
 def run(board, source, out, compiler, private_canary=False, min_free_gib=8):
+    lineage = source_guard.materialized_source(source)
     out.mkdir(parents=True, exist_ok=False)
+    save(out / 'source-lineage.json', lineage)
     space = {'path': str(out), 'minimum_free_gib': min_free_gib,
              'minimum_free_bytes': min_free_gib * 1024 ** 3,
              'before_free_bytes': shutil.disk_usage(out).free, 'after_free_bytes': None}
@@ -136,7 +145,7 @@ def run(board, source, out, compiler, private_canary=False, min_free_gib=8):
         try:
             mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
             try:
-                child = subprocess.Popen(argv, cwd=source, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                child = launch_compiler(argv, source, log)
                 save(out / 'started.json', {'pid': child.pid, 'owner_pid': os.getpid(), 'epoch': started, 'timeout_s': 600, 'cleanup_s': 10})
             finally:
                 signal.pthread_sigmask(signal.SIG_SETMASK, mask)

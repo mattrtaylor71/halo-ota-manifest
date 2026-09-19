@@ -7,6 +7,11 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
+import importlib.util
+
+_guard_spec = importlib.util.spec_from_file_location('production_source_guard', Path(__file__).with_name('production_source_guard.py'))
+source_guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(source_guard)
 
 
 def require(condition, message):
@@ -82,6 +87,7 @@ def main():
     tree = git(repo, "rev-parse", commit + ":" + firmware.relative_to(repo).as_posix())
     require(tree == baseline["artifact_source_firmware_tree"], "Frozen firmware tree mismatch")
     candidate = git(repo, "rev-parse", "--verify", args.source_ref + "^{commit}")
+    current = source_guard.committed_source(firmware, candidate)
     ancestry = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor",
                                commit, candidate])
     require(ancestry.returncode == 0,
@@ -100,6 +106,7 @@ def main():
                       "version": baseline["version"], "source_ref": args.source_ref,
                       "source_commit": candidate, "applications_verified": 2,
                       "package_files_verified": checked,
+                      "current_production_source": current,
                       "scope": "Committed ancestry and retained bytes only; no dirty-source or device acceptance."},
                      indent=2))
 

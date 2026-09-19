@@ -6,21 +6,20 @@ builder afterwards. The commit identifies the original source; the receipt also
 records the three generated headers and every resulting source-file hash.
 """
 import argparse
-import datetime
 import hashlib
 import io
 import json
 from pathlib import Path
-import re
 import subprocess
 import tarfile
+import importlib.util
+
+_guard_spec = importlib.util.spec_from_file_location('production_source_guard', Path(__file__).with_name('production_source_guard.py'))
+source_guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(source_guard)
 
 REQUIRED = 'tools/production_required_files.json'
-HEADERS = {
-    'halo_ota_demo/firmware/shared/Version.h': 'sense',
-    'halo_ota_demo/firmware/halo_sense_prod/Version.h': 'sense',
-    'halo_ota_demo/firmware/halo_lcd_prod/Version.h': 'lcd',
-}
+HEADERS = source_guard.HEADERS
 LOCAL_CREDENTIALS = (
     'halo_ota_demo/firmware/shared/MqttSecrets.local.h',
     'halo_ota_demo/firmware/halo_sense_prod/MqttSecrets.local.h',
@@ -36,39 +35,9 @@ def git(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], timeout=60)
 
 
-def metadata(version, epoch, commit):
-    if not re.fullmatch(r'\d+\.\d+\.\d+', version) or any(
-            len(p) > 1 and p.startswith('0') or int(p) > 65535 for p in version.split('.')):
-        raise ValueError('Version must be canonical MAJOR.MINOR.PATCH with uint16 components')
-    if not isinstance(epoch, int) or isinstance(epoch, bool) or not 1577836800 <= epoch <= 4294967295:
-        raise ValueError('Build epoch must be an explicit UTC Unix second in 2020..2106')
-    if not re.fullmatch(r'[0-9a-f]{40}', commit):
-        raise ValueError('Expected exact Git commit SHA1')
-    moment = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc)
-    # Numeric UTC format is independent of the host's locale and timezone.
-    date, clock = moment.strftime('%Y-%m-%d'), moment.strftime('%H:%M:%S')
-    return {'FIRMWARE_VERSION': version, 'BUILD_DATE': date, 'BUILD_TIME': clock,
-            'BUILD_DATE_TIME_STR': date + ' ' + clock + ' UTC',
-            'BUILD_GIT_HASH': commit,
-            'BUILD_ID': version + '-' + moment.strftime('%Y%m%dT%H%M%SZ') + '-' + commit[:12]}
-
-
-def version_header(original, board, values):
-    text = original.decode('utf-8')
-    replacements = dict(values)
-    replacements['FW_EMBED_MARKER'] = ('HALO_FW_MARKER:' + values['FIRMWARE_VERSION'] +
-                                     '|BUILD_ID:' + values['BUILD_ID'] + '|BOARD:' + board)
-    for key, value in replacements.items():
-        text, count = re.subn(r'^#define ' + key + r' "[^"\n]*"$',
-                             '#define ' + key + ' ' + json.dumps(value), text, flags=re.M)
-        if count != 1:
-            raise ValueError('Expected exactly one metadata macro: ' + key)
-    text = re.sub(r'^// Generated:.*$', '// Generated from committed source; explicit build time ' +
-                  values['BUILD_DATE_TIME_STR'], text, flags=re.M)
-    text = re.sub(r'^// Source snapshot \(precommit, not a Git commit\):.*$',
-                  '// Source commit: ' + values['BUILD_GIT_HASH'], text, flags=re.M)
-    text = text.replace('tools/generate_version_header.py', 'tools/prepare_production_release.py')
-    return text.encode('utf-8')
+# Preparation and admission use exactly the same whole-header transformation.
+metadata = source_guard.metadata
+version_header = source_guard.version_header
 
 
 def prepare(source, out, version, epoch):
@@ -85,6 +54,7 @@ def prepare(source, out, version, epoch):
     if any((source / p).exists() for p in LOCAL_CREDENTIALS):
         raise ValueError('Local MQTT credentials are not release source')
     commit = git(repo, 'rev-parse', 'HEAD').decode().strip()
+    lineage = source_guard.committed_source(source, commit, version)
     tree = git(repo, 'rev-parse', commit + ':' + relative).decode().strip()
     values = metadata(version, epoch, commit)
     manifest_bytes = git(repo, 'show', commit + ':' + relative + '/' + REQUIRED)
@@ -129,6 +99,7 @@ def prepare(source, out, version, epoch):
                'required_manifest_sha256': sha(manifest_bytes),
                'original_source_hashes': original, 'source_snapshot': resulting,
                'generated_headers': list(HEADERS), 'uncommitted_scope_refused': True,
+               'production_source_guard': lineage,
                'built': False, 'published': False}
     (out / 'materialization.json').write_text(json.dumps(receipt, indent=2) + '\n')
     return receipt

@@ -28,12 +28,27 @@ class ReleasePreparationTests(unittest.TestCase):
             path = self.source / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes((REAL_SOURCE / name).read_bytes())
+        for name in ('halo_ota_demo/firmware/halo_sense_prod/partitions.csv',
+                     'halo_ota_demo/firmware/halo_lcd_prod/partitions.csv', 'LCD_Minimal/lv_conf.h'):
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((REAL_SOURCE / name).read_bytes())
         (self.source / 'vendor').mkdir()
         (self.source / 'vendor/LICENSE').write_text('local fixture license\n')
         (self.source / 'tools').mkdir()
         required = list(release.HEADERS) + ['vendor/LICENSE']
         (self.source / release.REQUIRED).write_text(json.dumps({'required_paths': required}))
         (self.repo / 'unrelated.txt').write_text('not firmware\n')
+        self.commit()
+        self.old_commit = self.run_git('rev-parse', 'HEAD').decode().strip()
+        (self.source / 'vendor/LICENSE').write_text('current fixture license\n')
+        self.commit()
+        self.floor = self.run_git('rev-parse', 'HEAD').decode().strip()
+        self.floor_tree = self.run_git('rev-parse', self.floor + ':Arduino/HALOMAIN_rev1p5_modular').decode().strip()
+        self.policy = {'schema_version': 1, 'minimum_source_commit': self.floor,
+                       'minimum_source_firmware_tree': self.floor_tree,
+                       'minimum_new_version': '6.4.102', 'artifact_source_version': '6.4.101'}
+        (self.source / 'PRODUCTION_BASELINE.json').write_text(json.dumps(self.policy))
         self.commit()
 
     def run_git(self, *args):

@@ -1,3 +1,7 @@
+# September 19 production baseline freeze
+
+Designate 197 source `7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e` as the required ancestor for all future firmware; retain public/bench 196 and historical 158 recovery separately. Pin the existing application/factory packages and evidence, correct stale source-selection documentation, and enforce current-source ancestry/minimum 198 in release preparation and canonical builds. No device/runtime/OTA publication change. September 19 two real camera uploads, gallery readback and user cloud activity are documented without widening qualification. [Production handoff](docs/PRODUCTION_BASELINE_197.md).
+
 # 6.4.197 factory candidate — automatic blank-NVS UART recovery
 
 Fix the setup-mode deadlock without trusting absent state: require a fresh healthy/idle LCD proof before enabling ordinary Sense replies. Preserve interrupted-transfer quarantine and existing OTA debt. Make FW_INFO/query transmission logs truthful and add a composed factory-startup regression. Both 99-suite gates, canonical paired builds and full factory write/readback passed. After correcting the test harness reset/capture sequence and rechecking pristine NVS/selectors, automatic startup and fresh paired SDK VALID communication passed. Physical power-cycle, Settings and sleep/wake remain pending; public 196 is unchanged. See [cause and validation](docs/FACTORY_UART_STARTUP_197.md).

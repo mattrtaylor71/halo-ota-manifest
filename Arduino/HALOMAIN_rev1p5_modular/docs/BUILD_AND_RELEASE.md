@@ -1,33 +1,26 @@
-> September 18 release: **196 is published and read back for Sense and LCD.** Both canonical builds/artifact checks and all 97 exact-snapshot suites passed. The user’s paired manual OTA passed: Sense 195/app0 → 196/app1 and LCD 191/app1 → 196/app0, both SDK VALID, with verified image hashes, observed target resolution, Home and paired sleep. Capture closed after 60.438 seconds without USB reopening. A further no-update request is untested; no new scheduled-OTA or full-product pass is claimed. See [release evidence and remaining steps](MANUAL_OTA_196_20260918.md).
+# Build and release from the current production source
 
-Current source is `26c5d713475dc0390c375a9b1e77d2e2ffaaa82a`, firmware tree `672353630dab3650e7f233a331eb4b989d8772b0`, build `6.4.196-20260918T213712Z-26c5d713475d`. Continue from this release or reviewed descendants. It retains 190 voice/list and 191 immediate-delete behavior, explicit manual grants and the completed-calendar handoff, and adds the bounded clock retry for a manual request joined to recovery. Use an unused 197+ after fresh inventory. Frozen 158 remains the immutable recovery reference below. The working checkout also contains unpublished UI-copy change `4a52ac3` (“Keep Halo powered on”); that wording is not in published or installed196.
+The authoritative selector is [PRODUCTION_BASELINE.json](../PRODUCTION_BASELINE.json), explained in [the 197 handoff](PRODUCTION_BASELINE_197.md). All new firmware must descend from `7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e` (197 factory-startup correction), preserving earlier UI, upload/retry and OTA fixes. The canonical branch is `codex/halo-production-baseline-197`. Exact 197 source is tagged `halo-v6.4.197`; it is the EOL package, while publicly served OTA and the configured bench remain 196. No 197 OTA pass or publication is implied.
 
-
-# Build and release from the frozen 6.4.158 baseline
-
-Use `RELEASE_BASELINE.json` → `current_working_source` as the authoritative source starting point (159 or a reviewed descendant). The retained `current_baseline` identifies frozen158 recovery artifacts and the previous paired scheduled-OTA qualification; it does not select an older working checkout. The following paragraph records that immutable158 reference. Its artifact source is commit `b6d06da5997e2252a3472697f30dc8111ab90367`, firmware tree `6e1a6b0bf8e8d5739075fa96e680667483312fd9`, build epoch `1789397604`, and build ID `6.4.158-20260914T145324Z-b6d06da5997e`. The local annotated tag is `halo-v6.4.158`. Creating that tag did not push Git history or tags remotely; S3 firmware publication is a separate, completed operation.
-
-The frozen package belongs at `/Users/MattTaylor/halo-releases/6.4.158`, with its portable archive alongside it. Use the package inventory/checksums and release receipts to verify the actual files. Keep the published BINs authoritative. A rebuild under a different absolute snapshot path can change embedded `__FILE__` strings, even with identical source/version/time. Do not rebuild and republish 158 under its existing immutable identity.
-
-The qualification is specific: one scheduled 157→158 paired OTA, exact image hashes, selected/running SDK VALID, native RESOLVED with zero reservation and no separate debt, followed by verified restoration of daily 02:00 Pacific and genuine history. Three LCD packet retries recovered. Initial serial prefixes were missed; the positive early-calendar WAIT branch was covered by host tests, but was not exercised in that device run. Historical 117 product/UI qualification remains historical; it is not a claim that every product feature was retested on 158.
+The retained `RELEASE_BASELINE.json.current_baseline` and `development_baseline` identify historical 158 recovery/scheduled qualification. They do not select new development. Its tag, package and previous acceptance stay immutable; see [historical 158 recovery](FROZEN_RELEASE_158.md). Retain both new 197/196 packages under `/Users/MattTaylor/halo-releases`, with their hashes and original build evidence. Never rebuild/relabel existing immutable versions.
 
 ## Before changing anything
 
-Work on a clean, reviewed descendant of the frozen 158 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
+Work on a clean, reviewed descendant of the required 197 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
 
 ```sh
 python3 -B tools/verify_frozen_baseline.py
 ```
 
-Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run the complete [host regression gate](REGRESSION_TESTING.md), and commit the reviewed source before preparing release artifacts. The baseline guard verifies identity; it does not establish device acceptance of new code.
+Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run the complete [host regression gate](REGRESSION_TESTING.md), and commit the reviewed source before preparing release artifacts. The guard verifies current-source ancestry and historical recovery bytes; it does not establish device acceptance of new code. The source preparer independently enforces the same current source floor and minimum new version.
 
-Allocate an unused version **6.4.197 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.198 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.197>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.198>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"
@@ -42,7 +35,7 @@ From the clean firmware root:
   --version "$RELEASE_VERSION" --epoch "$BUILD_EPOCH" --out "$OUT/snapshot"
 ```
 
-The preparer extracts only the tracked firmware subtree, verifies required dependencies, rejects dirty/untracked source and local MQTT credential overrides, and generates exactly three version headers. Retain `snapshot/materialization.json`: it records the full source commit/tree, explicit build inputs, original source hashes and materialized hashes. Do not hand-edit generated headers or substitute repository source-only metadata.
+The preparer rejects old/unrelated source and reused baseline version numbers, then extracts only the tracked firmware subtree, verifies required dependencies, rejects dirty/untracked source and local MQTT credential overrides, and generates exactly three version headers. Retain `snapshot/materialization.json`: it records the full source commit/tree, explicit build inputs, original source hashes and materialized hashes. Do not hand-edit generated headers or substitute repository source-only metadata.
 
 Run the complete offline gate from that immutable snapshot before publication:
 
@@ -122,4 +115,4 @@ AWS_CLI_PYTHON='<absolute-installed-AWS-CLI-v2-Python>'
 
 Stage must close successfully before promotion. Immutable writes require absence; promotion rechecks served artifacts and exact predecessors, changes LCD latest then Sense latest, and performs full readback. Preserve uncertain/partial results; there is no blind automatic retry or rollback. Reverting latest does not force firmware downgrade.
 
-Finish by recording actual source, paired hashes, acceptance scope, publication/readback, process closure and tag in `current_baseline` and the changelog. Archive the complete release package and distinguish local Git tagging from any separately requested remote push. The new baseline becomes authoritative only when those actual results exist.
+Finish by recording actual source, paired hashes, acceptance scope, publication/readback, process closure and tag in `current_working_source`, the compact production selector and the changelog. Preserve the separate historical recovery records; do not overwrite them with a prospective release. Archive the complete release package and distinguish local Git tagging from any separately requested remote push. The new baseline becomes authoritative only when those actual results exist.

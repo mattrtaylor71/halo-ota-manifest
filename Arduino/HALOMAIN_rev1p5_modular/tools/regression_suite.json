@@ -2,6 +2,12 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "test_production_source_guard",
+      "path": "tools/test_production_source_guard.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
       "id": "test_publish_lcd_ota",
       "path": "halo_ota_demo/tools/ota/test_publish_lcd_ota.py",
       "args": [],

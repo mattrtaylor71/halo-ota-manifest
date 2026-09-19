@@ -16,9 +16,18 @@ SPEC = importlib.util.spec_from_file_location('production_build', Path(__file__)
 build = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(build)
 SOURCE = Path(__file__).resolve().parents[1]
+_fixture_spec = importlib.util.spec_from_file_location('prepare_fixtures', Path(__file__).with_name('test_prepare_production_release.py'))
+prepare_fixtures = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(prepare_fixtures)
 
 
 class ProductionProfileTests(unittest.TestCase):
+    def prepared_source(self):
+        fixture = prepare_fixtures.ReleasePreparationTests('test_reproducible_metadata_and_scope')
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        return Path(fixture.prepare()['source_root'])
+
     def test_qualified_shipping_features_and_fixed_boards(self):
         for board in ('sense', 'lcd'):
             with self.subTest(board=board):
@@ -128,15 +137,17 @@ class ProductionProfileTests(unittest.TestCase):
                 run.assert_not_called()
 
     def test_disk_reserve_rechecked_between_boards_and_recorded(self):
+        source = self.prepared_source()
         child = SimpleNamespace(pid=123456789, poll=lambda: 0, wait=lambda timeout: 0)
         with tempfile.TemporaryDirectory() as name:
             out = Path(name) / 'build'
             with patch.object(sys, 'argv', ['builder', '--out', str(out), '--min-free-gib', '4']), \
+                    patch.object(build, '__file__', str(source / 'tools/build_ota_policy_production.py')), \
                     patch.object(build.shutil, 'which', return_value='/synthetic/arduino-cli'), \
                     patch.object(build.shutil, 'disk_usage', side_effect=[SimpleNamespace(free=n*1024**3) for n in (5, 3, 3)]), \
                     patch.object(build.sdk_patch, 'prepare', return_value={}), \
                     patch.object(build.sdk_patch, 'verify_compiled'), \
-                    patch.object(build.subprocess, 'Popen', return_value=child) as popen, \
+                    patch.object(build, 'launch_compiler', return_value=child) as popen, \
                     patch.object(build, 'close_owned_group', return_value={'group_absent': True, 'signals': []}):
                 with self.assertRaisesRegex(AssertionError, 'host build reserve'):
                     build.main()
@@ -153,6 +164,7 @@ class ProductionProfileTests(unittest.TestCase):
             self.assertFalse((out / 'lcd/started.json').exists())
 
     def test_pending_signal_after_spawn_retains_compiler_custody(self):
+        source = self.prepared_source()
         child = SimpleNamespace(pid=123456789, poll=lambda: 0, returncode=0)
         def mask(how, signals):
             if how == build.signal.SIG_SETMASK:
@@ -163,10 +175,10 @@ class ProductionProfileTests(unittest.TestCase):
             with patch.object(build.shutil, 'disk_usage', return_value=SimpleNamespace(free=9*1024**3)), \
                     patch.object(build.sdk_patch, 'prepare', return_value={}), \
                     patch.object(build.signal, 'pthread_sigmask', side_effect=mask), \
-                    patch.object(build.subprocess, 'Popen', return_value=child), \
+                    patch.object(build, 'launch_compiler', return_value=child), \
                     patch.object(build, 'close_owned_group', return_value={'group_absent': True, 'signals': []}) as close:
                 with self.assertRaises(AssertionError):
-                    build.run('sense', SOURCE, out, '/synthetic/arduino-cli')
+                    build.run('sense', source, out, '/synthetic/arduino-cli')
                 close.assert_called_once_with(child)
             self.assertEqual(json.loads((out / 'started.json').read_text())['pid'], child.pid)
             result = json.loads((out / 'result.json').read_text())

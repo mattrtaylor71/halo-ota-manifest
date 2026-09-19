@@ -1,6 +1,6 @@
 # Frozen HALO 6.4.158
 
-**Use 6.4.158 as the default production firmware baseline from now on.** This freeze preserves the published bytes, exact source, evidence, and operating procedure. It makes no runtime change, schedules no new test, and does not republish the OTA. Future firmware starts from this checkout or a reviewed descendant of the frozen source.
+**Historical recovery record: 158 is not the current development baseline.** Use [the 197 production handoff](PRODUCTION_BASELINE_197.md) for new work. This freeze preserves the published bytes, exact source, evidence, and operating procedure. It makes no runtime change, schedules no new test, and does not republish the OTA. Future firmware must also preserve the newer required source floor in that handoff.
 
 ## Exact identity
 
@@ -22,7 +22,7 @@ The tag identifies the source that produced the binaries. Later documentation co
 | Sense | 1,812,640 | `017795e6fc298c93d8ebeb7f4f3bcd1d3683d6db4902d07b19ba50ec0b2f5d56` |
 | LCD | 1,891,872 | `d2d3e6eb38e09c5b699dd2cb7b25abdd139bf7649b7deb047bab1f51a228ee91` |
 
-[RELEASE_BASELINE.json](../RELEASE_BASELINE.json) → `current_baseline` is authoritative for the current source, package hashes, publication, and acceptance receipts. `historical_product_qualification_117` and the versioned campaign records preserve earlier evidence; their former “current” wording does not select the development baseline.
+[RELEASE_BASELINE.json](../RELEASE_BASELINE.json) → `current_baseline` is authoritative only for these historical158 package hashes, publication and acceptance receipts. `PRODUCTION_BASELINE.json` selects current development. `historical_product_qualification_117` and the versioned campaign records preserve earlier evidence; their former “current” wording does not select the development baseline.
 
 ## Preserved files and verification
 
@@ -61,7 +61,7 @@ The package's merged images are **factory/reset payloads**. Their component offs
 
 ## Future work and safe retention
 
-Use [BUILD_AND_RELEASE.md](BUILD_AND_RELEASE.md) for the next change. Run the baseline preflight, make one scoped change, verify it, commit clean source, allocate an unused version at least 6.4.159, prepare a snapshot, build both production targets, check the real artifacts, then stage/promote those same bytes with fresh paired predecessor receipts. Keep the reviewed ESP32 3.3.8 DNS patch, production flags, 96 KiB LVGL heap, and exact partition profiles. Changes to those dependencies need their own validation.
+Use [BUILD_AND_RELEASE.md](BUILD_AND_RELEASE.md) for the next change. Run the baseline preflight, make one scoped change, verify it, commit clean source, allocate an unused version at or above the current production selector's minimum, prepare a snapshot, build both production targets, check the real artifacts, then stage/promote those same bytes with fresh paired predecessor receipts. Keep the reviewed ESP32 3.3.8 DNS patch, production flags, 96 KiB LVGL heap, and exact partition profiles. Changes to those dependencies need their own validation.
 
 Never move `halo-v6.4.158`, overwrite its frozen payloads, or rebuild different bytes under version 158. The archive is also immutable; amendments go in new documentation commits or a separately named addendum. To compare or explore the old source, use a separate checkout; do not discard the current handoff by resetting this working directory.
 

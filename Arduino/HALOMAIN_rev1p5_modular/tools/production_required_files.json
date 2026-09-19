@@ -2,6 +2,8 @@
   "schema": 1,
   "purpose": "Required source/dependency/license paths for the qualified production firmware and canonical release preparation. Git commit records contents.",
   "required_paths": [
+    "PRODUCTION_BASELINE.json",
+    "tools/production_source_guard.py",
     "AGENTS.md",
     "LCD_Minimal/LCD_Minimal.ino",
     "LCD_Minimal/audio_bsp.c",
