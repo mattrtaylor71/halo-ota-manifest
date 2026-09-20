@@ -1,3 +1,7 @@
+# 6.4.198 candidate — keep background activity from relighting an idle display
+
+Preserve an ordinary session's dark LCD through late maintenance/list activity and non-user sleep aborts. Actual touch/scroll and OTA presentation retain explicit visibility. Add 15 visibility cases and three ordinary-session abort cases; frozen197 reproduces the defects and all focused corrected cases pass. Full release gates, publication and the user's physical verification are pending at this source checkpoint. Sense retries, scheduling and EOL factory selection are unchanged. [Cause, regression coverage and limits](docs/LCD_IDLE_DARK_198.md).
+
 # September 19 production baseline freeze
 
 Designate 197 source `7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e` as the required ancestor for all future firmware; retain public/bench 196 and historical 158 recovery separately. Pin the existing application/factory packages and evidence, correct stale source-selection documentation, and enforce current-source ancestry/minimum 198 in release preparation and canonical builds. No device/runtime/OTA publication change. September 19 two real camera uploads, gallery readback and user cloud activity are documented without widening qualification. [Production handoff](docs/PRODUCTION_BASELINE_197.md).

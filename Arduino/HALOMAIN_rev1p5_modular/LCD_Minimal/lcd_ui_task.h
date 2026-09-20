@@ -178,7 +178,7 @@ static void ui_task(void *arg) {
     // Just tick LVGL to keep the display alive and release the lock.
     if (g_ota_screen_active) {
       lcd_allow_visible_ui("ota_screen");
-      if (g_idle_screen_dark) lcd_set_idle_screen_dark(false, "ota_screen");
+      if (g_idle_screen_dark) lcd_set_idle_screen_dark(false, "ota_screen", true);
       // OTA_LOCK can arrive while setup is still finishing the dark UI init.
       // Repair the final panel state here on its owner task as well as the PWM.
       if (!g_panel_enabled && g_lcd_initialized) {

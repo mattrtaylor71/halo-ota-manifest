@@ -237,7 +237,7 @@ static void lcd_set_backlight_binary(bool on, const char* reason) {
   lcd_set_backlight_level(on ? 255 : 0, reason);
 }
 
-static void lcd_set_idle_screen_dark(bool dark, const char* reason) {
+static void lcd_set_idle_screen_dark(bool dark, const char* reason, bool explicit_visibility = false) {
   if (dark) {
     if (g_idle_screen_dark || g_sleep_transition || g_in_light_sleep || g_ota_mode_active || g_ota_screen_active) {
       return;
@@ -260,7 +260,11 @@ static void lcd_set_idle_screen_dark(bool dark, const char* reason) {
     return;
   }
 
-  if (g_background_wake_dark || !g_idle_screen_dark) {
+  // Background UART activity may extend processor uptime after the user's
+  // screen timed out. It must not turn that activity into a visible wake.
+  // Touch/scroll restore UI in ensure_awake_for_ui(); the OTA overlay is the
+  // only caller that explicitly owns visibility through this helper.
+  if (g_background_wake_dark || !g_idle_screen_dark || !explicit_visibility) {
     return;
   }
   if (!g_panel_enabled) {
@@ -377,7 +381,7 @@ static void abort_sleep_transition(const char* reason, bool user_input = true) {
                    (g_backlight_duty == 0) || !g_panel_enabled || !g_lvgl_running;
   g_sleep_transition = false;
   g_in_light_sleep = false;
-  if (need_wake && !g_background_wake_dark) {
+  if (need_wake && !g_background_wake_dark && (user_input || !g_idle_screen_dark)) {
     g_idle_screen_dark = false;
     if (g_sleep_transition) {
       g_sleep_transition = false;

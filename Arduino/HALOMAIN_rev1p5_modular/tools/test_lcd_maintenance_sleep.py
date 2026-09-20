@@ -16,7 +16,8 @@ CASES = ('ordinary_arm', 'handshake_future_race', 'handshake_future_hold',
          'touch', 'scroll', 'early_provisioning', 'early_ota',
          'early_recent_ready', 'early_asleep', 'early_link',
          'early_wake_line', 'denied', 'timeout', 'abort_ota_early',
-         'abort_ota_late', 'abort_bench', 'abort_ota_touch_early', 'abort_ota_touch_late')
+         'abort_ota_late', 'abort_bench', 'abort_ota_touch_early', 'abort_ota_touch_late',
+         'ordinary_dark_abort', 'ordinary_lit_abort', 'ordinary_dark_touch_abort')
 
 
 def definition(text, anchor):
@@ -169,7 +170,21 @@ static void assert_future_arm_preserved(){
 }
 int main(int argc,char** argv){
   assert(argc==2);scenario=argv[1];
-  if(scenario.find("abort_")==0){
+  if(scenario.find("ordinary_")==0 && scenario!="ordinary_arm"){
+    const bool touch=scenario=="ordinary_dark_touch_abort";
+    const bool lit=scenario=="ordinary_lit_abort";
+    g_background_wake_dark=false;g_sleep_transition=true;g_idle_screen_dark=!lit;
+    g_panel_enabled=lit;g_lvgl_running=lit;g_backlight_duty=lit?128:0;
+    host_sleep_touch_irq=touch;teardown_abort("early");
+    assert(media_user_notices==(touch?1u:0u));
+    assert(visible_calls==(touch?1u:0u));
+    assert(relights==(touch?1u:0u));
+    assert(g_backlight_duty==((lit||touch)?128:0));
+    assert(g_panel_enabled==(lit||touch) && g_idle_screen_dark==!(lit||touch));
+    assert(!g_sleep_transition);
+    printf("OBS %s user_input=%d relights=%u backlight=%d idle_dark=%d\n",
+           scenario.c_str(),touch,relights,g_backlight_duty,g_idle_screen_dark);
+  }else if(scenario.find("abort_")==0){
     const bool touch=scenario.find("touch")!=std::string::npos;
     host_sleep_touch_irq=touch;g_background_wake_dark=true;g_sleep_transition=true;
     const char* stage=scenario.find("bench")!=std::string::npos?"bench":
