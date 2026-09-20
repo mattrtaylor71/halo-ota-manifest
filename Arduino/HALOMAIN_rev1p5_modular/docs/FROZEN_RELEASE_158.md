@@ -1,6 +1,6 @@
 # Frozen HALO 6.4.158
 
-**Historical recovery record: 158 is not the current development baseline.** Use [the 197 production handoff](PRODUCTION_BASELINE_197.md) for new work. This freeze preserves the published bytes, exact source, evidence, and operating procedure. It makes no runtime change, schedules no new test, and does not republish the OTA. Future firmware must also preserve the newer required source floor in that handoff.
+**Historical recovery record: 158 is not the current development baseline.** Use [the current production handoff](LCD_IDLE_DARK_198.md) for new work. This freeze preserves the published bytes, exact source, evidence, and operating procedure. It makes no runtime change, schedules no new test, and does not republish the OTA. Future firmware must also preserve the newer required source floor in that handoff.
 
 ## Exact identity
 

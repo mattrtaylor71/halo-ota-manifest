@@ -1,3 +1,5 @@
+> Historical September19 source-freeze record. Current published/development source is198; use [the current handoff](LCD_IDLE_DARK_198.md) and `PRODUCTION_BASELINE.json`. EOL factory selection remains197. The evidence and qualification limits below are retained.
+
 # Production firmware baseline — September 19, 2026
 
 **Start all further firmware and OTA work from the 197 source, preserving every preceding fix.** The compact machine-readable selector is [PRODUCTION_BASELINE.json](../PRODUCTION_BASELINE.json). The full historical ledger remains [RELEASE_BASELINE.json](../RELEASE_BASELINE.json); its old `current_baseline=158` means retained recovery evidence, not today's development source.

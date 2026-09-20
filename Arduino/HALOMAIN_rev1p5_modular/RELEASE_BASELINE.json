@@ -874,7 +874,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.196",
+  "current_production_latest_version": "6.4.198",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -4849,14 +4849,14 @@
     }
   },
   "current_validation_blocker": {
-    "status": "FACTORY_STARTUP_PASS_PHYSICAL_POWER_SETTINGS_SLEEP_PENDING",
-    "details": "Exact EOL pair full-flashed with197. Pristine-state reset, automatic identity and fresh paired SDK VALID pass. Physical all-power-off recovery, visible Settings and configured sleep/wake remain pending. Public196 unchanged; no new shipping or OTA claim.",
+    "status": "PUBLISHED_198_MANUAL_OTA_AND_PHYSICAL_SCREEN_ACCEPTANCE_PENDING",
+    "details": "Both 102-suite gates, paired canonical builds, artifact checks and publication/readback passed. User will install198 with Manual Update and repeat voice/list-to-idle. No new hardware pass is claimed. EOL197 acceptance limits remain in its retained record.",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-factory-startup-20260918/FACTORY-ACCEPTANCE-REVIEW.json",
-      "sha256": "b1fb3b556c2a08c33b78985418c221552560ef697970a03412e28a4502064aef"
+      "path": "/Users/MattTaylor/halo-idle-dark198-20260920/RELEASE-RECORD.json",
+      "sha256": "6d986b7051fe19bde0afada6e4428dd450a515707f90de2e29b7f988f9f23e64"
     },
-    "candidate_installed": true,
-    "no_public_promotion": true
+    "candidate_installed": false,
+    "no_public_promotion": false
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6555,110 +6555,89 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.197",
-    "status": "PASS_SCOPED_FACTORY_STARTUP_AND_PAIRED_PRODUCTION_COMMUNICATION",
-    "artifact_source_commit": "7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e",
-    "artifact_source_firmware_tree": "3ad5b5d1015bd0444e12560c40460475268030fa",
-    "build_id": "6.4.197-20260918T231600Z-7f87340d7c27",
+    "version": "6.4.198",
+    "status": "PUBLISHED_HOST_VALIDATED_DEVICE_ACCEPTANCE_PENDING",
+    "artifact_source_commit": "3826d4ad1858922a245558634cb0d6881acbfc5e",
+    "artifact_source_firmware_tree": "51357035951277ee3dd1967848261774a07f98f8",
+    "build_id": "6.4.198-20260920T195720Z-3826d4ad1858",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e or reviewed descendants. Retain the automatic guarded factory-startup handshake,190 voice/list,191 immediate delete, explicit manual grants and196 clock recovery. Frozen158 remains immutable; public196 and its earlier bench acceptance remain separate.",
+    "source_selection": "Continue from 3826d4ad1858922a245558634cb0d6881acbfc5e or reviewed descendants. Retain the 198 idle-dark correction, 197 guarded factory startup and all earlier UI, media retry and OTA fixes. EOL factory selection remains 197; historical 158 recovery is immutable.",
     "materialization": {
-      "path": "/Users/MattTaylor/halo-factory-startup-20260918/snapshot/materialization.json",
-      "sha256": "42158014fe93d00505d331db5b9747b2aef63f5dbed976ae778438266a799798"
+      "path": "/Users/MattTaylor/halo-idle-dark198-20260920/snapshot/materialization.json",
+      "sha256": "1af3f63a2b58521329a47daf3635d65754709ea0242eb6319526db366188be29"
+    },
+    "working_host_tests": {
+      "path": "/Users/MattTaylor/halo-idle-dark198-20260920/working-host001/RESULT.json",
+      "sha256": "24a2efa7682ee35325b3e23797af92b883fc10659ba9674cd7aeacb06e87e40d"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-factory-startup-20260918/host001/RESULT.json",
-      "sha256": "e05de160abff5803f302cf16bacc72b26e12e68ccdc155ee23879a4675b5c364"
+      "path": "/Users/MattTaylor/halo-idle-dark198-20260920/regression/RESULT.json",
+      "sha256": "73bf9af7b2a5567fa7656dc37eab71841bfcc43b24fad8e67b06a1b0adf8582b"
     },
-    "host_suite_count": 99,
+    "host_suite_count": 102,
     "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
     "built_boards": [
       "sense",
       "lcd"
     ],
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "bca1bc01a7a6b2c870959c89a5a57abbcbd4ec2177092bbcbaf357f43511537b"
+      "path": "/Users/MattTaylor/halo-idle-dark198-20260920/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "f4b191211d62aefa9baeffd4a96c9ae0c6cf1c37f3f39db6d7e56542bdba52fc"
     },
     "board_proofs": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/sense/artifacts/verified.json",
-        "sha256": "f5fceb730cd38eaecfaee2c556036bb9766bf9b29032b85452e8de192cdc10eb"
+        "path": "/Users/MattTaylor/halo-idle-dark198-20260920/build/sense/artifacts/verified.json",
+        "sha256": "3e6d4d1588d4ccdb9392ade3a808481eaff15d68346d341a6715e63eb294d49b"
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/lcd/artifacts/verified.json",
-        "sha256": "58d245a621bf876d8eaf624f5720bab7b9dd1f1083c8c409105e198222d8c3e5"
+        "path": "/Users/MattTaylor/halo-idle-dark198-20260920/build/lcd/artifacts/verified.json",
+        "sha256": "041d5c2d18948b237512091c7bc7d9fb1bf23a4ca6a4b58cc92a7ba5ba816dbf"
       }
     },
     "applications": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/sense/artifacts/halo_sense_prod.ino.bin",
-        "sha256": "50f11891252244cb478cf86d308eb1d53abfb323988a266628c00faccf4b9504"
+        "path": "/Users/MattTaylor/halo-idle-dark198-20260920/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "2026acf678b95458c1ff0ca9c290e3e0d429bb2824ca5c71cf11999fe38247f6",
+        "bytes": 1868224
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/lcd/artifacts/halo_lcd_prod.ino.bin",
-        "sha256": "fd650cfc6521bb5fa133837bb09c91a6b629c53c423f9dd764fed36cbab330bb"
+        "path": "/Users/MattTaylor/halo-idle-dark198-20260920/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "8e6a88cad058586b4f9e4ac3951b689320831b5ea518904321acaecb513b318a",
+        "bytes": 2030064
       }
     },
-    "factory_manifest": {
-      "path": "/Users/MattTaylor/halo-factory-startup-20260918/package/factory/factory.json",
-      "sha256": "5d56061795375ce517953e774330eb56c05185bf3a0ee70bcb13d061970cd7f9"
+    "publication": {
+      "path": "/Users/MattTaylor/halo-idle-dark198-20260920/promote001/result.json",
+      "sha256": "cafce8c89825fd4b36bc6daf76cc8bdfbc9e0aa27230c2936318f16a06be0677"
     },
-    "published": false,
-    "current_public_ota_version": "6.4.196",
+    "published": true,
+    "current_public_ota_version": "6.4.198",
     "git_remote_push_performed": false,
-    "installed": true,
-    "installed_boards": [
-      "sense",
-      "lcd"
-    ],
-    "hardware_target": {
-      "sense": "10:20:ba:03:97:b8",
-      "lcd": "d0:cf:13:1e:19:bc"
-    },
-    "last_observed_installed_configuration": {
-      "sense": "6.4.197 app0 SDK VALID",
-      "lcd": "6.4.197 app0 SDK VALID"
-    },
-    "last_observed_device_acceptance": {
-      "path": "/Users/MattTaylor/halo-factory-startup-20260918/FACTORY-ACCEPTANCE-REVIEW.json",
-      "sha256": "b1fb3b556c2a08c33b78985418c221552560ef697970a03412e28a4502064aef"
-    },
-    "acceptance": {
-      "full_factory_write_readback": true,
-      "erased_nvs_verified_before_first_accepted_boot": true,
-      "automatic_sense_identity_at_lcd_before_commands": true,
-      "fresh_bidirectional_request_reply": true,
-      "both_sdk_valid": true,
-      "saved_safe_usb_reset_recovery": true,
-      "physical_cold_power_cycle": false,
-      "visible_settings": false,
-      "configured_sleep_wake": false,
-      "physical_interrupted_ota": false,
-      "new_manual_or_scheduled_ota": false
-    },
-    "shipping_qualification": false,
-    "schedule": "Production02:00 Pacific-default configuration unchanged. This factory test erased both EOL NVS regions; prior complete flash backups are retained.",
-    "next_version_minimum": "6.4.198",
-    "next_version_requires_fresh_inventory_check": true,
-    "handoff": "docs/FACTORY_UART_STARTUP_197.md",
-    "limits": [
-      "factory001 startup capture failed with zero bytes after full-flash verification. Its failure remains recorded separately; R2 corrected DTR/reset/USB-handle capture without rewriting flash.",
-      "The first automatic Sense identity was UNDEFINED during the factory health interval; subsequent fresh identity was VALID.",
-      "cold-power003 is a five-minute command-free USB-reset observation, despite its directory name. No physical power removal was observed or confirmed.",
-      "Settings screen pixels, physical cold-power and configured sleep/wake remain pending. Interrupted-update/saved-unsafe corner cases have host regression coverage, not a new physical interruption test.",
-      "Public OTA remains196. Live EOL station was updated to197 and the genuine recovery receipt adopted; unit remains functional_review. No new full-product or197OTA qualification is claimed."
-    ],
+    "installed": false,
+    "device_acceptance": "PENDING_USER_MANUAL_OTA_AND_PHYSICAL_IDLE_RETRY_REVIEW",
     "retained_configured_bench_version": "6.4.196",
     "retained_configured_bench_record": "last_verified_device_health",
-    "production_source_baseline": true,
+    "retained_factory_version": "6.4.197",
+    "schedule": "Production 02:00 Pacific unchanged; no allowance, debt or queue edits.",
+    "next_version_minimum": "6.4.199",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/LCD_IDLE_DARK_198.md",
     "source_tag": {
-      "name": "halo-v6.4.197",
-      "object": "7230e761b423b95ea47538604cc572229d47e83b",
-      "commit": "7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e",
+      "name": "halo-v6.4.198",
+      "object": "9b4278d7a467838752d03bc0ea59341b05368bee",
+      "commit": "3826d4ad1858922a245558634cb0d6881acbfc5e",
       "remote_push": false
-    }
+    },
+    "archive_verification": {
+      "path": "/Users/MattTaylor/halo-releases/6.4.198.FREEZE-VERIFIED.json",
+      "sha256": "6a3b46492c7874e6776427c9d85a287f31c7f7d17df30132445af11d6b635825"
+    },
+    "limits": [
+      "Full working-tree and exact-snapshot host gates passed; no new physical test or firmware installation was performed.",
+      "The fix covers reproduced same-boot idle relights; cloud retry wake reports do not establish physical screen visibility.",
+      "No new scheduled OTA, full-product, cold-power or interrupted-transfer hardware pass is claimed."
+    ]
   },
   "previous_working_source_187": {
     "version": "6.4.187",
@@ -10105,14 +10084,16 @@
   },
   "production_source_selection": {
     "authoritative_selector": "PRODUCTION_BASELINE.json",
-    "handoff": "docs/PRODUCTION_BASELINE_197.md",
-    "minimum_source_commit": "7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e",
-    "source_tag": "halo-v6.4.197",
-    "source_tag_object": "7230e761b423b95ea47538604cc572229d47e83b",
+    "handoff": "docs/LCD_IDLE_DARK_198.md",
+    "minimum_source_commit": "3826d4ad1858922a245558634cb0d6881acbfc5e",
+    "source_tag": "halo-v6.4.198",
+    "source_tag_object": "9b4278d7a467838752d03bc0ea59341b05368bee",
     "canonical_branch": "codex/halo-production-baseline-197",
-    "minimum_new_version": "6.4.198",
-    "user_designated_production_baseline": "2026-09-19",
-    "public_version_unchanged": "6.4.196"
+    "minimum_new_version": "6.4.199",
+    "last_published_update": "2026-09-20",
+    "public_version": "6.4.198",
+    "factory_version_unchanged": "6.4.197",
+    "device_acceptance": "PENDING"
   },
   "baseline_freeze_20260919": {
     "scope": "Current source197 and exact196/197 artifacts; no runtime/build/publication change",
@@ -10207,5 +10188,121 @@
         "status": "PASS_CHECKSUM_VERIFIED_PRIVATE_FREEZE"
       }
     }
+  },
+  "previous_working_source_197": {
+    "version": "6.4.197",
+    "status": "PASS_SCOPED_FACTORY_STARTUP_AND_PAIRED_PRODUCTION_COMMUNICATION",
+    "artifact_source_commit": "7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e",
+    "artifact_source_firmware_tree": "3ad5b5d1015bd0444e12560c40460475268030fa",
+    "build_id": "6.4.197-20260918T231600Z-7f87340d7c27",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e or reviewed descendants. Retain the automatic guarded factory-startup handshake,190 voice/list,191 immediate delete, explicit manual grants and196 clock recovery. Frozen158 remains immutable; public196 and its earlier bench acceptance remain separate.",
+    "materialization": {
+      "path": "/Users/MattTaylor/halo-factory-startup-20260918/snapshot/materialization.json",
+      "sha256": "42158014fe93d00505d331db5b9747b2aef63f5dbed976ae778438266a799798"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-factory-startup-20260918/host001/RESULT.json",
+      "sha256": "e05de160abff5803f302cf16bacc72b26e12e68ccdc155ee23879a4675b5c364"
+    },
+    "host_suite_count": 99,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "built_boards": [
+      "sense",
+      "lcd"
+    ],
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "bca1bc01a7a6b2c870959c89a5a57abbcbd4ec2177092bbcbaf357f43511537b"
+    },
+    "board_proofs": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/sense/artifacts/verified.json",
+        "sha256": "f5fceb730cd38eaecfaee2c556036bb9766bf9b29032b85452e8de192cdc10eb"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/lcd/artifacts/verified.json",
+        "sha256": "58d245a621bf876d8eaf624f5720bab7b9dd1f1083c8c409105e198222d8c3e5"
+      }
+    },
+    "applications": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "50f11891252244cb478cf86d308eb1d53abfb323988a266628c00faccf4b9504"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-factory-startup-20260918/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "fd650cfc6521bb5fa133837bb09c91a6b629c53c423f9dd764fed36cbab330bb"
+      }
+    },
+    "factory_manifest": {
+      "path": "/Users/MattTaylor/halo-factory-startup-20260918/package/factory/factory.json",
+      "sha256": "5d56061795375ce517953e774330eb56c05185bf3a0ee70bcb13d061970cd7f9"
+    },
+    "published": false,
+    "current_public_ota_version": "6.4.196",
+    "git_remote_push_performed": false,
+    "installed": true,
+    "installed_boards": [
+      "sense",
+      "lcd"
+    ],
+    "hardware_target": {
+      "sense": "10:20:ba:03:97:b8",
+      "lcd": "d0:cf:13:1e:19:bc"
+    },
+    "last_observed_installed_configuration": {
+      "sense": "6.4.197 app0 SDK VALID",
+      "lcd": "6.4.197 app0 SDK VALID"
+    },
+    "last_observed_device_acceptance": {
+      "path": "/Users/MattTaylor/halo-factory-startup-20260918/FACTORY-ACCEPTANCE-REVIEW.json",
+      "sha256": "b1fb3b556c2a08c33b78985418c221552560ef697970a03412e28a4502064aef"
+    },
+    "acceptance": {
+      "full_factory_write_readback": true,
+      "erased_nvs_verified_before_first_accepted_boot": true,
+      "automatic_sense_identity_at_lcd_before_commands": true,
+      "fresh_bidirectional_request_reply": true,
+      "both_sdk_valid": true,
+      "saved_safe_usb_reset_recovery": true,
+      "physical_cold_power_cycle": false,
+      "visible_settings": false,
+      "configured_sleep_wake": false,
+      "physical_interrupted_ota": false,
+      "new_manual_or_scheduled_ota": false
+    },
+    "shipping_qualification": false,
+    "schedule": "Production02:00 Pacific-default configuration unchanged. This factory test erased both EOL NVS regions; prior complete flash backups are retained.",
+    "next_version_minimum": "6.4.198",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/FACTORY_UART_STARTUP_197.md",
+    "limits": [
+      "factory001 startup capture failed with zero bytes after full-flash verification. Its failure remains recorded separately; R2 corrected DTR/reset/USB-handle capture without rewriting flash.",
+      "The first automatic Sense identity was UNDEFINED during the factory health interval; subsequent fresh identity was VALID.",
+      "cold-power003 is a five-minute command-free USB-reset observation, despite its directory name. No physical power removal was observed or confirmed.",
+      "Settings screen pixels, physical cold-power and configured sleep/wake remain pending. Interrupted-update/saved-unsafe corner cases have host regression coverage, not a new physical interruption test.",
+      "Public OTA remains196. Live EOL station was updated to197 and the genuine recovery receipt adopted; unit remains functional_review. No new full-product or197OTA qualification is claimed."
+    ],
+    "retained_configured_bench_version": "6.4.196",
+    "retained_configured_bench_record": "last_verified_device_health",
+    "production_source_baseline": true,
+    "source_tag": {
+      "name": "halo-v6.4.197",
+      "object": "7230e761b423b95ea47538604cc572229d47e83b",
+      "commit": "7f87340d7c271bfdfc9b888aa6a0fcbf43822a8e",
+      "remote_push": false
+    }
+  },
+  "previous_current_validation_blocker_197": {
+    "status": "FACTORY_STARTUP_PASS_PHYSICAL_POWER_SETTINGS_SLEEP_PENDING",
+    "details": "Exact EOL pair full-flashed with197. Pristine-state reset, automatic identity and fresh paired SDK VALID pass. Physical all-power-off recovery, visible Settings and configured sleep/wake remain pending. Public196 unchanged; no new shipping or OTA claim.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-factory-startup-20260918/FACTORY-ACCEPTANCE-REVIEW.json",
+      "sha256": "b1fb3b556c2a08c33b78985418c221552560ef697970a03412e28a4502064aef"
+    },
+    "candidate_installed": true,
+    "no_public_promotion": true
   }
 }

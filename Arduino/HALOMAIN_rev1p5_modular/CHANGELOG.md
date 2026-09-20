@@ -1,6 +1,6 @@
-# 6.4.198 candidate — keep background activity from relighting an idle display
+# 6.4.198 published — keep background activity from relighting an idle display
 
-Preserve an ordinary session's dark LCD through late maintenance/list activity and non-user sleep aborts. Actual touch/scroll and OTA presentation retain explicit visibility. Add 15 visibility cases and three ordinary-session abort cases; frozen197 reproduces the defects and all focused corrected cases pass. Full release gates, publication and the user's physical verification are pending at this source checkpoint. Sense retries, scheduling and EOL factory selection are unchanged. [Cause, regression coverage and limits](docs/LCD_IDLE_DARK_198.md).
+Preserve an ordinary session's dark LCD through late maintenance/list activity and non-user sleep aborts. Actual touch/scroll and OTA presentation retain explicit visibility. Add15 visibility cases and three ordinary-session abort cases; frozen197 reproduces the defects. Source `3826d4ad1858`, both102-suite gates, paired canonical builds/artifact checks and full public readbacks pass. Commit/tag/archive preserve the exact release; no remote Git push. RAM, Sense retries, scheduling and EOL197 selection are unchanged. User manual installation and physical verification remain pending; cloud retry-boot entries alone do not establish screen visibility. Future builds must descend from198 and use unused199+. [Cause, receipts and limits](docs/LCD_IDLE_DARK_198.md).
 
 # September 19 production baseline freeze
 
@@ -14,9 +14,9 @@ Fix the setup-mode deadlock without trusting absent state: require a fresh healt
 
 Replace the fixed-port blocking tap helper with exact-device discovery and bounded raw-serial workers. Require fresh readiness, preserve the calibrated stroke and distinguish completion from an observed Halo wake. Record and contain USB/cleanup failures; no automatic reset, stronger stroke or Halo firmware change. The intermittent controller fault is reproduced and remains under investigation. See [evidence and scope](docs/ACTUATOR_INVESTIGATION_20260918.md).
 
-# Pending next release — OTA instruction copy
+# Included in197 and published198 — OTA instruction copy
 
-Replace the static installation screen's “Installing update” subtitle with “Keep Halo powered on.” Preserve the existing typography, layout, heading and transfer behavior. This copy change is not part of published 196.
+Replace the static installation screen's “Installing update” subtitle with “Keep Halo powered on.” Preserve the existing typography, layout, heading and transfer behavior. This copy change was not part of196; it is included in197 and published198.
 
 # 6.4.196 published — manual clock recovery correction
 
