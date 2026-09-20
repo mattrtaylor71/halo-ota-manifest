@@ -36,6 +36,10 @@ This freeze changes release tooling and documentation only. It neither rebuilds 
 
 Use application images for ordinary OTA. Factory images erase NVS and provisioning; they are for an explicitly assigned fresh unit or approved recovery procedure. Do not apply one device's private flash backup to another unit. Packages are private engineering assets and are not uploaded by this freeze. Original absolute evidence/toolchain dependencies remain documented; relocating a package does not automatically make every build or acceptance tool portable.
 
+## Backend account readiness
+
+The September20 [account acceptance checkpoint](ALL_ACCOUNT_BACKEND_ACCEPTANCE.md) records removal of the single-owner image admission gate and a read-only deployment guard. Full multi-account provisioning/feature/replay acceptance is still incomplete; the real discard/add path and account-switch cache have unresolved findings. Preserve these limits alongside firmware release evidence, and do not redeploy the stale shared backend checkout over the serving packages.
+
 ## Required workflow
 
 1. Read this handoff and the compact selector. Work from the canonical checkout or a reviewed descendant of the required source.
