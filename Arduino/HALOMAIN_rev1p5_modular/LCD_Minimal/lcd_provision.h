@@ -140,6 +140,29 @@ static void provision_ui_profile_draw(lv_event_t* e) {
   lv_draw_rect(lv_event_get_draw_ctx(e), &ink, &head);
   lv_draw_rect(lv_event_get_draw_ctx(e), &ink, &shoulders);
 }
+static void provision_ui_assistant_draw(lv_event_t* e) {
+  // Match iOS HaloDeviceIcon's 34x48 vector in its 24x34 profile-row footprint.
+  // Draw directly into the existing buffer; no bitmap, symbol font or child objects.
+  lv_area_t a;
+  lv_obj_get_coords(lv_event_get_target(e), &a);
+  auto scaled = [](int value) { return (value * 24 + 17) / 34; };
+  auto shape = [&](int x, int y, int w, int h, int radius, uint32_t color, int border) {
+    lv_draw_rect_dsc_t ink;
+    lv_draw_rect_dsc_init(&ink);
+    ink.bg_color = lv_color_hex(color);
+    ink.bg_opa = LV_OPA_COVER;
+    ink.radius = radius < 0 ? LV_RADIUS_CIRCLE : scaled(radius);
+    ink.border_color = lv_color_hex(COL_DARK);
+    ink.border_width = border;
+    const lv_coord_t left = a.x1 + scaled(x), top = a.y1 + scaled(y);
+    lv_area_t area = {left, top, (lv_coord_t)(left + scaled(w) - 1),
+                                 (lv_coord_t)(top + scaled(h) - 1)};
+    lv_draw_rect(lv_event_get_draw_ctx(e), &ink, &area);
+  };
+  shape(5, 14, 24, 33, 5, COL_DARK, 0);
+  shape(1, 1, 32, 32, -1, COL_TEAL, 1);
+  shape(5, 5, 24, 24, -1, COL_CREAM, 1);
+}
 static void provision_ui_success_frame(void* object, int32_t value) {
   lv_obj_t* page = (lv_obj_t*)object;
   const lv_opa_t opacity = (lv_opa_t)value;
@@ -230,7 +253,12 @@ static void provision_ui_render() {
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
     halo_ui_icon(provision_screen, HALO_ICON_CHEVRON_DOWN, 169, 182, 22, COL_TEAL);
     lv_obj_t* route = halo_ui_card(provision_screen, 81, 214, 198, 67, COL_WHITE, 18);
-    halo_ui_icon(route, HALO_ICON_WIFI, 14, 21, 26, COL_TEAL);
+    lv_obj_t* assistant = lv_obj_create(route);
+    lv_obj_remove_style_all(assistant);
+    lv_obj_set_pos(assistant, 16, 15);
+    lv_obj_set_size(assistant, 24, 34);
+    lv_obj_clear_flag(assistant, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(assistant, provision_ui_assistant_draw, LV_EVENT_DRAW_MAIN, NULL);
     title = halo_ui_label(route, "Setup kitchen\nassistant", &nunito_18, COL_DARK, 48, 12, 142);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
     provision_ui_scroll_cue();
