@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "PUBLISHED_SOURCE_BASELINE_DEVICE_ACCEPTANCE_PENDING",
+  "status": "PUBLISHED_INSTALLED_PARTIAL_DEVICE_ACCEPTANCE",
   "designated_date": "2026-09-21",
   "minimum_source_commit": "1f5b952284b0ca9732a23dad5e00d73c927b461d",
   "minimum_source_firmware_tree": "a3a43b5208b6b3fe9b82a126cd02786220c69ec8",
@@ -38,5 +38,9 @@
   "installation": {
     "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
     "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
+  },
+  "functional_test": {
+    "path": "/Users/MattTaylor/halo-postclaim199-20260921/reprovision-voice199-01/TEST-RESULT.json",
+    "sha256": "c63c9d040f3ac2db713afd1cef548dc46f78b72a4e7c9e8f409833118ea053b5"
   }
 }

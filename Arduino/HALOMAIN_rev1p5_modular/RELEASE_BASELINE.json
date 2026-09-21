@@ -6556,7 +6556,7 @@
   },
   "current_working_source": {
     "version": "6.4.199",
-    "status": "PUBLISHED_INSTALLED_USER_ACCEPTANCE_PENDING",
+    "status": "PUBLISHED_INSTALLED_PARTIAL_DEVICE_ACCEPTANCE",
     "artifact_source_commit": "1f5b952284b0ca9732a23dad5e00d73c927b461d",
     "artifact_source_firmware_tree": "a3a43b5208b6b3fe9b82a126cd02786220c69ec8",
     "build_id": "6.4.199-20260921T162738Z-1f5b952284b0",
@@ -6615,7 +6615,7 @@
     "current_public_ota_version": "6.4.199",
     "git_remote_push_performed": false,
     "installed": true,
-    "device_acceptance": "PAIRED_USB_BOOT_LINK_SLEEP_VERIFIED_IMMEDIATE_PROVISIONING_VOICE_RETEST_PENDING",
+    "device_acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE",
     "retained_configured_bench_version": "6.4.196",
     "retained_configured_bench_record": "last_verified_device_health",
     "retained_factory_version": "6.4.197",
@@ -6631,7 +6631,7 @@
     },
     "limits": [
       "Both 104-suite working-tree and exact-snapshot gates, paired canonical builds/artifact checks and complete paired public readbacks passed.",
-      "Paired199 application-only USB install, both SDKVALID, fresh inter-board version exchange and coordinated sleep passed. User immediate provisioning/voice/cloud retest remains pending.",
+      "199 user reprovision/immediate voice exercised cleanup correctly; initial AES allocation failures required saved automatic retry. Exact Celery audio reached cloud/list, retries remained dark and final2am timer was selected. Immediate upload reliability remains unresolved.",
       "Immediate voice followed by staying on the shopping list during setup grace remains deferred until list activity ends; this pattern is not claimed fixed.",
       "No new scheduled OTA execution, full-product, cold-power or interrupted-transfer hardware pass is claimed. No new private archive verification is claimed.",
       "198 saved orphan lcd_ota_due blocks OTA discovery despite RESOLVED policy; debt preserved,199 OTA logic unchanged. Additional actuator wake verification stopped on host actuator timeout."
@@ -6639,6 +6639,10 @@
     "installation": {
       "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
       "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
+    },
+    "functional_test": {
+      "path": "/Users/MattTaylor/halo-postclaim199-20260921/reprovision-voice199-01/TEST-RESULT.json",
+      "sha256": "c63c9d040f3ac2db713afd1cef548dc46f78b72a4e7c9e8f409833118ea053b5"
     }
   },
   "previous_working_source_187": {
