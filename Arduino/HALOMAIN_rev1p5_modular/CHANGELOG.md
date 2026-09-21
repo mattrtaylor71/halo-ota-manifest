@@ -1,3 +1,7 @@
+# Unreleased — clearer provisioning instructions
+
+Enlarge the side scroll hint from 12 to 16 px and match the app’s white Profile badge. Actual LVGL page renders and all 104 offline suites passed. Ready for a future release based on 199; no new build, device installation or OTA publication. [Visuals and validation](docs/PROVISIONING_READABILITY_20260921.md).
+
 # 6.4.199 published — immediate media after provisioning
 
 Finish verified-owner setup cleanup despite queued media after the existing 15-second grace, retaining active user/capture/transport guards. This breaks a reproduced setup/upload/sleep circular dependency. Make the LCD five-minute guardian respect existing passive wait and sleep retry backoff. Both 104-suite gates, paired canonical builds/artifact checks and complete public readbacks pass for source `1f5b952284b0`. Paired installation and immediate provisioning/voice/cloud/timer acceptance remain pending. Schedule arithmetic and OTA policy are unchanged; EOL selection stays 197. Future work uses 199 descendants and unused 200+. [Cause, receipts and acceptance limits](docs/POST_PROVISION_MEDIA_199.md).

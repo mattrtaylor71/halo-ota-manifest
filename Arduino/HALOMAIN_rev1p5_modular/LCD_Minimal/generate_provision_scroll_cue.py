@@ -20,7 +20,7 @@ def main():
     args = parser.parse_args()
     scale = 4
     mask = Image.new('L', (360 * scale, 360 * scale), 0)
-    font = ImageFont.truetype(str(args.font), 12 * scale)
+    font = ImageFont.truetype(str(args.font), 16 * scale)
     text, radius = 'Scroll for next step', 148
     widths = [font.getlength(c) / scale + .2 for c in text]
     span = sum(widths) / radius * 180 / math.pi

@@ -222,8 +222,8 @@ static void provision_ui_render() {
   } else if (step == LcdProvisionFlow::AppRoute) {
     provision_ui_app_pill();
     lv_obj_t* profile = halo_ui_card(provision_screen, 81, 119, 198, 55, COL_WHITE, 18);
-    // A simple profile emblem is restricted to setup; main-menu art is untouched.
-    lv_obj_t* avatar = halo_ui_card(profile, 16, 14, 25, 25, COL_GOLD, 13);
+    // Match the app's Profile button: dark filled person in a white outlined circle.
+    lv_obj_t* avatar = halo_ui_card(profile, 16, 14, 25, 25, COL_WHITE, 13);
     lv_obj_set_style_shadow_width(avatar, 0, 0);
     lv_obj_add_event_cb(avatar, provision_ui_profile_draw, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_t* title = halo_ui_label(profile, "Profile", &nunito_22, COL_DARK, 48, 13, 131);
