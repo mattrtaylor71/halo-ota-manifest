@@ -45,14 +45,14 @@ def main():
     hi = 90 + span / 2 + 7
     for begin, end in ((hi, hi + 17),):
         pts = [point(begin + (end - begin) * i / 80, 168) for i in range(81)]
-        draw.line(pts, fill=255, width=2 * scale, joint='curve')
+        draw.line(pts, fill=255, width=4 * scale, joint='curve')
     for a, direction in ((hi + 17, 1),):
         tip = point(a, 168)
         tail = point(a - direction * 2.8, 168)
         radial = (math.sin(math.radians(a)), -math.cos(math.radians(a)))
         wings = [(tail[0] + s * 3.4 * scale * radial[0],
                   tail[1] + s * 3.4 * scale * radial[1]) for s in (-1, 1)]
-        draw.line([wings[0], tip, wings[1]], fill=255, width=2 * scale, joint='curve')
+        draw.line([wings[0], tip, wings[1]], fill=255, width=4 * scale, joint='curve')
     mask = mask.resize((360, 360), Image.Resampling.LANCZOS)
     mask = mask.point(lambda a: a if a >= 8 else 0)
     box = mask.getbbox()
