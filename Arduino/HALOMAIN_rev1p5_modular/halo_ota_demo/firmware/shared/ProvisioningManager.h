@@ -27,6 +27,11 @@ public:
   
   // Update state machine (call in loop())
   void update();
+
+  // Owner-loop-only cleanup of an already successful session. Does not poll
+  // HTTP, start/apply an owner claim, reconnect STA, or start OTA. The caller
+  // must first exclude active capture, media/HTTP work and radio owners.
+  bool finishCompletedSetup();
   
   // Start Setup Mode (SoftAP + HTTP server)
   bool startSetupMode();
@@ -129,6 +134,8 @@ private:
   static const unsigned long CONNECTION_VERIFY_DELAY_MS = 2000;  // 2 seconds to verify connection stable
   static const unsigned long FLAP_TOLERANCE_MS = 5000;  // Once connected_verified_ms is set, ignore brief STA drops (AP_STA radio sharing) for this long; only treat as a real drop after continuous disconnect > this window.
   static const unsigned long SOFTAP_GRACE_PERIOD_MS = 150000;  // 150s after connect (or until owner_id set). Covers the app's ~97.5s /status poll window plus connect+claim time so the app can always read the terminal /status (success or failed) before the server tears down.
+  static const unsigned long MIN_CONNECTED_DELAY_MS = 1500;
+  static const unsigned long OWNER_SUCCESS_GRACE_MS = 15000;
   static const unsigned long STA_FAILURE_THRESHOLD = 3;       // Re-enter Setup Mode after N consecutive failures (if used)
   unsigned int sta_failure_count;   // Consecutive STA connection failures (for logging)
   unsigned int connect_attempt;     // Current attempt within this submit (0 = first, 1 = retry; max CONNECT_MAX_RETRIES)

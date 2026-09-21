@@ -395,6 +395,35 @@ bool ProvisioningManager::isAppSessionActive(unsigned long now_ms) const {
   return (now_ms - last_app_request_ms) <= APP_SESSION_ACTIVE_MS;
 }
 
+bool ProvisioningManager::finishCompletedSetup() {
+  if (halo_rebooting() || !setup_mode_active || claim_in_progress ||
+      claimTransportBusy() ||
+      ProvisioningState::getState() != ProvisioningState::STATE_CONNECTED) {
+    return false;
+  }
+  const uint32_t now = (uint32_t)millis();
+  // Use elapsed intervals, including across millis() wrap. Never substitute
+  // the unclaimed timeout: this path is exclusively verified-owner cleanup.
+  if (!connected_verified_ms || !connected_state_set_ms || !owner_id_set_ms ||
+      (uint32_t)(now - connected_state_set_ms) < MIN_CONNECTED_DELAY_MS ||
+      (uint32_t)(now - owner_id_set_ms) < OWNER_SUCCESS_GRACE_MS) {
+    return false;
+  }
+  char owner_id[64] = {0};
+  if (!ProvisioningState::loadOwnerId(owner_id, sizeof(owner_id)) || !owner_id[0]) {
+    return false;
+  }
+  // The SDK may have finished an app scan while queued media kept update()
+  // from clearing its local flag. Retire only completed/failed results here;
+  // do not build a response cache, start a scan, or interrupt a running scan.
+  if (g_scan_inflight) {
+    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return false;
+    clearProvisionScanCache();
+  }
+  stopSetupMode();
+  return !setup_mode_active;
+}
+
 void ProvisioningManager::update() {
   if (halo_rebooting()) {
     return;
@@ -594,9 +623,8 @@ void ProvisioningManager::update() {
     // 1. Minimum delay after marking connected has passed (1500ms for browser UX), AND
     // 2. Grace period expired (60s after connection verified) AND owner_id not set, OR
     // 3. Owner_id was set AND 15s have passed since owner_id was set
-    const unsigned long MIN_CONNECTED_DELAY_MS = 1500;  // Minimum delay for browser to poll /status
     // Owner grace bumped 10s→15s so the app's 1.5s-interval /status poll reliably catches owner_id_set=true before SoftAP teardown.
-    unsigned long grace_end_ms = (owner_id_set_ms > 0) ? owner_id_set_ms + 15000 : connected_verified_ms + SOFTAP_GRACE_PERIOD_MS;
+    unsigned long grace_end_ms = (owner_id_set_ms > 0) ? owner_id_set_ms + OWNER_SUCCESS_GRACE_MS : connected_verified_ms + SOFTAP_GRACE_PERIOD_MS;
     
     // Ensure minimum delay after marking connected (for browser UX)
     bool min_delay_passed = (connected_state_set_ms > 0 && (now - connected_state_set_ms) >= MIN_CONNECTED_DELAY_MS);

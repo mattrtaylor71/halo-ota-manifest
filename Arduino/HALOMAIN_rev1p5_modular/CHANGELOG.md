@@ -1,3 +1,7 @@
+# 6.4.199 candidate — immediate media after provisioning
+
+Finish verified-owner setup cleanup despite queued media after the existing 15-second grace, with active user/capture/transport guards retained. This breaks a reproduced setup/queued-upload/sleep circular dependency. Make the LCD five-minute guardian respect existing passive wait and sleep retry backoff. Schedule arithmetic, user wake, media custody and OTA policy are unchanged. Build, installation and immediate provisioning/voice/cloud/timer acceptance remain pending. [Cause and validation plan](docs/POST_PROVISION_MEDIA_199.md).
+
 # 6.4.198 published — keep background activity from relighting an idle display
 
 Preserve an ordinary session's dark LCD through late maintenance/list activity and non-user sleep aborts. Actual touch/scroll and OTA presentation retain explicit visibility. Add15 visibility cases and three ordinary-session abort cases; frozen197 reproduces the defects. Source `3826d4ad1858`, both102-suite gates, paired canonical builds/artifact checks and full public readbacks pass. Commit/tag/archive preserve the exact release; no remote Git push. RAM, Sense retries, scheduling and EOL197 selection are unchanged. User manual installation and physical verification remain pending; cloud retry-boot entries alone do not establish screen visibility. Future builds must descend from198 and use unused199+. [Cause, receipts and limits](docs/LCD_IDLE_DARK_198.md).

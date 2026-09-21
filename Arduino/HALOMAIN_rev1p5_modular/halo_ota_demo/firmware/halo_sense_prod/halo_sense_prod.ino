@@ -2015,6 +2015,7 @@ static void maybe_set_reboot_guard_override() {
 // File-scope: shared between halo_prod_loop() and halo_prod_should_delay_sleep()
 static bool s_post_ap_claim_retry_pending = false;
 static unsigned long s_post_ap_shutdown_ms = 0;
+static bool s_last_setup_mode_active = true;
 
 bool halo_prod_should_delay_sleep() {
   static unsigned long tls_wait_start_ms = 0;
@@ -6305,6 +6306,35 @@ static void handle_mqtt_commands() {
   }
 }
 
+static void service_completed_provisioning() {
+  if (!g_provisioning_manager.isSetupModeActive()) return;
+  // A fresh queued recording/image is waiting for the sleep flush, which in
+  // turn waits for setup to finish. Allow only completed local AP teardown to
+  // break that dependency. Active user work and every transport retain priority;
+  // the general manager/claim/OTA paths stay behind sense_action_inflight().
+  if (http_inflight || upload_inflight || upload_worker_claim_active.load() ||
+      current_job.active || (current_job.state != OP_IDLE && current_job.state != OP_DONE) ||
+      voice_recording_active || foreground_active || scan_ui_inflight ||
+      dish_scan_inflight || g_list_screen_active ||
+      (op_queue && uxQueueMessagesWaiting(op_queue)) ||
+      g_provision_reset_pending.load() || g_ota_check_in_progress ||
+      g_ota_apply_in_progress || g_lcd_ota_task_running || g_lcd_ota_proxy_owns_uart) return;
+  const uint32_t grace_ms = (uint32_t)(millis() - g_provisioning_manager.getOwnerIdSetMs());
+  if (!g_provisioning_manager.finishCompletedSetup()) return;
+
+  // This path verified the owner and never needs a post-AP claim retry. Consume
+  // the transition here even when queued media makes the rest of this loop exit.
+  s_last_setup_mode_active = false;
+  s_post_ap_shutdown_ms = millis();
+  s_post_ap_claim_retry_pending = false;
+  LOG_INFO("[PROVISION] completed cleanup before media flush queued=%u",
+           (unsigned)upload_queue_count());
+  char detail[96];
+  snprintf(detail, sizeof(detail), "setup=0 queued=%u grace_ms=%lu",
+           (unsigned)upload_queue_count(), (unsigned long)grace_ms);
+  uart_send_sense_diag("provision", "setup_complete", "media_flush_ready", 0, detail);
+}
+
 void halo_prod_loop() {
   // The direct-USB offline diagnostic is bounded and RAM-only. Defer new
   // network/OTA work until its automatic expiry or explicit local resume.
@@ -6325,6 +6355,7 @@ void halo_prod_loop() {
 #endif
   ota_peer_service();
   ota_notify_lcd_activity();
+  service_completed_provisioning();
   if (sense_action_inflight()) {
     static unsigned long last_skip_log_ms = 0;
     unsigned long now_ms = millis();
@@ -6338,7 +6369,6 @@ void halo_prod_loop() {
   bool wifi_connected = wifi_is_connected();
   static bool last_wifi_connected = false;
   static unsigned long s_mqtt_awake_failover_ms = 0;
-  static bool s_last_setup_mode_active = true;
 
 
 #if OTA_TEST_BUILD

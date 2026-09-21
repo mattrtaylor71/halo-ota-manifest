@@ -5940,7 +5940,7 @@ void loop() {
           Serial.println("[GUARDIAN] force_sleep deferred (shared_ota_hold)");
           guardian_ota_defer_logged = true;
         }
-      } else {
+      } else if (lcd_sleep_retry_ready(now_ms)) {
         if (!guardian_sleep_triggered) {
           guardian_sleep_triggered = true;
           Serial.printf("[GUARDIAN] force_sleep elapsed_ms=%lu\n", awake_ms);
@@ -6228,31 +6228,7 @@ void loop() {
       enterLightSleep();
       goto loop_continue;
     }
-    if (sleep_wait_for_sense_idle) {
-      unsigned long rx_age_ms = last_sense_rx_ms > 0 ? (now_ms - last_sense_rx_ms) : 0xFFFFFFFFUL;
-      bool sense_recent = (last_sense_rx_ms > 0) &&
-                          (rx_age_ms < SENSE_RECENT_RX_FOR_SLEEP_MS);
-      if (sense_state == SENSE_ASLEEP || !sense_recent) {
-        sleep_wait_for_sense_idle = false;
-        Serial.printf("[SLEEP] passive_wait_released state=%s rx_age_ms=%lu\n",
-                      sense_state_name(sense_state),
-                      rx_age_ms);
-      } else {
-        if (now_ms - last_sleep_retry_log_ms > 5000) {
-          Serial.printf("[SLEEP] waiting_for_sense_idle reason=%s rx_age_ms=%lu\n",
-                        sleep_deny_reason[0] ? sleep_deny_reason : "op_inflight",
-                        rx_age_ms);
-          last_sleep_retry_log_ms = now_ms;
-        }
-        goto loop_continue;
-      }
-    }
-    if (sleep_retry_allowed_ms > 0 && now_ms < sleep_retry_allowed_ms) {
-      if (now_ms - last_sleep_retry_log_ms > 5000) {
-        unsigned long remaining_ms = sleep_retry_allowed_ms - now_ms;
-        Serial.printf("[SLEEP] retry_backoff remaining_ms=%lu\n", remaining_ms);
-        last_sleep_retry_log_ms = now_ms;
-      }
+    if (!lcd_sleep_retry_ready(now_ms)) {
       goto loop_continue;
     }
     // An image spool from the Sense is in flight — do not sleep through it.

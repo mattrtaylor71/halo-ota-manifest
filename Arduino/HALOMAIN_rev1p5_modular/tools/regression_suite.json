@@ -657,6 +657,25 @@
       "path": "tools/test_tapctl.py",
       "args": [],
       "timeout_seconds": 30
+    },
+    {
+      "id": "test_lcd_guardian_retry",
+      "path": "tools/test_lcd_guardian_retry.py",
+      "args": [
+        "--out",
+        "{case_out}",
+        "--negative-control"
+      ],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_provisioning_media_completion",
+      "path": "tools/test_provisioning_media_completion.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
     }
   ]
 }
