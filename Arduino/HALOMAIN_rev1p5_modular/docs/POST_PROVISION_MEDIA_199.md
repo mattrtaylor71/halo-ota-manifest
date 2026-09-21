@@ -33,7 +33,7 @@ If an earlier legitimate media retry wins timer selection, inspect retention of 
 
 ## Status and receipts
 
-Published and installed on both boards by application-only USB service; the user retest remains pending at this documentation checkpoint. EOL factory selection remains 197. No new private archive or device acceptance is claimed. Preserve prior immutable releases, including 198. Future work must descend from this source and allocate unused 200+ after a fresh inventory check.
+Published and installed on both boards by application-only USB service. The user retest confirmed recovered voice delivery and calendar scheduling; initial upload reliability remains unresolved, as recorded below. EOL factory selection remains 197. No new private archive or device acceptance is claimed. Preserve prior immutable releases, including 198. Future work must descend from this source and allocate unused 200+ after a fresh inventory check.
 
 | Identity | Value |
 | --- | --- |
