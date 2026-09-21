@@ -1,6 +1,6 @@
 # Production OTA build
 
-Start from `PRODUCTION_BASELINE.json` and `RELEASE_BASELINE.json.current_working_source`. Follow [Build and release](BUILD_AND_RELEASE.md) for the current published198 source and future freshly allocated199+ versions. The retained158 record is historical recovery only. Publication/build evidence and physical acceptance remain separate. Preserve exact source/build/publication provenance as described in [Release baseline](RELEASE_BASELINE.md). `halo_ota_demo/publish_both.sh` delegates to the verified prebuilt-artifact publisher; it does not compile firmware.
+Start from `PRODUCTION_BASELINE.json` and `RELEASE_BASELINE.json.current_working_source`. Follow [Build and release](BUILD_AND_RELEASE.md) for the current published 200 source and future freshly allocated 201+ versions. The retained158 record is historical recovery only. Publication/build evidence and physical acceptance remain separate. Preserve exact source/build/publication provenance as described in [Release baseline](RELEASE_BASELINE.md). `halo_ota_demo/publish_both.sh` delegates to the verified prebuilt-artifact publisher; it does not compile firmware.
 
 Prepare a release snapshot from clean committed source, then compile that snapshot:
 

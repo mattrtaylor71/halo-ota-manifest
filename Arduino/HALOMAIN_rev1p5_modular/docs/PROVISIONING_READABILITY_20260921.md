@@ -1,6 +1,6 @@
 # Provisioning readability — September 21, 2026
 
-Unreleased cosmetic changes on the current 199 descendant. Neither board was flashed and no OTA was published; published/installed 199 and its recorded acceptance limits remain unchanged.
+Published in paired firmware 200 on September 21. User manual installation is pending; installed 199 acceptance is retained separately. [Release identity and limits](PROVISIONING_UI_RELEASE_200.md). The iteration records below describe their original pre-release validation.
 
 - Enlarge “Scroll for next step” from 12 to 16 px (33%). Extend the single downward arrow around the outside of the full text arc, with a 4 px stroke and one arrowhead below the final word. Retain centered page content and existing scroll behavior.
 - Change the step 2 Profile badge from yellow to white, retaining the dark filled person and circular dark outline. The app reference is `Desktop/Apps/trepo-ios-codex/trepo_v0/trepo_v0/MainTabView.swift`, lines 95–103: `person.fill` on a white circular button. Only this setup badge changes; the yellow “On Trepo App” pill retains its existing appearance.

@@ -1,12 +1,12 @@
 # Build and release from the current production source
 
-The authoritative selector is [PRODUCTION_BASELINE.json](../PRODUCTION_BASELINE.json), explained in [the 199 handoff](POST_PROVISION_MEDIA_199.md). All new firmware must descend from `1f5b952284b0ca9732a23dad5e00d73c927b461d`, preserving completed-provisioning media cleanup, LCD guardian backoff and the earlier idle-dark, guarded factory startup, UI, media retry and OTA fixes. The canonical branch remains `codex/halo-production-baseline-197`. Source is tagged `halo-v6.4.199`; both 104-suite gates, paired canonical builds and full public readbacks passed. Paired installation and user retest remain pending at this checkpoint; EOL factory selection remains 197. Publication is separate from device acceptance.
+The authoritative selector is [PRODUCTION_BASELINE.json](../PRODUCTION_BASELINE.json), explained in [the 200 handoff](PROVISIONING_UI_RELEASE_200.md). All new firmware must descend from `a145313b6ada576f0a3413abf919fe68447d9ed1`, preserving the 200 provisioning UI, 199 completed-provisioning cleanup and LCD guardian backoff, and all earlier fixes. The canonical branch remains `codex/halo-production-baseline-197`. Source is tagged `halo-v6.4.200`; paired canonical builds, the exact-snapshot 104-suite gate and full public readbacks passed. User manual installation is pending; prior paired 199 partial acceptance remains separate. EOL factory selection stays 197. Publication is separate from device acceptance.
 
 The retained `RELEASE_BASELINE.json.current_baseline` and `development_baseline` identify historical158 recovery/scheduled qualification. They do not select new development. Its tag, package and previous acceptance stay immutable; see [historical158 recovery](FROZEN_RELEASE_158.md). Retain the immutable158/196/197/198 packages under `/Users/MattTaylor/halo-releases`, with their hashes and original evidence. Never rebuild/relabel existing versions.
 
 ## Before changing anything
 
-Work on a clean, reviewed descendant of the required 199 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
+Work on a clean, reviewed descendant of the required 200 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
 
 ```sh
 python3 -B tools/verify_frozen_baseline.py
@@ -14,13 +14,13 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run the complete [host regression gate](REGRESSION_TESTING.md), and commit the reviewed source before preparing release artifacts. The guard verifies current-source ancestry and historical recovery bytes; it does not establish device acceptance of new code. The source preparer independently enforces the same current source floor and minimum new version.
 
-Allocate an unused version **6.4.200 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.201 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.200>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.201>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"

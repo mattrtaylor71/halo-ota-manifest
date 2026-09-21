@@ -874,7 +874,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.199",
+  "current_production_latest_version": "6.4.200",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -4849,11 +4849,11 @@
     }
   },
   "current_validation_blocker": {
-    "status": "PUBLISHED_198_MANUAL_OTA_AND_PHYSICAL_SCREEN_ACCEPTANCE_PENDING",
-    "details": "Both 102-suite gates, paired canonical builds, artifact checks and publication/readback passed. User will install198 with Manual Update and repeat voice/list-to-idle. No new hardware pass is claimed. EOL197 acceptance limits remain in its retained record.",
+    "status": "PUBLISHED_200_USER_MANUAL_OTA_PENDING",
+    "details": "Same bench unit has documented saved lcd_ota_due=1 despite resolved198 policy; this can defer discovery. UI-only200 does not fix or clear that retained-state issue.",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-idle-dark198-20260920/RELEASE-RECORD.json",
-      "sha256": "6d986b7051fe19bde0afada6e4428dd450a515707f90de2e29b7f988f9f23e64"
+      "path": "/Users/MattTaylor/halo-release200-20260921/promote001/result.json",
+      "sha256": "dc874943cd54761fa10b46917280a58288d928265d10ed3e6afa689224746dc8"
     },
     "candidate_installed": false,
     "no_public_promotion": false
@@ -6555,25 +6555,25 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.199",
-    "status": "PUBLISHED_INSTALLED_PARTIAL_DEVICE_ACCEPTANCE",
-    "artifact_source_commit": "1f5b952284b0ca9732a23dad5e00d73c927b461d",
-    "artifact_source_firmware_tree": "a3a43b5208b6b3fe9b82a126cd02786220c69ec8",
-    "build_id": "6.4.199-20260921T162738Z-1f5b952284b0",
+    "version": "6.4.200",
+    "status": "PUBLISHED_AWAITING_MANUAL_OTA",
+    "artifact_source_commit": "a145313b6ada576f0a3413abf919fe68447d9ed1",
+    "artifact_source_firmware_tree": "9adb706f3528c89c6c97c5381b3723398f8c4da2",
+    "build_id": "6.4.200-20260921T230415Z-a145313b6ada",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from 1f5b952284b0ca9732a23dad5e00d73c927b461d or reviewed descendants. Retain the 199 completed-provisioning media cleanup and LCD guardian backoff corrections, 198 idle-dark behavior, 197 guarded factory startup and earlier UI, media retry and OTA fixes. EOL factory selection remains197; prior immutable releases are retained.",
+    "source_selection": "Continue from a145313b6ada576f0a3413abf919fe68447d9ed1 or reviewed descendants, preserving all199 fixes and the200 provisioning presentation. EOL remains197.",
     "materialization": {
-      "path": "/Users/MattTaylor/halo-postclaim199-20260921/snapshot/materialization.json",
-      "sha256": "7ca11d053721f7615e5430622f4d9e30de81d41e05029b737953ffd2953e37fe"
+      "path": "/Users/MattTaylor/halo-release200-20260921/snapshot/materialization.json",
+      "sha256": "74ba1a5826d9cb81499719ecd34b40faceef9814ea342e2d72aa26ae99ee4f41"
     },
     "working_host_tests": {
-      "path": "/Users/MattTaylor/halo-postclaim199-20260921/working-host001/RESULT.json",
-      "sha256": "c042eee97d8bb7d3e96f02ac99099d031aee5b7ee75364c7be72b8d6daee2167"
+      "path": "/Users/MattTaylor/halo-provision-assistant-icon-20260921/regression001/RESULT.json",
+      "sha256": "07c73b8babc99b7b6e0ff75de162a4ed1b52e5df155bd2f2c269ee88eeb11285"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-postclaim199-20260921/regression/RESULT.json",
-      "sha256": "d6601ff63ff1bcd29471636be63c79aad59ff5032b2b12dde92e4cd4609f0f1b"
+      "path": "/Users/MattTaylor/halo-release200-20260921/regression/RESULT.json",
+      "sha256": "99625d02463d733505509329a8e5877cd609ea29f183d3ba7224ddeb559cde55"
     },
     "host_suite_count": 104,
     "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
@@ -6582,67 +6582,77 @@
       "lcd"
     ],
     "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "3be6d27c4db8cdeed45b1074853ac6a2721f15517189d39c3236cc2ac09a05c5"
+      "path": "/Users/MattTaylor/halo-release200-20260921/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "ec265a1fc3ef13722d4b1e9729b88c57c80476341be848b032178a7e709f6726"
     },
     "board_proofs": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/sense/artifacts/verified.json",
-        "sha256": "d43afd63f6cbc45f72f832df8f7ed662814f00f662425de9cdc3bb134841542a"
+        "path": "/Users/MattTaylor/halo-release200-20260921/build/sense/artifacts/verified.json",
+        "sha256": "e5d5f3c66662f69e879f1114a02f5878a8c7030eca00ab115ccf87ff76f2ee42"
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/lcd/artifacts/verified.json",
-        "sha256": "c9c1a05d3cd6d3791dbe39db960a202dc318900d79fde22cb4e06916080120be"
+        "path": "/Users/MattTaylor/halo-release200-20260921/build/lcd/artifacts/verified.json",
+        "sha256": "7210e6d13c1bde011a29cff45f0765c038262bb5cea8b69d0b4b528873514c2b"
       }
     },
     "applications": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/sense/artifacts/halo_sense_prod.ino.bin",
-        "sha256": "f4618ec34281261b8ad4793dd77011ed6a97f711038b7dcc1ecbab0b769393b6",
+        "path": "/Users/MattTaylor/halo-release200-20260921/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "9de8d20c20b488ccdd7946a42ff3a74837f29c8104845852e73dfe3a259ced00",
         "bytes": 1869008
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/lcd/artifacts/halo_lcd_prod.ino.bin",
-        "sha256": "ac688e5d8dff56e39fffd5b96fa0f7a39dfd8caed2728d95b248139be9c30fcd",
-        "bytes": 2030128
+        "path": "/Users/MattTaylor/halo-release200-20260921/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "6c586f4c41b0948592b2a0ca1913415c7a70fbb9d99e2b4beac9d87c96b2e110",
+        "bytes": 2032720
       }
     },
     "publication": {
-      "path": "/Users/MattTaylor/halo-postclaim199-20260921/promote001/result.json",
-      "sha256": "7fdd7500f3fdc91b3029acc53dc3d8a719111bdd45b43f93323a493fb3a2d1b0"
+      "path": "/Users/MattTaylor/halo-release200-20260921/promote001/result.json",
+      "sha256": "dc874943cd54761fa10b46917280a58288d928265d10ed3e6afa689224746dc8"
+    },
+    "public_readback": {
+      "path": "/Users/MattTaylor/halo-release200-20260921/PUBLIC-READBACK.json",
+      "sha256": "be296b0e73c67dce142a3b17c9c9ea5de26ff9a2c3a426fa79e0a827d0ded55f"
     },
     "published": true,
-    "current_public_ota_version": "6.4.199",
+    "current_public_ota_version": "6.4.200",
     "git_remote_push_performed": false,
-    "installed": true,
-    "device_acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE",
-    "retained_configured_bench_version": "6.4.196",
-    "retained_configured_bench_record": "last_verified_device_health",
+    "installed": false,
+    "device_acceptance": "PENDING_USER_MANUAL_OTA",
+    "retained_installed_pair": {
+      "version": "6.4.199",
+      "installation": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
+        "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
+      },
+      "functional_test": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/reprovision-voice199-01/TEST-RESULT.json",
+        "sha256": "c63c9d040f3ac2db713afd1cef548dc46f78b72a4e7c9e8f409833118ea053b5"
+      },
+      "acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE"
+    },
     "retained_factory_version": "6.4.197",
-    "schedule": "Production 02:00 Pacific unchanged; no allowance, debt or queue edits.",
-    "next_version_minimum": "6.4.200",
+    "schedule": "Production02:00Pacific unchanged; no device settings, allowance or debt edits.",
+    "next_version_minimum": "6.4.201",
     "next_version_requires_fresh_inventory_check": true,
-    "handoff": "docs/POST_PROVISION_MEDIA_199.md",
+    "handoff": "docs/PROVISIONING_UI_RELEASE_200.md",
     "source_tag": {
-      "name": "halo-v6.4.199",
-      "object": "980ff7e09d9e383518ae613e366b24de82ec0edc",
-      "commit": "1f5b952284b0ca9732a23dad5e00d73c927b461d",
+      "name": "halo-v6.4.200",
+      "object": "2c7c81504e95b6772f324a5ed66c91af677bd416",
+      "commit": "a145313b6ada576f0a3413abf919fe68447d9ed1",
       "remote_push": false
     },
     "limits": [
-      "Both 104-suite working-tree and exact-snapshot gates, paired canonical builds/artifact checks and complete paired public readbacks passed.",
-      "199 user reprovision/immediate voice exercised cleanup correctly; initial AES allocation failures required saved automatic retry. Exact Celery audio reached cloud/list, retries remained dark and final2am timer was selected. Immediate upload reliability remains unresolved.",
-      "Immediate voice followed by staying on the shopping list during setup grace remains deferred until list activity ends; this pattern is not claimed fixed.",
-      "No new scheduled OTA execution, full-product, cold-power or interrupted-transfer hardware pass is claimed. No new private archive verification is claimed.",
-      "198 saved orphan lcd_ota_due blocks OTA discovery despite RESOLVED policy; debt preserved,199 OTA logic unchanged. Additional actuator wake verification stopped on host actuator timeout."
+      "Working-tree and exact-snapshot 104-suite gates, paired canonical builds/artifact checks and complete public binary readbacks passed.",
+      "No installation or device acceptance of200 yet; user will attempt Manual Update. Last observed paired199 installation and partial acceptance are retained separately.",
+      "Same bench unit has documented saved lcd_ota_due=1 despite resolved198 policy; this can defer discovery. UI-only200 does not fix or clear that retained-state issue.",
+      "199 initial post-provision voice AES allocation failure remains unresolved; saved automatic retry delivered the recording. No new upload reliability claim.",
+      "No new physical provisioning, cold-power, interrupted-update, scheduled-OTA or full-product pass. Factory selection remains197."
     ],
-    "installation": {
-      "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
-      "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
-    },
-    "functional_test": {
-      "path": "/Users/MattTaylor/halo-postclaim199-20260921/reprovision-voice199-01/TEST-RESULT.json",
-      "sha256": "c63c9d040f3ac2db713afd1cef548dc46f78b72a4e7c9e8f409833118ea053b5"
+    "private_release_package": {
+      "path": "/Users/MattTaylor/halo-release200-20260921/ARCHIVE-RECORD.json",
+      "sha256": "bbdf195732a9eb3a1ba0ab748f56eac5bb75082192674713409083d325a2090d"
     }
   },
   "previous_working_source_187": {
@@ -10090,16 +10100,16 @@
   },
   "production_source_selection": {
     "authoritative_selector": "PRODUCTION_BASELINE.json",
-    "handoff": "docs/POST_PROVISION_MEDIA_199.md",
-    "minimum_source_commit": "1f5b952284b0ca9732a23dad5e00d73c927b461d",
-    "source_tag": "halo-v6.4.199",
-    "source_tag_object": "980ff7e09d9e383518ae613e366b24de82ec0edc",
+    "handoff": "docs/PROVISIONING_UI_RELEASE_200.md",
+    "minimum_source_commit": "a145313b6ada576f0a3413abf919fe68447d9ed1",
+    "source_tag": "halo-v6.4.200",
+    "source_tag_object": "2c7c81504e95b6772f324a5ed66c91af677bd416",
     "canonical_branch": "codex/halo-production-baseline-197",
-    "minimum_new_version": "6.4.200",
+    "minimum_new_version": "6.4.201",
     "last_published_update": "2026-09-21",
-    "public_version": "6.4.199",
+    "public_version": "6.4.200",
     "factory_version_unchanged": "6.4.197",
-    "device_acceptance": "PENDING"
+    "device_acceptance": "PENDING_USER_MANUAL_OTA"
   },
   "baseline_freeze_20260919": {
     "scope": "Current source197 and exact196/197 artifacts; no runtime/build/publication change",
@@ -10395,5 +10405,106 @@
       "The fix covers reproduced same-boot idle relights; cloud retry wake reports do not establish physical screen visibility.",
       "No new scheduled OTA, full-product, cold-power or interrupted-transfer hardware pass is claimed."
     ]
+  },
+  "previous_working_source_199": {
+    "version": "6.4.199",
+    "status": "PUBLISHED_INSTALLED_PARTIAL_DEVICE_ACCEPTANCE",
+    "artifact_source_commit": "1f5b952284b0ca9732a23dad5e00d73c927b461d",
+    "artifact_source_firmware_tree": "a3a43b5208b6b3fe9b82a126cd02786220c69ec8",
+    "build_id": "6.4.199-20260921T162738Z-1f5b952284b0",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from 1f5b952284b0ca9732a23dad5e00d73c927b461d or reviewed descendants. Retain the 199 completed-provisioning media cleanup and LCD guardian backoff corrections, 198 idle-dark behavior, 197 guarded factory startup and earlier UI, media retry and OTA fixes. EOL factory selection remains197; prior immutable releases are retained.",
+    "materialization": {
+      "path": "/Users/MattTaylor/halo-postclaim199-20260921/snapshot/materialization.json",
+      "sha256": "7ca11d053721f7615e5430622f4d9e30de81d41e05029b737953ffd2953e37fe"
+    },
+    "working_host_tests": {
+      "path": "/Users/MattTaylor/halo-postclaim199-20260921/working-host001/RESULT.json",
+      "sha256": "c042eee97d8bb7d3e96f02ac99099d031aee5b7ee75364c7be72b8d6daee2167"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-postclaim199-20260921/regression/RESULT.json",
+      "sha256": "d6601ff63ff1bcd29471636be63c79aad59ff5032b2b12dde92e4cd4609f0f1b"
+    },
+    "host_suite_count": 104,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "built_boards": [
+      "sense",
+      "lcd"
+    ],
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "3be6d27c4db8cdeed45b1074853ac6a2721f15517189d39c3236cc2ac09a05c5"
+    },
+    "board_proofs": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/sense/artifacts/verified.json",
+        "sha256": "d43afd63f6cbc45f72f832df8f7ed662814f00f662425de9cdc3bb134841542a"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/lcd/artifacts/verified.json",
+        "sha256": "c9c1a05d3cd6d3791dbe39db960a202dc318900d79fde22cb4e06916080120be"
+      }
+    },
+    "applications": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "f4618ec34281261b8ad4793dd77011ed6a97f711038b7dcc1ecbab0b769393b6",
+        "bytes": 1869008
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "ac688e5d8dff56e39fffd5b96fa0f7a39dfd8caed2728d95b248139be9c30fcd",
+        "bytes": 2030128
+      }
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-postclaim199-20260921/promote001/result.json",
+      "sha256": "7fdd7500f3fdc91b3029acc53dc3d8a719111bdd45b43f93323a493fb3a2d1b0"
+    },
+    "published": true,
+    "current_public_ota_version": "6.4.199",
+    "git_remote_push_performed": false,
+    "installed": true,
+    "device_acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE",
+    "retained_configured_bench_version": "6.4.196",
+    "retained_configured_bench_record": "last_verified_device_health",
+    "retained_factory_version": "6.4.197",
+    "schedule": "Production 02:00 Pacific unchanged; no allowance, debt or queue edits.",
+    "next_version_minimum": "6.4.200",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/POST_PROVISION_MEDIA_199.md",
+    "source_tag": {
+      "name": "halo-v6.4.199",
+      "object": "980ff7e09d9e383518ae613e366b24de82ec0edc",
+      "commit": "1f5b952284b0ca9732a23dad5e00d73c927b461d",
+      "remote_push": false
+    },
+    "limits": [
+      "Both 104-suite working-tree and exact-snapshot gates, paired canonical builds/artifact checks and complete paired public readbacks passed.",
+      "199 user reprovision/immediate voice exercised cleanup correctly; initial AES allocation failures required saved automatic retry. Exact Celery audio reached cloud/list, retries remained dark and final2am timer was selected. Immediate upload reliability remains unresolved.",
+      "Immediate voice followed by staying on the shopping list during setup grace remains deferred until list activity ends; this pattern is not claimed fixed.",
+      "No new scheduled OTA execution, full-product, cold-power or interrupted-transfer hardware pass is claimed. No new private archive verification is claimed.",
+      "198 saved orphan lcd_ota_due blocks OTA discovery despite RESOLVED policy; debt preserved,199 OTA logic unchanged. Additional actuator wake verification stopped on host actuator timeout."
+    ],
+    "installation": {
+      "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
+      "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
+    },
+    "functional_test": {
+      "path": "/Users/MattTaylor/halo-postclaim199-20260921/reprovision-voice199-01/TEST-RESULT.json",
+      "sha256": "c63c9d040f3ac2db713afd1cef548dc46f78b72a4e7c9e8f409833118ea053b5"
+    }
+  },
+  "previous_validation_blocker_pre200": {
+    "status": "PUBLISHED_198_MANUAL_OTA_AND_PHYSICAL_SCREEN_ACCEPTANCE_PENDING",
+    "details": "Both 102-suite gates, paired canonical builds, artifact checks and publication/readback passed. User will install198 with Manual Update and repeat voice/list-to-idle. No new hardware pass is claimed. EOL197 acceptance limits remain in its retained record.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-idle-dark198-20260920/RELEASE-RECORD.json",
+      "sha256": "6d986b7051fe19bde0afada6e4428dd450a515707f90de2e29b7f988f9f23e64"
+    },
+    "candidate_installed": false,
+    "no_public_promotion": false
   }
 }
