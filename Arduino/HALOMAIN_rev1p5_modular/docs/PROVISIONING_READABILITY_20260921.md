@@ -2,13 +2,13 @@
 
 Unreleased cosmetic changes on the current 199 descendant. Neither board was flashed and no OTA was published; published/installed 199 and its recorded acceptance limits remain unchanged.
 
-- Enlarge “Scroll for next step” from 12 to 16 px (33%). Thicken the single downward arrow and its arrowhead from 2 to 4 px, retaining centered page content and existing scroll behavior.
+- Enlarge “Scroll for next step” from 12 to 16 px (33%). Extend the single downward arrow around the outside of the full text arc, with a 4 px stroke and one arrowhead below the final word. Retain centered page content and existing scroll behavior.
 - Change the step 2 Profile badge from yellow to white, retaining the dark filled person and circular dark outline. The app reference is `Desktop/Apps/trepo-ios-codex/trepo_v0/trepo_v0/MainTabView.swift`, lines 95–103: `person.fill` on a white circular button. Only this setup badge changes; the yellow “On Trepo App” pill retains its existing appearance.
-- Regenerate the checked-in alpha mask with the same Nunito Black font. Mask data grows from 6,916 to 12,255 bytes of static flash; no new UI object, font or animation is added.
+- Regenerate the checked-in alpha mask with the same Nunito Black font. Mask data grows from 6,916 to 9,118 bytes of static flash; no new UI object, font or animation is added.
 
 ## Validation
 
-Actual LVGL 8.3 rendering of both production page branches, real fonts and QR widget: no cue/content overlap or circular clipping; minimum cue-to-rim clearance 6.954 px. Existing Profile callback test passed, including its missing-person negative control and repeated redraw allocation check. All 104 offline regression suites passed with no skipped cases. Source stayed unchanged during that gate; this documentation and the preview PNGs were added afterward. No physical-panel or new firmware-build qualification is claimed.
+Actual LVGL 8.3 rendering of both production page branches, real fonts and QR widget: no cue/content overlap or circular clipping; minimum cue-to-rim clearance 7.466 px. Existing Profile callback test passed, including its missing-person negative control and repeated redraw allocation check. All 104 offline regression suites passed with no skipped cases. Source stayed unchanged during that gate; this documentation and the preview PNGs were added afterward. No physical-panel or new firmware-build qualification is claimed.
 
 ![Step 1](provisioning-ui/readability-step1-20260921.png)
 ![Step 2](provisioning-ui/readability-step2-20260921.png)
@@ -21,8 +21,16 @@ Future releases must include these source changes on top of 199 and use the exis
 
 ## Arrow thickness follow-up
 
-The regenerated asset changes only the lower arrow pixels (x276–315, y279–318); all text pixels are identical. Both actual LVGL page renders again pass overlap/clipping checks, and all 104 offline suites pass on the updated source. The previews above now show the 4 px arrow. No firmware was built, installed or published.
+The regenerated asset changes only the lower arrow pixels (x276–315, y279–318); all text pixels are identical. Both actual LVGL page renders again pass overlap/clipping checks, and all 104 offline suites pass on the updated source. This intermediate revision used a short 4 px arrow; the previews above show the latest full-length revision described below. No firmware was built, installed or published.
 
 Evidence: `/Users/MattTaylor/halo-provision-arrow-20260921/asset-diff.json`, `regression001/RESULT.json`, and `/Users/MattTaylor/halo-provision-readability-20260921/render-tools/arrow-renders/RESULT.json`.
 
 Arrow follow-up regression SHA-256: `b47cfff860b48c013727f484186695a6e847ce08597c8f805044da5e248c956d`.
+
+## Full-length curved arrow follow-up
+
+The arrow now follows the outside of the entire text arc, starting just above the first word and ending below the last word with one downward arrowhead. The 4 px stroke remains. Text pixels are unchanged; all asset differences are outside radius 162 px. Both actual LVGL pages pass overlap/clipping checks, with 7.466 px minimum rim clearance. All 104 offline suites pass on this updated source. Documentation and current previews were updated after the gate. No device installation, firmware build or publication occurred.
+
+Evidence: `/Users/MattTaylor/halo-provision-wrap-20260921/asset-diff.json`, `regression001/RESULT.json`, and `/Users/MattTaylor/halo-provision-readability-20260921/render-tools/wrap-renders/RESULT.json`.
+
+Full-length arrow regression SHA-256: `0df2b760ef20f69e20dc8249b4589812655ef9b44b3a60aebed843fd8d5a6702`.

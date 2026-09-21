@@ -42,11 +42,13 @@ def main():
         mask.paste(glyph, (round(x - 16 * scale), round(y - 16 * scale)), glyph)
         angle += half
     draw = ImageDraw.Draw(mask)
+    # Follow the outside of the full text arc, with one arrowhead at its lower end.
+    lo = 90 - span / 2 - 2
     hi = 90 + span / 2 + 7
-    for begin, end in ((hi, hi + 17),):
+    for begin, end in ((lo, hi),):
         pts = [point(begin + (end - begin) * i / 80, 168) for i in range(81)]
         draw.line(pts, fill=255, width=4 * scale, joint='curve')
-    for a, direction in ((hi + 17, 1),):
+    for a, direction in ((hi, 1),):
         tip = point(a, 168)
         tail = point(a - direction * 2.8, 168)
         radial = (math.sin(math.radians(a)), -math.cos(math.radians(a)))

@@ -1,6 +1,6 @@
 # Unreleased — clearer provisioning instructions
 
-Enlarge the side scroll hint from 12 to 16 px, double its arrow stroke from 2 to 4 px, and match the app’s white Profile badge. Actual LVGL page renders and all 104 offline suites passed. Ready for a future release based on 199; no new build, device installation or OTA publication. [Visuals and validation](docs/PROVISIONING_READABILITY_20260921.md).
+Enlarge the side scroll hint from 12 to 16 px, extend its 4 px arrow around the full length of the text, and match the app’s white Profile badge. Actual LVGL page renders and all 104 offline suites passed. Ready for a future release based on 199; no new build, device installation or OTA publication. [Visuals and validation](docs/PROVISIONING_READABILITY_20260921.md).
 
 # 6.4.199 published — immediate media after provisioning
 
