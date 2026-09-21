@@ -134,6 +134,10 @@ static bool unresolved_legacy(){return false;}
 // exercise only the pre-existing exact-target postboot settlement contract.
 static durable_ota::Admission reserve_proved_discovery_recovery(const durable_ota::Record&,
  durable_ota::Clock,bool,durable_ota::Record&){return durable_ota::Admission::LEGACY;}
+// Orphan-hint retirement has its own actual-function/storage regression. These
+// postboot cases retain pending completion debt and must not retire that hint.
+static bool reconcile_resolved_lcd_hint(bool& reconciled){reconciled=false;return false;}
+static bool resolved_lcd_hint_ready(){return false;}
 static bool legacy_expectation(uint32_t,uint32_t,bool&pending){pending=false;return !read_error;}
 static bool rollback_matches(const durable_ota::Record&,uint32_t,uint32_t){return false;}
 static bool image_matches(const esp_partition_t*,const durable_ota::Target&,uint32_t start,uint32_t budget){

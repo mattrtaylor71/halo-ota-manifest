@@ -3285,7 +3285,7 @@ static void mark_lcd_ota_still_pending(const char* reason) {
   g_lcd_ota_request_active = false;
 }
 
-static bool set_lcd_ota_due_nvs(bool value);
+static bool set_lcd_ota_due_nvs(bool value, bool (*admission)() = nullptr);
 static bool get_lcd_ota_due_nvs();
 
 // Persist an inline LCD OTA outcome: updated/target or noop/queried version.
@@ -3567,16 +3567,18 @@ static bool ota_storage_mutation_open() {
   return !g_ota_storage_uncertain && !g_coord_credit_uncertain && !g_nvs_reclaim_uncertain &&
       coord_credit_format_write_ready() && coord_credit_budget_open();
 }
-static bool set_lcd_ota_due_nvs(bool value) {
+static bool set_lcd_ota_due_nvs(bool value, bool (*admission)()) {
   if(value)g_lcd_due_ram_obligation=true;
-  if(!ota_storage_mutation_open())return false;
+  if(!ota_storage_mutation_open()||(admission&&!admission()))return false;
   bool old=true;if(!ota_storage_read_debt(old))return false;
+  if(admission&&!admission())return false;
   if(old==value){g_lcd_due_ram_obligation=value;return true;}
   NvsCapacityLease lease;
   if(!lease || !wakelog_nvs_prepare_essential(2,coord_credit_budget_open))return false;
+  if(admission&&!admission())return false;
   nvs_handle_t h;
   if(nvs_open("halo",NVS_READWRITE,&h)!=ESP_OK){g_ota_storage_uncertain=true;return false;}
-  if(!ota_storage_mutation_open()){nvs_close(h);return false;}
+  if(!ota_storage_mutation_open()||(admission&&!admission())){nvs_close(h);return false;}
   g_ota_storage_uncertain=true;
   const esp_err_t wrote=value?nvs_set_u32(h,"lcd_ota_due",1):nvs_erase_key(h,"lcd_ota_due");
   const esp_err_t committed=wrote==ESP_OK?nvs_commit(h):wrote;

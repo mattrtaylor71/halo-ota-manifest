@@ -165,6 +165,63 @@ static bool running_matches(const durable_ota::Target&t,uint32_t started,uint32_
   return nvs_capacity_image_valid()&&!strcmp(t.version,kFirmwareVersion)&&
     image_matches(esp_ota_get_running_partition(),t,started,budget)&&nvs_capacity_image_valid();
 }
+// A completed canonical campaign can outlive a readiness-only LCD hint. Its
+// completion authority is distinct from today's installed pair: a later
+// service image must not be hashed as the old target, or resolve active work.
+// This predicate is also rechecked by the hint writer after blocking NVS work.
+static bool resolved_lcd_hint_ready() {
+  const auto* r=current();
+  if(!state_loaded||!state_present||!state_allowed||!r||
+     r->phase!=durable_ota::Phase::RESOLVED||!durable_ota::shape(*r)||
+     !durable_ota::target_valid(r->target)||r->bench.state!=durable_ota::BenchState::NONE||
+     r->one_shot.phase!=durable_ota::OneShotPhase::NONE||
+     !durable_ota::clock_valid(*r,fresh_clock(work.normal))||
+     !g_coord_credit_loaded||!g_coord_credit_mutations||!g_coord_credit_persisted||
+     !credit_state_shape(g_coord_credit)||g_coord_credit.pending.id[0]||
+     g_coord_credit.deferred.id[0]||g_coord_pending[0]||g_coord_completion_target[0]||
+     storage_uncertain||g_ota_storage_uncertain||g_coord_credit_uncertain||
+     g_serial_install_uncertain||g_nvs_reclaim_uncertain||work.live||
+     !g_lcd_work_budget_live||!work.original_budget||
+     g_lcd_work_budget.started_ms!=work.original_start||
+     g_lcd_work_budget.limit_ms!=work.original_budget||
+     g_peer_continue_work||g_self_retry_execution||g_ota_check_in_progress||
+     g_ota_apply_in_progress||!retry_transport_ready()||s_lcd_mode_marker_pending||
+     g_spool_owns_uart||g_img_spool_tx_active||g_img_spool_request_active.load()||
+     sense_img_spool_binary_pending())return false;
+  const auto& b=work.retry_baseline;
+  if(!b.boot||!g_peer_gate.active||!g_peer_gate.entered||!g_peer_gate.ready||
+     !g_peer_gate.locked||g_peer_gate.legacy||!g_peer_gate.owner[0]||
+     !g_peer_gate.challenge[0]||!peer_valid(r->target.peer_version)||
+     !strcmp(g_lcd_query_running_part,"?")||!g_lcd_query_recovery_idle||
+     !g_lcd_query_coord_reported||g_lcd_query_peer_boot_id!=b.boot||
+     g_lcd_query_peer_boot_id!=g_peer_gate.peer_boot||
+     strcmp(g_lcd_ota_query_resp_fw,b.fw)||strcmp(g_lcd_query_running_part,b.part)||
+     !b.part_size||g_lcd_ota_query_resp_part_size!=b.part_size||
+     strcmp(g_lcd_query_coord_id,g_peer_gate.challenge)||
+     strcmp(g_lcd_query_coord_owner,g_peer_gate.owner)||!g_lcd_query_coord_lease_ms||
+     g_lcd_query_coord_lease_ms>120000||
+     compareSemver(kFirmwareVersion,r->target.version)<0||!nvs_capacity_image_valid())return false;
+  return !halo_primary_user_work_busy()&&
+    uint32_t(millis()-work.original_start)<work.original_budget&&
+    uint32_t(millis()-g_peer_gate.proof_ms)<2000&&
+    int32_t(millis()-g_peer_gate.deadline_ms)<0;
+}
+static bool reconcile_resolved_lcd_hint(bool& reconciled) {
+  reconciled=false;
+  bool due=false;
+  if(!resolved_lcd_hint_ready()||!ota_storage_read_debt(due)||!due)return false;
+  const auto* r=current();
+  // Already-RESOLVED authority permits the same completed comparison used by
+  // manual discovery recovery. Each board independently meets its old floor;
+  // a staged service upgrade need not have identical current version labels.
+  if(!(compareSemver(kFirmwareVersion,r->target.version)>0||
+       running_matches(r->target,work.original_start,work.original_budget))||
+     !resolved_lcd_hint_ready()||
+     !set_lcd_ota_due_nvs(false,resolved_lcd_hint_ready))return false;
+  reconciled=true; // A verified erase stays final even if the lease just ended.
+  Serial.println("[OTA_POLICY] lcd_hint_retired authority=resolved credit=unchanged");
+  return !get_lcd_ota_due_nvs()&&!unresolved_legacy()&&resolved_lcd_hint_ready();
+}
 static bool rollback_matches(const durable_ota::Record&r,uint32_t started,uint32_t budget) {
   if(!r.attempt_ordinal||!r.attempt_begins[0]||!nvs_capacity_image_valid())return false;
   const esp_partition_t* invalid=esp_ota_get_last_invalid_partition();
@@ -303,6 +360,18 @@ static bool enter(const char* reason,bool retained_legacy) {
          !commit_candidate(candidate,work.original_start,work.original_budget))return false;
     }
     r=current();
+  }
+  if(r&&r->phase==durable_ota::Phase::RESOLVED&&!resolved_now&&retained_legacy&&
+     !g_coord_pending[0]){
+    bool reconciled=false;
+    if(!reconcile_resolved_lcd_hint(reconciled)){
+      Serial.printf("[OTA_POLICY] lcd_hint_reconcile_refused retired=%u\n",reconciled?1:0);
+      return false;
+    }
+    retained_legacy=unresolved_legacy();work.legacy=retained_legacy;
+    // Retirement itself grants no campaign, GET, budget or calendar credit.
+    // A fresh explicit user request retains its ordinary charged admission.
+    if(retained_legacy||!resolved_lcd_hint_ready()||!halo_ota_manual_override_active())return false;
   }
   const bool manual_completed_handoff=r&&r->phase==durable_ota::Phase::RESOLVED&&
     !resolved_now&&retained_legacy&&halo_ota_manual_override_active()&&
