@@ -33,7 +33,7 @@ If an earlier legitimate media retry wins timer selection, inspect retention of 
 
 ## Status and receipts
 
-Published for both boards; paired installation and the user retest remain pending at this documentation checkpoint. EOL factory selection remains 197. No new private archive or device acceptance is claimed. Preserve prior immutable releases, including 198. Future work must descend from this source and allocate unused 200+ after a fresh inventory check.
+Published and installed on both boards by application-only USB service; the user retest remains pending at this documentation checkpoint. EOL factory selection remains 197. No new private archive or device acceptance is claimed. Preserve prior immutable releases, including 198. Future work must descend from this source and allocate unused 200+ after a fresh inventory check.
 
 | Identity | Value |
 | --- | --- |
@@ -58,3 +58,11 @@ Machine-readable receipt hashes and current source selection are in [RELEASE_BAS
 The assembled test unit remains Sense198/app0 and LCD198/app1, both SDK VALID. Two Settings-action requests did not start a transfer; a matching fresh cloud report records `policy_deferred` while the retained nightly_20260920 target198 record is RESOLVED. The exact legacy coordinator predicate is not visible through existing LCD/cloud diagnostics. No policy, quota, NVS or media was cleared. Sense USB was requested for application-only service;199 user acceptance remains pending. See `/Users/MattTaylor/halo-postclaim199-20260921/install-01/INSTALLATION-STATUS.md` and its raw/cloud receipts.
 
 A later ordinary wake on198 successfully refreshed and armed the next02:00 calendar timer. This does not qualify the failing immediate post-provision path or199 hardware acceptance. Remaining on the shopping list during the setup grace deliberately retains foreground priority; the focused user retest should record and then leave the unit untouched.
+
+## USB installation and diagnosed OTA refusal, September21
+
+The exact published199 applications were installed sequentially into Sense app1 and LCD app0. Both prior VALID198 banks were retained. Both full banks were backed up per board; readbacks verified the new images, alternate NEW selectors, unchanged NVS/table/old banks and unchanged filesystem regions. No factory erase, quota/debt reset or queue mutation was used. The closed post-LCD-release capture contains fresh Sense199/app1 VALID FW_INFO, LCD199/app0 VALID/boot-ready queries, successful SLEEP_READY coordination and local deep sleep, plus stored_verified nightly_20260922 start1790067600.
+
+Private evidence: `/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json`. A first LCD admission stopped before flash because LCD slept during Sense service; a deliberate actuator wake then admitted the successful LCD service. The extra post-install actuator wake timed out before any Halo connection, so it is not a passed extra wake check. Fresh passive user-test capture is `reprovision-voice199-01`; no immediate provisioning/voice/cloud acceptance is claimed yet.
+
+The preserved pre-service Sense NVS conclusively explains the earlier refusal: canonical retry_v1 generation43 is RESOLVED for198/198, coordinator eligibility has no pending ID, but halo/lcd_ota_due remains1. That hint makes retained_legacy true, while the empty pending ID prevents the manual-completed-handoff exception. Policy entry returns before the manifest GET. Wi-Fi and fresh SNTP were present. See `policy-readonly/FINDINGS.md` for exact hashes/guard chain and a narrowly bounded future fix.199 deliberately retains its already published OTA logic; USB installation is not an OTA pass and does not resolve this separate stale-hint bug.

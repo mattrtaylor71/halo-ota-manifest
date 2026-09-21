@@ -34,5 +34,9 @@
         "complete_public_binary_readback": true
       }
     }
+  },
+  "installation": {
+    "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
+    "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
   }
 }
