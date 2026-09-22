@@ -398,8 +398,20 @@ def verify(store, obj):
     return etag
 
 
-def execute(plan, store, phase):
+def require_release_approval(plan, approve_production_version):
+    route = plan.get('route')
+    require(route in DESTINATIONS and (plan.get('bucket'), plan.get('prefix')) == DESTINATIONS[route],
+            'Changed release destination')
+    if route == 'production':
+        require(isinstance(approve_production_version, str) and
+                approve_production_version == plan['version'],
+                'Production stage/promote requires --approve-production-version exactly matching the release version')
+
+
+def execute(plan, store, phase, *, approve_production_version=None):
     require(phase in ('stage', 'promote'), 'Unknown release phase')
+    require_release_approval(plan, approve_production_version)
+    require((store.bucket, store.prefix) == DESTINATIONS[plan['route']], 'Store destination differs from release route')
     etags = {}
     for board, obj in plan['previous_latest'].items():
         if obj['file'] is None:
@@ -463,6 +475,7 @@ def main():
         p.add_argument('--profile', required=True)
         p.add_argument('--aws-cli-python', required=True, help='Python interpreter of the installed AWS CLI v2')
         p.add_argument('--out', required=True, help='New phase evidence directory')
+        p.add_argument('--approve-production-version', help='Explicit release approval: exact production version, required separately for stage and promote')
     args = parser.parse_args()
     if args.phase == 'prepare-bridge':
         value = prepare_bridge(args.release, args.release_sha256, args.baseline_sense, args.baseline_lcd, args.out)
@@ -474,10 +487,13 @@ def main():
         print(json.dumps({'prepared_release': value, 'network_actions': 0, 'compiler_actions': 0}))
         return 0
     plan = load_plan(args.release, args.release_sha256)
+    require_release_approval(plan, args.approve_production_version)
     out = Path(args.out).resolve(); out.mkdir(parents=True, exist_ok=False)
-    result = {'status': 'ATTENTION_NO_AUTOMATIC_RETRY', 'phase': args.phase, 'release': ref(args.release), 'started_epoch': time.time()}
+    result = {'status': 'ATTENTION_NO_AUTOMATIC_RETRY', 'phase': args.phase, 'release': ref(args.release), 'started_epoch': time.time(),
+              'approved_production_version': args.approve_production_version if plan['route'] == 'production' else None}
     try:
-        result.update(execute(plan, Store(out, args.profile, args.aws_cli_python, plan['route']), args.phase))
+        result.update(execute(plan, Store(out, args.profile, args.aws_cli_python, plan['route']), args.phase,
+                              approve_production_version=args.approve_production_version))
         return 0
     except BaseException as exc:
         result['error_type'] = type(exc).__name__

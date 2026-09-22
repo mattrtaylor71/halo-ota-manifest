@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-OTA Publishing Pipeline for HALO SENSE
+Legacy HALO SENSE OTA helpers. The CLI permits --dry-run only.
+Use publish_pair.py for remote staging/promotion; production requires an exact
+--approve-production-version on each invocation.
 
-End-to-end OTA release workflow:
+Historical workflow (remote steps are disabled in this CLI):
 1. Compile firmware (arduino-cli)
 2. Extract version/build_id from binary marker
 3. Validate marker matches expected version
@@ -12,14 +14,7 @@ End-to-end OTA release workflow:
 7. Optionally invalidate CloudFront
 
 Usage:
-    # Dev channel
-    python3 tools/ota/publish_ota.py --channel dev
-
-    # Prod channel
-    python3 tools/ota/publish_ota.py --channel prod
-
-    # Custom channel
-    python3 tools/ota/publish_ota.py --channel staging --bucket my-bucket
+    python3 tools/ota/publish_ota.py --channel prod --bin /abs/path/to/sense.bin --dry-run
 
 Environment Variables:
     OTA_BUCKET          - S3 bucket name (required)
@@ -30,8 +25,7 @@ Environment Variables:
     OTA_PUBLIC_BASE_URL - Public base URL (optional, defaults to S3 URL)
     CLOUDFRONT_DIST_ID  - CloudFront distribution ID (optional)
 
-Before publishing (non-dry-run), run: aws sts get-caller-identity
-If that fails, publish will exit non-zero—credentials are missing or invalid.
+Non-dry-run invocations fail before compilation or AWS access.
 """
 
 import argparse
@@ -854,6 +848,9 @@ def main():
     parser.add_argument("--min-version-allowed", default=None, help="Optional rollout min version gate")
     
     args = parser.parse_args()
+
+    if not args.dry_run:
+        parser.error('Direct legacy publishing is retired. Use publish_pair.py with --approve-production-version for each production stage and promote; --dry-run remains available.')
 
     if args.bin:
         try:

@@ -1,3 +1,7 @@
+# Unreleased tooling — private firmware development workflow
+
+Production remains 6.4.211. Added local candidate planning/preparation/verification, read-only paired production status, documented state-preserving bench installation, exact-version production publish approval, and disabled legacy single-board publishing CLI writes. Build/flash/test requests do not imply publishing. No device runtime or production artifacts changed. [Workflow](docs/DEVELOPMENT_AND_RELEASE.md).
+
 # 6.4.211 published — discard and dish confirmation subtitles
 
 LCD Got it subtitles now say “Updating your kitchen...” for discard and “Macros available in app” for dish. Check-in wording and 210 automatic check-in behavior remain unchanged. The label resets for each screen presentation; no camera, network, OTA or storage implementation changes. Exact 114-suite snapshot gate, paired canonical builds/artifact checks and full public readbacks passed. Installation and device test pending; retained installed 209 evidence stays separate. [Release details](docs/RELEASE_211.md).

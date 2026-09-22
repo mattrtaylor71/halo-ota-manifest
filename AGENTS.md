@@ -28,6 +28,8 @@ At that earlier178/179 checkpoint, public manifests remained162. The older-manif
 
 ## Current workflow
 
+- **Default to local development.** Read [Development and release](Arduino/HALOMAIN_rev1p5_modular/docs/DEVELOPMENT_AND_RELEASE.md). Build, flash, test, commit, and push-to-device requests do not authorize public OTA. Keep the current production latest unchanged until the user explicitly approves that candidate for production; historical publication authorization does not carry forward.
+- Prepare local candidates with `tools/firmware_candidate.py`; record bench evidence separately. Only after explicit release approval use the current paired publisher with `--approve-production-version` for each production remote phase. Do not use historical publisher copies, the retired single-board CLIs, or direct cloud writes to bypass this boundary.
 - The authoritative production project is `Arduino/HALOMAIN_rev1p5_modular`; read its `AGENTS.md`, `docs/RELEASE_211.md` and build instructions before changing firmware. Frozen 158 remains a separate recovery reference.
 - Use `PRODUCTION_BASELINE.json` and `RELEASE_BASELINE.json.current_working_source` for new changes, preserving 211 and all earlier fixes. `current_baseline` identifies the retained frozen 158 recovery artifacts. Historical records and `Arduino/HALOMAIN_rev1` are not alternative current baselines.
 - Run `python3 -B tools/verify_frozen_baseline.py` from the production firmware directory before preparing new firmware. This read-only check verifies ancestry and retained artifact identity, not the correctness of uncommitted changes.

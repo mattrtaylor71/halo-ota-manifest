@@ -28,6 +28,8 @@ At that earlier178/179 checkpoint, public manifests remained162. The older-manif
 
 ## Release Baseline
 
+- **Default to local development.** Read [Development and release](docs/DEVELOPMENT_AND_RELEASE.md). Build, flash, test, commit, and push-to-device requests do not authorize public OTA. Keep the current production latest unchanged until the user explicitly approves that candidate for production; historical publication authorization does not carry forward.
+- Prepare local candidates with `tools/firmware_candidate.py`; record bench evidence separately. Only after explicit release approval use the current paired publisher with `--approve-production-version` for each production remote phase. Do not use historical publisher copies, the retired single-board CLIs, or direct cloud writes to bypass this boundary.
 - Start future firmware work from `PRODUCTION_BASELINE.json` and `RELEASE_BASELINE.json.current_working_source`, preserving 211 and all earlier fixes. `current_baseline` and tag `halo-v6.4.158` identify immutable recovery and previous scheduled qualification. Read `docs/RELEASE_211.md` and `docs/BUILD_AND_RELEASE.md`; historical qualification does not select the current source.
 - Run `python3 -B tools/verify_frozen_baseline.py` before preparing new firmware. Preserve the immutable 158 tag and binaries; new changes need an unused version at least 6.4.212 after a fresh inventory check. The guard verifies committed ancestry and retained bytes, not uncommitted edits or device acceptance.
 - Use `docs/PRODUCTION_RELEASE_ACCEPTANCE.md` for finite shipping acceptance. Preserve the distinction between bench evidence, shipping build evidence and actual production acceptance.

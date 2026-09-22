@@ -748,6 +748,12 @@
       "path": "tools/test_ota_calendar_owner_adoption.py",
       "args": [],
       "timeout_seconds": 180
+    },
+    {
+      "id": "test_firmware_candidate",
+      "path": "tools/test_firmware_candidate.py",
+      "args": [],
+      "timeout_seconds": 90
     }
   ]
 }

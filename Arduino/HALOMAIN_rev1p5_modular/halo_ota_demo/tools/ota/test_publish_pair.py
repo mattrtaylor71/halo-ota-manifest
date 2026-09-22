@@ -1,5 +1,7 @@
 """Offline release identity, conditional publication and process-custody tests."""
+import contextlib
 import copy
+import io
 import json
 import os
 from pathlib import Path
@@ -14,11 +16,14 @@ from unittest.mock import patch
 
 import publish_pair as p
 import release_s3_guard as guard
+import publish_ota as legacy_sense
+import publish_lcd_ota as legacy_lcd
 
 
 class FakeStore:
     def __init__(self, plan, out, staged=False):
         self.out, self.actions = Path(out), []
+        self.bucket, self.prefix = p.DESTINATIONS[plan['route']]
         self.out.mkdir()
         self.data = {v['key']: p.pin(v['file']).read_bytes() for v in plan['previous_latest'].values() if v['file']}
         if staged:
@@ -259,9 +264,89 @@ class ReleaseTests(unittest.TestCase):
                     p.load_plan(self.plan_ref['path'], self.plan_ref['sha256'])
                 file.write_bytes(original)
 
+    def test_production_approval_required_before_every_remote_action(self):
+        for phase in ('stage', 'promote'):
+            for i, approval in enumerate((None, '', '6.4.103', '6.4.105', 'v6.4.104', '6.4.104 ', True)):
+                with self.subTest(phase=phase, approval=approval):
+                    store = FakeStore(self.plan, self.root / (phase + str(i)), staged=True)
+                    with self.assertRaisesRegex(ValueError, '--approve-production-version'):
+                        p.execute(self.plan, store, phase, approve_production_version=approval)
+                    self.assertEqual(store.actions, [])
+
+    def test_stage_approval_is_not_inherited_by_promotion(self):
+        store = FakeStore(self.plan, self.root / 'separate-approval')
+        p.execute(self.plan, store, 'stage', approve_production_version='6.4.104')
+        prior = list(store.actions)
+        # An old plan field or environment variable is not invocation approval.
+        self.plan['approved_production_version'] = '6.4.104'
+        with patch.dict(os.environ, APPROVE_PRODUCTION_VERSION='6.4.104'):
+            with self.assertRaisesRegex(ValueError, '--approve-production-version'):
+                p.execute(self.plan, store, 'promote')
+        self.assertEqual(store.actions, prior)
+
+    def test_changed_destination_or_store_cannot_bypass_approval(self):
+        for mode in ('plan', 'store'):
+            with self.subTest(mode=mode):
+                plan = copy.deepcopy(self.plan)
+                store = FakeStore(plan, self.root / mode)
+                if mode == 'plan':
+                    plan['route'] = 'private-canary'  # Still carries production destination.
+                else:
+                    store.bucket, store.prefix = p.DESTINATIONS['private-canary']
+                with self.assertRaisesRegex(ValueError, 'destination'):
+                    p.execute(plan, store, 'stage', approve_production_version='6.4.104')
+                self.assertEqual(store.actions, [])
+
+    def phase_argv(self, phase, out, approval=None):
+        argv = ['publish_pair.py', phase, '--release', self.plan_ref['path'],
+                '--release-sha256', self.plan_ref['sha256'], '--profile', 'synthetic',
+                '--aws-cli-python', sys.executable, '--out', str(out)]
+        if approval is not None:
+            argv.extend(['--approve-production-version', approval])
+        return argv
+
+    def test_cli_approval_refuses_before_store_or_output_creation(self):
+        for phase in ('stage', 'promote'):
+            for i, approval in enumerate((None, '6.4.103')):
+                with self.subTest(phase=phase, approval=approval):
+                    out = self.root / ('cli-refuse-' + phase + str(i))
+                    with patch.object(sys, 'argv', self.phase_argv(phase, out, approval)), \
+                         patch.object(p.signal, 'signal'), patch.object(p, 'Store') as store:
+                        with self.assertRaisesRegex(ValueError, '--approve-production-version'):
+                            p.main()
+                    store.assert_not_called()
+                    self.assertFalse(out.exists())
+
+    def test_cli_exact_approval_reaches_real_execution_and_receipt(self):
+        for phase in ('stage', 'promote'):
+            with self.subTest(phase=phase):
+                out = self.root / ('cli-' + phase)
+                store = FakeStore(self.plan, self.root / ('remote-' + phase), staged=phase == 'promote')
+                store.out = out  # main creates the evidence directory before execution.
+                with patch.object(sys, 'argv', self.phase_argv(phase, out, '6.4.104')), \
+                     patch.object(p.signal, 'signal'), patch.object(p, 'Store', return_value=store), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(p.main(), 0)
+                receipt = json.loads((out / 'result.json').read_text())
+                self.assertEqual(receipt['approved_production_version'], '6.4.104')
+                self.assertEqual(receipt['latest_writes'], 0 if phase == 'stage' else 2)
+                self.assertEqual(receipt['promotion_verified'], [] if phase == 'stage' else ['lcd', 'sense'])
+                self.assertEqual(len([a for a in store.actions if a[0] == 'put']), 4 if phase == 'stage' else 2)
+
+    def test_shell_wrapper_cannot_omit_production_approval(self):
+        out = self.root / 'wrapper-refused'
+        wrapper = Path(p.__file__).resolve().parents[2] / 'publish_both.sh'
+        env = os.environ.copy()
+        env['PYTHON_BIN'] = sys.executable
+        result = subprocess.run(['/bin/bash', str(wrapper)] + self.phase_argv('stage', out)[1:],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'--approve-production-version', result.stderr)
+        self.assertFalse(out.exists())
+
     def test_stage_is_four_immutable_writes_no_latest(self):
         store = FakeStore(self.plan, self.root / 'stage')
-        result = p.execute(self.plan, store, 'stage')
+        result = p.execute(self.plan, store, 'stage', approve_production_version='6.4.104')
         writes = [a for a in store.actions if a[0] == 'put']
         self.assertEqual(len(writes), 4)
         self.assertTrue(all(not a[1].endswith('/manifest_latest.json') and a[2] is None for a in writes))
@@ -270,24 +355,24 @@ class ReleaseTests(unittest.TestCase):
     def test_changed_predecessor_prevents_every_write(self):
         store = FakeStore(self.plan, self.root / 'stage')
         store.data[self.plan['previous_latest']['lcd']['key']] = b'newer deployment'
-        with self.assertRaises(ValueError): p.execute(self.plan, store, 'stage')
+        with self.assertRaises(ValueError): p.execute(self.plan, store, 'stage', approve_production_version='6.4.104')
         self.assertFalse(any(a[0] == 'put' for a in store.actions))
 
     def test_lcd_version_collision_prevents_every_stage_write(self):
         store = FakeStore(self.plan, self.root / 'stage')
         store.data[self.plan['objects'][3]['key']] = b'exists'
-        with self.assertRaises(ValueError): p.execute(self.plan, store, 'stage')
+        with self.assertRaises(ValueError): p.execute(self.plan, store, 'stage', approve_production_version='6.4.104')
         self.assertFalse(any(a[0] == 'put' for a in store.actions))
 
     def test_promotion_requires_all_four_served_bytes(self):
         store = FakeStore(self.plan, self.root / 'promote', staged=True)
         store.data[self.plan['objects'][2]['key']] = b'corrupt served LCD'
-        with self.assertRaises(ValueError): p.execute(self.plan, store, 'promote')
+        with self.assertRaises(ValueError): p.execute(self.plan, store, 'promote', approve_production_version='6.4.104')
         self.assertFalse(any(a[0] == 'put' for a in store.actions))
 
     def test_promotion_lcd_first_exact_etags(self):
         store = FakeStore(self.plan, self.root / 'promote', staged=True)
-        result = p.execute(self.plan, store, 'promote')
+        result = p.execute(self.plan, store, 'promote', approve_production_version='6.4.104')
         self.assertEqual(result['promoted'], ['lcd', 'sense'])
         self.assertEqual([a[1] for a in store.actions if a[0] == 'put'], [self.plan['previous_latest'][b]['key'] for b in ('lcd', 'sense')])
         for board in ('lcd', 'sense'):
@@ -296,7 +381,7 @@ class ReleaseTests(unittest.TestCase):
     def test_uncertain_sense_promotion_never_retries_or_rolls_back(self):
         store = FakeStore(self.plan, self.root / 'promote', staged=True)
         store.fail_put = self.plan['previous_latest']['sense']['key']
-        with self.assertRaises(RuntimeError): p.execute(self.plan, store, 'promote')
+        with self.assertRaises(RuntimeError): p.execute(self.plan, store, 'promote', approve_production_version='6.4.104')
         self.assertEqual(len([a for a in store.actions if a[0] == 'put']), 2)
         self.assertTrue((store.out / 'promoted-lcd.json').exists())
         self.assertTrue((store.out / 'promotion-attempt-sense.json').exists())
@@ -305,7 +390,7 @@ class ReleaseTests(unittest.TestCase):
     def test_accepted_put_failed_get_retains_unknown_attempt(self):
         store = FakeStore(self.plan, self.root / 'promote', staged=True)
         store.fail_get_after_put = self.plan['previous_latest']['lcd']['key']
-        with self.assertRaises(RuntimeError): p.execute(self.plan, store, 'promote')
+        with self.assertRaises(RuntimeError): p.execute(self.plan, store, 'promote', approve_production_version='6.4.104')
         self.assertEqual(len([a for a in store.actions if a[0] == 'put']), 1)
         self.assertTrue((store.out / 'promotion-attempt-lcd.json').exists())
         self.assertFalse((store.out / 'promoted-lcd.json').exists())
@@ -365,6 +450,51 @@ class ReleaseTests(unittest.TestCase):
         manifest['file'] = p.ref(file)
         changed = p.save(self.root / 'changed-bridge.json', plan)
         with self.assertRaisesRegex(ValueError, 'byte-identical'): p.load_plan(changed['path'], changed['sha256'])
+
+
+class LegacyCliTests(unittest.TestCase):
+    def test_live_legacy_clis_refuse_before_build_validation_or_remote_access(self):
+        for publisher in (legacy_sense, legacy_lcd):
+            for extra in ([], ['--channel', 'prod'], ['--channel', 'dev'],
+                          ['--bucket', 'halo-ota-prod', '--prefix', 'halo/ota/prod']):
+                with self.subTest(publisher=publisher.__name__, extra=extra):
+                    argv = [publisher.__name__ + '.py'] + extra
+                    if publisher is legacy_lcd:
+                        argv += ['--version', '6.4.104', '--bin', '/never-read.bin']
+                    output = io.StringIO()
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(patch.object(sys, 'argv', argv))
+                        stack.enter_context(contextlib.redirect_stderr(output))
+                        boundaries = [stack.enter_context(patch.object(publisher, name,
+                                      side_effect=AssertionError('legacy work attempted: ' + name)))
+                                      for name in ('validate_publishable_artifact', 'get_aws_config', 'ensure_s3_bucket')]
+                        boundaries.append(stack.enter_context(patch.object(publisher.subprocess, 'run',
+                                                   side_effect=AssertionError('legacy subprocess attempted'))))
+                        if publisher is legacy_sense:
+                            boundaries.append(stack.enter_context(patch.object(publisher, 'compile_firmware',
+                                                       side_effect=AssertionError('legacy compile attempted'))))
+                        with self.assertRaises(SystemExit) as stopped:
+                            publisher.main()
+                    self.assertEqual(stopped.exception.code, 2)
+                    self.assertIn('Direct legacy publishing is retired', output.getvalue())
+                    for boundary in boundaries:
+                        boundary.assert_not_called()
+
+    def test_dry_run_still_reaches_existing_artifact_validation(self):
+        # Existing LCD slot tests cover complete dry runs; this checks both CLI gates
+        # preserve validation, and never treat invalid artifacts as an upload request.
+        for publisher in (legacy_sense, legacy_lcd):
+            with self.subTest(publisher=publisher.__name__):
+                argv = [publisher.__name__ + '.py', '--dry-run', '--channel', 'prod', '--bin', '/invalid.bin']
+                if publisher is legacy_lcd:
+                    argv += ['--version', '6.4.104']
+                with patch.object(sys, 'argv', argv), \
+                     patch.object(publisher, 'validate_publishable_artifact', side_effect=ValueError('synthetic invalid artifact')) as validate, \
+                     patch.object(publisher, 'get_aws_config') as config, \
+                     contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(publisher.main(), 1)
+                validate.assert_called_once_with('/invalid.bin')
+                config.assert_not_called()
 
 
 class GuardTests(unittest.TestCase):

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-LCD OTA Publishing – publish a prebuilt LCD binary to S3. NO COMPILATION.
+Legacy LCD OTA helpers. The CLI permits --dry-run only. NO COMPILATION.
 
-This script never compiles. It only validates the provided BIN and uploads to S3.
-Build the LCD firmware in Arduino IDE (or your build system) and pass the .bin path.
+Use publish_pair.py for remote staging/promotion; production requires an exact
+--approve-production-version on each invocation. Imported helpers remain available.
 
 Usage:
-    python3 tools/ota/publish_lcd_ota.py --channel dev --version 6.0.3 --bin /abs/path/to/lcd.bin
-    make ota-publish-lcd CHANNEL=dev VERSION=6.0.3 BIN=/abs/path/to/lcd.bin
+    python3 tools/ota/publish_lcd_ota.py --channel dev --version 6.0.3 --bin /abs/path/to/lcd.bin --dry-run
 
 Inputs:
     --channel dev|prod   Channel name (default: dev)
@@ -25,7 +24,7 @@ Validation (fail fast):
     - size <= both OTA slots from firmware/halo_lcd_prod/partitions.csv
     - SHA256 computed and placed into manifest
 
-Upload order:
+Historical upload order (disabled in this CLI):
     1) BIN to halo/ota/<channel>/lcd/artifacts/<artifact_name>.bin
     2) manifest_<version>.json to halo/ota/<channel>/lcd/
     3) manifest_latest.json to halo/ota/<channel>/lcd/ LAST with Cache-Control: no-store, no-cache, max-age=0, must-revalidate
@@ -306,6 +305,9 @@ def main():
     parser.add_argument("--rollout-seed", default=None, type=int, help="Optional rollout seed (int)")
     parser.add_argument("--min-version-allowed", default=None, help="Optional rollout min version gate")
     args = parser.parse_args()
+
+    if not args.dry_run:
+        parser.error('Direct legacy publishing is retired. Use publish_pair.py with --approve-production-version for each production stage and promote; --dry-run remains available.')
 
     try:
         args.bin = str(validate_publishable_artifact(args.bin))

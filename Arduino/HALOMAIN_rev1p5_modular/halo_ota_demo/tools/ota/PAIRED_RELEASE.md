@@ -1,5 +1,13 @@
 # Prebuilt paired release
 
+Development builds and USB bench tests are local by default; see
+[Development and release](../../../docs/DEVELOPMENT_AND_RELEASE.md). Production
+stage and promote require a separate explicit user release decision and
+`--approve-production-version` matching the pinned plan version. Missing or
+wrong approval is refused before remote access. Canary phases do not require
+that production flag. The legacy single-board CLIs are dry-run only. Historical
+version numbers below illustrate the original campaign, not the current release.
+
 `../../publish_both.sh` now packages and publishes verified prebuilt images. It never compiles or changes version headers. Build separately with the canonical `tools/build_ota_policy_production.py`; supply the actual artifact checker's `verified.json` for both boards. Provisional or explicitly held proofs are refused.
 
 Local preparation checks the exact canonical compiler command, actual flag proof, source partition table, compiled partition evidence, app capacity, and unique version/build/board marker. It copies exact BIN bytes, writes deterministic manifests, and pins all provenance, publisher, guard, and builder inputs. The package retains absolute provenance paths; preserve those files unchanged until publication completes.
@@ -17,6 +25,7 @@ Prepare locally:
 ./publish_both.sh prepare --route production --version 6.4.104 \
   --sense-proof /absolute/final104/sense/artifacts/verified.json \
   --lcd-proof /absolute/final104/lcd/artifacts/verified.json \
+  --host-result /absolute/final104/regression/RESULT.json \
   --baseline-sense /absolute/saved-production-sense-latest.json \
   --baseline-lcd /absolute/saved-production-lcd-latest.json \
   --out /absolute/release104
@@ -24,7 +33,7 @@ Prepare locally:
 
 Use `--route private-canary` for 102/103. The first empty canary namespace may omit both baseline arguments; authenticated absence is then required at staging and promotion. Production always requires exact previous latest bodies.
 
-Run `stage`, then separately `promote`, each with `--release /absolute/release104/release.json`, its returned `--release-sha256`, `--profile`, `--aws-cli-python` pointing to the installed AWS CLI v2 Python interpreter, and a fresh `--out` evidence directory. Staging writes only the four immutable objects. It refuses existing versioned manifests and uses `If-None-Match: *` for every immutable PUT. Promotion first checks all served objects and exact previous latest bodies, then changes LCD latest followed by Sense latest using their observed ETags. Every write gets a full public GET/hash check.
+Run `stage`, then separately `promote`, each with `--release /absolute/release104/release.json`, its returned `--release-sha256`, `--profile`, `--aws-cli-python` pointing to the installed AWS CLI v2 Python interpreter, `--approve-production-version 6.4.104` for this historical production example, and a fresh `--out` evidence directory. Staging writes only the four immutable objects. It refuses existing versioned manifests and uses `If-None-Match: *` for every immutable PUT. Promotion first checks all served objects and exact previous latest bodies, then changes LCD latest followed by Sense latest using their observed ETags. Every write gets a full public GET/hash check.
 
 Each phase has a 600-second bound. Each command reserves five seconds for owned process-group cleanup. The S3 before-send guard permits one transmission per operation, including redirects; there is no automatic retry or rollback. A promotion-attempt receipt is fsynced before each latest PUT. An interrupted or uncertain operation remains `ATTENTION_NO_AUTOMATIC_RETRY`, with per-board attempted and verified states. Inspect those receipts and current objects before deciding any separate recovery action. Restoring old manifest bytes does not establish that firmware downgrade policy will accept an older image.
 

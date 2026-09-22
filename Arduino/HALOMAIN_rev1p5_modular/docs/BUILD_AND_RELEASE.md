@@ -4,6 +4,10 @@
 
 The retained `RELEASE_BASELINE.json.current_baseline` and `development_baseline` identify historical158 recovery/scheduled qualification. They do not select new development. Its tag, package and previous acceptance stay immutable; see [historical158 recovery](FROZEN_RELEASE_158.md). Retain the immutable158/196/197/198 packages under `/Users/MattTaylor/halo-releases`, with their hashes and original evidence. Never rebuild/relabel existing versions.
 
+## Development is local by default
+
+Follow [Development and release](DEVELOPMENT_AND_RELEASE.md) for the candidate workspace, selected-unit USB testing and explicit release boundary. Building the production profile does not publish it. Stop after local build/test/bench work unless the user explicitly asks to release that candidate. Prior publication requests are not blanket approval for later versions.
+
 ## Before changing anything
 
 Work on a clean, reviewed descendant of the required 211 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
@@ -99,7 +103,7 @@ PUBLISHER="$OUT/snapshot/source/halo_ota_demo/tools/ota/publish_pair.py"
   --baseline-lcd "$OUT/predecessor/lcd.json" --out "$OUT/publication"
 ```
 
-`prepare` is local: it validates proofs and copies the exact images. Record its returned release SHA. For an authorized deployment, run the two separate remote phases using actual configured AWS values:
+`prepare` is local: it validates proofs and copies the exact images. Record its returned release SHA. Only after explicit user approval to publish this candidate, run the two separate remote phases using actual configured AWS values. Both require `--approve-production-version` equal to the pinned release version; the flag never supplies user authorization by itself:
 
 ```sh
 RELEASE_SHA='<SHA-returned-by-prepare>'
@@ -107,10 +111,10 @@ AWS_PROFILE_NAME='<configured-profile>'
 AWS_CLI_PYTHON='<absolute-installed-AWS-CLI-v2-Python>'
 "$PY" -B "$PUBLISHER" stage --release "$OUT/publication/release.json" \
   --release-sha256 "$RELEASE_SHA" --profile "$AWS_PROFILE_NAME" \
-  --aws-cli-python "$AWS_CLI_PYTHON" --out "$OUT/stage001"
+  --aws-cli-python "$AWS_CLI_PYTHON" --approve-production-version "$RELEASE_VERSION" --out "$OUT/stage001"
 "$PY" -B "$PUBLISHER" promote --release "$OUT/publication/release.json" \
   --release-sha256 "$RELEASE_SHA" --profile "$AWS_PROFILE_NAME" \
-  --aws-cli-python "$AWS_CLI_PYTHON" --out "$OUT/promote001"
+  --aws-cli-python "$AWS_CLI_PYTHON" --approve-production-version "$RELEASE_VERSION" --out "$OUT/promote001"
 ```
 
 Stage must close successfully before promotion. Immutable writes require absence; promotion rechecks served artifacts and exact predecessors, changes LCD latest then Sense latest, and performs full readback. Preserve uncertain/partial results; there is no blind automatic retry or rollback. Reverting latest does not force firmware downgrade.
