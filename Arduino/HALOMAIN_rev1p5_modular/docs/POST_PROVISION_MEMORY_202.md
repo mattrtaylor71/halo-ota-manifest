@@ -159,3 +159,40 @@ acceptance are separate from this boot/readback result.
 closed cleanly before `reprovision-camera203-01` was armed for the user's repeat
 setup→immediate Check-in/Confirm case. No203 JPEG or upload pass is claimed yet.
 Public paired201, EOL197 and retained OTA policy remain unchanged.
+
+### Physical result: immediate post-provision Check-in on203
+
+`reprovision-camera203-01/TEST-RESULT.json` now closes that pending case.
+The user completed provisioning and selected Check-in about5.5seconds after
+claim completion, without intervening reset/sleep. The camera selected the
+PSRAM fallback with largest internal DMA block11764bytes, verified actual
+OV2640 PID0x26, and captured a149100-byte1280×1024 JPEG in1527ms. This is a
+physical pass of the previously failing immediate-camera path on this unit.
+
+The first upload still failed: all15 PUT attempts emitted an AES allocation
+failure. The exact failed allocation size/capabilities are not established;
+post-error heap logging occurs after TLS cleanup and cannot establish them.
+The camera had already been deinitialized. Do not claim the camera fix also
+solves this separate encrypted-upload memory pressure.
+
+Durable recovery passed. Halo saved job118, entered paired sleep, and uploaded
+the saved image automatically on the retry's first PUT (HTTP200), about391s
+after Confirm. The read-only cloud receipt under
+`backend/object-check-20260922T035345008079Z/RESULT.json` verifies149100bytes,
+SHA256 `f9c1ab026829e8fe7d2ebff516ec2cbf7707a2a96f39dbcd1f97a8f527fa0919`,
+and full JPEG decode at1280×1024. This proves exact captured-image delivery;
+downstream recognition/inventory processing was not checked.
+
+Observed retry heartbeats kept backlight/panel off. A following short timer
+wake cleared the pending hint to0, canceled the retry arm with peer ACK and
+returned both boards to sleep; the02:00Pacific maintenance arm remained.
+USB attachment does not cover the first instant of boot, so the display claim
+is limited to captured telemetry. The passive capture issued no commands,
+closed cleanly and was reaped with exit0. Final evidence hashes are in the
+test receipt; raw logs contain credentials/signed URLs and remain private.
+
+This is one physical camera/retry case, not repeated-capture, voice or OTA
+qualification. Sense203 remains a private bench candidate paired with LCD201;
+public paired201 and EOL197 are unchanged. Remaining investigation should
+capture image-PUT allocation failures at the failing call, before TLS cleanup,
+rather than infer their cause from the recovered heap afterward.
