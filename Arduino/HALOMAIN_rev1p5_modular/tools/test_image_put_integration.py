@@ -2,7 +2,8 @@
 """Run the entire production image PUT and actual cancellation client with SDK doubles.
 
 Exercises request/response, retries, DMA-reservation cleanup, cancellation and
-allocation-report lifetime. No hardware, cloud or real TLS memory claim.
+allocation-report lifetime, including image pacing under modeled TX pressure.
+No hardware, cloud or real TLS memory claim.
 """
 import argparse
 import hashlib
@@ -41,7 +42,9 @@ struct Scenario {
  bool saved=false,initial_cancel=false,cancel_connect=false,foreground_connect=false;
  unsigned connect_failures=0,write_failures=0;
  size_t fail_at=SIZE_MAX,cancel_at=SIZE_MAX,foreground_at=SIZE_MAX,partial=512;
- uint32_t write_ms=0,budget=60000;
+ size_t queue_limit=SIZE_MAX,image_bytes=4096;
+ uint32_t write_ms=0,body_write_ms=0,budget=60000,start_ms=1000;
+ unsigned cancel_pace=0,foreground_pace=0;
  std::string reply="HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
 };
 static Scenario scenario;
@@ -49,6 +52,9 @@ static bool paused=false,foreground_active=false,alive=false,locked=false,in_sdk
 static uint32_t now_ms=1000;
 static unsigned attempts=0,resets=0,locks=0,unlocks=0,releases=0,acquires=0,trace_reports=0;
 static size_t max_write=0,closed_writes=0;
+static size_t queued_bytes=0,peak_queue=0,wire_at_pace_abort=0;
+static unsigned queue_failures=0,body_writes=0,writes_after_abort=0,pace_waits=0;
+static std::vector<uint32_t> paced_delays;
 static std::vector<std::string> requests;
 static std::string diagnostics;
 static uint8_t reserve;
@@ -70,7 +76,18 @@ static struct {
 #include "Sense_Minimal/sense_memory_diag.h"
 #include "Sense_Minimal/sense_image_http.h"
 static uint32_t millis(){return now_ms;}
-static void delay(uint32_t n){now_ms+=n;}
+static void delay(uint32_t n){
+ now_ms+=n;
+ // A scheduling yield without positive elapsed time cannot drain this queue.
+ // Rate/capacity are adversarial SDK doubles, not measured Wi-Fi throughput.
+ if(n)queued_bytes-=std::min(queued_bytes,size_t(n)*256);
+ if(alive&&body_writes){
+  ++pace_waits;paced_delays.push_back(n);
+  if(scenario.cancel_pace==pace_waits)paused=true;
+  if(scenario.foreground_pace==pace_waits)foreground_active=true;
+  if(paused||foreground_active)wire_at_pace_abort=requests.back().size();
+ }
+}
 static bool media_upload_network_active(){return true;}
 static bool media_retry_network_active(){return scenario.saved;}
 static bool media_retry_network_cancelled(){return paused;}
@@ -105,11 +122,11 @@ struct Stream {
 struct WiFiClientSecure:Stream {
  size_t response_offset=0;
  virtual ~WiFiClientSecure(){stop();}
- void stop(){assert(!in_sdk);alive=false;}
+ void stop(){assert(!in_sdk);alive=false;queued_bytes=0;}
  void setHandshakeTimeout(uint32_t){}
  int lastError(char* b,size_t n){snprintf(b,n,"test");return 48;}
  virtual int connect(const char*,uint16_t,int32_t){
-  assert(!alive);++attempts;requests.emplace_back();response_offset=0;
+  assert(!alive);++attempts;requests.emplace_back();response_offset=0;queued_bytes=0;body_writes=0;
   alive=attempts>scenario.connect_failures;
   if(scenario.cancel_connect)paused=true;
   if(scenario.foreground_connect)foreground_active=true;
@@ -119,10 +136,18 @@ struct WiFiClientSecure:Stream {
  virtual size_t write(const uint8_t* p,size_t n){
   if(!alive){++closed_writes;return 0;}in_sdk=true;max_write=std::max(max_write,n);
   auto& wire=requests.back();
+  if(paused||foreground_active)++writes_after_abort;
+  const bool body=wire.find("\r\n\r\n")!=std::string::npos;
+  if(body)++body_writes;
   size_t sent=std::min(n,scenario.partial);
+  if(sent>scenario.queue_limit-queued_bytes){
+   ++queue_failures;failure_hook(512,MALLOC_CAP_DMA,"heap_caps_aligned_alloc");
+   alive=false;in_sdk=false;return 0;
+  }
   const bool fail=attempts<=scenario.write_failures&&wire.size()+sent>=scenario.fail_at;
   if(fail)sent=scenario.fail_at>wire.size()?scenario.fail_at-wire.size():0;
-  wire.append(reinterpret_cast<const char*>(p),sent);now_ms+=scenario.write_ms;
+  wire.append(reinterpret_cast<const char*>(p),sent);now_ms+=scenario.write_ms+(body?scenario.body_write_ms:0);
+  queued_bytes+=sent;peak_queue=std::max(peak_queue,queued_bytes);
   if(wire.size()>=scenario.cancel_at)paused=true;
   if(wire.size()>=scenario.foreground_at)foreground_active=true;
   if(fail){failure_hook(544,MALLOC_CAP_DMA,"heap_caps_aligned_alloc");alive=false;}
@@ -154,22 +179,23 @@ static const std::string image(4096,'I');
 using Put=bool(*)(const String&,const uint8_t*,size_t,const char*,uint32_t,uint32_t,bool*,const PresignReply*,int*);
 static void run(Put put,const char* name,Scenario config,bool expect_ok,int expect_code,unsigned expect_attempts,bool expect_budget=false,bool durable=true,bool reserve_held=true){
  ++cases;case_name=name;scenario=config;paused=config.initial_cancel;foreground_active=false;
- alive=locked=in_sdk=false;now_ms=1000;attempts=resets=locks=unlocks=releases=acquires=trace_reports=0;
+ alive=locked=in_sdk=false;now_ms=config.start_ms;attempts=resets=locks=unlocks=releases=acquires=trace_reports=0;
  max_write=closed_writes=0;requests.clear();diagnostics.clear();g_camera_dma_reserve=reserve_held?&reserve:nullptr;
- require(!sense_memory::current);const String before=url;const std::string saved_image=image;
- PresignReply proof;proof.expected_image_bytes=image.size();proof.checksum_sha256_b64=checksum;
+ queued_bytes=peak_queue=wire_at_pace_abort=0;queue_failures=body_writes=writes_after_abort=pace_waits=0;paced_delays.clear();
+ require(!sense_memory::current);const String before=url;const std::string payload(config.image_bytes,'I'),saved_image=payload;
+ PresignReply proof;proof.expected_image_bytes=payload.size();proof.checksum_sha256_b64=checksum;
  bool aborted=false;int code=77;
- const bool ok=put(url,reinterpret_cast<const uint8_t*>(image.data()),image.size(),"image/jpeg",118,
+ const bool ok=put(url,reinterpret_cast<const uint8_t*>(payload.data()),payload.size(),"image/jpeg",118,
    now_ms+config.budget,&aborted,durable?&proof:nullptr,&code);
  require(ok==expect_ok);require(code==expect_code);require(attempts==expect_attempts);require(aborted==expect_budget);
  require(!alive&&!locked&&!sense_memory::current&&sense_memory::failures.phase==sense_memory::Idle);
  require(locks==unlocks&&releases==acquires&&bool(g_camera_dma_reserve)==reserve_held);
- require(url==before&&image==saved_image);require(max_write<=512);
+ require(url==before&&payload==saved_image);require(max_write<=512);require(writes_after_abort==0);
  if(config.saved||paused)require(resets==0);
  if(ok){const std::string path=url.substr(url.find('/',8));
-  std::string expected="PUT "+path+" HTTP/1.1\r\nHost: fixture.s3.amazonaws.com\r\nContent-Type: image/jpeg\r\nContent-Length: 4096\r\n";
+  std::string expected="PUT "+path+" HTTP/1.1\r\nHost: fixture.s3.amazonaws.com\r\nContent-Type: image/jpeg\r\nContent-Length: "+std::to_string(payload.size())+"\r\n";
   if(durable)expected+="If-None-Match: *\r\nx-amz-checksum-sha256: "+checksum+"\r\n";
-  expected+="Connection: close\r\n\r\n"+image;
+  expected+="Connection: close\r\n\r\n"+payload;
   require(requests.back()==expected);
  }
  if(put==candidate_put&&attempts){require(trace_reports==attempts);
@@ -222,9 +248,51 @@ static void exercise(Put put){
  run(put,"all bytes handed off but SDK returns error retains image",s,false,0,1);
  require(requests.back().size()==header_bytes+image.size());
 }
+static void exercise_pacing(Put put,bool paced){
+ Scenario s;
+ run(put,"pacing exact successful body",s,true,200,1);
+ const size_t header_bytes=requests.back().find("\r\n\r\n")+4;
+ require(pace_waits==(paced?7u:0u));require(body_writes==8);
+ require(now_ms==s.start_ms+(paced?14u:0u));
+ for(uint32_t waited:paced_delays)require(waited==2);
+ // All request headers and one body chunk fit. Continued zero-time writes
+ // exceed capacity; positive two-ms waits retire one512-byte body chunk.
+ for(bool saved:{false,true})for(size_t partial:{size_t(512),size_t(3)}){
+  s={};s.saved=saved;s.partial=partial;s.queue_limit=header_bytes+512;
+  run(put,"TX queue drains only with positive time",s,paced,paced?200:0,paced||saved?1:5);
+  require(peak_queue<=s.queue_limit);require((queue_failures==0)==paced);
+  if(paced)require(pace_waits==7);else require(requests.back().size()<=s.queue_limit);
+ }
+ if(!paced)return; // These fault arrivals specifically occur in the new wait.
+ for(bool saved:{false,true})for(bool foreground:{false,true})for(unsigned at:{1u,4u,7u}){
+  s={};s.saved=saved;if(foreground)s.foreground_pace=at;else s.cancel_pace=at;
+  run(put,"user arrival during pacing sends no next byte",s,false,0,1);
+  require(pace_waits==at);require(body_writes==at);
+  require(requests.back().size()==header_bytes+at*512);
+  require(requests.back().size()==wire_at_pace_abort);require(resets==0);
+ }
+ for(uint32_t start:{1000u,UINT32_MAX-15u}){
+  s={};s.start_ms=start;s.budget=1001;s.body_write_ms=1000;
+  run(put,"deadline during clamped one-ms pacing",s,false,0,1,true);
+  require(paced_delays==std::vector<uint32_t>{1});require(body_writes==1);
+  require(requests.back().size()==header_bytes+512);
+  require(now_ms==uint32_t(start+1001));
+  s.budget=1000;
+  run(put,"deadline already expired skips pacing",s,false,0,1,true);
+  require(paced_delays.empty());require(body_writes==1);
+  require(requests.back().size()==header_bytes+512);
+ }
+ for(size_t bytes:{size_t(1),size_t(511),size_t(512),size_t(513)}){
+  s={};s.image_bytes=bytes;
+  run(put,"no wait before first or after last body chunk",s,true,200,1);
+  require(pace_waits==(bytes>512?1u:0u));
+  require(now_ms==s.start_ms+(bytes>512?2u:0u));
+ }
+}
 int main(){sense_memory::begin();exercise(candidate_put);
+ exercise_pacing(candidate_put,true);
  BASELINE_RUN
- printf("PASS %u whole-production PUT cases / %u assertions; actual client, exact requests, retries, 412/uncertainty, DMA/HTTP cleanup, input/deadlines, allocation-report lifetime\n",cases,checks);
+ printf("PASS %u whole-production PUT cases / %u assertions; actual client, exact requests, retries, 412/uncertainty, DMA/HTTP cleanup, positive-time TX pressure, pacing input/deadlines, allocation-report lifetime\n",cases,checks);
 }
 '''
 
@@ -242,7 +310,7 @@ def harness(root, baseline=None):
     if baseline:
         old = (baseline/'Sense_Minimal/sense_upload_exec.h').read_text()
         functions += definition(old, 'static bool put_to_presigned_url(').replace('put_to_presigned_url(', 'baseline_put(', 1)
-    return PREFIX + functions + TESTS.replace('BASELINE_RUN', 'exercise(baseline_put);' if baseline else '')
+    return PREFIX + functions + TESTS.replace('BASELINE_RUN', 'exercise(baseline_put);exercise_pacing(baseline_put,false);' if baseline else '')
 
 
 def main():

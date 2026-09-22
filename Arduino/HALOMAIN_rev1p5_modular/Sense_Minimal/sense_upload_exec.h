@@ -531,6 +531,15 @@ static bool put_to_presigned_url(const String& url,
 
     const size_t chunk_size = UPLOAD_TLS_CHUNK_BYTES;
     while (write_ok && offset < len) {
+      // Successful TLS writes can queue faster than Wi-Fi releases its DMA
+      // buffers. Pace image body chunks only; a positive delay permits drain
+      // but does not guarantee headroom. The pinned SDK uses a 1 ms RTOS tick.
+      // Recheck the existing deadline/user guards after waiting. This loop is
+      // not entered after the final chunk, so response handling is unpaced.
+      if (offset > 0 && !media_retry_network_cancelled() && !foreground_active) {
+        const uint32_t pace_ms = clamp_timeout_ms(2, deadline_ms);
+        if (pace_ms > 0) delay(pace_ms);
+      }
       if (deadline_expired(deadline_ms)) {
         if (aborted_for_budget) {
           *aborted_for_budget = true;

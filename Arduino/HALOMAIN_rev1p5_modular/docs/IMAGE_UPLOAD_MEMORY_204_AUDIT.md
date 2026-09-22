@@ -8,7 +8,7 @@ failure is cured.
 
 At the offline-audit checkpoint the bench retained private Sense203 with LCD201.
 The subsequent204 installation and boot/sleep result are recorded below;
-post-provision upload acceptance remains pending. Public paired201 and EOL197
+post-provision first upload failed; saved retry passed as recorded below. Public paired201 and EOL197
 are unchanged. No LCD image was built or published for this candidate.
 See [the camera/upload investigation](POST_PROVISION_MEMORY_202.md) for the
 physical203 failure and successful durable recovery that motivated this work.
@@ -167,7 +167,48 @@ focused controller tests passed; no firmware guard was relaxed. The actuator
 probe also failed before opening USB or sending a stroke; its worker was later
 observed absent, without claiming normal reaping.
 
-The passive `reprovision-camera204-01` capture was then armed for the user's
-normal app provisioning followed immediately by Check-in/Confirm. That upload
-acceptance is pending; do not infer an AES fix from successful installation.
-Private raw logs/backups remain in the case root and can contain credentials.
+## Immediate post-provision physical result
+
+The user's normal app provisioning followed immediately by Check-in/Confirm is
+closed in `reprovision-camera204-01`. The first owner claim failed with an AES
+allocation error; its next attempt returned HTTP200. Check-in started5.211s
+after successful claim, without intervening sleep/reset. Camera fallback again
+worked: OV2640,1280x1024,145109-byte JPEG,1299ms total capture, job222.
+
+The first wake's15 image PUT attempts failed. The allocation hook recorded a
+512-byte MALLOC_CAP_DMA failure during TLS writes, together with internal DMA
+allocation failures. The pinned SDK/ELF review matches this size to the AES
+output bounce allocation; allocator hashes identify allocator APIs, not caller
+PCs. Wi-Fi transmit buffers competing for that heap remain a supported inference,
+not a measured allocation call stack.204 reduces memory use but does not cure
+this case. Teardown review found no live camera worker, provisioning server or
+claim TLS client by the first PUT. Snapshot baselines return after attempts;
+this is evidence against an accumulating per-attempt TLS leak, not a complete
+heap census.
+
+Custody/recovery passed for this image. It was saved with request
+`aaabfce95e9c01a521a3f16c908f5424` and SHA256
+`929a31edde744cd9dcecc9deb937ed937cef52e99472621f993dece34833caa9`.
+After the armed299-second sleep, the automatic saved retry returned HTTP200 on
+its first PUT; body transmission took2353ms. Read-only S3 HEAD/GET verified exact
+size/hash and complete JPEG decode in
+`bench204-prep/object-check-20260922T055834989472Z/RESULT.json`.
+This verifies cloud object custody, not downstream recognition semantics.
+
+A subsequent short retry-hint cleanup wake cleared pending work and returned
+to the production02:00Pacific timer. Captured LCD heartbeats during the automatic
+retry and cleanup show backlight0/panel0. Capture was passive, with zero device
+commands, and closed/reaped normally. USB capture misses some early boot bytes;
+these logs are not an optical measurement of every instant of display output.
+
+After the user reset the actuator, a separate unchanged calibrated stroke passed
+fresh HELP/STATUS/STOP, woke both boards to lit Home with progressing LVGL, then
+both slept. See `actuator-reset204-01/WAKE-RESULT.json`. This establishes one
+working cycle, not the cause or permanent resolution of its intermittent fault.
+
+The next contained experiment is positive-tick pacing between image body chunks
+so queued transmit buffers can drain. It must retain existing deadline/input
+checks, original media custody, TLS verification and OTA behavior. It is not
+yet physically qualified. Detailed SDK findings are in
+`audit204/sdk-aes-wifi-review/REVIEW.md`. No204 publication occurred; public201
+and EOL197 remain unchanged. Private raw logs/backups may contain credentials.
