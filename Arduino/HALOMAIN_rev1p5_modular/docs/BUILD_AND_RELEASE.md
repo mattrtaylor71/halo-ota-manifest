@@ -64,12 +64,12 @@ Keep durable policy/diagnostics enabled, bench/one-shot/probe/credential-provisi
 The established artifact checker is currently external to the repository:
 
 ```sh
-CHECKER=/Users/MattTaylor/halo-ui-implementation-2026-09-07/investigations/ota-recovery-20260908/production-source-integration001/check_release_artifacts_v2.py
+CHECKER=/Users/MattTaylor/halo-provision-memory202-20260921/service203-prep/check_release_artifacts_203.py
 "$PY" -B "$CHECKER" --build-root "$OUT/build" \
   --materialization "$OUT/snapshot/materialization.json" --boards sense lcd
 ```
 
-Its reviewed SHA256 is `a042bdb8d6e9e3fe050b6a4301a5880dd9a6feeee72801a186d2a335cba3f1bd`. Preserve its pinned dependency closure and installed toolchain paths; this command is not a claim that the checker is independently portable. A relocated host needs a reviewed packaging adaptation, not fabricated proof files.
+Its reviewed SHA256 is `4e3791533f26fcf04b2d458322bb39ed0582e34c4d547b0f6bc1f9feddd8331d`. This camera-aware descendant is required for203+ Sense builds: it verifies both canonical build properties and the pinned camera-driver/wrapper receipts. The historical v2 checker expects only one build property and refuses the legitimate camera wrapper flag; do not remove that flag or relax the check. Preserve its pinned dependency closure and installed toolchain paths; this command is not a claim that the checker is independently portable. A relocated host needs a reviewed packaging adaptation, not fabricated proof files.
 
 Retain both `artifacts/verified.json` files, BIN/ELF/partition/map/stack evidence, compiler results, SDK patch/object receipts, and artifact-check result. Review resource changes against 158. Compilation and artifact checks establish package identity and layout; perform the relevant finite device acceptance separately. Preserve failed debt and real history. Do not reuse old campaign fixtures to manufacture a clean baseline or infer completion from a successful download alone.
 
