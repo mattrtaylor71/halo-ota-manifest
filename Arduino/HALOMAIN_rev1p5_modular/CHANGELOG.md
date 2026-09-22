@@ -1,3 +1,7 @@
+# 6.4.209 published — version-only manual OTA bump
+
+Publish the tested 208 runtime under 209 at the user’s request; only generated version/build metadata changes. Exact 114-suite snapshot tests, paired canonical builds/artifact checks and full public binary readbacks pass. Source `cd2b84bc072a`, local tag `halo-v6.4.209`. Device 209 testing is pending; last verified installed pair and acceptance remain 208. Factory 197/frozen 158 are unchanged. [Release details](docs/RELEASE_209.md).
+
 # 6.4.208 published — guarded recovery of stale OTA bookkeeping
 
 Repair explicit-manual admission for a proved ownerless completed-comparison hint retained in closed DISCOVERY, and adopt real same-boot due calendar credit despite an older queued reason. Preserve checked storage, unfinished work, accounting, peer/user guards and production 02:00 scheduling. Both 114-suite gates, paired canonical builds and complete public readbacks pass. Sense 208 USB bootstrap preserved the failing NVS state; ordinary LCD 206→208 OTA passed exact SHA, SDK VALID, native RESOLVED, Home and paired sleep. One subsequent same-version request passed, with a corroborated interleaved Sense comparison line, natural Home and paired sleep. Local tag `halo-v6.4.208` pins the exact source. No new Sense self-OTA or physical scheduled pass is claimed. Source `38cd15105624`; [release evidence and limits](docs/RELEASE_208.md).

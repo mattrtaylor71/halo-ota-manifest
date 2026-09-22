@@ -1,12 +1,12 @@
 # Build and release from the current production source
 
-The authoritative selector is [PRODUCTION_BASELINE.json](../PRODUCTION_BASELINE.json), explained in [the 208 handoff](RELEASE_208.md). New firmware must descend from `38cd151056242aba29bd07503ba78157e7cb0a97`, preserving 208 and all earlier fixes. The canonical branch remains `codex/halo-production-baseline-197`. Both 114-suite gates, paired canonical builds and complete public readbacks passed. The bench is paired 208, SDK VALID: Sense was USB bootstrapped and LCD passed one ordinary manual OTA with exact hash, native RESOLVED, Home and sleep. The subsequent ordinary same-version request passed natural Home and paired sleep, with an interleaved Sense comparison line corroborated by exact versions and the executed terminal path. Local annotated tag `halo-v6.4.208` pins the source. No new Sense self-OTA or physical scheduled/full-product qualification is claimed. EOL factory selection stays 197.
+The authoritative selector is [PRODUCTION_BASELINE.json](../PRODUCTION_BASELINE.json), explained in [the 209 handoff](RELEASE_209.md). New firmware must descend from `cd2b84bc072a8f287c4f93bed99df091e04610ba`, preserving the 208 runtime and all earlier fixes. Local annotated tag `halo-v6.4.209` pins the version-only release source. Exact 114-suite snapshot tests, paired canonical artifact checks and complete public readbacks passed. Device 209 testing is pending; last verified installed pair and finite manual acceptance remain 208. Factory 197 and frozen 158 recovery remain separate.
 
 The retained `RELEASE_BASELINE.json.current_baseline` and `development_baseline` identify historical158 recovery/scheduled qualification. They do not select new development. Its tag, package and previous acceptance stay immutable; see [historical158 recovery](FROZEN_RELEASE_158.md). Retain the immutable158/196/197/198 packages under `/Users/MattTaylor/halo-releases`, with their hashes and original evidence. Never rebuild/relabel existing versions.
 
 ## Before changing anything
 
-Work on a clean, reviewed descendant of the required 208 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
+Work on a clean, reviewed descendant of the required 209 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
 
 ```sh
 python3 -B tools/verify_frozen_baseline.py
@@ -14,13 +14,13 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run the complete [host regression gate](REGRESSION_TESTING.md), and commit the reviewed source before preparing release artifacts. The guard verifies current-source ancestry and historical recovery bytes; it does not establish device acceptance of new code. The source preparer independently enforces the same current source floor and minimum new version.
 
-Allocate an unused version **6.4.209 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.210 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.209>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.210>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"

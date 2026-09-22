@@ -1,66 +1,66 @@
 {
   "schema_version": 1,
-  "status": "PUBLISHED_PAIRED208_SCOPED_DEVICE_ACCEPTANCE_PASS",
+  "status": "PUBLISHED_PAIRED209_DEVICE_TEST_PENDING",
   "designated_date": "2026-09-22",
-  "minimum_source_commit": "38cd151056242aba29bd07503ba78157e7cb0a97",
-  "minimum_source_firmware_tree": "5a1c3632d5ea6e8cb5e855689c24fa1fa48e4191",
-  "minimum_new_version": "6.4.209",
-  "artifact_source_version": "6.4.208",
-  "source_tag": "halo-v6.4.208",
-  "source_tag_object": "8cacdd41d5b20dfd37c12e63f8f25775fa0c7e92",
+  "minimum_source_commit": "cd2b84bc072a8f287c4f93bed99df091e04610ba",
+  "minimum_source_firmware_tree": "607b49e924d036923c4f90a911416918efc04cca",
+  "minimum_new_version": "6.4.210",
+  "artifact_source_version": "6.4.209",
+  "source_tag": "halo-v6.4.209",
+  "source_tag_object": "91133914f364a3d70c4485b8567729f3b3e30a12",
   "canonical_checkout": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
   "canonical_firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
   "canonical_branch": "codex/halo-production-baseline-197",
-  "public_ota_version": "6.4.208",
+  "public_ota_version": "6.4.209",
   "factory_version": "6.4.197",
   "historical_recovery_version": "6.4.158",
-  "handoff": "docs/RELEASE_208.md",
-  "policy": "Future source must descend from 38cd151056242aba29bd07503ba78157e7cb0a97 and retain208 plus earlier fixes. Use a freshly inventoried unused 209+ version and exact-snapshot gates. Factory197/frozen 158 remain unchanged; USB bootstrap and manual LCD OTA are separate from Sense self-OTA or physical scheduled qualification.",
+  "handoff": "docs/RELEASE_209.md",
+  "policy": "New source must descend from cd2b84bc072a8f287c4f93bed99df091e04610ba and preserve208 plus earlier fixes. Inventory unused210+; factory197/frozen158 remain unchanged. Published209 is not yet device-qualified; retain208 acceptance separately.",
   "public_readback": {
     "status": "PASS_PAIRED_PUBLIC_MANIFEST_AND_COMPLETE_BINARY_READBACK",
-    "checked_epoch": 1790097593.095999,
+    "checked_epoch": 1790100006.899976,
     "release": {
-      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/publication/release.json",
-      "sha256": "eb3314944ddfdabe9dcc0ee578fa2402c8f584325e4c1ea6f82cc775435b2eca"
+      "path": "/Users/MattTaylor/halo-release209-20260922/publication/release.json",
+      "sha256": "cae9e542a8a13e78b6e33e1f25d49cc7944e1e29b25075020044dd49b3a47068"
     },
     "proofs": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/sense/artifacts/verified.json",
-        "sha256": "c9c4d97df7332dddd7c6f758baa47b56e85b65237bb54d0b1ce2aab03834f9fc"
+        "path": "/Users/MattTaylor/halo-release209-20260922/build/sense/artifacts/verified.json",
+        "sha256": "5dad2eaa11f16fe741857edc3e165ead1ae5bc2bf0f8d3d4e94da5798274baf4"
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/lcd/artifacts/verified.json",
-        "sha256": "f342ee5e3fd134c080322bc95cd51ed650091b5003054c1f003882c5ab636178"
+        "path": "/Users/MattTaylor/halo-release209-20260922/build/lcd/artifacts/verified.json",
+        "sha256": "9ff03a8843ccf5f38d762af81c0c161e5ab885be49a2b71a4bc3522304033947"
       }
     },
     "promotion": {
-      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/promote001/result.json",
-      "sha256": "6fe19012d184e3304644a9bb53be010431d9be3f3e66a17a411e63c11e60b10c"
+      "path": "/Users/MattTaylor/halo-release209-20260922/promote001/result.json",
+      "sha256": "6c012b5cfd927d5d7890e2b677b19deacf3e7b6136f688f1fe7467b2b93ab956"
     },
     "script": {
-      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback-prep/verify_public208.py",
-      "sha256": "c9144ce0ae340c796e23f329848b8e49dd7243bbb5673c3384846cd1e4d2c632"
+      "path": "/Users/MattTaylor/halo-release209-20260922/public-readback-prep/verify_public209.py",
+      "sha256": "0885a78d43644fc7ac868db26011f9a1fd87bed23454e53d42abd0b29593b836"
     },
     "boards": {
       "sense": {
-        "version": "6.4.208",
-        "sha256": "2f254cdaa2e92ab8d727f2bfdaa6e4a2a9159d8091c2e1ed5ce3cfa048a63951",
-        "bytes": 1874944,
-        "manifest_sha256": "0fb137e805b24c7808999ff7ae650e5ef602d438dfc1b959c2b97f73dc8771d1",
-        "manifest_receipt": "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback/sense-manifest.json",
+        "version": "6.4.209",
+        "sha256": "6dfc8840e25e1c3466eb1ec999a813f2b7707c03df5b458585dd282e6e65f9ca",
+        "bytes": 1874928,
+        "manifest_sha256": "d95d3781571113a5ac00d8c3f01e12e78e0aea4f3d7a0d97c806647022b8d5e2",
+        "manifest_receipt": "/Users/MattTaylor/halo-release209-20260922/public-readback/sense-manifest.json",
         "binary_receipts": [
-          "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback/sense.bin"
+          "/Users/MattTaylor/halo-release209-20260922/public-readback/sense.bin"
         ],
         "complete_public_binary_readback": true
       },
       "lcd": {
-        "version": "6.4.208",
-        "sha256": "421abd322036615ec9a1d810b3fe77724c2a188fbfca476371c4fbf63120a128",
-        "bytes": 2032960,
-        "manifest_sha256": "303771b1e1389f41f4734c0e2e1d66f0fd8a36131a02dff5e6826f4d82190654",
-        "manifest_receipt": "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback/lcd-manifest.json",
+        "version": "6.4.209",
+        "sha256": "3bf8881e2db47c3f9a5c53296ba6bb4ff707744608675d87b0b0c87150c2ef72",
+        "bytes": 2032896,
+        "manifest_sha256": "cec0cc4f04ed67ca299ae95f251a0d9d6e9365948136741a9085d730108421d5",
+        "manifest_receipt": "/Users/MattTaylor/halo-release209-20260922/public-readback/lcd-manifest.json",
         "binary_receipts": [
-          "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback/lcd.bin"
+          "/Users/MattTaylor/halo-release209-20260922/public-readback/lcd.bin"
         ],
         "complete_public_binary_readback": true
       }
@@ -68,10 +68,10 @@
     "automatic_retries": 0,
     "cloud_writes": 0,
     "hardware_actions": 0,
-    "finished_epoch": 1790097603.2738361
+    "finished_epoch": 1790100009.892662
   },
-  "installed": true,
-  "device_acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
+  "installed": false,
+  "device_acceptance": "DEVICE_TEST_PENDING_USER_MANUAL_OTA",
   "retained_installed_pair": {
     "version": "6.4.208",
     "installed": {
@@ -110,11 +110,11 @@
     },
     "acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE"
   },
-  "device_evidence": {
-    "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
-    "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+  "device_evidence": null,
+  "private_release_package": {
+    "path": "/Users/MattTaylor/halo-releases/6.4.209.ARCHIVE-RECORD.json",
+    "sha256": "dc49b7aa81a0bc090845911e9c474062512e7d7e037c1a6ae9b1dc558f8dbffc"
   },
-  "private_release_package": null,
   "previous_installed_pair_201": {
     "version": "6.4.201",
     "installation_methods": {
@@ -233,24 +233,34 @@
       "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
     }
   },
-  "same_version_acceptance": {
-    "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
-    "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
-  },
+  "same_version_acceptance": null,
   "source_tag_status": "LOCAL_ANNOTATED_SOURCE_TAG_CREATED",
-  "private_release_package_status": "NOT_CREATED",
+  "private_release_package_status": "PASS_VERIFIED_PRIVATE_RELEASE_ARCHIVE",
   "source_tag_receipt": {
-    "path": "/Users/MattTaylor/halo-ota208-20260922/release208/SOURCE-TAG.json",
-    "sha256": "34c74627ab9ec4274daab97f4af894d0845417735b1188b9c5153b5df4011895"
+    "path": "/Users/MattTaylor/halo-release209-20260922/SOURCE-TAG.json",
+    "sha256": "195064aac2cb9c60972ad5b36ee72cf4bdbe20bfe9a9dbb0bcb6ac2afb691894"
   },
   "release_record": {
-    "path": "/Users/MattTaylor/halo-ota208-20260922/release208/RELEASE-RECORD.json",
-    "sha256": "94978b7dcc3b933ca4e712a27ebf5c9df5260878123b9f7862cc369b705752d5"
+    "path": "/Users/MattTaylor/halo-release209-20260922/RELEASE-RECORD.json",
+    "sha256": "b7be44936234e11f91e48e870cda791e629b2f2b1509b964e19be6344f879881"
   },
-  "device_acceptance_record": {
-    "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
-    "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
-  },
-  "new_release_archive_created": false,
-  "git_remote_push_performed": false
+  "device_acceptance_record": null,
+  "new_release_archive_created": true,
+  "git_remote_push_performed": false,
+  "previous_published_release_208": {
+    "version": "6.4.208",
+    "source_commit": "38cd151056242aba29bd07503ba78157e7cb0a97",
+    "source_tag": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/SOURCE-TAG.json",
+      "sha256": "34c74627ab9ec4274daab97f4af894d0845417735b1188b9c5153b5df4011895"
+    },
+    "release_record": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/RELEASE-RECORD.json",
+      "sha256": "94978b7dcc3b933ca4e712a27ebf5c9df5260878123b9f7862cc369b705752d5"
+    },
+    "device_acceptance": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+    }
+  }
 }
