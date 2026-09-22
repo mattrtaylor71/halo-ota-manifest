@@ -65,3 +65,40 @@ The separate Sense post-AP claim retry defect discovered during the first setup
 is still pending: exhausted incomplete attempts are not reset, and inactive
 setup returns before the retry can submit. Do not describe that recovery as
 fixed by this LCD change.
+
+## Build and bench results
+
+Source `b0667160c4bc26f4383b50f56094e26dc96b4011`, firmware tree
+`ff31282afe47d7c67554ea9885861b2dee0335ca`, produced private LCD build
+`6.4.206-20260922T064705Z-b0667160c4bc`. The203 camera-aware artifact checker
+passed the unchanged canonical LCD production profile. No Sense206 was built
+and no OTA was published.
+
+LCD BIN:2033104bytes, SHA256
+`19df338b6065f0daed9e521f508a8d9ee7deba1333ecfd57e3052a79c27ed344`.
+Both working-tree and exact-snapshot full gates passed all112 suites. The
+focused39-case flow/funnel suite reproduced seven expected failures against
+the retained205 source; three comparison controls remained passing.
+
+`service-lcd206-01` installed206/app0, retaining201/app1, NVS, partition table,
+filesystem and the old selected VALID selector. Both full application banks
+were backed up, candidate and alternate NEW selector were read back, and all
+service/capture owners closed and reaped. This is scoped USB service, not OTA.
+
+`postservice206-health02/RESULT.json` passed a fresh actuator wake, nonce/CRC
+checked LCD206/app0/bootapp0 SDKVALID identity, fresh Sense205/app0/bootapp0
+SDKVALID reply, unlocked Home, normal coordinated sleep and five seconds
+without USB reopening. All29 LCD heartbeats were lit before normal sleep.
+The next timers remained02:00Pacific for Sense and01:59:45 for LCD.
+
+The earlier health01 observation is retained as a host-check failure: it saved
+ID1 during the startup OTA lease, then checked that stale busy reply after
+Home unlocked. Correct firmware/build/SDKVALID were already observed. Health02
+waited for startup work to settle and required a fresh idle reply; no firmware
+or persistent state was changed to pass it.
+
+The actual long phone-provisioning success screen still needs a retest on206.
+The ordinary wake case and host reproduction do not establish that physical
+acceptance. Passive capture `reprovision-lcd206-01` is reserved for the user's
+normal provisioning followed by Check-in/Confirm; its outcome also determines
+the still-pending same-wake Sense205 upload experiment.
