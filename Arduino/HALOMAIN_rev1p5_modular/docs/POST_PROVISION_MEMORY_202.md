@@ -130,3 +130,15 @@ five-minute duration is **not** a five-minute sleep-exclusion lease. Do not reus
 that premise for service admission. A separate bounded installation hold must
 be verified and removed before camera/voice/sleep acceptance; preserve both
 failed attempts and their zero-write results.
+
+The replacement external tool is `service203-rom-prep`. It requires fresh
+paired idle/SDK identity, rechecks its five-second handoff age after artifact
+hashing, then uses the unchanged bounded Sense-only ROM executor. Actual ROM
+MAC/security/stub ownership precedes every flash write; that chip's application
+sleep code is no longer running. The LCD's GPIO wake line is not Sense power or
+reset, so LCD sleep after takeover does not require a fabricated long awake
+lease. Both full-bank backups and every NVS/current-bank/filesystem/readback
+barrier remain. No diagnostic or test-mode command is sent. Its19 offline tests
+and actual203r2 plan validation passed. The unused test-mode tooling draft was
+never executed and is marked as such. Physical installation and subsequent
+paired health still require their own observed receipts.
