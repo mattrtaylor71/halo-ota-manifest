@@ -97,6 +97,7 @@ static void uart_send_ui_list(){++cached_sends;}
     code += '#define free worker_free\nstatic bool actual_worker_offline(const UploadJob& job){do{\n'
     code += offline + '\nreturn true;\n}while(false);return false;}\n#undef free\n'
     anim = (root / 'LCD_Minimal/lcd_anim.h').read_text()
+    lcd_activity = (root / 'LCD_Minimal/lcd_activity.h').read_text()
     ui = (root / 'LCD_Minimal/lcd_ui_task.h').read_text()
     menu = (root / 'LCD_Minimal/lcd_menu.h').read_text()
     for callback in ('static void knob_left_cb(', 'static void knob_right_cb('):
@@ -111,6 +112,8 @@ static void uart_send_ui_list(){++cached_sends;}
     code += r'''
 namespace lcd_scroll_producer {
 static unsigned wake_notices=0,local_activity=0;
+static std::atomic<uint32_t> guardian_awake_start_ms{0};
+static std::atomic<bool> guardian_sleep_triggered{false};
 static std::vector<std::string> wire_types;
 struct tx_msg_t{char type[24];};
 static bool uart_tx_enqueue(const tx_msg_t* msg,const char*){
@@ -146,6 +149,8 @@ static void example_lvgl_unlock(){}
 static void user_activity_bump(const char*){}
 '''
     code += definition(anim, 'static void lcd_media_user_wake(') + '\n'
+    if 'static void lcd_guardian_begin_foreground(' in lcd_activity:
+        code += definition(lcd_activity, 'static void lcd_guardian_begin_foreground(') + '\n'
     code += definition(anim, 'static void ensure_awake_for_ui(') + '\n'
     # Execute the actual UI task's scroll path through its wake call. Rendering
     # beyond that call and RTOS delivery are explicitly outside this test.
@@ -434,7 +439,8 @@ def main():
              'Sense_Minimal/sense_media_retry.h', 'Sense_Minimal/sense_media_retry_client.h',
              'Sense_Minimal/sense_user_activity.h', 'Sense_Minimal/sense_voice.h',
              'Sense_Minimal/sense_upload.h', 'Sense_Minimal/sense_op_queue.h',
-             'LCD_Minimal/lcd_anim.h', 'LCD_Minimal/lcd_ui_task.h', 'LCD_Minimal/lcd_menu.h',
+             'LCD_Minimal/lcd_anim.h', 'LCD_Minimal/lcd_activity.h',
+             'LCD_Minimal/lcd_ui_task.h', 'LCD_Minimal/lcd_menu.h',
              'tools/test_voice_list_workflow.py', 'tools/test_fresh_upload_user_priority.py',
              'tools/test_media_network_corner_cases.py', 'tools/test_media_network_retry.py']
     result['source_sha256'] = {path: hashlib.sha256((a.source_root / path).read_bytes()).hexdigest()

@@ -246,6 +246,7 @@ static void menu_btn_event_handler(lv_event_t * e);
 static void set_menu_mode(menu_mode_t mode);
 static void update_menu_display();
 static void resetActivityTimer();
+static void lcd_guardian_begin_foreground(uint32_t now);
 static void lcd_ota_arm_recovery_grace();
 static void user_activity_bump(const char* reason);
 static void save_list_to_storage(const app_state_t *s);
@@ -3971,6 +3972,9 @@ static void cancel_pending_sleep_for_user_input(const char* reason) {
   }
   if (cancelled) {
     sleep_cancelled_by_user_input = true;
+    // A new user session ends the old denied-sleep episode. Retaining its
+    // count can force teardown immediately after the display is restored.
+    sleep_deny_count = 0;
     sleep_handshake_fail_count = 0;
     sleep_retry_requires_user = false;
     sleep_retry_allowed_ms = 0;
@@ -4787,7 +4791,7 @@ void loop() {
         }
       }
       // Deadline check: exit headless if maintenance window expired or failsafe hit
-      unsigned long headless_age_ms = millis() - guardian_awake_start_ms;
+      unsigned long headless_age_ms = lcd_guardian_awake_ms((uint32_t)millis());
       bool deadline_expired = (g_lcd_maintenance_deadline_ms > 0 && millis() > g_lcd_maintenance_deadline_ms);
       bool failsafe_expired = (headless_age_ms >= GUARDIAN_FORCE_SLEEP_MS);
       if (deadline_expired || failsafe_expired) {
@@ -5931,7 +5935,7 @@ void loop() {
   }
 
   if (!g_in_light_sleep && GUARDIAN_FORCE_SLEEP_MS > 0) {
-    unsigned long awake_ms = now_ms - guardian_awake_start_ms;
+    unsigned long awake_ms = lcd_guardian_awake_ms((uint32_t)now_ms);
     if (awake_ms >= GUARDIAN_FORCE_SLEEP_MS) {
       if (lcd_ota_uart_active() || sleep_blocked_for_ota()) {
         // All sleep paths honor the same finite OTA ownership

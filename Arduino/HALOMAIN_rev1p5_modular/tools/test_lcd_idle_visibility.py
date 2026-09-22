@@ -26,7 +26,10 @@ def harness(root):
     anim = (root / 'LCD_Minimal/lcd_anim.h').read_text()
     uart = (root / 'LCD_Minimal/lcd_uart_rx.h').read_text()
     ui = (root / 'LCD_Minimal/lcd_ui_task.h').read_text()
-    actual = '\n'.join((
+    guardian = ('static void lcd_guardian_begin_foreground(' in activity)
+    actual = (definition(activity, 'static void lcd_guardian_begin_foreground(')
+              + '\n') if guardian else ''
+    actual += '\n'.join((
         definition(activity, 'static void resetActivityTimer() {'),
         definition(main, 'static void lcd_allow_visible_ui('),
         definition(anim, 'static void lcd_set_backlight_level('),
@@ -83,6 +86,8 @@ static unsigned long ota_stay_awake_until_ms=0,g_lcd_maintenance_deadline_ms=0;
 static uint8_t g_lcd_maintenance_timer_armed=0;
 static uint32_t g_lcd_maintenance_wake_in_s=0,g_lcd_maintenance_remaining_s=0;
 static std::atomic<bool> g_lcd_sleep_handshake_active{false};
+static std::atomic<uint32_t> guardian_awake_start_ms{0};
+static std::atomic<bool> guardian_sleep_triggered{false};
 static bool lv_is_initialized(){return true;}
 static void lcd_lvgl_wait_tx_done(int){}
 static void lcd_panel_set_power(bool on){if(on)++power_on_count;}

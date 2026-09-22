@@ -28,10 +28,15 @@ int main() {
   assert(!f.status("app_connected", 45) && f.step == f.Connecting);
   assert(!f.status("claiming", 1000));
   assert(f.status("connected", 2000) && f.step == f.Complete);
+  assert(f.progress_sleep_pending(2000));
+  const uint32_t completion_deadline = f.progress_sleep_deadline_ms.load();
   assert(!f.status("connected", 3000)); // Heartbeats do not extend the welcome screen.
   assert(!f.status("failed", 4000));
+  assert(f.progress_sleep_deadline_ms.load() == completion_deadline);
   assert(!f.completion_due(6499) && f.completion_due(6500));
+  assert(f.progress_sleep_pending(16499) && !f.progress_sleep_pending(16500));
   f.close();
+  assert(!f.progress_sleep_pending(6500));
   assert(!f.active() && !f.status("connected", 6600));
   for (int page = 1; page <= 3; ++page) {
     f.begin();
@@ -54,6 +59,8 @@ int main() {
   assert(f.check_timeout(0xfffffff0u + 240000u));
   f.close(); f.begin(); f.status("claiming", 0xffffffe0); f.status("connected", 0xfffffff0);
   assert(f.completion_due(0xfffffff0u + 4500u));
+  assert(f.progress_sleep_pending(0xfffffff0u + 14499u));
+  assert(!f.progress_sleep_pending(0xfffffff0u + 14500u));
   puts("PASS LCD guide: normal wake, scroll bounds, app latch from all pages, retries, heartbeat stability, 240s timeout, 4.5s success, timer rollover");
 }
 '''

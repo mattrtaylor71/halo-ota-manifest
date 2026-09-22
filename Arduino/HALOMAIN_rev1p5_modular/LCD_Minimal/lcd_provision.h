@@ -339,6 +339,9 @@ static void provision_ui_service() {
     provision_ui_render();
   }
   if (provision_flow.completion_due(millis())) {
+    // Publish the fresh foreground interval before dropping the completion
+    // lease: the sleep loop runs on the other core and may already be overdue.
+    lcd_guardian_begin_foreground((uint32_t)millis());
     provision_flow.close();
     provision_ui_can_scroll = false;
     provisioning_active = false;

@@ -18,10 +18,24 @@
 
 static const unsigned long INACTIVITY_TIMEOUT_MS = 10000;  // 10 seconds
 static const unsigned long HOME_SLEEP_DELAY_MS = 10000;  // 10 seconds after HOME shown
-// Guardian: hard upper bound for awake time (ms). Set 0 to disable.
+// Guardian: bounds an unattended awake session. Explicit user input and the
+// one-time successful setup -> Home transition start a fresh session; ordinary
+// UART traffic/resetActivityTimer must never renew it. Set 0 to disable.
 static const unsigned long GUARDIAN_FORCE_SLEEP_MS = 5UL * 60UL * 1000UL;
-static unsigned long guardian_awake_start_ms = 0;
-static bool guardian_sleep_triggered = false;
+static std::atomic<uint32_t> guardian_awake_start_ms{0};
+static std::atomic<bool> guardian_sleep_triggered{false};
+
+static void lcd_guardian_begin_foreground(uint32_t now) {
+  guardian_awake_start_ms.store(now);
+  guardian_sleep_triggered.store(false);
+}
+
+static uint32_t lcd_guardian_awake_ms(uint32_t now) {
+  // The UI core may publish a newer start after the sleep loop sampled now.
+  // Treat that as fresh activity, not an unsigned-underflow five-minute expiry.
+  const uint32_t elapsed = now - guardian_awake_start_ms.load();
+  return int32_t(elapsed) < 0 ? 0 : elapsed;
+}
 
 // A denied handshake owns its existing passive wait or retry deadline even
 // after the guardian becomes due. Otherwise each loop retries INPUT_SLEEP,

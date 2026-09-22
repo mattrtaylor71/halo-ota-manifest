@@ -62,7 +62,6 @@ struct LcdMaintenanceStorageGuard {
  LcdMaintenanceStorageGuard(){if(race_at_guard){g_img_rx_active=true;g_img_rx_binary_mode=true;race_at_guard=false;}++lock_depth;}
  ~LcdMaintenanceStorageGuard(){--lock_depth;}
 };
-static unsigned sleep_deny_count=2;
 static constexpr unsigned SLEEP_DENY_MAX_COUNT=4,SLEEP_LINK_RETRY_MS=2000;
 static unsigned long last_sleep_retry_log_ms;
 static bool notify_sense_sleep();

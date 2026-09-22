@@ -43,7 +43,11 @@ def harness(root):
     scope = definition(sleep, scope_anchor) + ';\n' if scope_anchor in sleep else ''
     media = ('static bool s_sleep_media_deferred=false;\n' + definition(sleep, 'static bool sleep_defer_for_media() {')) if 'static bool sleep_defer_for_media() {' in sleep else ''
     provision = ('#include "' + str(root / 'LCD_Minimal/lcd_provision_flow.h') + '"\nstatic LcdProvisionFlow provision_flow;\nstatic bool s_sleep_provision_deferred=false;\n' + definition(sleep, 'static bool sleep_defer_for_provisioning() {')) if 'static bool sleep_defer_for_provisioning() {' in sleep else ''
+    guardian = '\n'.join(definition(activity, anchor) for anchor in (
+        'static void lcd_guardian_begin_foreground(', 'static uint32_t lcd_guardian_awake_ms(')
+        if anchor in activity)
     actual = '\n'.join((
+        guardian,
         definition(activity, 'static void resetActivityTimer() {'),
         definition(main, 'static bool sleep_blocked_for_ota() {'),
         definition(main, 'static void cancel_pending_sleep_for_user_input(const char* reason) {'),
@@ -109,6 +113,9 @@ static bool sense_sleep_intent_pending=true,g_sleep_transition,g_in_light_sleep;
 static bool g_img_rx_active=false,g_img_rx_binary_mode=false,g_spool_tx_pending=false,g_spool_tx_active=false;
 static unsigned long sleep_deny_retry_ms,sleep_deny_received_ms,sleep_retry_allowed_ms;
 static unsigned sleep_handshake_fail_count,sleep_fallback_timer_sec;
+static unsigned sleep_deny_count=2;
+static std::atomic<uint32_t> guardian_awake_start_ms{0};
+static std::atomic<bool> guardian_sleep_triggered{false};
 static constexpr uint32_t SLEEP_DENY_RETRY_DEFAULT_MS=5000,SLEEP_FALLBACK_TIMER_SEC=15,SLEEP_HANDSHAKE_RETRY_DELAY_MS=800;
 static constexpr uint8_t SLEEP_HANDSHAKE_MAX_ATTEMPTS=3;
 static char sleep_deny_reason[64];

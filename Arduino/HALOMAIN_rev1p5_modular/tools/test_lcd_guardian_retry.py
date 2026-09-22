@@ -39,6 +39,9 @@ def harness(root, negative=False):
     guardian = definition(main, '  if (!g_in_light_sleep && GUARDIAN_FORCE_SLEEP_MS > 0) {')
     gate = definition(activity, 'static bool lcd_sleep_retry_ready(unsigned long now_ms) {')
     touch = definition(main, 'static void user_activity_bump_quiet(')
+    helpers = '\n'.join(definition(activity, anchor) for anchor in (
+        'static void lcd_guardian_begin_foreground(', 'static uint32_t lcd_guardian_awake_ms(')
+        if anchor in activity)
     # Call-site closure: both paths must use this exact helper. This supplements
     # behavioral execution and is not a substitute for the guardian test.
     assert guardian.count('lcd_sleep_retry_ready(now_ms)') == 1
@@ -60,6 +63,7 @@ def harness(root, negative=False):
                                              (main, 'SLEEP_DENY_RETRY_DEFAULT_MS')))
     return r'''
 #include <cassert>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -70,8 +74,10 @@ static struct {template<class... A>void printf(const char*,A...){} void println(
 enum SenseState {SENSE_UNKNOWN,SENSE_AWAKE,SENSE_ASLEEP};
 static SenseState sense_state=SENSE_AWAKE;
 static const char* sense_state_name(SenseState){return "controlled_peer";}
-static bool g_in_light_sleep=false,guardian_sleep_triggered=false;
-static unsigned long guardian_awake_start_ms=0,last_sense_rx_ms=299999;
+static bool g_in_light_sleep=false;
+static std::atomic<uint32_t> guardian_awake_start_ms{0};
+static std::atomic<bool> guardian_sleep_triggered{false};
+static unsigned long last_sense_rx_ms=299999;
 static unsigned long sleep_retry_allowed_ms=0,last_sleep_retry_log_ms=0;
 static bool sleep_wait_for_sense_idle=false,sleep_deny_active=false,sleep_deny_received=false;
 static char sleep_deny_reason[24]="op_inflight";
@@ -88,7 +94,7 @@ static unsigned long last_user_activity_ms=0,last_touch_or_input_ms=0,home_shown
 static int ui_screen_state=0;
 static bool ui_is_sleep_eligible_menu_screen(int){return true;}
 static bool g_lcd_maintenance_active=false,g_lcd_maintenance_aborted=false;
-''' + constants + '\n' + gate + '\n' + touch + r'''
+''' + constants + '\n' + helpers + '\n' + gate + '\n' + touch + r'''
 static bool controlled_handshake(){
  ++handshakes;
  if(!peer_denies)return true;

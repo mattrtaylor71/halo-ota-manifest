@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ARGS = argparse.Namespace(source=None)
 
 
-def harness(source, rx, uart, anim):
+def harness(source, rx, uart, anim, activity):
     names = ('WAKE_RETRY_INTERVAL_MS', 'WAKE_RETRY_WINDOW_MS',
              'WAKE_TIMER_WAIT_WINDOW_MS',
              'WAKE_PULSE_DURATION_MS', 'WAKE_PULSE_SHORT_MS',
@@ -60,6 +60,8 @@ def harness(source, rx, uart, anim):
         signatures[:0] = ['static void sense_pong_reset(', 'static void sense_pong_arm(',
                            'static bool sense_pong_take_expired(']
     functions = '\n'.join(definition(source, signature) for signature in signatures)
+    if 'static void lcd_guardian_begin_foreground(' in activity:
+        functions += '\n' + definition(activity, 'static void lcd_guardian_begin_foreground(')
     functions += '\n' + definition(anim, 'static void ensure_awake_for_ui(')
     timeout = definition(source, 'if (sense_pong_take_expired(now_ms))' if has_pong_helpers
                          else 'if (sense_pong_pending &&')
@@ -118,9 +120,12 @@ static bool link_sync_pending=false,link_synced=false,queued=false;
 static bool sense_sleep_intent_pending=false,sleep_deny_active=false;
 static bool sleep_wait_for_sense_idle=false,sleep_cancelled_by_user_input=false;
 static bool sleep_retry_requires_user=false,sleep_deny_received=false;
+static uint8_t sleep_deny_count=0;
 static unsigned sleep_handshake_fail_count=0;
 static unsigned long sleep_retry_allowed_ms=0,sleep_deny_retry_ms=0;
 static char sleep_deny_reason[64]={};
+static std::atomic<uint32_t> guardian_awake_start_ms{0};
+static std::atomic<bool> guardian_sleep_triggered{false};
 static bool g_lcd_maintenance_headless=false,g_idle_screen_dark=false;
 static bool g_panel_enabled=true,g_lvgl_running=true;
 static int g_backlight_duty=128;
@@ -365,7 +370,8 @@ class UserWake(unittest.TestCase):
         cls.binary = Path(cls.directory.name) / 'test'
         cpp.write_text(harness(main.read_text(), (siblings/'lcd_uart_rx.h').read_text(),
                                (siblings/'lcd_uart.h').read_text(),
-                               (siblings/'lcd_anim.h').read_text()))
+                               (siblings/'lcd_anim.h').read_text(),
+                               (siblings/'lcd_activity.h').read_text()))
         subprocess.run([shutil.which('c++'), '-std=c++17', str(cpp), '-o', str(cls.binary)],
                        check=True, timeout=30)
 

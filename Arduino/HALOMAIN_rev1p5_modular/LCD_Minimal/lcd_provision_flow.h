@@ -19,6 +19,8 @@ struct LcdProvisionFlow {
   // lease without reading UI state across cores. A separate active bit allows
   // both a start at millis()==0 and a deadline that wraps exactly to zero.
   static constexpr uint32_t kProgressTimeoutMs = 240000;
+  static constexpr uint32_t kCompletionShowMs = 4500;
+  static constexpr uint32_t kCompletionExitGraceMs = 10000;
   std::atomic<uint32_t> progress_sleep_deadline_ms{0};
   std::atomic<bool> progress_sleep_active{false};
 
@@ -69,7 +71,11 @@ struct LcdProvisionFlow {
       // A queued heartbeat from the old network can arrive just after Change
       // Wi-Fi begins. Require progress from this guide before showing success.
       if (!app_connected) return false;
-      clear_progress_sleep();
+      // Success remains UI-owned even when subsequent connected heartbeats
+      // clear the peer's setup flag. The extra finite interval covers the
+      // UI owner's handoff to Home; a stalled UI cannot hold sleep forever.
+      progress_sleep_deadline_ms.store(now + kCompletionShowMs + kCompletionExitGraceMs);
+      progress_sleep_active.store(true);
       app_connected = true;
       step = Complete;
       complete_at_ms = now;
@@ -80,7 +86,7 @@ struct LcdProvisionFlow {
     return step != old || claiming != was_claiming;
   }
   bool completion_due(uint32_t now) const {
-    return step == Complete && uint32_t(now - complete_at_ms) >= 4500;
+    return step == Complete && uint32_t(now - complete_at_ms) >= kCompletionShowMs;
   }
   bool check_timeout(uint32_t now) {
     if (step != Connecting || uint32_t(now - connecting_at_ms) < kProgressTimeoutMs) return false;
