@@ -119,3 +119,14 @@ the original timeout receipt remains unchanged. The next attempt waits for a
 manual wake, then uses the existing fresh identity/idle/diagnostic-lease gates
 and NVS-preserving inactive-bank service. Public paired201 and EOL197 remain
 unchanged; this candidate is not a production release or an OTA test.
+
+The manual wake in `service203-02` was detected, but again no flash write was
+attempted. The exact diagnostic acknowledgement was truncated in the USB log;
+the controller refused it and closed capture. `pre-service203-observation01`
+then recorded paired sleep about25seconds after `diag`, despite continuing
+diagnostic pings. Code review confirms that `diag` only refreshes the user idle
+timestamp; it does not guard the Home-age or remote-sleep paths. Its advertised
+five-minute duration is **not** a five-minute sleep-exclusion lease. Do not reuse
+that premise for service admission. A separate bounded installation hold must
+be verified and removed before camera/voice/sleep acceptance; preserve both
+failed attempts and their zero-write results.
