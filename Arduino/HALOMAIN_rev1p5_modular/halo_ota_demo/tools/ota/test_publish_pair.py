@@ -148,6 +148,31 @@ class ReleaseTests(unittest.TestCase):
         file = self.root / 'incomplete-proof.json'; p.save(file, proof)
         with self.assertRaises(ValueError): p.shipping_proof(file, 'sense', '6.4.104')
 
+    def test_camera_linker_property_must_match_exact_canonical_command(self):
+        for mutation in ('missing', 'duplicate', 'wrong', 'extra'):
+            with self.subTest(mutation=mutation):
+                proof = json.loads(p.pin(self.proofs['sense']).read_text())
+                command = json.loads(p.pin(proof['configuration']).read_text())
+                argv = command['argv']
+                value = 'compiler.c.elf.extra_flags=-Wl,--wrap=heap_caps_aligned_alloc'
+                index = argv.index(value)
+                if mutation == 'missing':
+                    del argv[index-1:index+1]
+                elif mutation == 'duplicate':
+                    argv[index+1:index+1] = ['--build-property', value]
+                elif mutation == 'wrong':
+                    argv[index] = 'compiler.c.elf.extra_flags=-Wl,--wrap=malloc'
+                else:
+                    argv[index+1:index+1] = ['--build-property', 'build.extra_flags=-DUNREVIEWED=1']
+                proof['configuration'] = p.save(self.root / ('camera-command-' + mutation + '.json'), command)
+                flags = json.loads(p.pin(proof['flags']).read_text())
+                flags['command'] = proof['configuration']
+                proof['flags'] = p.save(self.root / ('camera-flags-' + mutation + '.json'), flags)
+                file = self.root / ('camera-proof-' + mutation + '.json')
+                p.save(file, proof)
+                with self.assertRaisesRegex(ValueError, 'canonical'):
+                    p.shipping_proof(file, 'sense', '6.4.104')
+
     def test_production_requires_predecessors(self):
         with self.assertRaises(ValueError):
             p.prepare('6.4.104', self.proofs['sense']['path'], self.proofs['lcd']['path'], None, None, self.root / 'no-baseline', host_result=self.host_ref['path'])

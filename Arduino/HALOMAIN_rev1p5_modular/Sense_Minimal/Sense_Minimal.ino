@@ -941,6 +941,7 @@ static void diag_record_error_persistent(const char* stage, int32_t code, const 
 #include "sense_image_identity.h"
 #include "sense_image_spool.h"
 #include "sense_list.h"
+#include "sense_camera_psram_alloc.h"
 #include "sense_camera.h"
 #include "sense_presign.h"
 #include "sense_image_upload.h"

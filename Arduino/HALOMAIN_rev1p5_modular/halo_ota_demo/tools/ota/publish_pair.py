@@ -139,10 +139,12 @@ def shipping_proof(path, board, version, route='production'):
             flags['one_shot'] is False and flags['bench_profile'] is False, 'Actual profile flags mismatch')
     command = json.loads(pin(p['configuration']).read_text())
     argv = command['argv']
-    require(argv.count('--build-path') == 1 and argv.count('--build-property') == 1, 'Ambiguous compiler command')
+    require(argv.count('--build-path') == 1, 'Ambiguous compiler command')
     expected_argv = canonical.command(board, Path(p['source_root']),
                                       argv[argv.index('--build-path') + 1], argv[0],
                                       route == 'private-canary')
+    # Sense now has a second, exact linker property for camera DMA allocation.
+    # Whole-command equality still rejects missing, extra or duplicate values.
     require(argv == expected_argv, 'Actual compiler command differs from complete canonical shipping profile')
     partition_csv = Path(p['source_root']) / ('halo_ota_demo/firmware/halo_' + board + '_prod/partitions.csv')
     require(sha(partition_csv.read_bytes()) == canonical.PARTITIONS[board], 'Changed canonical partition table')

@@ -17,6 +17,9 @@ _patch_spec.loader.exec_module(sdk_patch)
 _guard_spec = importlib.util.spec_from_file_location('production_source_guard', Path(__file__).with_name('production_source_guard.py'))
 source_guard = importlib.util.module_from_spec(_guard_spec)
 _guard_spec.loader.exec_module(source_guard)
+_camera_spec = importlib.util.spec_from_file_location('production_camera_driver_guard', Path(__file__).with_name('production_camera_driver_guard.py'))
+camera_guard = importlib.util.module_from_spec(_camera_spec)
+_camera_spec.loader.exec_module(camera_guard)
 
 BASE_FLAGS = '-DARDUINO_HOST_OS="{runtime.os}" -DARDUINO_FQBN="{build.fqbn}" -DESP32=ESP32 -DCORE_DEBUG_LEVEL={build.code_debug} {build.loop_core} {build.event_core} {build.defines} {build.extra_flags.{build.mcu}} {build.zigbee_mode}'
 FQBNS = {
@@ -75,7 +78,12 @@ def command(board, source, build, compiler, private_canary=False):
                      'halo_ota_demo/firmware/halo_sense_prod/MqttSecrets.local.h',
                      'halo_ota_demo/firmware/halo_sense_prod/MqttSecrets.local.cpp'):
         assert not (source / relative).exists(), 'Production build must use tracked disabled-MQTT defaults, not local credentials'
-    return [str(compiler), 'compile', '--fqbn', FQBNS[board], '--build-path', str(build), '--build-property', 'build.extra_flags=' + flags, sketch, '--jobs', '2']
+    argv = [str(compiler), 'compile', '--fqbn', FQBNS[board], '--build-path', str(build), '--build-property', 'build.extra_flags=' + flags]
+    if board == 'sense':
+        # ESP32 3.3.8 consumes this empty-by-default property separately from
+        # compiler.c.elf.flags; retain its existing panic wrapper and SDK flags.
+        argv += ['--build-property', 'compiler.c.elf.extra_flags=-Wl,--wrap=heap_caps_aligned_alloc']
+    return argv + [sketch, '--jobs', '2']
 
 
 def save(path, value):
@@ -137,6 +145,7 @@ def run(board, source, out, compiler, private_canary=False, min_free_gib=8):
     assert space['admitted'], 'Free disk space is below the configured host build reserve'
     argv = command(board, source, out / 'compile', compiler, private_canary)
     sdk_provenance = sdk_patch.prepare(compiler, out)
+    camera_provenance = camera_guard.prepare(compiler, out)
     save(out / 'command.json', {'argv': argv, 'cwd': str(source), 'profile': 'shipping', 'route_profile': 'private-canary' if private_canary else 'production', 'policy': board == 'sense', 'diagnostics': True, 'one_shot': False, 'bench_profile': False, 'private_route_override': private_canary, 'idle_network_recovery': board == 'sense', 'diagnostic_admission': board == 'sense', 'auth_provisioning': False, 'idle_network_probe': False, 'admission_endpoint': ADMISSION_URL if board == 'sense' else None})
     started = time.time()
     child = None
@@ -166,6 +175,7 @@ def run(board, source, out, compiler, private_canary=False, min_free_gib=8):
             save(out / 'disk-space.json', space)
     assert result['reaped'] and result['group_absent'] and result['exit_code'] == 0 and not error, result
     sdk_patch.verify_compiled(sdk_provenance, out / 'compile')
+    camera_guard.verify_compiled(camera_provenance, out / 'compile', board)
 
 
 def main():

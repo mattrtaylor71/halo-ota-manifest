@@ -44,11 +44,13 @@ class ProductionProfileTests(unittest.TestCase):
                                   'HALO_OTA_BENCH_PROFILE=1', 'HALO_IDLE_NETWORK_PROBE=1'):
                     self.assertNotIn(forbidden, flags)
                 if board == 'sense':
+                    self.assertIn('compiler.c.elf.extra_flags=-Wl,--wrap=heap_caps_aligned_alloc', argv)
                     for macro in ('HALO_DURABLE_OTA_POLICY=1', 'HALO_DIAGNOSTIC_ADMISSION=1',
                                   'HALO_IDLE_NETWORK_RECOVERY=1', 'HALO_IDLE_NETWORK_PROBE=0'):
                         self.assertIn('-D' + macro, flags)
                     self.assertIn(build.ADMISSION_URL, flags)
                 else:
+                    self.assertFalse(any('compiler.c.elf.extra_flags=' in value for value in argv))
                     self.assertNotIn('HALO_DIAG_B1_URL', flags)
                     self.assertIn('-DHALO_UI_REVIEW=1 -DLAYOUT_AUDIT=1', flags)
 
@@ -147,6 +149,8 @@ class ProductionProfileTests(unittest.TestCase):
                     patch.object(build.shutil, 'disk_usage', side_effect=[SimpleNamespace(free=n*1024**3) for n in (5, 3, 3)]), \
                     patch.object(build.sdk_patch, 'prepare', return_value={}), \
                     patch.object(build.sdk_patch, 'verify_compiled'), \
+                    patch.object(build.camera_guard, 'prepare', return_value={}), \
+                    patch.object(build.camera_guard, 'verify_compiled'), \
                     patch.object(build, 'launch_compiler', return_value=child) as popen, \
                     patch.object(build, 'close_owned_group', return_value={'group_absent': True, 'signals': []}):
                 with self.assertRaisesRegex(AssertionError, 'host build reserve'):
@@ -174,6 +178,7 @@ class ProductionProfileTests(unittest.TestCase):
             out = Path(name) / 'build'
             with patch.object(build.shutil, 'disk_usage', return_value=SimpleNamespace(free=9*1024**3)), \
                     patch.object(build.sdk_patch, 'prepare', return_value={}), \
+                    patch.object(build.camera_guard, 'prepare', return_value={}), \
                     patch.object(build.signal, 'pthread_sigmask', side_effect=mask), \
                     patch.object(build, 'launch_compiler', return_value=child), \
                     patch.object(build, 'close_owned_group', return_value={'group_absent': True, 'signals': []}) as close:
@@ -184,6 +189,19 @@ class ProductionProfileTests(unittest.TestCase):
             result = json.loads((out / 'result.json').read_text())
             self.assertTrue(result['reaped'] and result['group_absent'])
             self.assertIn('InterruptedError', result['error'])
+
+    def test_unreviewed_camera_driver_refused_before_compiler_launch(self):
+        source = self.prepared_source()
+        with tempfile.TemporaryDirectory() as name:
+            out = Path(name) / 'build'
+            with patch.object(build.shutil, 'disk_usage', return_value=SimpleNamespace(free=9*1024**3)), \
+                    patch.object(build.sdk_patch, 'prepare', return_value={}), \
+                    patch.object(build.camera_guard, 'prepare', side_effect=ValueError('Unreviewed camera SDK')), \
+                    patch.object(build, 'launch_compiler') as launch:
+                with self.assertRaisesRegex(ValueError, 'Unreviewed camera SDK'):
+                    build.run('sense', source, out, '/synthetic/arduino-cli')
+                launch.assert_not_called()
+                self.assertFalse((out / 'started.json').exists())
 
 
 if __name__ == '__main__':

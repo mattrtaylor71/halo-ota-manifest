@@ -42,6 +42,19 @@ The qualified shipping profile retains the fixed HTTPS diagnostic admission endp
 
 The tracked MQTT-disabled configuration supplies the existing public CA with empty client certificate/key. The canonical builder rejects `MqttSecrets.local.h` and `MqttSecrets.local.cpp` overrides before compiling. This packages the tested configuration reproducibly without enabling MQTT or committing credentials. Compile jobs are capped at two.
 
+The Sense camera fragmentation recovery additionally requires the pinned
+ESP32-S3 camera archive, public header and qio_opi SDK configuration.
+`production_camera_driver_guard.py` records their exact bytes before and after
+compilation, verifies actual header dependencies and retained camera symbols,
+and rejects an unknown SDK. The Sense link adds only
+`-Wl,--wrap=heap_caps_aligned_alloc` through `compiler.c.elf.extra_flags`, leaving
+the SDK linker defaults intact. It verifies the scoped allocation wrapper is
+retained from the Sense sketch and referenced by the camera archive. This
+protects the pre-init mode-setting and64-byte cache-line contract described in
+[post-provision memory investigation](POST_PROVISION_MEMORY_202.md); it does not
+edit the installed SDK or qualify physical JPEG capture. Keep
+`sdk-camera-before.json` and `sdk-camera-compiled.json` with candidate evidence.
+
 The qualified Arduino ESP32 3.3.8 Network library also requires the tracked DNS-cache lock correction. On first IP acquisition, its `NetworkManager::hostByName` calls raw `dns_clear_cache` without the TCPIP core lock; clearing an outstanding DNS entry can remove a UDP PCB and panic. The correction adds the lock only around cache clearing, leaving blocking `lwip_getaddrinfo` outside it. No firmware network retry, timing, DNS policy or assertion setting changes.
 
 Apply the exact reviewed SDK correction once, using a new evidence directory:

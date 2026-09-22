@@ -703,6 +703,24 @@
         "{case_out}"
       ],
       "timeout_seconds": 90
+    },
+    {
+      "id": "test_camera_psram_fallback",
+      "path": "tools/test_camera_psram_fallback.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_camera_psram_alloc",
+      "path": "tools/test_camera_psram_alloc.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_production_camera_driver_guard",
+      "path": "tools/test_production_camera_driver_guard.py",
+      "args": [],
+      "timeout_seconds": 180
     }
   ]
 }

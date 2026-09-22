@@ -28,6 +28,8 @@ def harness(root):
         "static bool init_camera()"]
     if "static bool camera_claim_network_dma(" in camera:
         signatures.insert(2, "static bool camera_claim_network_dma(")
+    if "static bool camera_prepare_dma_mode(" in camera:
+        signatures.insert(-1, "static bool camera_prepare_dma_mode(")
     functions = "\n".join(definition(camera, signature) for signature in signatures)
     constants = []
     for name in ("CAMERA_HTTP_DRAIN_MAX_MS", "CAMERA_DMA_LARGEST_BLOCK_MIN_BYTES",
@@ -56,12 +58,18 @@ static uint32_t now_ms, release_http_at;
 static bool http_inflight, foreground_active, mutex_busy, inject_http_on_lock;
 static bool camera_allocated, grab_worker, fail_stop, fail_reserve;
 static bool fragment_without_wifi;
+static bool psram_mode, reject_mode, wrong_mode_readback;
+static unsigned mode_sets;
+static size_t psram_bytes;
+static uint16_t sensor_pid;
+static int mode_result;
 static unsigned fail_init_count, init_count, radio_off_count, radio_on_count;
 static unsigned reconnect_requests, reconnects;
 static int radio_mode;
 static size_t connected_largest;
 static std::atomic<void*> g_camera_dma_reserve{nullptr};
 static std::atomic<bool> g_camera_radio_off_owned{false};
+static std::atomic<bool> g_camera_psram_dma_allocation{false};
 namespace sense_backup_diag {
 static constexpr uint8_t Idle=0;
 static std::atomic<uint8_t> phase{Idle};
@@ -107,14 +115,22 @@ static struct {
  unsigned getFreeHeap(){return 60000;}
  unsigned getMaxAllocHeap(){return heap_caps_get_largest_free_block(3);}
  unsigned getFreePsram(){return 7000000;}
- unsigned getPsramSize(){return 8000000;}
+ unsigned getPsramSize(){return psram_bytes;}
 } ESP;
 static struct {
  template<class...T>void printf(const char*,T...){}
  void println(const char*){}
 } Serial;
 static constexpr int ESP_LOG_NONE=0,ESP_LOG_ERROR=1,ESP_OK=0;
+static constexpr int ESP_ERR_INVALID_STATE=0x103,ESP_ERR_NOT_SUPPORTED=0x106,OV2640_PID=0x26;
 using esp_err_t=int;
+static bool esp_camera_get_psram_mode(){return psram_mode;}
+static esp_err_t esp_camera_set_psram_mode(bool enable){
+ check(!camera_allocated,"mode changes only on inactive camera");++mode_sets;
+ if(reject_mode)return ESP_ERR_NOT_SUPPORTED;
+ if(!wrong_mode_readback)psram_mode=enable;
+ return mode_result; // pinned SDK sets flag before the inactive check
+}
 static const char* esp_err_to_name(int){return "injected";}
 static void esp_log_level_set(const char*,int){}
 static void capture_fill_led_set(bool,const char*){}
@@ -161,18 +177,24 @@ struct camera_config_t {
 };
 static int esp_camera_init(camera_config_t*){
  ++init_count;events.push_back("camera_init");
+ check(g_camera_psram_dma_allocation.load()==psram_mode,"cache-safe allocation scope matches DMA mode during SDK init");
  check(!g_camera_dma_reserve,"camera reserve released before SDK allocation");
  if(fail_init_count){--fail_init_count;return -1;}
- if(heap_caps_get_largest_free_block(3)<16384)return -1;
+ if(!psram_mode&&heap_caps_get_largest_free_block(3)<16384)return -1;
  camera_allocated=true;return 0;
 }
 struct sensor_t {
+ struct {uint16_t PID;} id;
  int(*reset)(sensor_t*);
  int(*set_framesize)(sensor_t*,int);
  int(*set_quality)(sensor_t*,int);
  int(*set_gainceiling)(sensor_t*,int);
 };
-static sensor_t* esp_camera_sensor_get(){return nullptr;}
+static sensor_t* esp_camera_sensor_get(){
+ static sensor_t sensor{{0},[](sensor_t*){return 0;},[](sensor_t*,int){return 0;},
+                       [](sensor_t*,int){return 0;},[](sensor_t*,int){return 0;}};
+ sensor.id.PID=sensor_pid;return camera_allocated?&sensor:nullptr;
+}
 struct camera_fb_t{size_t len;};
 static camera_fb_t* sense_camera_fb_get_bounded(unsigned){return nullptr;}
 static void esp_camera_fb_return(camera_fb_t*){}
@@ -191,7 +213,10 @@ static void reset(){
  http_inflight=false;foreground_active=true;mutex_busy=false;inject_http_on_lock=false;
  mutex.held=false;http_mutex=&mutex;
  g_camera_radio_off_owned.store(false);sense_backup_diag::wifi_calls.store(0);
+ g_camera_psram_dma_allocation.store(false);
  camera_allocated=false;grab_worker=false;fail_stop=false;fail_reserve=false;fragment_without_wifi=false;
+ psram_mode=reject_mode=wrong_mode_readback=false;mode_sets=0;psram_bytes=8000000;sensor_pid=OV2640_PID;
+ mode_result=ESP_ERR_INVALID_STATE;
  fail_init_count=init_count=radio_off_count=radio_on_count=reconnect_requests=reconnects=0;
  radio_mode=WIFI_STA;connected_largest=11764;g_camera_dma_reserve=nullptr;
 }
@@ -213,7 +238,8 @@ int main(){
  reset();fail_init_count=1;check(init_camera(),"retry succeeds while radio remains off");
  check(init_count==2&&radio_off_count==1&&!radio_on_count,"retry does not cycle WiFi back on");finish_and_reconnect();
  reset();fail_init_count=2;check(!init_camera(),"double init failure propagates");finish_and_reconnect();
- reset();fragment_without_wifi=true;check(!init_camera(),"unrecoverable fragmentation stays failure");finish_and_reconnect();
+ reset();fragment_without_wifi=true;check(init_camera(),"persistent fragmentation uses PSRAM DMA");
+ check(psram_mode&&mode_sets==1,"fallback mode applied and read back");finish_and_reconnect();
  reset();radio_mode=WIFI_OFF;check(init_camera(),"already-off radio supports capture");
  check(!radio_off_count&&!radio_on_count,"already-off path does not toggle radio");finish_and_reconnect();
  reset();connected_largest=40000;g_camera_dma_reserve=&events;
@@ -230,7 +256,7 @@ int main(){
  check(!radio_off_count&&!radio_on_count,"mutex contention never tears down WiFi");
  reset();inject_http_on_lock=true;check(!init_camera(),"HTTP admission race preserves radio");
  check(!radio_off_count&&!radio_on_count&&!mutex.held,"race recheck releases lease without radio mutation");
- reset();fail_stop=true;check(!init_camera(),"driver stop failure is not treated as reclaimed DMA");
+ reset();fail_stop=true;psram_bytes=0;check(!init_camera(),"driver stop failure is not treated as reclaimed DMA");
  check(!radio_on_count&&!mutex.held&&!g_camera_radio_off_owned.load(),"stop failure cleans mutex and owner without restarting driver");
  reset();fail_reserve=true;check(init_camera(),"capture before reserve restoration failure");finish_and_reconnect();
  reset();http_mutex=nullptr;check(init_camera(),"legacy missing-mutex configuration remains supported");finish_and_reconnect();

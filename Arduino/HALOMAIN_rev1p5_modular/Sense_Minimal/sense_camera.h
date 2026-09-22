@@ -660,6 +660,21 @@ static bool camera_claim_network_dma() {
   return false;
 }
 
+// Arduino3.3.8's pinned camera driver stores the DMA mode before checking
+// whether a sensor is initialized. Pre-init INVALID_STATE therefore means
+// "no running camera to reconfigure", not "mode rejected". Verify readback;
+// never switch modes on a live sensor. The production builder pins these SDK
+// bytes because a future driver may change this pre-init behavior.
+static bool camera_prepare_dma_mode(bool psram_dma) {
+  if (esp_camera_sensor_get() != nullptr) return false;
+  if (esp_camera_get_psram_mode() == psram_dma) return true;
+  const esp_err_t rc = esp_camera_set_psram_mode(psram_dma);
+  const bool matched = esp_camera_get_psram_mode() == psram_dma;
+  Serial.printf("[CAMERA_DMA] prepare psram=%u rc=0x%x verified=%u\n",
+                psram_dma ? 1u : 0u, (unsigned)rc, matched ? 1u : 0u);
+  return matched && (rc == ESP_OK || rc == ESP_ERR_INVALID_STATE);
+}
+
 static bool init_camera() {
 #if HALO_CAMERA_KEEP_INIT
   // Already initialised from an earlier capture this session — reuse it.
@@ -791,7 +806,7 @@ static bool init_camera() {
     pinMode(FILL_LED_PIN, OUTPUT);
   }
 
-  camera_config_t config;
+  camera_config_t config{};
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer   = LEDC_TIMER_0;
   config.pin_d0       = Y2_GPIO_NUM;
@@ -821,8 +836,34 @@ static bool init_camera() {
   g_camera_last_init_err = 0;
   for (uint8_t attempt = 1; attempt <= 2; ++attempt) {
     camera_power_enable();
+    // Provisioning/TLS can split the former reserve into smaller blocks even
+    // after Wi-Fi is stopped. Repeating the same16KiB JPEG staging allocation
+    // cannot recover that heap. Direct PSRAM DMA avoids that one allocation;
+    // retain the established internal-DMA path whenever it still fits.
+    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    const bool psram_dma = largest < CAMERA_DMA_RESERVE_BYTES && ESP.getPsramSize() != 0;
+    Serial.printf("[CAMERA_DMA] attempt=%u mode=%s largest=%u\n", attempt,
+                  psram_dma ? "psram_fallback" : "internal", (unsigned)largest);
     Serial.printf("[CAM_PWR] esp_camera_init begin attempt=%u\n", attempt);
-    esp_err_t err = esp_camera_init(&config);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (camera_prepare_dma_mode(psram_dma)) {
+      // Only this fallback's framebuffer allocations need the pinned driver's
+      // cache-line alignment correction. Clear the scope on every SDK result.
+      g_camera_psram_dma_allocation.store(psram_dma);
+      err = esp_camera_init(&config);
+      g_camera_psram_dma_allocation.store(false);
+    }
+    if (err == ESP_OK) {
+      sensor_t* sensor = esp_camera_sensor_get();
+      Serial.printf("[CAMERA_DMA] initialized mode=%s sensor_pid=0x%x\n",
+                    psram_dma ? "psram_fallback" : "internal",
+                    sensor ? (unsigned)sensor->id.PID : 0u);
+      // The pinned driver's EOI tail search is unsuitable for the padded JPEG
+      // output of some other sensors. Limit this recovery to our OV2640; keep
+      // ordinary internal-DMA support for every previously supported sensor.
+      if (psram_dma && (!sensor || sensor->id.PID != OV2640_PID))
+        err = ESP_ERR_NOT_SUPPORTED;
+    }
     if (err == ESP_OK) {
       break;
     }

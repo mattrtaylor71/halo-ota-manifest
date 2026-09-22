@@ -41,3 +41,49 @@ After the user placed the unit under the actuator, `service202-02` installed Sen
 The cache release freed 704 DMA bytes from a 675-byte response. Largest free block stayed 13,300 bytes, and the 16,384-byte camera reserve still failed. Complete voice telemetry reported zero allocation failures and restored its pre-client memory values after TLS destruction. Thus the retention fix is physically verified, but it did **not** repair the contiguous camera reserve; this successful voice attempt does not prove the historical intermittent AES failure is cured.
 
 The LCD stayed dark during upload; both boards slept and neither USB reopened during a 166-second observation. The next 02:00 Pacific maintenance arm was stored/verified, with LCD's 15-second lead. No scheduled transfer, same-wake camera, failed-upload persistence/retry or phone rendering pass is claimed. The next physical gap is a check-in capture immediately following provisioning, without an intervening sleep/reset. Separate diagnostic-journal persistence warnings remain distinct from the verified maintenance-arm acknowledgement.
+
+## Immediate post-provision camera failure and scoped recovery candidate
+
+`reprovision-camera202-01/TEST-RESULT.json` now proves that gap is a real failure.
+Check-in job89 began5.58seconds after claim, before the15second app-completion grace
+ended. The camera needed one16,384-byte internal DMA staging buffer; largest free
+block was13,812bytes. Existing radio shutdown increased aggregate free heap from
+24,056 to53,472bytes but did not change that largest block. Both camera init
+attempts failed; no photo existed and no image upload was expected. Later setup
+cleanup also left largest unchanged. This is fragmentation, not a failed upload.
+
+A manual OTA preceded a POWERON reset in the same capture. The new boot held a
+fresh camera reserve, then explicitly released it for provisioning. No OTA
+reserve release preceded this camera failure in that boot. Interrupted manual
+discovery recovery later delayed sleep until its deadline; its durable history
+and NVS have been preserved. That separate confound does not account for the
+recorded camera allocation failure. Both boards eventually slept.
+
+The next private candidate preserves the provisioning/AP and TLS reserve rules
+that avoid the earlier WPA/AES allocation failures. After existing camera
+admission, reserve release and radio recovery, only a remaining sub16KiB block
+selects direct PSRAM DMA. Normal adequate-memory captures retain internal DMA.
+The pinned camera library sets the requested mode before returning
+INVALID_STATE for an inactive sensor; the adapter accepts that exact case only
+with verified mode readback and never calls the setter on a live camera. Fresh
+initialization reselects the appropriate mode; KEEP_INIT reuse does not switch.
+
+The fallback checks actual sensor PID after driver init, before starting the
+grab worker or consuming frames. Only OV2640 is admitted because other sensors
+can pad JPEGs beyond the pinned driver's EOI search window. This is not a claim
+that all camera modules are qualified. Existing internal-DMA sensor support is
+unchanged, and all failures retain bounded retries and full cleanup.
+
+Direct DMA also requires exclusive cache-line ownership: the pinned library's
+16-byte-aligned frame allocation is insufficient for this SDK's64-byte PSRAM
+cache lines. A Sense-only linker wrapper, active only during fallback init,
+rounds that specific framebuffer allocation's alignment/capacity up to64bytes
+and prepares its cache before DMA. Other allocations retain their original
+arguments. Exact archive/header/config hashes and actual linkage are required
+by the canonical builder; no installed SDK bytes are edited.
+
+Qualification is pending until the candidate is built and exercised on the
+physical unit: reproduce setup→immediate check-in without sleep/reset, verify
+OV2640/direct-DMA logs, decode actual JPEGs, confirm cloud delivery, repeat
+captures, then check voice, normal capture, user priority and paired sleep.
+Host coverage is not evidence of real image integrity or a production release.
