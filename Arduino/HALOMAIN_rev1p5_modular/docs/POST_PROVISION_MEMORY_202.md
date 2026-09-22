@@ -267,3 +267,9 @@ separate. No new firmware blocker was found; this does not establish an AES
 fix. At this checkpoint the bench remains Sense203/LCD201, with private204
 installation and physical acceptance pending. Public paired201 and EOL197
 remain unchanged.
+
+Subsequent private204 service and boot/sleep validation passed; see the final
+installation section of [the audit](IMAGE_UPLOAD_MEMORY_204_AUDIT.md). The bench
+now runs Sense204/app1/SDK VALID with LCD201/app1/SDK VALID, retaining Sense203
+as its fallback. The fresh post-provision Check-in capture is armed and remains
+pending. Public paired201 and EOL197 are unchanged.

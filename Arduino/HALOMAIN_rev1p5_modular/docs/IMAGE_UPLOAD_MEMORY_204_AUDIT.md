@@ -6,8 +6,9 @@ passes, and the expanded full host gate passes all 112 suites. This supports
 the scoped mitigation; it does **not** prove that the first-wake AES allocation
 failure is cured.
 
-At this checkpoint the bench retains private Sense203 with LCD201. Private204
-installation and physical acceptance are pending. Public paired201 and EOL197
+At the offline-audit checkpoint the bench retained private Sense203 with LCD201.
+The subsequent204 installation and boot/sleep result are recorded below;
+post-provision upload acceptance remains pending. Public paired201 and EOL197
 are unchanged. No LCD image was built or published for this candidate.
 See [the camera/upload investigation](POST_PROVISION_MEMORY_202.md) for the
 physical203 failure and successful durable recovery that motivated this work.
@@ -137,3 +138,36 @@ interruption with preserved custody, ordinary voice and paired sleep. Saved
 recovery/dark behavior and another camera capture retain their own physical
 limits. Installation, host PASS and compiled-path review alone cannot close
 the AES investigation or establish full-product/OTA qualification.
+
+## Private bench installation and boot result
+
+`service204-03` subsequently installed the exact audited204 Sense image into
+app1. Both complete banks were backed up; Sense203/app0, NVS, partition table,
+filesystem and the selected old selector sector were preserved. The two writes
+were the padded inactive image and alternate NEW selector. Independent receipt
+review verifies the protected-range checks, candidate checksums and clean
+descriptor/lock/child closure. No LCD image, public OTA or EOL change occurred.
+
+`postservice204-health01/HEALTH-RESULT.json` records the separate runtime result:
+the release boot log identifies204/app1, registers the allocation hook, and
+reports successful SDK mark-valid with current readback. Fresh peer queries
+identify LCD201/app1/SDK VALID and boot-ready. Wi-Fi connected, both boards
+entered deep sleep, and captured LCD heartbeats show backlight/panel off.
+The next maintenance target remains September22 at02:00Pacific; the LCD logs
+its timer arm. The ACK line is interleaved, so it is not a complete standalone
+JSON acknowledgement. This is USB service/boot/sleep evidence, not a paired OTA
+or physical power-cycle test.
+
+Earlier attempts remain retained: `service204-01` refused a truncated final
+UI-state reply before any flash; `service204-02` refused an initial macOS EBUSY
+before opening either board or sending commands. The bounded host controller
+now re-requests a complete UI reply, and the capture retries only initial EBUSY
+for two seconds with fresh USB identity and cu/tty ownership checks. Twenty
+focused controller tests passed; no firmware guard was relaxed. The actuator
+probe also failed before opening USB or sending a stroke; its worker was later
+observed absent, without claiming normal reaping.
+
+The passive `reprovision-camera204-01` capture was then armed for the user's
+normal app provisioning followed immediately by Check-in/Confirm. That upload
+acceptance is pending; do not infer an AES fix from successful installation.
+Private raw logs/backups remain in the case root and can contain credentials.
