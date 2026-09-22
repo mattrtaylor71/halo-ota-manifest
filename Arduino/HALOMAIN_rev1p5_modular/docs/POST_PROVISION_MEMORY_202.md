@@ -142,3 +142,20 @@ barrier remain. No diagnostic or test-mode command is sent. Its19 offline tests
 and actual203r2 plan validation passed. The unused test-mode tooling draft was
 never executed and is marked as such. Physical installation and subsequent
 paired health still require their own observed receipts.
+
+`service203-03` subsequently installed the exact203r2 Sense image into app0.
+The complete candidate/selector readback and protected-range checks passed;
+both banks were backed up and Sense202/app1, NVS and filesystem were preserved.
+The executor released/reset Sense once on the same descriptor and closed all
+ownership. Boot logs identify203/app0, the registered allocation hook, and
+`esp_ota_mark_app_valid_cancel_rollback` success with current SDK readback.
+Fresh peer queries reported LCD201/app1/bootapp1 SDK VALID. Sense prepared sleep
+and its USB disappeared; LCD then completed paired deep sleep with its next
+02:00 Pacific maintenance arm. The final Sense sleep line was truncated, so
+do not represent that line as complete. Visible post-service Home and camera
+acceptance are separate from this boot/readback result.
+
+`postservice203-health01/HEALTH-RESULT.json` records these limits. Its capture
+closed cleanly before `reprovision-camera203-01` was armed for the user's repeat
+setup→immediate Check-in/Confirm case. No203 JPEG or upload pass is claimed yet.
+Public paired201, EOL197 and retained OTA policy remain unchanged.
