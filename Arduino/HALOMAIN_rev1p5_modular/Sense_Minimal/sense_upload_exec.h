@@ -30,6 +30,7 @@
 #define SENSE_UPLOAD_EXEC_H
 
 #include "sense_media_network.h"
+#include "sense_image_http.h"
 
 // S3 normally returns Content-Length: 0. Finish when framing proves the reply
 // complete instead of holding the HTTP owner for an unconditional two seconds.
@@ -327,11 +328,8 @@ static bool put_to_presigned_url(const String& url,
   HaloNtpDnsGuard ntp_dns_guard;
   http_queue_lock("UPLOAD_PUT", effective_job);
 
-  bool https = false;
-  String host;
-  String path;
-  uint16_t port = 0;
-  if (!parse_url_parts(url, https, host, port, path)) {
+  sense_image_http::Target target;
+  if (!sense_image_http::parse(url.c_str(), url.length(), target)) {
     Serial.println("[UPLOAD] URL parse failed for PUT");
     diag_record_error_persistent("upload_put", -1, "bad_url_parse");
     uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "bad_url");
@@ -385,6 +383,9 @@ static bool put_to_presigned_url(const String& url,
   const int put_hard_reset_from_attempt = 4;
   bool write_ok = false;
   int put_attempt;
+  // Declare before the reusable client so every early return destroys TLS
+  // before the final trace report. Retry reports follow explicit stop().
+  sense_memory::ImagePutTrace memory_trace(effective_job);
   SenseMediaRetryClient tls;
   // Retrying must never outlive the upload budget. The per-write deadline check
   // below only covers a write already in progress; without this, ten attempts
@@ -403,6 +404,8 @@ static bool put_to_presigned_url(const String& url,
       return false;
     }
     tls.stop();
+    memory_trace.finish();
+    memory_trace.start(put_attempt);
     // Validate the peer for the photo upload too.
     //
     // This was setInsecure() while presign, MQTT and the OTA paths all validated
@@ -453,9 +456,11 @@ static bool put_to_presigned_url(const String& url,
     // These bound individual phases; DNS and progress-based writes are separate.
     tls.setHandshakeTimeout(handshake_seconds);
 
-    if (!tls.connect(host.c_str(), port, (int32_t)connect_timeout)) {
+    if (!tls.connect(target.host, target.port, (int32_t)connect_timeout)) {
       Serial.printf("[UPLOAD] TLS connect failed for PUT (attempt %d/%d)\n", put_attempt, put_max_attempts);
       tls.stop();
+      memory_trace.response(-1);
+      memory_trace.finish();
       if (media_retry_network_cancelled()) {
         http_queue_unlock("UPLOAD_PUT", effective_job); return false;
       }
@@ -486,29 +491,29 @@ static bool put_to_presigned_url(const String& url,
                                 : "image/jpeg";
     Serial.printf("[UPLOAD] Using Content-Type: %s\n", resolved_ct);
 
-    // Dump the request target in chunks. A presigned S3 path is ~1500 chars and a
-    // single Serial line that long gets truncated in transit, so a truncated URL
-    // and an intact one look the same in the log. Chunking makes the difference
-    // visible, and lets the exact device URL be replayed from a workstation.
+    // Keep signed credentials out of the log and avoid temporary substring
+    // allocations while TLS needs internal DMA memory.
     Serial.printf("[UPLOAD_URL] host=%s port=%u path_len=%u\n",
-                  host.c_str(), (unsigned)port, (unsigned)path.length());
-    for (size_t i = 0; i < path.length(); i += 100) {
-      Serial.printf("[UPLOAD_URL] %03u:%s\n", (unsigned)i,
-                    path.substring(i, i + 100).c_str());
-    }
+                  target.host, (unsigned)target.port, (unsigned)target.path_length);
 
-    // Header writes were fire-and-forget. If the request line already fails to go
-    // out, every body write fails too and the log blames the body -- so check the
-    // first write and report the headers as the failure when that is what it is.
-    const int hdr_written = tls.printf("PUT %s HTTP/1.1\r\n", path.c_str());
-    tls.printf("Host: %s\r\n", host.c_str());
-    tls.printf("Content-Type: %s\r\n", resolved_ct);
-    tls.printf("Content-Length: %u\r\n", (unsigned)len);
-    if (durable && durable->immutable_image) {
-      tls.print("If-None-Match: *\r\n");
-      tls.printf("x-amz-checksum-sha256: %s\r\n", durable->checksum_sha256_b64.c_str());
+    // Send the identical HTTP bytes without duplicating the long signed path.
+    // A failed/short header must not fall through into the image body.
+    const int hdr_written = sense_image_http::write_headers(tls, target, resolved_ct, len,
+        durable && durable->immutable_image ? durable->checksum_sha256_b64.c_str() : nullptr,
+        [&]() { return !deadline_expired(deadline_ms) &&
+                        !media_retry_network_cancelled() && !foreground_active; }) ? 1 : 0;
+    if (hdr_written <= 0 && deadline_expired(deadline_ms)) {
+      if (aborted_for_budget) *aborted_for_budget = true;
+      presign_set_error_text("Upload timeout");
+      diag_record_error("upload_put", -1, "timeout");
+      uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "timeout");
+      tls.stop(); http_queue_unlock("UPLOAD_PUT", effective_job); return false;
     }
-    tls.print("Connection: close\r\n\r\n");
+    if (hdr_written <= 0 && (media_retry_network_cancelled() || foreground_active)) {
+      diag_record_error("upload_put", -1, "foreground_preempt");
+      uart_send_sense_diag("http", "fail", "UPLOAD_PUT", -1, "foreground_preempt");
+      tls.stop(); http_queue_unlock("UPLOAD_PUT", effective_job); return false;
+    }
     if (hdr_written <= 0) {
       char hdr_err[128] = {0};
       const int hdr_err_code = tls.lastError(hdr_err, sizeof(hdr_err));
@@ -522,10 +527,10 @@ static bool put_to_presigned_url(const String& url,
     unsigned long upload_start = millis();
 
     size_t offset = 0;
-    write_ok = true;
+    write_ok = hdr_written > 0;
 
     const size_t chunk_size = UPLOAD_TLS_CHUNK_BYTES;
-    while (offset < len) {
+    while (write_ok && offset < len) {
       if (deadline_expired(deadline_ms)) {
         if (aborted_for_budget) {
           *aborted_for_budget = true;
@@ -579,6 +584,8 @@ static bool put_to_presigned_url(const String& url,
     if (!write_ok) {
       Serial.printf("[UPLOAD] PUT write failed (attempt %d/%d)\n", put_attempt, put_max_attempts);
       tls.stop();
+      memory_trace.response(-1);
+      memory_trace.finish();
       if (media_retry_network_cancelled()) {
         http_queue_unlock("UPLOAD_PUT", effective_job); return false;
       }
@@ -632,6 +639,8 @@ static bool put_to_presigned_url(const String& url,
   String resp;
   const bool response_complete = upload_put_drain_response(tls, code, deadline_ms, resp);
   tls.stop();
+  memory_trace.response(response_complete ? code : -1);
+  memory_trace.finish();
   http_queue_unlock("UPLOAD_PUT", effective_job);
   if (!response_complete) {
     // A status without a complete reply is not a safe success/412 receipt.

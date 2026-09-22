@@ -196,3 +196,49 @@ qualification. Sense203 remains a private bench candidate paired with LCD201;
 public paired201 and EOL197 are unchanged. Remaining investigation should
 capture image-PUT allocation failures at the failing call, before TLS cleanup,
 rather than infer their cause from the recovered heap afterward.
+
+### Image PUT memory investigation and bounded mitigation
+
+The failing first wake had25760bytes free before TLS connection; the successful
+saved retry had31836. Largest DMA block was actually larger on the failed wake
+(13300 versus12276), so those measurements do not prove a contiguous-block
+threshold or the exact allocation that failed. The pinned AES implementation
+has both small DMA-descriptor and up-to1600byte bounce-buffer allocation paths
+with the same error text. Arduino stops TLS before returning a failed write,
+making the old post-write heap diagnostic unsuitable for sizing the failure.
+
+Review found no unclosed camera, claim TLS client or dedicated claim task:
+claim transport reuses the upload worker, and its clients are destroyed before
+publishing the result. The setup HTTP/DNS server and scan cache were already
+released. Do not attribute the remaining roughly6KB difference to a proved
+provisioning leak. A small Arduino WebServer argument-array cleanup issue is
+separate and was not changed in this work.
+
+There is avoidable image-request memory pressure. This case's signed path was
+1740bytes. The old String copy requests1744bytes for the whole PUT, and
+Print::printf additionally requests1756bytes while writing the request line
+(pinned Arduino3.3.8 implementations). Standard allocator preference puts
+small requests in internal memory when possible. The new image-only helper
+borrows the original immutable URL's path and streams the same headers through
+a512byte stack buffer, eliminating those duplicate heap-buffer requests. It
+does not decode/rebuild signed query bytes. Partial writes resume at confirmed
+bytes; zero/invalid writes stop the attempt. Every write checks the original
+deadline, user cancellation and foreground state, and failed headers cannot
+fall through into the image body. TLS validation, body chunk size, retry
+budgets, durable custody, provisioning and OTA policy are unchanged.
+
+Image PUT now uses the existing bounded allocation-failure recorder. Per-attempt
+reports include phase, size/capabilities and heap snapshots; printing occurs
+after TLS stop/destruction. The callback/ring are unchanged, allocations from
+other tasks can also be observed, and overflow/contention marks evidence
+incomplete. Voice diagnostics retain their existing behavior.
+
+Evidence is under `image-put-memory-review` in the private case root. All111
+working-tree host suites passed, including8891 new signed-wire, parser,
+short-write and cancellation checks under ASan/UBSan. The pinned S3 helper
+compile has no malloc/calloc/realloc/new references; its main header frame is
+608bytes, excluding callees and the caller. This is not physical stack-margin
+evidence. The mitigation is not yet proved to cure the AES failure: repeat
+provision→immediate Check-in on the candidate and require first-attempt PUT200,
+exact cloud-image integrity, user priority and dark saved recovery. Do not
+publish or declare an AES fix solely from these host results.

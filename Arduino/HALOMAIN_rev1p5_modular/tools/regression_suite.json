@@ -109,6 +109,12 @@
       "timeout_seconds": 180
     },
     {
+      "id": "test_image_http_memory",
+      "path": "tools/test_image_http_memory.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
       "id": "test_image_upload_contract",
       "path": "tools/test_image_upload_contract.py",
       "args": [],

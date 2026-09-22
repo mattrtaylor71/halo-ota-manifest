@@ -65,6 +65,7 @@ def harness(root):
 #include <vector>
 #include "Sense_Minimal/sense_ops.h"
 #include "Sense_Minimal/sense_media_network.h"
+#include "Sense_Minimal/sense_image_http.h"
 using String=std::string;
 static constexpr int pdTRUE=1;
 static uint32_t clock_ms,delay_ms,reset_budget,last_handshake,last_connect,last_stream_timeout;
@@ -180,7 +181,8 @@ struct HTTPClient {
 };
 ''' + functions + r'''
 static bool production_put_connect(uint32_t deadline_ms){
-  WiFiClientSecure tls;String host="example.invalid";uint16_t port=443;
+  WiFiClientSecure tls;sense_image_http::Target target;
+  assert(sense_image_http::parse("https://example.invalid/",24,target));
   bool* aborted_for_budget=&aborted;uint32_t effective_job=1;
 ''' + setup + r'''
 }

@@ -14,12 +14,13 @@ PREFIX=r'''
 #include <vector>
 static constexpr int ESP_OK=0,MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP_DMA=4;
 static unsigned samples=0,registrations=0,prints=0;static bool in_hook=false;
+static bool tls_live=false;
 static size_t free_bytes=30000,largest=12000;static std::string output;
 static size_t heap_caps_get_free_size(int){assert(!in_hook);++samples;return free_bytes;}
 static size_t heap_caps_get_largest_free_block(int){assert(!in_hook);++samples;return largest;}
 using Hook=void(*)(size_t,uint32_t,const char*);static Hook installed=nullptr;
 static int heap_caps_register_failed_alloc_callback(Hook h){++registrations;installed=h;return 0;}
-static struct {template<class...A>void printf(const char*fmt,A...args){assert(!in_hook);++prints;char b[700];snprintf(b,sizeof b,fmt,args...);output+=b;}}Serial;
+static struct {template<class...A>void printf(const char*fmt,A...args){assert(!in_hook&&!tls_live);++prints;char b[700];snprintf(b,sizeof b,fmt,args...);output+=b;}}Serial;
 #define HALO_MEMORY_DIAGNOSTICS_TEST 1
 '''
 TESTS=r'''
@@ -29,6 +30,22 @@ static void ok(bool x){++checks;assert(x);}
 static void reset(){
  current=nullptr;failures.guard.clear();failures.sequence=0;failures.dropped=0;failures.phase=Idle;
  for(auto& x:failures.ring)x={};output.clear();samples=prints=0;free_bytes=30000;largest=12000;
+}
+struct SenseMediaRetryClient {
+ void connect(){tls_live=true;point(BeforeConnect,Connect);free_bytes=10000;largest=800;point(AfterConnect,Connect);}
+ void stop(){tls_live=false;free_bytes=30000;largest=12000;}
+ ~SenseMediaRetryClient(){stop();}
+};
+static void production_declaration_lifetime(unsigned exit_phase) {
+ const uint32_t effective_job=90;
+ @PUT_DECLARATIONS@
+ memory_trace.start(1);
+ if(exit_phase==0)return;
+ tls.connect();
+ if(exit_phase==1)return;
+ point(FirstWrite,Write);installed(512,4,"heap_caps_aligned_alloc");wrote(512);
+ if(exit_phase==2)return;
+ point(FirstRead,Read);memory_trace.response(200);
 }
 int main(){
  begin();begin();ok(registrations==1&&registered&&installed==failed_alloc);
@@ -64,6 +81,39 @@ int main(){
  ok(output.find("failures=0 loss_seen=1 complete=0")!=std::string::npos);
  output.clear();{VoiceTrace trace(23,1);}ok(output.find("loss_seen=1 complete=0")!=std::string::npos);
  reset();registered=false;{VoiceTrace trace(22,1);}ok(output.find("complete=0")!=std::string::npos);registered=true;
+ reset();{
+  ImagePutTrace trace(30);ok(!current&&samples==0&&prints==0);
+  ok(trace.start(1));ok(current==&trace&&failures.phase==ImagePutAttempt);
+  ok(!trace.start(2)&&trace.attempt==1);
+  {ImagePutTrace nested(31);ok(!nested.start(1)&&current==&trace);}
+  ok(prints==0);point(BeforeConnect,Connect);tls_live=true;
+  free_bytes=10000;largest=800;point(AfterConnect,Connect);point(FirstWrite,Write);
+  installed(1600,4,"heap_caps_aligned_alloc");wrote(1740+512);trace.response(-1);
+  tls_live=false;free_bytes=30000;largest=12000;trace.finish();
+  ok(!current&&failures.phase==Idle);ok(output.find("[IMAGE_PUT_MEM] job=30 attempt=1 http=-1 tls_bytes=2252")!=std::string::npos);
+  ok(output.find("owner=IMAGE_PUT_MEM attempt=1")!=std::string::npos);
+  ok(output.find("point=6 internal=30000")!=std::string::npos);
+  ok(output.find("point=0 ")==std::string::npos);
+  const auto first_output=output;trace.finish();ok(output==first_output);
+  installed(9,4,"between_attempts");output.clear();ok(trace.start(2));
+  ok(trace.sent==0&&trace.result==0&&trace.mask==(1u<<BeforeAttempt));
+  point(BeforeConnect,Connect);point(AfterConnect,Connect);point(FirstWrite,Write);
+  wrote(42);point(FirstRead,Read);trace.response(200);trace.finish();
+  ok(output.find("job=30 attempt=2 http=200 tls_bytes=42 mask=126")!=std::string::npos);
+  ok(output.find("failures=0 loss_seen=0 complete=1")!=std::string::npos);
+  ok(output.find("[ALLOC_FAIL]")==std::string::npos);
+ }
+ for(unsigned exit_phase=0;exit_phase<4;++exit_phase){
+  reset();production_declaration_lifetime(exit_phase);ok(!current&&!tls_live);
+  ok(output.find("[IMAGE_PUT_MEM] job=90 attempt=1")!=std::string::npos);
+  ok(output.find("point=5 internal=30000 dma_free=30000 dma_largest=12000")!=std::string::npos);
+ }
+ reset();{
+  ImagePutTrace trace(32);failures.guard.test_and_set();ok(trace.start(1));failures.guard.clear();trace.finish();
+ }ok(output.find("complete=0")!=std::string::npos);
+ reset();{
+  ImagePutTrace trace(33);ok(trace.start(1));failures.guard.test_and_set();trace.finish();failures.guard.clear();
+ }ok(output.find("complete=0")!=std::string::npos);
  reset();std::vector<std::thread> threads;
  for(unsigned i=0;i<6;++i)threads.emplace_back([i]{for(unsigned n=0;n<10000;++n)failures.record(100+i,100+i,"stress");});
  for(auto& t:threads)t.join();ok(failures.copy(ring,seq,lost));ok(seq<=60000&&lost<=1);ok(seq==60000||lost==1);
@@ -74,10 +124,18 @@ int main(){
 def main():
  p=argparse.ArgumentParser();p.add_argument('--source-root',type=Path,default=ROOT);p.add_argument('--out',type=Path);a=p.parse_args();root=a.source_root.resolve()
  text=(root/HEADER).read_text();client=(root/'Sense_Minimal/sense_media_retry_client.h').read_text();voice=(root/'Sense_Minimal/sense_voice.h').read_text()
+ put=(root/'Sense_Minimal/sense_upload_exec.h').read_text().split('static bool put_to_presigned_url(',1)[1]
  assert '#include "sense_memory_diag.h"' in client
  assert voice.index('sense_memory::VoiceTrace memory_trace')<voice.index('SenseMediaRetryClient client;')
  assert 'memory_trace.response(httpResponseCode);' in voice
  assert client.index('const int connected = WiFiClientSecure::connect')<client.index('point(sense_memory::AfterConnect')
+ declarations=put[put.index('  sense_memory::ImagePutTrace memory_trace'):put.index('  // Retrying must never outlive')]
+ assert declarations.index('ImagePutTrace')<declarations.index('SenseMediaRetryClient tls;')
+ assert 'tls.stop();\n    memory_trace.finish();\n    memory_trace.start(put_attempt);' in put
+ for marker in ('TLS connect failed for PUT','PUT write failed (attempt'):
+  finish=put[put.index(marker):].split('memory_trace.finish();',1)[0]
+  assert 'tls.stop();' in finish and 'memory_trace.response(-1);' in finish
+ assert 'tls.stop();\n  memory_trace.response(response_complete ? code : -1);\n  memory_trace.finish();' in put
  # Compile the actual production primitive with the pinned S3 compiler. The
  # toolchain reports is_always_lock_free=false even though these operations
  # inline; inspect the emitted operations rather than deleting that safeguard.
@@ -91,7 +149,7 @@ extern "C" void probe_clear(){gate.clear();}
 extern "C" void probe_store(uint32_t x){word.store(x,std::memory_order_relaxed);}
 extern "C" uint32_t probe_load(){return word.load(std::memory_order_relaxed);}
 '''
- code=PREFIX+'\n#include "'+str(root/HEADER)+'"\n'+TESTS
+ code=PREFIX+'\n#include "'+str(root/HEADER)+'"\n'+TESTS.replace('@PUT_DECLARATIONS@',declarations)
  with tempfile.TemporaryDirectory(prefix='halo-memory-diag-') as tmp:
   asm=Path(tmp)/'target.s'
   subprocess.run([str(target),'-std=gnu++17','-Os','-S','-x','c++','-o',str(asm),'-'],input=asm_source,text=True,check=True,capture_output=True,timeout=20)
@@ -104,7 +162,7 @@ extern "C" uint32_t probe_load(){return word.load(std::memory_order_relaxed);}
   compiler=shutil.which('clang++') or shutil.which('g++');assert compiler
   build=subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-pthread',str(c),'-o',str(b)],capture_output=True,text=True,timeout=40)
   run=subprocess.run([str(b)],capture_output=True,text=True,timeout=30) if not build.returncode else None
- result={'status':'PASS' if run and run.returncode==0 else 'FAIL','scope':'Production header with SDK boundary doubles, loss/overflow/lifetime and concurrent callback coverage; actual S3 gate/store/load assembly has one CAS maximum and no calls/branches. No physical heap or TLS claim.','source_sha256':hashlib.sha256(text.encode()).hexdigest(),'target_assembly_sha256':hashlib.sha256(target_asm.encode()).hexdigest(),'output':build.stdout+build.stderr+(run.stdout+run.stderr if run else '')}
+ result={'status':'PASS' if run and run.returncode==0 else 'FAIL','scope':'Production header with SDK boundary doubles, image attempt isolation and actual PUT declaration lifetime, loss/overflow/concurrent callback coverage. Standalone S3 primitive probe omits production -mdisable-hardware-atomics; exact ELF review remains required for actual dispatch/helper. No physical heap or TLS claim.','source_sha256':hashlib.sha256(text.encode()).hexdigest(),'target_assembly_sha256':hashlib.sha256(target_asm.encode()).hexdigest(),'output':build.stdout+build.stderr+(run.stdout+run.stderr if run else '')}
  if a.out:a.out.mkdir(parents=True,exist_ok=True);(a.out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
  print(result['output'],end='');return result['status']!='PASS'
 if __name__=='__main__':raise SystemExit(main())

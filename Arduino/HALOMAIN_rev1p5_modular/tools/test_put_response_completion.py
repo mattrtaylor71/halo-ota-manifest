@@ -27,6 +27,7 @@ def harness(root):
     tail = tail[:tail.index('\n\n\n#endif')]
     return r'''
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +46,13 @@ struct String : std::string {
 };
 static uint32_t now_ms,started,elapsed,read_step,deadline;
 static uint32_t cancel_at,close_at; static unsigned cancel_read,reads,stops,unlocks;
+static unsigned trace_finishes;static int trace_code;static bool trace_has_response;
+struct MemoryTrace {
+ bool finished=false;
+ void response(int code){trace_code=code;trace_has_response=true;}
+ void finish(){if(finished)return;assert(stops==1);finished=true;++trace_finishes;}
+ ~MemoryTrace(){finish();}
+};
 static bool paused; static unsigned checks;
 static uint32_t millis(){return now_ms;}
 static void delay(uint32_t n){now_ms+=n;elapsed+=n;if(cancel_at&&elapsed>=cancel_at)paused=true;}
@@ -79,11 +87,13 @@ static void diag_record_error_persistent(const char*,int,const char*){}
 ''' + framing + r'''
 static bool response(SenseMediaRetryClient& tls,uint32_t deadline_ms,int* response_code){
  const unsigned effective_job=7;
+ MemoryTrace memory_trace;
 ''' + tail + r'''
 static void require(bool ok,const char* test){++checks;if(!ok){
  std::fprintf(stderr,"FAIL %s (elapsed=%u reads=%u stops=%u unlocks=%u)\n",test,elapsed,reads,stops,unlocks);std::exit(1);}}
 static void reset(uint32_t start=1000){now_ms=started=start;elapsed=0;read_step=0;deadline=0;
- cancel_at=0;close_at=UINT32_MAX;cancel_read=0;reads=stops=unlocks=0;paused=false;}
+ cancel_at=0;close_at=UINT32_MAX;cancel_read=0;reads=stops=unlocks=trace_finishes=0;paused=false;
+ trace_code=0;trace_has_response=false;}
 static void run(const char* name,std::vector<Event> events,bool success,int code,uint32_t max_ms,
  uint32_t eof=UINT32_MAX,uint32_t cancel_ms=0,uint32_t budget=0,uint32_t start=1000,unsigned cancel_byte=0){
  reset(start);close_at=eof;cancel_at=cancel_ms;cancel_read=cancel_byte;
@@ -91,6 +101,7 @@ static void run(const char* name,std::vector<Event> events,bool success,int code
  bool ok=response(stream,deadline,&actual);
  require(ok==success,name);require(actual==code,name);require(elapsed<=max_ms,name);
  require(stops==1&&unlocks==1,name);
+ require(trace_finishes==1&&(!trace_has_response||trace_code==actual),name);
 }
 int main(){
  const std::string status="HTTP/1.1 200 OK\r\n";
