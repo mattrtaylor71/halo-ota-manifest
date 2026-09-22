@@ -1,10 +1,11 @@
 # Private Sense205 image upload experiment
 
-Sense205 is installed on the bench with LCD201. The ordinary Check-in smoke
-passed on the first upload attempt, but the decisive same-boot phone
-provisioning → immediate Check-in case is pending. Do not call the original
-post-provision AES failure fixed from the ordinary smoke. Public paired OTA
-remains201 and EOL remains197;205 has not been published.
+Sense205 is installed on the bench, now with LCD206. The ordinary Check-in
+smoke passed on the first upload attempt. The later same-boot phone provisioning
+→ immediate Check-in case failed its first PUT with a512-byte AES allocation
+failure, then succeeded on the immediate second attempt. The first-attempt
+post-provision AES problem remains. Public paired OTA remains201 and EOL
+remains197;205 has not been published.
 
 ## Why this change
 
@@ -100,9 +101,35 @@ FULL_OBJECT checksum; this successful fresh path did not print an independent
 camera-buffer SHA. Do not label that as the same independent capture-hash proof
 as the failed-and-saved204 case. Backend recognition semantics remain separate.
 
-The fresh passive `reprovision-camera205-01` capture is armed for the user's
-normal app provisioning followed immediately by Check-in/Confirm. First-attempt
-PUT200 without allocation failures in that same wake is required to close the
-immediate-upload regression. User interruption on205 and ordinary voice remain
-physically unqualified; host coverage and prior-version results are not new
-physical passes. No new manual/scheduled OTA transfer is claimed.
+`reprovision-camera205-01` instead captured a prolonged setup/retry and the
+LCD201 guardian blackout, without a subsequent Check-in. Its account-link
+retry defect is separate from the image path. LCD206 now corrects the display
+behavior; see [the LCD case](LCD_PROVISION_COMPLETION_206.md).
+
+## Same-wake post-provision image result
+
+The user's next case, `reprovision-lcd206-01/CASE-RESULT.json`, completed on
+September22 at00:09Pacific. Its passive capture sent no device commands and
+closed/reaped after paired sleep. Claim attempt1 logged an AES allocation
+failure; attempt2 returned HTTP200 in930ms and persisted the owner.
+
+Physical Check-in capture47/job119 produced154506bytes at1280x1024 in1267ms.
+The first image PUT failed after33208 TLS bytes with a512-byte allocation
+failure, caps0x8, during the body. The existing immediate retry returned HTTP200
+with zero allocation failures and156482 TLS bytes; its body took4423ms.
+Upload completed at epoch1790060952.494314, about22.2seconds after the Confirm
+touch. No persistence/sleep retry was needed. The retry arm was cleared with
+peer ACK and both boards slept with the normal02:00Pacific schedule retained.
+
+The cloud object was the unique matching-size image in the known device/date
+prefix, with LastModified matching the PUT time. `cloud/RESULT.json` verifies
+its full-object server SHA256 and complete JPEG decode; the hash is
+`8efb3f9a8017a3c8a61a6ea5d5befe0ef0fb5f75d527443fc57338794a0e7ee3`.
+No independent capture-buffer hash was logged. Backend recognition semantics
+and app inventory changes were not checked by this image-delivery test.
+
+This proves successful same-wake recovery for one real case. It does not prove
+that pacing caused the recovery, that the failure is cured, or that repeated
+cases will all recover. First-attempt PUT200 without allocation failures remains
+the unmet target. User interruption on205 and ordinary voice remain physically
+unqualified. No new manual/scheduled OTA transfer is claimed.

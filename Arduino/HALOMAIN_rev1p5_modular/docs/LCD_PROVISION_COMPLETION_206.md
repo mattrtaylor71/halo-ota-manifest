@@ -97,8 +97,26 @@ Home unlocked. Correct firmware/build/SDKVALID were already observed. Health02
 waited for startup work to settle and required a fresh idle reply; no firmware
 or persistent state was changed to pass it.
 
-The actual long phone-provisioning success screen still needs a retest on206.
-The ordinary wake case and host reproduction do not establish that physical
-acceptance. Passive capture `reprovision-lcd206-01` is reserved for the user's
-normal provisioning followed by Check-in/Confirm; its outcome also determines
-the still-pending same-wake Sense205 upload experiment.
+## User provisioning and Check-in retest
+
+`reprovision-lcd206-01/CASE-RESULT.json` records the user's fresh phone setup
+and physical Check-in/Confirm. Claim succeeded on its second attempt. Complete
+rendered at epoch1790060922.351491 and returned Home at0926.8454, about4.5s
+later; a repeated connected heartbeat did not darken it. Check-in and quantity1
+confirmation were acknowledged. Home returned at0932.3716 and the first dark
+event was0942.383601, the normal10.012-second idle interval. All40 observed
+heartbeats before that dark event showed the panel lit. No guardian event or
+premature sleep was observed. There were no heartbeat samples after idle-dark;
+do not infer continuous sampled backlight proof during the remaining upload.
+
+The154506-byte image failed its first PUT with an AES512-byte allocation
+failure, then uploaded on the immediate second attempt. Read-only cloud
+checksum and full JPEG decode passed. Both boards slept normally; capture
+owners closed and reaped with no device commands sent. The next nightly arm
+remained02:00Pacific. The [Sense205 record](IMAGE_UPLOAD_PACING_205.md) retains
+the unresolved first-attempt memory issue and the delivery test's limits.
+
+This confirms the normal physical setup/completion/menu/capture flow on206.
+The case used a fresh wake and completed setup before five minutes, so actual
+expired-guardian physical reproduction remains unqualified. The exact prolonged
+sequence has host regression and retained pre-fix negative-control evidence.
