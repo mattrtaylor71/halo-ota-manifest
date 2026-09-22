@@ -392,6 +392,12 @@ static void ship_show_voice_ack() {
 
 static void ship_show_logged_impl() {
   ship_init_logged();
+  const char* subtitle = ship_choice_mode_is_discard()
+                             ? "Updating your kitchen..."
+                         : ship_mode_is_dish(g_ship_ui_op, g_ship_ui_mode)
+                             ? "Macros available in app"
+                             : "Sending to your kitchen...";
+  lv_label_set_text(ship_logged_subtitle, subtitle);
   ship_hide_expiry_screen();
   status_overlay_hide();
   if (is_glowing_animation) {
