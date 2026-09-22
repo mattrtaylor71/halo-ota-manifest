@@ -65,3 +65,69 @@ Evidence is under `/Users/MattTaylor/halo-ota208-20260922` in
 `actuator-reset01`, `actuator-after-reset-probe.json` and
 `actuator-recovered-health01`. No reflash was needed. This is recovery of this
 occurrence, not proof that the intermittent USB fault is permanently fixed.
+
+## September 22 build and installation checkpoint
+
+The fix is committed at `38cd151056242aba29bd07503ba78157e7cb0a97`, firmware
+tree `5a1c3632d5ea6e8cb5e855689c24fa1fa48e4191`. Both complete **114-suite**
+gates passed, including the exact materialized release snapshot. Both canonical
+builds and the camera-aware artifact checker passed. Build identity:
+`6.4.208-20260922T100632Z-38cd15105624`.
+
+| Image | Bytes | SHA256 |
+| --- | ---: | --- |
+| Sense | 1,874,944 | `2f254cdaa2e92ab8d727f2bfdaa6e4a2a9159d8091c2e1ed5ce3cfa048a63951` |
+| LCD | 2,032,960 | `421abd322036615ec9a1d810b3fe77724c2a188fbfca476371c4fbf63120a128` |
+
+The first service controller stopped before commands or flash because the unit
+slept before capture attached. The second obtained fresh identity and installed
+Sense208 into app0. It verified the candidate bytes and preserved NVS, the
+current207 app1 fallback, partition table, filesystem and old VALID selector.
+LCD remains206/app0. Native208 boot was observed marking the image VALID,
+communicating with LCD, deferring automatic `lcd_due` as `policy_not_due`, and
+later sleeping. The full requested Home/nonce health check remains incomplete.
+
+Independent strict decoding of the preserved NVS confirms that the original
+generation52 closed DISCOVERY policy blob is unchanged, with completed201
+comparison, `lcd_ota_due=1`, unsafe=0 and no pending/deferred/completion owner.
+The next calendar schedule advanced normally to September23 at02:00 Pacific.
+No debt, quota, target or schedule was forced to make a test pass.
+
+Only the four immutable208 release objects were staged and read back. **Latest
+manifests remain207;208 is not promoted.** Version208 is now reserved by those
+immutable bytes; a changed build must use a freshly inventoried unused209+.
+Current release selectors still describe published207. Continue development
+from38cd151 or descendants so these repairs are retained.
+
+### Remaining physical test and actuator failure
+
+The actuator subsequently failed during the post-install wake: it returned
+HELP/STATUS and PUSH progress through retraction, but no completion or STOP
+acknowledgement. Halo actually woke and slept; the health controller correctly
+stopped before issuing queries because actuator completion was unproved.
+All descriptor owners and processes eventually closed and were reaped.
+
+A subsequent live-serial USB probe timed out before reset. A separately reviewed
+helper bound the same Uno through fresh registry serial/VID/PID/location/address
+and repeated that identity after open; its single exact-device reset succeeded.
+The following nonmoving probe still received no HELP. A bounded avrdude reset
+and bootloader/signature probe also failed synchronization; **no actuator flash
+write occurred**. This recurrence does not establish an electrical root cause
+or permanent hardware failure. No hub reset, stronger stroke or blind repeated
+movement was used.
+
+The real manual208 transfer and same-version check have **not run**. Resume with
+the prepared health208 controller after a manual wake or restored actuator,
+then promote the exact staged208 pair, run the one-request manual208 observer,
+and require native `lcd_hint_retired authority=closed_discovery`, charged manual
+discovery, verified LCD208/app1 postboot, settlement and sleep. A successful
+transfer alone does not prove the stale-record branch ran. The physical timer
+path also remains unqualified; the new host regression reproduces the original
+calendar ordering failure and tests its guarded correction.
+
+Private evidence root: `/Users/MattTaylor/halo-ota208-20260922`. The release
+checkpoint `release208/QUALIFICATION-PENDING.json` hashes the gates, artifacts,
+stage, service and failure receipts. `service208-02/INDEPENDENT-SERVICE-OTA-REVIEW.json`
+records the preserved-state audit. `service208-prep/HEALTH208.md` and
+`ota-prep/README.md` contain the prepared next-test commands. Raw NVS/serial
+evidence remains private and is not a public release asset.

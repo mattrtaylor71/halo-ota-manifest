@@ -1,3 +1,7 @@
+# 6.4.208 candidate — guarded recovery of stale OTA bookkeeping
+
+Repair explicit-manual admission for a proved completed-comparison hint retained in closed DISCOVERY, and let a verified same-boot timer notice acquire due calendar ownership despite an older queued reason. Preserve unfinished work, accounting, checked storage, peer/user guards and production02:00 scheduling. Both114-suite gates and paired canonical builds pass. Sense208 is USB-installed with failing state preserved; LCD remains206. Actuator failure blocks the final device OTA test. Immutable208 artifacts are staged, but latest remains207. Source `38cd15105624`; [evidence and next test](docs/OTA_ADMISSION_208.md).
+
 # 6.4.207 published — post-provision memory and display fixes
 
 Prefer PSRAM for mbedTLS allocations only within account-claim and image transports, retaining task ownership, cancellation, deadlines and default allocation elsewhere. This release also includes the reviewed camera PSRAM fallback, reduced image URL temporaries, image-body pacing and bounded LCD completion/guardian fixes from private 203–206. Both 113-suite gates, paired canonical builds and complete public readbacks passed; local tag `halo-v6.4.207` identifies source `fcf6fb220f1f`.
