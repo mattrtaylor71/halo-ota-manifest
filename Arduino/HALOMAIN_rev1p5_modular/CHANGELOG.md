@@ -1,6 +1,6 @@
-# 6.4.208 candidate — guarded recovery of stale OTA bookkeeping
+# 6.4.208 published — guarded recovery of stale OTA bookkeeping
 
-Repair explicit-manual admission for a proved completed-comparison hint retained in closed DISCOVERY, and let a verified same-boot timer notice acquire due calendar ownership despite an older queued reason. Preserve unfinished work, accounting, checked storage, peer/user guards and production02:00 scheduling. Both114-suite gates and paired canonical builds pass. Sense208 is USB-installed with failing state preserved; LCD remains206. Actuator failure blocks the final device OTA test. Immutable208 artifacts are staged, but latest remains207. Source `38cd15105624`; [evidence and next test](docs/OTA_ADMISSION_208.md).
+Repair explicit-manual admission for a proved ownerless completed-comparison hint retained in closed DISCOVERY, and adopt real same-boot due calendar credit despite an older queued reason. Preserve checked storage, unfinished work, accounting, peer/user guards and production 02:00 scheduling. Both 114-suite gates, paired canonical builds and complete public readbacks pass. Sense 208 USB bootstrap preserved the failing NVS state; ordinary LCD 206→208 OTA passed exact SHA, SDK VALID, native RESOLVED, Home and paired sleep. One subsequent same-version request passed, with a corroborated interleaved Sense comparison line, natural Home and paired sleep. Local tag `halo-v6.4.208` pins the exact source. No new Sense self-OTA or physical scheduled pass is claimed. Source `38cd15105624`; [release evidence and limits](docs/RELEASE_208.md).
 
 # 6.4.207 published — post-provision memory and display fixes
 

@@ -1,12 +1,12 @@
 # Build and release from the current production source
 
-The authoritative selector is [PRODUCTION_BASELINE.json](../PRODUCTION_BASELINE.json), explained in [the 207 handoff](RELEASE_207.md). New firmware must descend from `fcf6fb220f1f4983557669e8e3b552f910e079c1`, preserving 207 and all earlier fixes. The canonical branch remains `codex/halo-production-baseline-197`; local tag `halo-v6.4.207` identifies the exact artifact source. Both 113-suite gates, paired canonical builds and complete public readbacks passed. The bench remains Sense207/app1 and LCD206/app0, both SDK VALID; one phone provisioning and immediate Check-in passed on first attempts, with cloud image verification and paired sleep. Exact paired 207 installation and broader reliability, voice, interruption/resume and scheduled/full-product checks remain untested. EOL factory selection stays 197.
+The authoritative selector is [PRODUCTION_BASELINE.json](../PRODUCTION_BASELINE.json), explained in [the 208 handoff](RELEASE_208.md). New firmware must descend from `38cd151056242aba29bd07503ba78157e7cb0a97`, preserving 208 and all earlier fixes. The canonical branch remains `codex/halo-production-baseline-197`. Both 114-suite gates, paired canonical builds and complete public readbacks passed. The bench is paired 208, SDK VALID: Sense was USB bootstrapped and LCD passed one ordinary manual OTA with exact hash, native RESOLVED, Home and sleep. The subsequent ordinary same-version request passed natural Home and paired sleep, with an interleaved Sense comparison line corroborated by exact versions and the executed terminal path. Local annotated tag `halo-v6.4.208` pins the source. No new Sense self-OTA or physical scheduled/full-product qualification is claimed. EOL factory selection stays 197.
 
 The retained `RELEASE_BASELINE.json.current_baseline` and `development_baseline` identify historical158 recovery/scheduled qualification. They do not select new development. Its tag, package and previous acceptance stay immutable; see [historical158 recovery](FROZEN_RELEASE_158.md). Retain the immutable158/196/197/198 packages under `/Users/MattTaylor/halo-releases`, with their hashes and original evidence. Never rebuild/relabel existing versions.
 
 ## Before changing anything
 
-Work on a clean, reviewed descendant of the required 207 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
+Work on a clean, reviewed descendant of the required 208 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
 
 ```sh
 python3 -B tools/verify_frozen_baseline.py
@@ -14,13 +14,13 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run the complete [host regression gate](REGRESSION_TESTING.md), and commit the reviewed source before preparing release artifacts. The guard verifies current-source ancestry and historical recovery bytes; it does not establish device acceptance of new code. The source preparer independently enforces the same current source floor and minimum new version.
 
-Allocate an unused version **6.4.208 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.209 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.208>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.209>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"

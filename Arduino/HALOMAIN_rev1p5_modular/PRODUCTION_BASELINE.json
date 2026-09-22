@@ -1,67 +1,102 @@
 {
   "schema_version": 1,
-  "status": "PUBLISHED_207_OTA_ADMISSION_BLOCKER_FOUND",
+  "status": "PUBLISHED_PAIRED208_SCOPED_DEVICE_ACCEPTANCE_PASS",
   "designated_date": "2026-09-22",
-  "minimum_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
-  "minimum_source_firmware_tree": "2489f338c55c9a9af14f49c4408ea70fc8d50f24",
-  "minimum_new_version": "6.4.208",
-  "artifact_source_version": "6.4.207",
-  "source_tag": "halo-v6.4.207",
-  "source_tag_object": "de5ab8df945e59ce66e600b410fd645ed9732496",
+  "minimum_source_commit": "38cd151056242aba29bd07503ba78157e7cb0a97",
+  "minimum_source_firmware_tree": "5a1c3632d5ea6e8cb5e855689c24fa1fa48e4191",
+  "minimum_new_version": "6.4.209",
+  "artifact_source_version": "6.4.208",
+  "source_tag": "halo-v6.4.208",
+  "source_tag_object": "8cacdd41d5b20dfd37c12e63f8f25775fa0c7e92",
   "canonical_checkout": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
   "canonical_firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
   "canonical_branch": "codex/halo-production-baseline-197",
-  "public_ota_version": "6.4.207",
+  "public_ota_version": "6.4.208",
   "factory_version": "6.4.197",
   "historical_recovery_version": "6.4.158",
-  "handoff": "docs/RELEASE_207.md",
-  "policy": "New source must preserve207 ancestry and all earlier fixes; use a freshly inventoried unused208+ version and exact-snapshot gates. EOL197/frozen158 stay unchanged. Public release and207/206 bench evidence do not imply paired207 installation or full-product qualification.",
+  "handoff": "docs/RELEASE_208.md",
+  "policy": "Future source must descend from 38cd151056242aba29bd07503ba78157e7cb0a97 and retain208 plus earlier fixes. Use a freshly inventoried unused 209+ version and exact-snapshot gates. Factory197/frozen 158 remain unchanged; USB bootstrap and manual LCD OTA are separate from Sense self-OTA or physical scheduled qualification.",
   "public_readback": {
     "status": "PASS_PAIRED_PUBLIC_MANIFEST_AND_COMPLETE_BINARY_READBACK",
-    "checked_epoch": 1790065172.326101,
+    "checked_epoch": 1790097593.095999,
+    "release": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/publication/release.json",
+      "sha256": "eb3314944ddfdabe9dcc0ee578fa2402c8f584325e4c1ea6f82cc775435b2eca"
+    },
+    "proofs": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/sense/artifacts/verified.json",
+        "sha256": "c9c4d97df7332dddd7c6f758baa47b56e85b65237bb54d0b1ce2aab03834f9fc"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/lcd/artifacts/verified.json",
+        "sha256": "f342ee5e3fd134c080322bc95cd51ed650091b5003054c1f003882c5ab636178"
+      }
+    },
+    "promotion": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/promote001/result.json",
+      "sha256": "6fe19012d184e3304644a9bb53be010431d9be3f3e66a17a411e63c11e60b10c"
+    },
+    "script": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback-prep/verify_public208.py",
+      "sha256": "c9144ce0ae340c796e23f329848b8e49dd7243bbb5673c3384846cd1e4d2c632"
+    },
     "boards": {
       "sense": {
-        "version": "6.4.207",
-        "sha256": "a6a46832b39dd7b05b677657b7af1e17818b5a234909b7357f1c77e120076e0e",
-        "bytes": 1874752,
-        "manifest_sha256": "02876f2347e51cf689d5b17ab84c25b057306114f4d8fb8d57cf17b6fe7b98a7",
-        "manifest_receipt": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/public-readback/sense-manifest.json",
+        "version": "6.4.208",
+        "sha256": "2f254cdaa2e92ab8d727f2bfdaa6e4a2a9159d8091c2e1ed5ce3cfa048a63951",
+        "bytes": 1874944,
+        "manifest_sha256": "0fb137e805b24c7808999ff7ae650e5ef602d438dfc1b959c2b97f73dc8771d1",
+        "manifest_receipt": "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback/sense-manifest.json",
         "binary_receipts": [
-          "/Users/MattTaylor/halo-provision-memory202-20260921/release207/public-readback/sense.bin"
+          "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback/sense.bin"
         ],
         "complete_public_binary_readback": true
       },
       "lcd": {
-        "version": "6.4.207",
-        "sha256": "ffb78b24586709e570c9a6647e5dd4f0462f80897ac2388173fd35312d147338",
-        "bytes": 2033104,
-        "manifest_sha256": "1d1f9b3e4373719187e53a084d5fdd6f94a4808109fbae27631a39348740b2b3",
-        "manifest_receipt": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/public-readback/lcd-manifest.json",
+        "version": "6.4.208",
+        "sha256": "421abd322036615ec9a1d810b3fe77724c2a188fbfca476371c4fbf63120a128",
+        "bytes": 2032960,
+        "manifest_sha256": "303771b1e1389f41f4734c0e2e1d66f0fd8a36131a02dff5e6826f4d82190654",
+        "manifest_receipt": "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback/lcd-manifest.json",
         "binary_receipts": [
-          "/Users/MattTaylor/halo-provision-memory202-20260921/release207/public-readback/lcd.bin"
+          "/Users/MattTaylor/halo-ota208-20260922/release208/public-readback/lcd.bin"
         ],
         "complete_public_binary_readback": true
       }
     },
-    "finished_epoch": 1790065175.027339
+    "automatic_retries": 0,
+    "cloud_writes": 0,
+    "hardware_actions": 0,
+    "finished_epoch": 1790097603.2738361
   },
-  "installed": false,
-  "device_acceptance": "SCOPED_IMAGE_LIST_SLEEP_PASS_MANUAL_AND_SCHEDULED_OTA_FAIL_VOICE_SEMANTICS_UNQUALIFIED",
+  "installed": true,
+  "device_acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
   "retained_installed_pair": {
-    "version": "Sense6.4.207/LCD6.4.206",
+    "version": "6.4.208",
     "installed": {
-      "sense": "6.4.207 app1 SDK VALID",
-      "lcd": "6.4.206 app0 SDK VALID"
+      "sense": "6.4.208 app0 SDK VALID",
+      "lcd": "6.4.208 app1 SDK VALID"
     },
-    "health": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/postservice207-health01/RESULT.json",
-      "sha256": "94b46a262ceb5f7e31bc6ee92de96834ff953353e0c8c050b4a456eae58e2a6b"
+    "installation_methods": {
+      "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
+      "lcd": "ordinary manual OTA from206/app0 to208/app1"
     },
-    "functional_test": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
-      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+    "acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
+    "first_manual_ota": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/manual208-01/FIRST-OTA-ACCEPTANCE.json",
+      "sha256": "5db811e1bf8b2b574cf3f35ef1eeb7ca0ba2d866704ec7ed4cf726c1d8c88108"
     },
-    "acceptance": "PASS_ONE_FIRST_ATTEMPT_CLAIM_AND_IMAGE_UPLOAD_WITH_CLOUD_VERIFICATION"
+    "same_version_check": "PASS",
+    "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
+    "same_version_manual": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
+      "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
+    },
+    "device_acceptance": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+    }
   },
   "previous_installed_pair_199": {
     "version": "6.4.199",
@@ -76,13 +111,10 @@
     "acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE"
   },
   "device_evidence": {
-    "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
-    "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+    "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+    "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
   },
-  "private_release_package": {
-    "path": "/Users/MattTaylor/halo-releases/6.4.207.ARCHIVE-RECORD.json",
-    "sha256": "112aa711d71a00309e4affb1e4d8a74fdbff7f50698fc8aa89338cee84838ecb"
-  },
+  "private_release_package": null,
   "previous_installed_pair_201": {
     "version": "6.4.201",
     "installation_methods": {
@@ -98,5 +130,127 @@
   "functional_campaign_20260922": {
     "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
     "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
-  }
+  },
+  "previous_production_selector_207": {
+    "schema_version": 1,
+    "status": "PUBLISHED_207_OTA_ADMISSION_BLOCKER_FOUND",
+    "designated_date": "2026-09-22",
+    "minimum_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
+    "minimum_source_firmware_tree": "2489f338c55c9a9af14f49c4408ea70fc8d50f24",
+    "minimum_new_version": "6.4.208",
+    "artifact_source_version": "6.4.207",
+    "source_tag": "halo-v6.4.207",
+    "source_tag_object": "de5ab8df945e59ce66e600b410fd645ed9732496",
+    "canonical_checkout": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "canonical_firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "canonical_branch": "codex/halo-production-baseline-197",
+    "public_ota_version": "6.4.207",
+    "factory_version": "6.4.197",
+    "historical_recovery_version": "6.4.158",
+    "handoff": "docs/RELEASE_207.md",
+    "policy": "New source must preserve207 ancestry and all earlier fixes; use a freshly inventoried unused208+ version and exact-snapshot gates. EOL197/frozen158 stay unchanged. Public release and207/206 bench evidence do not imply paired207 installation or full-product qualification.",
+    "public_readback": {
+      "status": "PASS_PAIRED_PUBLIC_MANIFEST_AND_COMPLETE_BINARY_READBACK",
+      "checked_epoch": 1790065172.326101,
+      "boards": {
+        "sense": {
+          "version": "6.4.207",
+          "sha256": "a6a46832b39dd7b05b677657b7af1e17818b5a234909b7357f1c77e120076e0e",
+          "bytes": 1874752,
+          "manifest_sha256": "02876f2347e51cf689d5b17ab84c25b057306114f4d8fb8d57cf17b6fe7b98a7",
+          "manifest_receipt": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/public-readback/sense-manifest.json",
+          "binary_receipts": [
+            "/Users/MattTaylor/halo-provision-memory202-20260921/release207/public-readback/sense.bin"
+          ],
+          "complete_public_binary_readback": true
+        },
+        "lcd": {
+          "version": "6.4.207",
+          "sha256": "ffb78b24586709e570c9a6647e5dd4f0462f80897ac2388173fd35312d147338",
+          "bytes": 2033104,
+          "manifest_sha256": "1d1f9b3e4373719187e53a084d5fdd6f94a4808109fbae27631a39348740b2b3",
+          "manifest_receipt": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/public-readback/lcd-manifest.json",
+          "binary_receipts": [
+            "/Users/MattTaylor/halo-provision-memory202-20260921/release207/public-readback/lcd.bin"
+          ],
+          "complete_public_binary_readback": true
+        }
+      },
+      "finished_epoch": 1790065175.027339
+    },
+    "installed": false,
+    "device_acceptance": "SCOPED_IMAGE_LIST_SLEEP_PASS_MANUAL_AND_SCHEDULED_OTA_FAIL_VOICE_SEMANTICS_UNQUALIFIED",
+    "retained_installed_pair": {
+      "version": "Sense6.4.207/LCD6.4.206",
+      "installed": {
+        "sense": "6.4.207 app1 SDK VALID",
+        "lcd": "6.4.206 app0 SDK VALID"
+      },
+      "health": {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/postservice207-health01/RESULT.json",
+        "sha256": "94b46a262ceb5f7e31bc6ee92de96834ff953353e0c8c050b4a456eae58e2a6b"
+      },
+      "functional_test": {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+        "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+      },
+      "acceptance": "PASS_ONE_FIRST_ATTEMPT_CLAIM_AND_IMAGE_UPLOAD_WITH_CLOUD_VERIFICATION"
+    },
+    "previous_installed_pair_199": {
+      "version": "6.4.199",
+      "installation": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
+        "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
+      },
+      "functional_test": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/reprovision-voice199-01/TEST-RESULT.json",
+        "sha256": "c63c9d040f3ac2db713afd1cef548dc46f78b72a4e7c9e8f409833118ea053b5"
+      },
+      "acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE"
+    },
+    "device_evidence": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+    },
+    "private_release_package": {
+      "path": "/Users/MattTaylor/halo-releases/6.4.207.ARCHIVE-RECORD.json",
+      "sha256": "112aa711d71a00309e4affb1e4d8a74fdbff7f50698fc8aa89338cee84838ecb"
+    },
+    "previous_installed_pair_201": {
+      "version": "6.4.201",
+      "installation_methods": {
+        "sense": "USB inactive-bank service",
+        "lcd": "manual OTA"
+      },
+      "health": {
+        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
+        "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
+      },
+      "acceptance": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP"
+    },
+    "functional_campaign_20260922": {
+      "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
+      "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
+    }
+  },
+  "same_version_acceptance": {
+    "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
+    "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
+  },
+  "source_tag_status": "LOCAL_ANNOTATED_SOURCE_TAG_CREATED",
+  "private_release_package_status": "NOT_CREATED",
+  "source_tag_receipt": {
+    "path": "/Users/MattTaylor/halo-ota208-20260922/release208/SOURCE-TAG.json",
+    "sha256": "34c74627ab9ec4274daab97f4af894d0845417735b1188b9c5153b5df4011895"
+  },
+  "release_record": {
+    "path": "/Users/MattTaylor/halo-ota208-20260922/release208/RELEASE-RECORD.json",
+    "sha256": "94978b7dcc3b933ca4e712a27ebf5c9df5260878123b9f7862cc369b705752d5"
+  },
+  "device_acceptance_record": {
+    "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+    "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+  },
+  "new_release_archive_created": false,
+  "git_remote_push_performed": false
 }

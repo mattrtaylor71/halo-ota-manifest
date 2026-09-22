@@ -1,5 +1,11 @@
 # OTA admission repair after the September 22 reproduction
 
+**Final September 22 outcome: 208 is published and installed on both boards.** Both 114-suite gates, paired canonical artifact checks and full public binary readbacks passed. Sense 208 was USB bootstrapped with NVS and207 fallback preserved; one ordinary LCD 206→208 OTA and one same-version request passed SDK VALID, terminal cleanup, natural Home and paired sleep. The first transfer's pre-sleep report proved canonical RESOLVED. The no-update Sense comparison line was interleaved and independently corroborated by exact versions and the executed terminal path. Local annotated tag `halo-v6.4.208` pins source `38cd151056242aba29bd07503ba78157e7cb0a97`; no new archive or remote Git push was performed. See [the final 208 handoff](RELEASE_208.md).
+
+This is finite manual acceptance, not Sense self-OTA, a physical scheduled 208 pass or full-product qualification. The [207 functional campaign](FUNCTIONAL_207_20260922.md) retains its separate camera, voice/list and semantic limits. The cause, test plan, actuator incidents and staged-only notes below are **historical checkpoints**; their 207/pending statements describe those earlier times. The final publication/acceptance section at the end supersedes them.
+
+## Historical candidate plan
+
 Candidate work for the next unused release, 6.4.208. Public firmware remains207
 until separately recorded publication. Original failure evidence and its limits
 are in [the 207 functional campaign](FUNCTIONAL_207_20260922.md).
@@ -58,15 +64,15 @@ they exist.
 
 ## Actuator recovery
 
-On September22 the exact replacement Uno accepted a targeted USB-device reset.
+On September 22 the exact replacement Uno accepted a targeted USB-device reset.
 A fresh HELP/STATUS probe then passed; one calibrated stroke woke the installed
-Sense207/LCD206 pair, fresh Home/VALID identities passed, and both slept.
+Sense207/LCD 206 pair, fresh Home/VALID identities passed, and both slept.
 Evidence is under `/Users/MattTaylor/halo-ota208-20260922` in
 `actuator-reset01`, `actuator-after-reset-probe.json` and
 `actuator-recovered-health01`. No reflash was needed. This is recovery of this
 occurrence, not proof that the intermittent USB fault is permanently fixed.
 
-## September 22 build and installation checkpoint
+## Historical September 22 build and installation checkpoint
 
 The fix is committed at `38cd151056242aba29bd07503ba78157e7cb0a97`, firmware
 tree `5a1c3632d5ea6e8cb5e855689c24fa1fa48e4191`. Both complete **114-suite**
@@ -81,7 +87,7 @@ builds and the camera-aware artifact checker passed. Build identity:
 
 The first service controller stopped before commands or flash because the unit
 slept before capture attached. The second obtained fresh identity and installed
-Sense208 into app0. It verified the candidate bytes and preserved NVS, the
+Sense 208 into app0. It verified the candidate bytes and preserved NVS, the
 current207 app1 fallback, partition table, filesystem and old VALID selector.
 LCD remains206/app0. Native208 boot was observed marking the image VALID,
 communicating with LCD, deferring automatic `lcd_due` as `policy_not_due`, and
@@ -99,7 +105,7 @@ immutable bytes; a changed build must use a freshly inventoried unused209+.
 Current release selectors still describe published207. Continue development
 from38cd151 or descendants so these repairs are retained.
 
-### Remaining physical test and actuator failure
+### Historical remaining physical test and actuator failure
 
 The actuator subsequently failed during the post-install wake: it returned
 HELP/STATUS and PUSH progress through retraction, but no completion or STOP
@@ -131,3 +137,12 @@ stage, service and failure receipts. `service208-02/INDEPENDENT-SERVICE-OTA-REVI
 records the preserved-state audit. `service208-prep/HEALTH208.md` and
 `ota-prep/README.md` contain the prepared next-test commands. Raw NVS/serial
 evidence remains private and is not a public release asset.
+
+
+## September 22 publication and first manual acceptance
+
+This later checkpoint supersedes the staged-only and actuator-blocked status above. After the user physically restarted the actuator, fresh paired health passed. The exact staged 208 resources were conditionally promoted from 207 and both full public binaries matched canonical proofs.
+
+One ordinary manual action on Sense 208/LCD 206 retired the original closed-DISCOVERY hint with credit unchanged, received the normal charged grant and transferred the exact LCD 208 image into app1. Both boards were SDK VALID; Home, cleared transport ownership and paired sleep were captured. The exact pre-sleep report at 1790097934 (ingested 1790097936, boot 2262) records RESOLVED phase 8/generation 57, storage READY, reserved 0 and the 208 target. `manual208-01/FIRST-OTA-ACCEPTANCE.json` binds the closed capture, target bytes and independent policy review. Sense 208 remains a USB bootstrap, not a self-OTA pass. The subsequent same-version request also passed matched `up_to_date`, natural Home and paired sleep. Its literal Sense comparison line was interleaved; exact current/fetched versions and the executed terminal path corroborate that result. No post-case canonical phase is inferred for this new read-only discovery. Local annotated tag `halo-v6.4.208` pins source38cd151. No new archive or remote push was performed. Calendar adoption has host regression coverage, not a new physical scheduled pass.
+
+`QUALIFICATION-PENDING` remains an immutable historical checkpoint; `release208/RELEASE-RECORD.json` and `release208/DEVICE-ACCEPTANCE.json` now supersede it. Current release selectors now require source 38cd151 or descendants and freshly inventoried unused 209+ versions. See [the 208 handoff](RELEASE_208.md).

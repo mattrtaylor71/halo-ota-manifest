@@ -874,7 +874,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.207",
+  "current_production_latest_version": "6.4.208",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -1763,27 +1763,29 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "Sense6.4.207/LCD6.4.206",
-    "status": "PASS_ONE_207_206_PROVISIONING_IMMEDIATE_CHECKIN_CLOUD_SLEEP_CASE",
+    "version": "6.4.208",
+    "status": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/postservice207-health01/RESULT.json",
-      "sha256": "94b46a262ceb5f7e31bc6ee92de96834ff953353e0c8c050b4a456eae58e2a6b"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
     },
-    "functional_evidence": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
-      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+    "installation_methods": {
+      "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
+      "lcd": "ordinary manual OTA from206/app0 to208/app1"
     },
     "limitations": [
-      "One actual phone provisioning and immediate Check-in on Sense207/LCD206 passed first account claim and first image PUT; public LCD207 has matching runtime dependencies except generated version metadata but its exact bytes have not been installed on the bench.",
-      "No new paired207 OTA transfer, scheduled OTA, cold-power, USB-free or exhaustive product qualification.",
-      "Repeat provisioning, ordinary voice and input interruption/resume remain separate acceptance work. Voice allocation policy is unchanged.",
-      "Existing camera DMA reserve warning and fragmentation remain; successful PSRAM fallback was observed.",
-      "Claim allocator counter line truncates before default_fallbacks; complete claim and PUT failure windows reported zero allocation failures.",
-      "Exhausted account-claim retry bookkeeping and permanent 64 KB internal OTA marker buffer remain separate open work.",
-      "Cloud image custody/checksum/decode verified; downstream recognition or inventory semantics were not tested in this case.",
-      "Earlier private QUALIFICATION.json is a historical pre-install checkpoint, not the current release status."
+      "One LCD manual transfer and one ordinary same-version check; not repeated reliability or full-product qualification.",
+      "Sense208 was USB bootstrapped; no Sense208 self-OTA pass is claimed.",
+      "Calendar repair has production-function host tests and an old-code negative control; no physical scheduled208 run is claimed. Production02:00 Pacific is unchanged.",
+      "The literal Sense no-update comparison line was interleaved. Exact current/fetched versions and the executed terminal path support success; natural Home and paired sleep were directly logged.",
+      "No new provisioning/voice semantics, interruption, power-cut or USB-free qualification is claimed. Prior207 functional limits remain separate.",
+      "No host allowance, schedule or OTA debt fixture was used to force acceptance."
     ],
-    "scope": "One private Sense207/LCD206 provisioning and immediate Check-in; paired207 OTA remains untested."
+    "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
+    "same_version_manual": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
+      "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
+    }
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -4842,13 +4844,13 @@
     }
   },
   "current_validation_blocker": {
-    "status": "REPRODUCED_MANUAL_AND_SCHEDULED_OTA_ADMISSION_FAILURE",
-    "report": "docs/FUNCTIONAL_207_20260922.md",
+    "status": "NO_BLOCKER_FOR_SCOPED208_MANUAL_ACCEPTANCE",
+    "report": "docs/RELEASE_208.md",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
-      "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
     },
-    "next_work": "Narrow closed-DISCOVERY orphan admission and same-boot calendar-credit adoption fixes with regression coverage; preserve all active-update/storage/accounting guards."
+    "remaining_scope": "Physical scheduled208, Sense self-OTA, repeated reliability and broader product acceptance remain unqualified; not required claims of these two finite manual cases."
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6547,27 +6549,27 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.207",
-    "status": "PUBLISHED_207_OTA_ADMISSION_BLOCKER_FOUND",
-    "artifact_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
-    "artifact_source_firmware_tree": "2489f338c55c9a9af14f49c4408ea70fc8d50f24",
-    "build_id": "6.4.207-20260922T073628Z-fcf6fb220f1f",
+    "version": "6.4.208",
+    "status": "PUBLISHED_PAIRED208_SCOPED_DEVICE_ACCEPTANCE_PASS",
+    "artifact_source_commit": "38cd151056242aba29bd07503ba78157e7cb0a97",
+    "artifact_source_firmware_tree": "5a1c3632d5ea6e8cb5e855689c24fa1fa48e4191",
+    "build_id": "6.4.208-20260922T100632Z-38cd15105624",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from fcf6fb220f1f4983557669e8e3b552f910e079c1 or reviewed descendants, preserving the 207 scoped TLS allocator, 206 LCD provisioning fix, camera recovery, image upload pacing, 201 OTA repair and all earlier fixes. EOL stays197.",
+    "source_selection": "Continue from 38cd151056242aba29bd07503ba78157e7cb0a97 or reviewed descendants, preserving the 208 admission/calendar repairs and all earlier fixes. Inventory an unused 209+ version; factory 197 and frozen 158 remain unchanged.",
     "materialization": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/snapshot/materialization.json",
-      "sha256": "1954fbe834a1cf6f987d5bae2c3f9929c866d94eba28283385231f530e9885e2"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/snapshot/materialization.json",
+      "sha256": "428c53ed063c91d4d7cc1f004cabfb84180169b294d48823f7986cb27a5180b5"
     },
     "working_host_tests": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/memory207-audit/regression-working01/RESULT.json",
-      "sha256": "301ebdfdc1ba176e5e2c3630263431509bea66d142949e77be6e7344d15f12a3"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/regression-working01/RESULT.json",
+      "sha256": "927e0e8e7837cdb525b54493616476d512855db845f7d305ae0115e0c84f6c51"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/regression/RESULT.json",
-      "sha256": "496ae0d58dcf4fc5b8cbc10b4a90b636210cb2db2136a3c1ce3abefc3f1db168"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/regression/RESULT.json",
+      "sha256": "1336d2789ad12773f29e65a405e06b87c577f9bb7690f9a0055cd8705af1c69a"
     },
-    "host_suite_count": 113,
+    "host_suite_count": 114,
     "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
     "built_boards": [
       "sense",
@@ -6575,116 +6577,136 @@
     ],
     "artifact_checks": [
       {
-        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/artifact-result-v2-sense.json",
-        "sha256": "2921768b2616a0a1445c7294006eeac0900ba67730e8051bfaf288f397556a99"
-      },
-      {
-        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/artifact-result-v2-lcd.json",
-        "sha256": "1f7fc8c4e74a687cc70ca5a093a39f211654b474e44b2f83f1fc0aaf53e340ef"
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/artifact-result-v2-sense-lcd.json",
+        "sha256": "436d5afdabe25bf17646951f6b8b36b62f8a1e522d340507f3c0670199bfe77a"
       }
     ],
     "board_proofs": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/sense/artifacts/verified.json",
-        "sha256": "e6a1bc7389ed1f9690c2d364cbd57286d4dbee3959e39e4a398d37e1cc633600"
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/sense/artifacts/verified.json",
+        "sha256": "c9c4d97df7332dddd7c6f758baa47b56e85b65237bb54d0b1ce2aab03834f9fc"
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/lcd/artifacts/verified.json",
-        "sha256": "e3cf3473f2e68a93b1aca78727c25a00fbcb858b96c1ed17cdbf25d843bf0fd0"
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/lcd/artifacts/verified.json",
+        "sha256": "f342ee5e3fd134c080322bc95cd51ed650091b5003054c1f003882c5ab636178"
       }
     },
     "applications": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/sense/artifacts/halo_sense_prod.ino.bin",
-        "sha256": "a6a46832b39dd7b05b677657b7af1e17818b5a234909b7357f1c77e120076e0e",
-        "bytes": 1874752
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "2f254cdaa2e92ab8d727f2bfdaa6e4a2a9159d8091c2e1ed5ce3cfa048a63951",
+        "bytes": 1874944
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/lcd/artifacts/halo_lcd_prod.ino.bin",
-        "sha256": "ffb78b24586709e570c9a6647e5dd4f0462f80897ac2388173fd35312d147338",
-        "bytes": 2033104
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "421abd322036615ec9a1d810b3fe77724c2a188fbfca476371c4fbf63120a128",
+        "bytes": 2032960
       }
     },
     "publication": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/promote001/result.json",
-      "sha256": "d08a61a6f12472c10d783e3f1ec782b3b954efd4805678109dfabeac3ec4546f"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/promote001/result.json",
+      "sha256": "6fe19012d184e3304644a9bb53be010431d9be3f3e66a17a411e63c11e60b10c"
     },
     "staging": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/stage001/result.json",
-      "sha256": "6b745f88f6459d229243eb4c10366d3f41242aa62460593df2cd883dd7802c21"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/stage001/result.json",
+      "sha256": "8dbdd6af92209f1e097ffdc18b7c3ac7602c984e35189696fd43e27f37f8a7ae"
     },
     "prepared_publication": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/publication/release.json",
-      "sha256": "e0fdf6a94d0bf41d1625ae2100a00564ca51282fb9704d044fa7c19e097cf13f"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/publication/release.json",
+      "sha256": "eb3314944ddfdabe9dcc0ee578fa2402c8f584325e4c1ea6f82cc775435b2eca"
     },
     "public_readback": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/PUBLIC-READBACK.json",
-      "sha256": "d923a2cd64ae5138745c0b3f13cb168d0f03098519ff6571c53e7cf3faf78c71"
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/PUBLIC-READBACK.json",
+      "sha256": "452c555cd09522363b7a193c0ea386721f714ff3e2ab35ed00280fca21c09620"
+    },
+    "publication_closure": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/release-review/PUBLICATION-CLOSURE.json",
+      "sha256": "ce4a6473bb6790bf092e821069c05d305777bcfeafbde4984772bc28a6aab30c"
     },
     "published": true,
-    "current_public_ota_version": "6.4.207",
+    "current_public_ota_version": "6.4.208",
     "git_remote_push_performed": false,
-    "installed": false,
-    "device_acceptance": "SCOPED_IMAGE_LIST_SLEEP_PASS_MANUAL_AND_SCHEDULED_OTA_FAIL_VOICE_SEMANTICS_UNQUALIFIED",
-    "device_evidence": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
-      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
-    },
+    "installed": true,
+    "device_acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
     "retained_installed_pair": {
-      "version": "Sense6.4.207/LCD6.4.206",
+      "version": "6.4.208",
       "installed": {
-        "sense": "6.4.207 app1 SDK VALID",
-        "lcd": "6.4.206 app0 SDK VALID"
+        "sense": "6.4.208 app0 SDK VALID",
+        "lcd": "6.4.208 app1 SDK VALID"
       },
-      "health": {
-        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/postservice207-health01/RESULT.json",
-        "sha256": "94b46a262ceb5f7e31bc6ee92de96834ff953353e0c8c050b4a456eae58e2a6b"
+      "installation_methods": {
+        "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
+        "lcd": "ordinary manual OTA from206/app0 to208/app1"
       },
-      "functional_test": {
-        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
-        "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+      "acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
+      "first_manual_ota": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/manual208-01/FIRST-OTA-ACCEPTANCE.json",
+        "sha256": "5db811e1bf8b2b574cf3f35ef1eeb7ca0ba2d866704ec7ed4cf726c1d8c88108"
       },
-      "acceptance": "PASS_ONE_FIRST_ATTEMPT_CLAIM_AND_IMAGE_UPLOAD_WITH_CLOUD_VERIFICATION"
+      "same_version_check": "PASS",
+      "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
+      "same_version_manual": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
+        "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
+      },
+      "device_acceptance": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+        "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+      }
+    },
+    "bootstrap_service": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/service208-02/service/result.json",
+      "sha256": "e413cae928e1f83515ae7bebf71eb3d949a330e96308e72c3bbc566e6ff146a5"
+    },
+    "bootstrap_independent_review": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/service208-02/INDEPENDENT-SERVICE-OTA-REVIEW.json",
+      "sha256": "380ca11acd430052c3ff081967d565b09ceb280624fcc6cb404e986593577b77"
     },
     "retained_factory_version": "6.4.197",
-    "schedule": "Production 02:00 Pacific unchanged. Latest case logged next nightly target1790067600; no schedule, allowance or debt modifications for this release.",
-    "next_version_minimum": "6.4.208",
+    "schedule": "Production02:00 Pacific unchanged. Calendar-credit repair has actual-function host regression evidence; no new physical scheduled 208 pass claimed.",
+    "next_version_minimum": "6.4.209",
     "next_version_requires_fresh_inventory_check": true,
-    "handoff": "docs/RELEASE_207.md",
+    "handoff": "docs/RELEASE_208.md",
     "source_tag": {
-      "name": "halo-v6.4.207",
-      "object": "de5ab8df945e59ce66e600b410fd645ed9732496",
-      "commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
+      "name": "halo-v6.4.208",
+      "object": "8cacdd41d5b20dfd37c12e63f8f25775fa0c7e92",
+      "commit": "38cd151056242aba29bd07503ba78157e7cb0a97",
       "remote_push": false
     },
-    "release_readiness": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/release-review/READINESS.json",
-      "sha256": "9c4e72be5484a465bcae73114b750aeae64f4ee1d12b108487f5631a20ed5e8e"
-    },
-    "source_scope_review": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/release-review/REVIEW.md",
-      "sha256": "c024baee4ba4169bec078742a7e7dc570e63718a61a4b2e72ec501a78d3cd563"
-    },
     "limits": [
-      "September22 functional campaign reproduces manual and genuine02:00 scheduled OTA policy_deferred before download in retained closedDISCOVERY+ownerlessLCDdue state; timer and Wi-Fi work. LCD remains206. Voice cloud ingest passed but acoustic transcript empty; no list/delete acceptance. See docs/FUNCTIONAL_207_20260922.md.",
-      "One actual phone provisioning and immediate Check-in on Sense207/LCD206 passed first account claim and first image PUT; public LCD207 has matching runtime dependencies except generated version metadata but its exact bytes have not been installed on the bench.",
-      "No new paired207 OTA transfer, scheduled OTA, cold-power, USB-free or exhaustive product qualification.",
-      "Repeat provisioning, ordinary voice and input interruption/resume remain separate acceptance work. Voice allocation policy is unchanged.",
-      "Existing camera DMA reserve warning and fragmentation remain; successful PSRAM fallback was observed.",
-      "Claim allocator counter line truncates before default_fallbacks; complete claim and PUT failure windows reported zero allocation failures.",
-      "Exhausted account-claim retry bookkeeping and permanent 64 KB internal OTA marker buffer remain separate open work.",
-      "Cloud image custody/checksum/decode verified; downstream recognition or inventory semantics were not tested in this case.",
-      "Earlier private QUALIFICATION.json is a historical pre-install checkpoint, not the current release status."
+      "One LCD manual transfer and one ordinary same-version check; not repeated reliability or full-product qualification.",
+      "Sense208 was USB bootstrapped; no Sense208 self-OTA pass is claimed.",
+      "Calendar repair has production-function host tests and an old-code negative control; no physical scheduled208 run is claimed. Production02:00 Pacific is unchanged.",
+      "The literal Sense no-update comparison line was interleaved. Exact current/fetched versions and the executed terminal path support success; natural Home and paired sleep were directly logged.",
+      "No new provisioning/voice semantics, interruption, power-cut or USB-free qualification is claimed. Prior207 functional limits remain separate.",
+      "No host allowance, schedule or OTA debt fixture was used to force acceptance."
     ],
-    "recorded_epoch": 1790065542.762676,
-    "private_release_package": {
-      "path": "/Users/MattTaylor/halo-releases/6.4.207.ARCHIVE-RECORD.json",
-      "sha256": "112aa711d71a00309e4affb1e4d8a74fdbff7f50698fc8aa89338cee84838ecb"
+    "device_evidence": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
     },
-    "functional_campaign_20260922": {
-      "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
-      "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
-    }
+    "first_manual_ota_acceptance": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/manual208-01/FIRST-OTA-ACCEPTANCE.json",
+      "sha256": "5db811e1bf8b2b574cf3f35ef1eeb7ca0ba2d866704ec7ed4cf726c1d8c88108"
+    },
+    "same_version_acceptance": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
+      "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
+    },
+    "release_record": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/RELEASE-RECORD.json",
+      "sha256": "94978b7dcc3b933ca4e712a27ebf5c9df5260878123b9f7862cc369b705752d5"
+    },
+    "device_acceptance_record": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+    },
+    "source_tag_receipt": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/SOURCE-TAG.json",
+      "sha256": "34c74627ab9ec4274daab97f4af894d0845417735b1188b9c5153b5df4011895"
+    },
+    "new_release_archive_created": false,
+    "private_release_package": null
   },
   "previous_working_source_187": {
     "version": "6.4.187",
@@ -10131,16 +10153,16 @@
   },
   "production_source_selection": {
     "authoritative_selector": "PRODUCTION_BASELINE.json",
-    "handoff": "docs/RELEASE_207.md",
-    "minimum_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
-    "source_tag": "halo-v6.4.207",
-    "source_tag_object": "de5ab8df945e59ce66e600b410fd645ed9732496",
+    "handoff": "docs/RELEASE_208.md",
+    "minimum_source_commit": "38cd151056242aba29bd07503ba78157e7cb0a97",
+    "source_tag": "halo-v6.4.208",
+    "source_tag_object": "8cacdd41d5b20dfd37c12e63f8f25775fa0c7e92",
     "canonical_branch": "codex/halo-production-baseline-197",
-    "minimum_new_version": "6.4.208",
+    "minimum_new_version": "6.4.209",
     "last_published_update": "2026-09-22",
-    "public_version": "6.4.207",
+    "public_version": "6.4.208",
     "factory_version_unchanged": "6.4.197",
-    "device_acceptance": "PASS_ONE_207_206_PROVISIONING_IMMEDIATE_CHECKIN_CLOUD_SLEEP_CASE"
+    "device_acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE"
   },
   "baseline_freeze_20260919": {
     "scope": "Current source197 and exact196/197 artifacts; no runtime/build/publication change",
@@ -10862,5 +10884,177 @@
     },
     "candidate_installed": false,
     "no_public_promotion": false
+  },
+  "previous_working_source_207": {
+    "version": "6.4.207",
+    "status": "PUBLISHED_207_OTA_ADMISSION_BLOCKER_FOUND",
+    "artifact_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
+    "artifact_source_firmware_tree": "2489f338c55c9a9af14f49c4408ea70fc8d50f24",
+    "build_id": "6.4.207-20260922T073628Z-fcf6fb220f1f",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from fcf6fb220f1f4983557669e8e3b552f910e079c1 or reviewed descendants, preserving the 207 scoped TLS allocator, 206 LCD provisioning fix, camera recovery, image upload pacing, 201 OTA repair and all earlier fixes. EOL stays197.",
+    "materialization": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/snapshot/materialization.json",
+      "sha256": "1954fbe834a1cf6f987d5bae2c3f9929c866d94eba28283385231f530e9885e2"
+    },
+    "working_host_tests": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/memory207-audit/regression-working01/RESULT.json",
+      "sha256": "301ebdfdc1ba176e5e2c3630263431509bea66d142949e77be6e7344d15f12a3"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/regression/RESULT.json",
+      "sha256": "496ae0d58dcf4fc5b8cbc10b4a90b636210cb2db2136a3c1ce3abefc3f1db168"
+    },
+    "host_suite_count": 113,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "built_boards": [
+      "sense",
+      "lcd"
+    ],
+    "artifact_checks": [
+      {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/artifact-result-v2-sense.json",
+        "sha256": "2921768b2616a0a1445c7294006eeac0900ba67730e8051bfaf288f397556a99"
+      },
+      {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/artifact-result-v2-lcd.json",
+        "sha256": "1f7fc8c4e74a687cc70ca5a093a39f211654b474e44b2f83f1fc0aaf53e340ef"
+      }
+    ],
+    "board_proofs": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/sense/artifacts/verified.json",
+        "sha256": "e6a1bc7389ed1f9690c2d364cbd57286d4dbee3959e39e4a398d37e1cc633600"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/lcd/artifacts/verified.json",
+        "sha256": "e3cf3473f2e68a93b1aca78727c25a00fbcb858b96c1ed17cdbf25d843bf0fd0"
+      }
+    },
+    "applications": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "a6a46832b39dd7b05b677657b7af1e17818b5a234909b7357f1c77e120076e0e",
+        "bytes": 1874752
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "ffb78b24586709e570c9a6647e5dd4f0462f80897ac2388173fd35312d147338",
+        "bytes": 2033104
+      }
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/promote001/result.json",
+      "sha256": "d08a61a6f12472c10d783e3f1ec782b3b954efd4805678109dfabeac3ec4546f"
+    },
+    "staging": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/stage001/result.json",
+      "sha256": "6b745f88f6459d229243eb4c10366d3f41242aa62460593df2cd883dd7802c21"
+    },
+    "prepared_publication": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/publication/release.json",
+      "sha256": "e0fdf6a94d0bf41d1625ae2100a00564ca51282fb9704d044fa7c19e097cf13f"
+    },
+    "public_readback": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/PUBLIC-READBACK.json",
+      "sha256": "d923a2cd64ae5138745c0b3f13cb168d0f03098519ff6571c53e7cf3faf78c71"
+    },
+    "published": true,
+    "current_public_ota_version": "6.4.207",
+    "git_remote_push_performed": false,
+    "installed": false,
+    "device_acceptance": "SCOPED_IMAGE_LIST_SLEEP_PASS_MANUAL_AND_SCHEDULED_OTA_FAIL_VOICE_SEMANTICS_UNQUALIFIED",
+    "device_evidence": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+    },
+    "retained_installed_pair": {
+      "version": "Sense6.4.207/LCD6.4.206",
+      "installed": {
+        "sense": "6.4.207 app1 SDK VALID",
+        "lcd": "6.4.206 app0 SDK VALID"
+      },
+      "health": {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/postservice207-health01/RESULT.json",
+        "sha256": "94b46a262ceb5f7e31bc6ee92de96834ff953353e0c8c050b4a456eae58e2a6b"
+      },
+      "functional_test": {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+        "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+      },
+      "acceptance": "PASS_ONE_FIRST_ATTEMPT_CLAIM_AND_IMAGE_UPLOAD_WITH_CLOUD_VERIFICATION"
+    },
+    "retained_factory_version": "6.4.197",
+    "schedule": "Production 02:00 Pacific unchanged. Latest case logged next nightly target1790067600; no schedule, allowance or debt modifications for this release.",
+    "next_version_minimum": "6.4.208",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/RELEASE_207.md",
+    "source_tag": {
+      "name": "halo-v6.4.207",
+      "object": "de5ab8df945e59ce66e600b410fd645ed9732496",
+      "commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
+      "remote_push": false
+    },
+    "release_readiness": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/release-review/READINESS.json",
+      "sha256": "9c4e72be5484a465bcae73114b750aeae64f4ee1d12b108487f5631a20ed5e8e"
+    },
+    "source_scope_review": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/release-review/REVIEW.md",
+      "sha256": "c024baee4ba4169bec078742a7e7dc570e63718a61a4b2e72ec501a78d3cd563"
+    },
+    "limits": [
+      "September22 functional campaign reproduces manual and genuine02:00 scheduled OTA policy_deferred before download in retained closedDISCOVERY+ownerlessLCDdue state; timer and Wi-Fi work. LCD remains206. Voice cloud ingest passed but acoustic transcript empty; no list/delete acceptance. See docs/FUNCTIONAL_207_20260922.md.",
+      "One actual phone provisioning and immediate Check-in on Sense207/LCD206 passed first account claim and first image PUT; public LCD207 has matching runtime dependencies except generated version metadata but its exact bytes have not been installed on the bench.",
+      "No new paired207 OTA transfer, scheduled OTA, cold-power, USB-free or exhaustive product qualification.",
+      "Repeat provisioning, ordinary voice and input interruption/resume remain separate acceptance work. Voice allocation policy is unchanged.",
+      "Existing camera DMA reserve warning and fragmentation remain; successful PSRAM fallback was observed.",
+      "Claim allocator counter line truncates before default_fallbacks; complete claim and PUT failure windows reported zero allocation failures.",
+      "Exhausted account-claim retry bookkeeping and permanent 64 KB internal OTA marker buffer remain separate open work.",
+      "Cloud image custody/checksum/decode verified; downstream recognition or inventory semantics were not tested in this case.",
+      "Earlier private QUALIFICATION.json is a historical pre-install checkpoint, not the current release status."
+    ],
+    "recorded_epoch": 1790065542.762676,
+    "private_release_package": {
+      "path": "/Users/MattTaylor/halo-releases/6.4.207.ARCHIVE-RECORD.json",
+      "sha256": "112aa711d71a00309e4affb1e4d8a74fdbff7f50698fc8aa89338cee84838ecb"
+    },
+    "functional_campaign_20260922": {
+      "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
+      "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
+    }
+  },
+  "previous_verified_device_health_207": {
+    "version": "Sense6.4.207/LCD6.4.206",
+    "status": "PASS_ONE_207_206_PROVISIONING_IMMEDIATE_CHECKIN_CLOUD_SLEEP_CASE",
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/postservice207-health01/RESULT.json",
+      "sha256": "94b46a262ceb5f7e31bc6ee92de96834ff953353e0c8c050b4a456eae58e2a6b"
+    },
+    "functional_evidence": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+    },
+    "limitations": [
+      "One actual phone provisioning and immediate Check-in on Sense207/LCD206 passed first account claim and first image PUT; public LCD207 has matching runtime dependencies except generated version metadata but its exact bytes have not been installed on the bench.",
+      "No new paired207 OTA transfer, scheduled OTA, cold-power, USB-free or exhaustive product qualification.",
+      "Repeat provisioning, ordinary voice and input interruption/resume remain separate acceptance work. Voice allocation policy is unchanged.",
+      "Existing camera DMA reserve warning and fragmentation remain; successful PSRAM fallback was observed.",
+      "Claim allocator counter line truncates before default_fallbacks; complete claim and PUT failure windows reported zero allocation failures.",
+      "Exhausted account-claim retry bookkeeping and permanent 64 KB internal OTA marker buffer remain separate open work.",
+      "Cloud image custody/checksum/decode verified; downstream recognition or inventory semantics were not tested in this case.",
+      "Earlier private QUALIFICATION.json is a historical pre-install checkpoint, not the current release status."
+    ],
+    "scope": "One private Sense207/LCD206 provisioning and immediate Check-in; paired207 OTA remains untested."
+  },
+  "previous_current_validation_blocker_207_admission": {
+    "status": "REPRODUCED_MANUAL_AND_SCHEDULED_OTA_ADMISSION_FAILURE",
+    "report": "docs/FUNCTIONAL_207_20260922.md",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
+      "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
+    },
+    "next_work": "Narrow closed-DISCOVERY orphan admission and same-boot calendar-credit adoption fixes with regression coverage; preserve all active-update/storage/accounting guards."
   }
 }
