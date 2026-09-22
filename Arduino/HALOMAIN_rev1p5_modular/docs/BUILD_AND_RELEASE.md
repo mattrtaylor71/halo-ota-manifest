@@ -79,6 +79,9 @@ Retain both `artifacts/verified.json` files, BIN/ELF/partition/map/stack evidenc
 
 ## 4. Prepare, stage, and publish exact bytes
 
+See [Publish for the 02:00 OTA check](NIGHTLY_OTA_RELEASE.md) for scheduled-device
+eligibility, other update triggers and the distinction between publication and installation.
+
 First save fresh, read-only paired production latest bodies in a new directory:
 
 ```sh

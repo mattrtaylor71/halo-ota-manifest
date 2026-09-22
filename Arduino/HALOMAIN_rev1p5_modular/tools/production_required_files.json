@@ -139,6 +139,7 @@
     "Sense_Minimal/user_config.h",
     "docs/BENCH_CANDIDATE_FLASH.md",
     "docs/DEVELOPMENT_AND_RELEASE.md",
+    "docs/NIGHTLY_OTA_RELEASE.md",
     "docs/OTA_BENCH_MANUAL.md",
     "docs/OTA_POLICY_PRODUCTION_BUILD.md",
     "docs/OTA_WIRELESS_DIAGNOSTICS.md",

@@ -136,6 +136,9 @@ canary, S3 policy or device routing is changed by setting up this workflow.
 
 ## Explicit production release
 
+For nightly discovery, use [Publish for the 02:00 OTA check](NIGHTLY_OTA_RELEASE.md);
+promotion needs no device schedule change and does not prove fleet installation.
+
 Only after the user explicitly approves the candidate for production, follow
 the existing [release procedure](BUILD_AND_RELEASE.md) against the exact tested
 pair. Local manifest `prepare` remains non-publishing. Both remote production

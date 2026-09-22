@@ -28,6 +28,7 @@ At that earlier178/179 checkpoint, public manifests remained162. The older-manif
 
 ## Release Baseline
 
+- For an explicitly approved production release, follow [Nightly OTA publication](docs/NIGHTLY_OTA_RELEASE.md). Promotion makes the pair available for each eligible 02:00 check; it does not change timers, force an immediate fleet update, or prove installation. Fresh provisioning/manual checks may update earlier.
 - **Default to local development.** Read [Development and release](docs/DEVELOPMENT_AND_RELEASE.md). Build, flash, test, commit, and push-to-device requests do not authorize public OTA. Keep the current production latest unchanged until the user explicitly approves that candidate for production; historical publication authorization does not carry forward.
 - Prepare local candidates with `tools/firmware_candidate.py`; record bench evidence separately. Only after explicit release approval use the current paired publisher with `--approve-production-version` for each production remote phase. Do not use historical publisher copies, the retired single-board CLIs, or direct cloud writes to bypass this boundary.
 - Start future firmware work from `PRODUCTION_BASELINE.json` and `RELEASE_BASELINE.json.current_working_source`, preserving 211 and all earlier fixes. `current_baseline` and tag `halo-v6.4.158` identify immutable recovery and previous scheduled qualification. Read `docs/RELEASE_211.md` and `docs/BUILD_AND_RELEASE.md`; historical qualification does not select the current source.

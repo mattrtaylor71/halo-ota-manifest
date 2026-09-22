@@ -29,7 +29,7 @@ def harness(root, negative=None):
     # Existing receive guard stays before all panel/widget work. Static text is
     # a distinct phase and does not advertise an unrendered percentage.
     assert ui.index('if (g_lcd_ota_uart_receiving || g_lcd_ota_binary_mode)') < ui.index('lcd_allow_visible_ui("ota_screen")')
-    assert 'install_frame ? "Keep Halo powered on"' in ui
+    assert 'install_frame ? "Keep your Kitchen Assistant\\npowered on"' in ui
     assert 'install_frame ? "Something new is coming"' in ui
     assert 'if (install_frame || manual_result)' in ui
     assert 'bool is_transfer = !install_frame &&' in ui

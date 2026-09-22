@@ -260,7 +260,7 @@ static void ui_task(void *arg) {
                                          ? "Something new is coming"
                                          : (finishing ? "Finishing update" : "Checking for updates"));
         lv_obj_set_pos(ota_label, 40, install_frame ? 150 : is_transfer ? 84 : 196);
-        lv_label_set_text(ota_description, install_frame ? "Keep Halo powered on" : manual_result ? result_detail : is_transfer ? ""
+        lv_label_set_text(ota_description, install_frame ? "Keep your Kitchen Assistant\npowered on" : manual_result ? result_detail : is_transfer ? ""
                                                        : (finishing ? "" : "Getting things ready..."));
         lv_obj_set_pos(ota_description, 50, install_frame ? 220 : is_transfer ? 250 : 236);
         if (!install_frame && !manual_result && (is_transfer || finishing))
