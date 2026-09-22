@@ -188,7 +188,9 @@ static void clearProvisionScanCache() {
   g_scan_inflight = false;
   g_scan_started_ms = 0;
   g_scan_cached_ms = 0;
-  g_scan_cached_response = "";
+  // Arduino String keeps its allocation for "", clear(), and String(). A
+  // null C string invalidates it and releases the setup-only backing store.
+  g_scan_cached_response = static_cast<const char*>(nullptr);
   WiFi.scanDelete();
 }
 
@@ -414,11 +416,10 @@ bool ProvisioningManager::finishCompletedSetup() {
     return false;
   }
   // The SDK may have finished an app scan while queued media kept update()
-  // from clearing its local flag. Retire only completed/failed results here;
-  // do not build a response cache, start a scan, or interrupt a running scan.
+  // from clearing its local flag. Teardown below retires completed/failed
+  // results; do not build a response cache or interrupt a running scan here.
   if (g_scan_inflight) {
     if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return false;
-    clearProvisionScanCache();
   }
   stopSetupMode();
   return !setup_mode_active;
@@ -735,6 +736,20 @@ void ProvisioningManager::stopSetupMode() {
   // CRITICAL: Safe teardown order to prevent "STA not started" errors
   // 1. Stop HTTP server first (closes all client connections)
   stopHttpServer();
+
+  // No setup HTTP handler can use the scan response now. Free its backing
+  // store before restoring camera DMA or admitting the queued media upload.
+  const size_t scan_cache_length = g_scan_cached_response.length();
+  const uint32_t dma_caps = MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL;
+  const size_t dma_free_before = heap_caps_get_free_size(dma_caps);
+  const size_t dma_largest_before = heap_caps_get_largest_free_block(dma_caps);
+  clearProvisionScanCache();
+  const size_t dma_free_after = heap_caps_get_free_size(dma_caps);
+  const size_t dma_largest_after = heap_caps_get_largest_free_block(dma_caps);
+  LOG_INFO("[PROVISION] scan_cache_released len=%u dma_free_before=%u dma_free_after=%u dma_largest_before=%u dma_largest_after=%u",
+           (unsigned)scan_cache_length, (unsigned)dma_free_before,
+           (unsigned)dma_free_after, (unsigned)dma_largest_before,
+           (unsigned)dma_largest_after);
   
   // Stop DNS server
   if (dns_server) {

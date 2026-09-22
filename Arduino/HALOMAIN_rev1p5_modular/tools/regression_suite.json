@@ -685,6 +685,24 @@
         "{case_out}"
       ],
       "timeout_seconds": 180
+    },
+    {
+      "id": "test_provisioning_scan_release",
+      "path": "tools/test_provisioning_scan_release.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_sense_memory_diag",
+      "path": "tools/test_sense_memory_diag.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 90
     }
   ]
 }

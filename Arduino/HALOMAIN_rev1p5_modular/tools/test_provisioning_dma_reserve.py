@@ -74,6 +74,7 @@ namespace ProvisioningState {
  static void setState(State s){state=s;}
 }
 static void clearProvisionScanCache(){}
+static struct {size_t length()const{return 0;}} g_scan_cached_response;
 static void primeProvisionScanCache(){check(g_camera_dma_provisioning&&!g_camera_dma_reserve,"reserve released before scan");}
 static void dump_system_truth(const char*){}
 static bool ap_start_ok=true,http_start_ok=true,ap_stop_ok=true;

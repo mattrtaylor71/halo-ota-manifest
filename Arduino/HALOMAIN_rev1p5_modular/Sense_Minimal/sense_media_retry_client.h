@@ -1,5 +1,6 @@
 #pragma once
 #include "sense_media_network.h"
+#include "sense_memory_diag.h"
 
 // The upload scope, input generation and saved pause are owned by sense_media_retry.h.
 // Only the upload worker calls this client's methods/stop(). No other task
@@ -20,7 +21,9 @@ class SenseMediaRetryClient : public WiFiClientSecure {
       if (uint32_t(timeout_ms) > remaining) timeout_ms = remaining;
       setHandshakeTimeout(remaining < 8000 ? remaining / 1000 : 8);
     }
+    sense_memory::point(sense_memory::BeforeConnect, sense_memory::Connect);
     const int connected = WiFiClientSecure::connect(host, port, timeout_ms);
+    sense_memory::point(sense_memory::AfterConnect, sense_memory::Connect);
     // DNS/TCP/handshake are synchronous SDK phases. They cannot be stopped
     // safely by another task; close here before sending any request bytes.
     return cancel_now() ? 0 : connected;
@@ -28,13 +31,19 @@ class SenseMediaRetryClient : public WiFiClientSecure {
   size_t write(uint8_t value) override { return write(&value, 1); }
   size_t write(const uint8_t* bytes, size_t count) override {
     if (cancel_now()) return 0;
-    if (!background_) return WiFiClientSecure::write(bytes, count);
+    sense_memory::point(sense_memory::FirstWrite, sense_memory::Write);
+    if (!background_) {
+      const size_t written = WiFiClientSecure::write(bytes, count);
+      sense_memory::wrote(written);
+      return written;
+    }
     size_t sent = 0;
     while (sent < count) {
       if (cancel_now()) return 0;
       const size_t remaining = count - sent;
       const size_t chunk = remaining < 512 ? remaining : 512;
       const size_t written = WiFiClientSecure::write(bytes + sent, chunk);
+      sense_memory::wrote(written);
       if (cancel_now()) return 0;
       if (!written) return sent;
       sent += written;
@@ -43,11 +52,13 @@ class SenseMediaRetryClient : public WiFiClientSecure {
   }
   int read() override {
     if (cancel_now()) return -1;
+    sense_memory::point(sense_memory::FirstRead, sense_memory::Read);
     const int result = WiFiClientSecure::read();
     return cancel_now() ? -1 : result;
   }
   int read(uint8_t* bytes, size_t count) override {
     if (cancel_now()) return -1;
+    sense_memory::point(sense_memory::FirstRead, sense_memory::Read);
     const int result = WiFiClientSecure::read(bytes, count);
     return cancel_now() ? -1 : result;
   }

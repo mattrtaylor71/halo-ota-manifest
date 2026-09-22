@@ -7163,6 +7163,7 @@ void halo_prod_setup() {
   // The prebuilt libs use CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC which restricts
   // mbedTLS to internal SRAM only (~32KB available). Standard calloc/free
   // with CONFIG_SPIRAM_USE_MALLOC routes large allocations (>4KB) to PSRAM.
+  sense_memory::begin();
   mbedtls_platform_set_calloc_free(calloc, free);
   Serial.printf("[TLS_PSRAM] mbedTLS allocator overridden to use default heap (PSRAM-capable)\n");
 

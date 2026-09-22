@@ -31,6 +31,7 @@ PREFIX = r'''
 #define HALO_DEFER_UPLOADS_TO_SLEEP 1
 #define MALLOC_CAP_INTERNAL 1
 #define MALLOC_CAP_8BIT 2
+#define MALLOC_CAP_DMA 4
 #define pdTRUE 1
 static uint32_t clock_ms=1;
 static unsigned stops=0,http_stops=0,dns_stops=0,ap_stops=0,dma_releases=0;
@@ -39,7 +40,9 @@ static unsigned active_ops=0,qcount=0,claim_reads=0;
 static unsigned scan_deletes=0;
 static int scan_status=-1;
 static unsigned long g_scan_started_ms=0,g_scan_cached_ms=0;
-static std::string g_scan_cached_response;
+static struct ScanResponse : std::string {
+ ScanResponse& operator=(const char* value){assign(value?value:"");return *this;}
+} g_scan_cached_response;
 static bool rebooting=false,claim_busy=false,claim_busy_at_stop=false,g_scan_inflight=false;
 static bool owner_read_ok=true;
 static std::string owner="test-owner",diag;
@@ -47,6 +50,7 @@ static unsigned long millis(){return clock_ms;}
 static bool halo_rebooting(){return rebooting;}
 static void delay(unsigned ms){clock_ms+=ms;}
 static unsigned heap_caps_get_largest_free_block(int){return 100000;}
+static unsigned heap_caps_get_free_size(int){return 100000;}
 static void dump_system_truth(const char*){}
 static void halo_provisioning_dma_reserve(bool active){if(!active)++dma_releases;}
 using wifi_mode_t=int;using wl_status_t=int;

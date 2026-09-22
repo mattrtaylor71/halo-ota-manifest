@@ -435,6 +435,8 @@ static bool voice_upload_and_parse(const UploadJob& job) {
   bool accepted = false;
   for (uint8_t attempt = 1; attempt <= max_attempts; ++attempt) {
     if (media_retry_network_cancelled()) break;
+    // Declared before the TLS client: reporting runs after its destruction.
+    sense_memory::VoiceTrace memory_trace(voice_job_id, attempt);
     SenseMediaRetryClient client;
     HTTPClient http;
     client.setInsecure();
@@ -466,6 +468,7 @@ static bool voice_upload_and_parse(const UploadJob& job) {
 
     Serial.printf("[VOICE] HTTP POST attempt=%u/%u\n", (unsigned)attempt, (unsigned)max_attempts);
     int httpResponseCode = http.POST((uint8_t*)audio_buf, audio_size);
+    memory_trace.response(httpResponseCode);
     Serial.printf("[VOICE] HTTP Response: %d\n", httpResponseCode);
     if (media_retry_network_cancelled()) {
       http.end(); client.stop();
