@@ -1,6 +1,6 @@
 # 6.4.209 published — version-only manual OTA bump
 
-Publish the tested 208 runtime under 209 at the user’s request; only generated version/build metadata changes. Exact 114-suite snapshot tests, paired canonical builds/artifact checks and full public binary readbacks pass. Source `cd2b84bc072a`, local tag `halo-v6.4.209`. Device 209 testing is pending; last verified installed pair and acceptance remain 208. Factory 197/frozen 158 are unchanged. [Release details](docs/RELEASE_209.md).
+Publish the tested 208 runtime under 209 at the user’s request; only generated version/build metadata changes. Exact 114-suite snapshot tests, paired canonical builds/artifact checks and full public binary readbacks pass. Source `cd2b84bc072a`, local tag `halo-v6.4.209`. The user’s second manual attempt installed both 209 boards with exact hashes, SDK VALID, native observed-pair settlement, Home and sleep. The nightly timer is stored and armed; scheduled execution is not yet observed. The first network failure exposed an unfixed preflight UI lease expiry issue. Factory 197/frozen 158 are unchanged. [Release details](docs/RELEASE_209.md).
 
 # 6.4.208 published — guarded recovery of stale OTA bookkeeping
 

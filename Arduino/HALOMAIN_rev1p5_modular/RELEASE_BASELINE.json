@@ -1763,29 +1763,35 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "6.4.208",
-    "status": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
+    "version": "6.4.209",
+    "status": "PASS_PAIRED209_MANUAL_OTA_NATIVE_VALID_SLEEP_AND_NIGHTLY_ARM",
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
-      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+      "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+      "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
     },
     "installation_methods": {
-      "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
-      "lcd": "ordinary manual OTA from206/app0 to208/app1"
+      "sense": "User manual OTA208/app0 to209/app1",
+      "lcd": "User manual OTA208/app1 to209/app0"
+    },
+    "next_nightly": {
+      "request_id": "nightly_20260923",
+      "start_epoch": 1790154000,
+      "local_time": "2026-09-23T02:00:00-07:00",
+      "timezone": "America/Los_Angeles",
+      "lcd_preparation_wake_epoch": 1790153985,
+      "lcd_preparation_local_time": "2026-09-23T01:59:45-07:00",
+      "lcd_final_sleep_timer_s": 51837,
+      "sense_final_sleep_timer_s": 51852,
+      "schedule_modified": false
     },
     "limitations": [
-      "One LCD manual transfer and one ordinary same-version check; not repeated reliability or full-product qualification.",
-      "Sense208 was USB bootstrapped; no Sense208 self-OTA pass is claimed.",
-      "Calendar repair has production-function host tests and an old-code negative control; no physical scheduled208 run is claimed. Production02:00 Pacific is unchanged.",
-      "The literal Sense no-update comparison line was interleaved. Exact current/fetched versions and the executed terminal path support success; natural Home and paired sleep were directly logged.",
-      "No new provisioning/voice semantics, interruption, power-cut or USB-free qualification is claimed. Prior207 functional limits remain separate.",
-      "No host allowance, schedule or OTA debt fixture was used to force acceptance."
+      "One successful paired manual OTA after a separate weak-signal transport failure; not repeated reliability qualification.",
+      "Nightly schedule persistence and actual sleep timer arm verified for September23 at02:00 PDT; that scheduled execution has not yet occurred.",
+      "Earlier attempt exposed LCD preflight lease expiry before blocking manifest retries finished. The UI feedback issue remains open and was not changed by this version-only release.",
+      "Native policy_target_valid observed-pair settlement was logged; no new cloud policy report or raw NVS inspection was performed.",
+      "No separate209 same-version, power-cut, USB-free or full-product acceptance is claimed."
     ],
-    "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
-    "same_version_manual": {
-      "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
-      "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
-    }
+    "scope": "One successful user-initiated paired manual OTA after a separate failed network attempt, exact image hashes, SDK VALID, native observed-pair settlement, fresh Home and paired sleep. Nightly persistence/arm verified; scheduled execution not yet observed."
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -4844,14 +4850,17 @@
     }
   },
   "current_validation_blocker": {
-    "status": "DEVICE209_TEST_PENDING",
+    "status": "SCOPED_PAIRED209_MANUAL_PASS_UI_MANIFEST_WAIT_FEEDBACK_ISSUE_OPEN",
     "report": "docs/RELEASE_209.md",
-    "last_verified_installed_pair": "6.4.208",
-    "retained_208_acceptance": {
-      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
-      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+    "successful_acceptance": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+      "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
     },
-    "next_work": "Observe the user's ordinary manual OTA; do not infer209 installation from publication or208 acceptance."
+    "earlier_failed_attempt": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/manual-user209-01-analysis/ATTEMPT1.json",
+      "sha256": "40e314a494b6a0329ccf46c1ad3d19b7cc745ec59b81974485533d54bb6221f8"
+    },
+    "next_work": "Retain the observed preflight UI lease expiry issue for a separately reviewed fix. Scheduled timer arm is verified; do not claim the next scheduled execution has occurred."
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6551,7 +6560,7 @@
   },
   "current_working_source": {
     "version": "6.4.209",
-    "status": "PUBLISHED_PAIRED209_DEVICE_TEST_PENDING",
+    "status": "PUBLISHED_INSTALLED_PAIRED209_SCOPED_MANUAL_OTA_PASS",
     "artifact_source_commit": "cd2b84bc072a8f287c4f93bed99df091e04610ba",
     "artifact_source_firmware_tree": "607b49e924d036923c4f90a911416918efc04cca",
     "build_id": "6.4.209-20260922T175500Z-cd2b84bc072a",
@@ -6620,34 +6629,28 @@
     "published": true,
     "current_public_ota_version": "6.4.209",
     "git_remote_push_performed": false,
-    "installed": false,
-    "device_acceptance": "DEVICE_TEST_PENDING_USER_MANUAL_OTA",
-    "device_evidence": null,
+    "installed": true,
+    "device_acceptance": "PASS_PAIRED209_MANUAL_OTA_NATIVE_VALID_SLEEP_AND_NIGHTLY_ARM",
+    "device_evidence": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+      "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
+    },
     "retained_installed_pair": {
-      "version": "6.4.208",
+      "version": "6.4.209",
       "installed": {
-        "sense": "6.4.208 app0 SDK VALID",
-        "lcd": "6.4.208 app1 SDK VALID"
+        "sense": "6.4.209 app1 SDK VALID",
+        "lcd": "6.4.209 app0 SDK VALID"
       },
       "installation_methods": {
-        "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
-        "lcd": "ordinary manual OTA from206/app0 to208/app1"
+        "sense": "User manual OTA208/app0 to209/app1",
+        "lcd": "User manual OTA208/app1 to209/app0"
       },
-      "acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
-      "first_manual_ota": {
-        "path": "/Users/MattTaylor/halo-ota208-20260922/manual208-01/FIRST-OTA-ACCEPTANCE.json",
-        "sha256": "5db811e1bf8b2b574cf3f35ef1eeb7ca0ba2d866704ec7ed4cf726c1d8c88108"
-      },
-      "same_version_check": "PASS",
-      "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
-      "same_version_manual": {
-        "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
-        "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
-      },
+      "acceptance": "PASS_PAIRED209_MANUAL_OTA_NATIVE_VALID_SLEEP_AND_NIGHTLY_ARM",
       "device_acceptance": {
-        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
-        "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
-      }
+        "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+        "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
+      },
+      "scope": "One successful user-initiated paired manual OTA after a separate failed network attempt, exact image hashes, SDK VALID, native observed-pair settlement, fresh Home and paired sleep. Nightly persistence/arm verified; scheduled execution not yet observed."
     },
     "retained_208_acceptance": {
       "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
@@ -6681,12 +6684,58 @@
       "sha256": "dc49b7aa81a0bc090845911e9c474062512e7d7e037c1a6ae9b1dc558f8dbffc"
     },
     "limits": [
-      "Version/build metadata bump only; runtime is unchanged from208.",
-      "209 device installation and acceptance are pending the user's manual OTA; last verified installed pair remains208.",
-      "Retained208 acceptance covers one LCD transfer and one same-version request after Sense USB bootstrap; it is not209 transfer, Sense self-OTA or physical scheduled209 qualification.",
-      "Factory197, frozen158 and earlier functional qualification limits remain unchanged."
+      "One successful paired manual OTA after a separate weak-signal transport failure; not repeated reliability qualification.",
+      "Nightly schedule persistence and actual sleep timer arm verified for September23 at02:00 PDT; that scheduled execution has not yet occurred.",
+      "Earlier attempt exposed LCD preflight lease expiry before blocking manifest retries finished. The UI feedback issue remains open and was not changed by this version-only release.",
+      "Native policy_target_valid observed-pair settlement was logged; no new cloud policy report or raw NVS inspection was performed.",
+      "No separate209 same-version, power-cut, USB-free or full-product acceptance is claimed."
     ],
-    "new_release_archive_created": true
+    "new_release_archive_created": true,
+    "previous_installed_pair_208": {
+      "version": "6.4.208",
+      "installed": {
+        "sense": "6.4.208 app0 SDK VALID",
+        "lcd": "6.4.208 app1 SDK VALID"
+      },
+      "installation_methods": {
+        "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
+        "lcd": "ordinary manual OTA from206/app0 to208/app1"
+      },
+      "acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
+      "first_manual_ota": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/manual208-01/FIRST-OTA-ACCEPTANCE.json",
+        "sha256": "5db811e1bf8b2b574cf3f35ef1eeb7ca0ba2d866704ec7ed4cf726c1d8c88108"
+      },
+      "same_version_check": "PASS",
+      "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
+      "same_version_manual": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
+        "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
+      },
+      "device_acceptance": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+        "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+      }
+    },
+    "device_acceptance_record": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+      "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
+    },
+    "next_nightly": {
+      "request_id": "nightly_20260923",
+      "start_epoch": 1790154000,
+      "local_time": "2026-09-23T02:00:00-07:00",
+      "timezone": "America/Los_Angeles",
+      "lcd_preparation_wake_epoch": 1790153985,
+      "lcd_preparation_local_time": "2026-09-23T01:59:45-07:00",
+      "lcd_final_sleep_timer_s": 51837,
+      "sense_final_sleep_timer_s": 51852,
+      "schedule_modified": false
+    },
+    "earlier_failed_attempt": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/manual-user209-01-analysis/ATTEMPT1.json",
+      "sha256": "40e314a494b6a0329ccf46c1ad3d19b7cc745ec59b81974485533d54bb6221f8"
+    }
   },
   "previous_working_source_187": {
     "version": "6.4.187",
@@ -10142,7 +10191,7 @@
     "last_published_update": "2026-09-22",
     "public_version": "6.4.209",
     "factory_version_unchanged": "6.4.197",
-    "device_acceptance": "DEVICE_TEST_PENDING_USER_MANUAL_OTA"
+    "device_acceptance": "PASS_PAIRED209_MANUAL_OTA_NATIVE_VALID_SLEEP_AND_NIGHTLY_ARM"
   },
   "baseline_freeze_20260919": {
     "scope": "Current source197 and exact196/197 artifacts; no runtime/build/publication change",
@@ -11205,5 +11254,40 @@
       "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
     },
     "remaining_scope": "Physical scheduled208, Sense self-OTA, repeated reliability and broader product acceptance remain unqualified; not required claims of these two finite manual cases."
+  },
+  "previous_verified_device_health_208": {
+    "version": "6.4.208",
+    "status": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+    },
+    "installation_methods": {
+      "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
+      "lcd": "ordinary manual OTA from206/app0 to208/app1"
+    },
+    "limitations": [
+      "One LCD manual transfer and one ordinary same-version check; not repeated reliability or full-product qualification.",
+      "Sense208 was USB bootstrapped; no Sense208 self-OTA pass is claimed.",
+      "Calendar repair has production-function host tests and an old-code negative control; no physical scheduled208 run is claimed. Production02:00 Pacific is unchanged.",
+      "The literal Sense no-update comparison line was interleaved. Exact current/fetched versions and the executed terminal path support success; natural Home and paired sleep were directly logged.",
+      "No new provisioning/voice semantics, interruption, power-cut or USB-free qualification is claimed. Prior207 functional limits remain separate.",
+      "No host allowance, schedule or OTA debt fixture was used to force acceptance."
+    ],
+    "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
+    "same_version_manual": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
+      "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
+    }
+  },
+  "previous_validation_blocker_209_pending": {
+    "status": "DEVICE209_TEST_PENDING",
+    "report": "docs/RELEASE_209.md",
+    "last_verified_installed_pair": "6.4.208",
+    "retained_208_acceptance": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+    },
+    "next_work": "Observe the user's ordinary manual OTA; do not infer209 installation from publication or208 acceptance."
   }
 }
