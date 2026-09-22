@@ -138,3 +138,39 @@ One separate previously identified claim-policy issue remains: after all four
 incomplete transport attempts, the advertised post-AP retry window does not
 actually submit another claim. That retry bookkeeping needs a separate scoped
 repair; this allocation change does not claim to fix exhausted-claim recovery.
+
+## Built and installed on the private bench
+
+Sense207 source `fcf6fb220f1f4983557669e8e3b552f910e079c1`, build
+`6.4.207-20260922T073628Z-fcf6fb220f1f`, passed the second complete113-suite gate
+in its immutable snapshot, canonical Sense compilation and artifact checks.
+Binary1,874,752 B / SHA256
+`a6a46832b39dd7b05b677657b7af1e17818b5a234909b7357f1c77e120076e0e`.
+Independent exact-ELF inspection confirms the registered dispatcher, shared
+internal owner and scoped call sites. Static internal RAM increases32 B; the
+upload-worker frame increases32 B and claim transport frame176 B. Task stack
+allocations are unchanged. These costs are not measured memory savings.
+
+`service207-01` installed207/app1, preserving the complete205/app0 fallback,
+NVS, partition table, filesystem and selected oldVALID selector sector. Only
+the inactive application and alternateNEW selector were written; readbacks,
+backups and independent44-reference service review passed. The release log
+confirms scoped allocator rc0/PSRAM1, registered failure hook, SDK mark-valid
+with current readback, and Sense sleep. LCD206/app0 was retained.
+
+`postservice207-health01/RESULT.json` separately passes one fresh actuator
+wake, exact paired207/206 SDKVALID identities, unlocked Home and both deep-sleep
+logs. Capture and actuator ownership closed cleanly. This is not a phone
+provisioning, capture/upload or OTA-transfer pass. The original memory-failure
+scenario still needs its own physical repeat.
+
+A preceding host wrapper successfully woke205/206 but then looked for a
+`tapctl --out` file that its parent CLI does not create. The controller never
+started and no flash was attempted. Its stdout JSON was retained and verified;
+the corrected wrapper consumes stdout. Preserve `wake-service01` evidence.
+This host receipt error is separate from firmware behavior.
+
+Public paired201 and EOL197 remain unchanged. Continue firmware work from207's
+reviewed source or descendants; do not publish this memory mitigation as
+physically qualified until the immediate post-provision claim/capture case is
+observed.
