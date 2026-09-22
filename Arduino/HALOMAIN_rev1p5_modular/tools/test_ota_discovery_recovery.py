@@ -67,6 +67,7 @@ static bool get_lcd_ota_due_nvs(){return debt_value;}
 static bool g_peer_continue_work=false;
 static char g_coord_schedule[64]{};
 static bool halo_policy_short_due(){return false;}
+static bool coord_credit_accepted_calendar(const CoordinatorCreditState&){return false;}
 static void ensure_timezone_pt(const char*){}
 static bool coord_credit_retire_configured_timezone(){return tz_ok;}
 static bool coord_credit_cancel_future_notice(){return false;}

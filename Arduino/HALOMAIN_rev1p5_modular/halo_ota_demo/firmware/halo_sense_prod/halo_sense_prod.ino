@@ -490,6 +490,7 @@ enum class CoordCompletion { Deferred, NoPending, Credited, ResolvedUncredited }
 static CoordCompletion ota_peer_schedule_complete();
 static bool coord_credit_store_arm(const char* id, uint32_t target);
 static bool coord_credit_prepare_work(const char* reason);
+static bool coord_credit_accepted_calendar(const CoordinatorCreditState& base);
 static uint32_t lcd_verified_arm_apply_budget();
 
 static volatile bool g_manual_ota_override = false;
@@ -3972,7 +3973,7 @@ static bool coord_credit_prepare_work(const char* reason) {
     std::lock_guard<std::recursive_mutex> lock(g_time_mutex);
     if (base.pending.id[0] && !base.pending_resolved) {
       changed = credit_admit_pending(base, now, fresh, tz, candidate);
-    } else if ((base.deferred.id[0] ||
+    } else if ((base.deferred.id[0] || coord_credit_accepted_calendar(base) ||
                 (reason && (!strcmp(reason, "nightly") || !strcmp(reason, "lcd_timer")))) &&
                !ota_peer_schedule_completed(base.deferred.id[0]?base.deferred.id:base.schedule.id)) {
       changed = credit_claim_due(base, now, fresh, tz, candidate, !ota_peer_schedule_completed(base.schedule.id));
@@ -5395,6 +5396,26 @@ static bool ota_primary_work_ready() {
 #include "../../../Sense_Minimal/sense_diagnostic_transport.h"
 #include "../shared/SenseDiagnosticExport.h"
 #include "../shared/SenseDurablePolicyRuntime.h"
+
+// Retained LCD debt can queue first, before this boot's actual TIMER notice.
+// Adopt only its correlated bound calendar origin inside the original lease;
+// the caller still uses pending-first, due/TZ/history checks and checked save.
+// Neither the older queue reason nor either readiness deadline is rewritten.
+static bool coord_credit_accepted_calendar(const CoordinatorCreditState& base) {
+#if HALO_DURABLE_OTA_POLICY
+  const uint32_t now = millis();
+  return !g_peer_gate.entered &&
+      (int32_t)(g_boot_ota_deadline_ms - now) > 0 &&
+      (int32_t)(g_peer_gate.deadline_ms - now) > 0 &&
+      (uint32_t)(now - g_peer_gate.proof_ms) < 2000 &&
+      ((base.schedule.bound && halo_policy_accepted_lcd_origin(base.schedule.id)) ||
+       (base.deferred.bound && halo_policy_accepted_lcd_origin(base.deferred.id)));
+#else
+  (void)base;
+  return false;
+#endif
+}
+
 #include "../shared/SenseSleepWitnessIntegration.h"
 #include "../shared/SenseAdmissionBreadcrumb.h"
 #include "../shared/SenseAdmissionExport.h"

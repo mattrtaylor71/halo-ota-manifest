@@ -309,6 +309,7 @@ static void ensure_timezone_pt(const char*){}
 static void coord_credit_clock(uint64_t&now,bool&fresh,char*tz,bool&finished){now=epoch;fresh=clock_fresh;strcpy(tz,"UTC0");finished=true;}
 static bool coord_credit_save(const CoordinatorCreditState&r){g_coord_credit=r;return true;}
 static bool halo_policy_short_due(){return false;}
+static bool coord_credit_accepted_calendar(const CoordinatorCreditState&){return false;}
 static bool s_desired_force=false,s_attempt_recorded=false;
 static uint32_t s_last_attempt_ms=0;
 ''' + definition((SHARED/'OtaIntent.cpp').read_text(),'static bool cooldown_allows()') + r'''

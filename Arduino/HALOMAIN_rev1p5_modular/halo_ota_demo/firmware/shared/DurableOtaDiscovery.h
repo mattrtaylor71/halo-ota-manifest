@@ -1,6 +1,17 @@
 #pragma once
 #include "DurableOtaPolicy.h"
 namespace durable_ota {
+// A canonical nondeferred DISCOVERY can retain a target only as comparison
+// evidence inherited from RESOLVED. Once its read-only reservation is closed,
+// explicit input may retire an otherwise ownerless LCD hint after the runtime
+// proves the current pair and storage. This does not resolve that discovery,
+// grant calendar credit, or change any accounting/target bytes.
+inline bool completed_comparison_hint_authority(const Record& r,bool explicit_manual) {
+  if(!shape(r)||!target_valid(r.target)||r.bench.state!=BenchState::NONE||
+     r.one_shot.phase!=OneShotPhase::NONE)return false;
+  return r.phase==Phase::RESOLVED||
+    (explicit_manual&&r.phase==Phase::DISCOVERY&&!active_phase(r)&&!r.deferred_path);
+}
 // First durable network reservation, before a latest-manifest GET. Only proven
 // absence with no legacy debt can use this entry; caller commits before I/O.
 inline bool start_discovery(const char* origin,const uint8_t(&campaign)[16],

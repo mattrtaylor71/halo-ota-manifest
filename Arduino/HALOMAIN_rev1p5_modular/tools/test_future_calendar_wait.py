@@ -59,6 +59,7 @@ static bool coord_credit_retire_configured_timezone(){return true;}
 static bool ota_peer_schedule_completed(const char*){return false;}
 static void ensure_timezone_pt(const char*){}
 static bool halo_policy_short_due(){return false;}
+static bool coord_credit_accepted_calendar(const CoordinatorCreditState&){return false;}
 static bool nvs_capacity_image_valid(){return image_valid;}
 // Independent media admission is covered by the manual/readiness suite.
 static bool ota_yield_automatic_readiness_to_fresh_media(){return false;}

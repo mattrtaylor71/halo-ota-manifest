@@ -1,4 +1,4 @@
-"""Execute the production resolved-policy hint repair and checked NVS setter.
+"""Execute the production completed-comparison hint repair and checked NVS setter.
 
 The existing postboot harness supplies SDK/flash boundaries and real durable
 policy transitions/codecs. This suite additionally extracts the actual repair,
@@ -19,11 +19,11 @@ from test_manual_ota_clock import definition
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def harness(root):
+def harness(root, runtime_override=None):
     postboot.ROOT = root
     postboot.SHARED = root / 'halo_ota_demo/firmware/shared'
     postboot.WRAPPER = root / 'halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.ino'
-    postboot.RUNTIME = postboot.SHARED / 'SenseDurablePolicyRuntime.h'
+    postboot.RUNTIME = runtime_override or postboot.SHARED / 'SenseDurablePolicyRuntime.h'
     postboot.STATE = postboot.SHARED / 'SenseDurablePolicyState.h'
     runtime, wrapper, state = (p.read_text() for p in
                                (postboot.RUNTIME, postboot.WRAPPER, postboot.STATE))
@@ -171,8 +171,57 @@ struct Retained{
   CHECK(!memcmp(actual,credit,sizeof(credit)));CHECK(done_ids==history);CHECK(!legacy_commits&&sets==0);
  }
 };
-static void denied(const char* name,const std::function<void()>& change){
- ++cases;reset_hint();change();const auto policy=sense_policy::store.bytes;
+// Exact OTA-only blobs from the byte-preserved service207 NVS backup. No
+// provisioning data. Policy SHA0ef76d018a7faa7ae6b0b09e666df427a18e081283bded74058de42b4904bee9;
+// credit SHA686e878184f4e80178a609b911eb8e2a780a0fea3051b81eb1f38429a76f62c8.
+static std::vector<uint8_t> unhex(const char* hex){
+ std::vector<uint8_t> bytes;for(size_t i=0;hex[i];i+=2){unsigned v=0;assert(sscanf(hex+i,"%2x",&v)==1);bytes.push_back(uint8_t(v));}return bytes;
+}
+static void reset_discovery(){
+ reset_hint();using namespace sense_policy;using namespace durable_ota;
+ const auto policy=unhex(
+  "444f523101090000340000003102bbf5cd2bf1c95e0d941f01720d526d7174745f636d64000000000000000000000000"
+  "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000362e342e"
+  "3230310000000000000000000000000000000000000000000000000068747470733a2f2f68616c6f2d6f74612d70726f"
+  "642e73332e75732d656173742d312e616d617a6f6e6177732e636f6d2f68616c6f2f6f74612f70726f642f6172746966"
+  "616374732f73656e73655f362e342e3230315f333765303165623834366139333432652e62696e000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000037e01eb8"
+  "46a9342e30cfb06c54c30fdc47c66c763c8f2e2969fa5442b048ae9780881c00362e342e323031000000000000000000"
+  "000000000000000000000000000000005cbdeccecba68671116a567d0cd9b2a8b12c88656e1b9b994d46fa5d4c93e24c"
+  "e0041f00a136a86a33f6b16aee5000005aeab16a0000000000000000000000009043b26a060000000000000000000000"
+  "40ca22000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000099740962"
+ );
+ const auto credit=unhex(
+  "4e434432020100006e696768746c795f3230323630393232000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "0000000000000000505354385044542c4d332e322e302c4d31312e312e30000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000009043b26a00000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  "00000000000000000000000000000000000000000000000000000000000000000000000000000000"
+ );
+ CHECK(decode(policy.data(),policy.size(),state_record));
+ CHECK(credit_decode(credit.data(),credit.size(),g_coord_credit));
+ store.bytes=policy;store.wrote=false;
+ CHECK(state_record.phase==Phase::DISCOVERY&&!active_phase(state_record)&&!state_record.deferred_path);
+ CHECK(state_record.reserved_work_ms==0&&state_record.active_deadline==0&&!strcmp(state_record.target.version,"6.4.201"));
+ CHECK(!g_coord_credit.pending.id[0]&&!g_coord_credit.deferred.id[0]&&!g_coord_credit.pending_credit_admitted);
+ epoch=1790066829;kFirmwareVersion="6.4.207";strcpy(g_lcd_ota_query_resp_fw,"6.4.206");
+ strcpy(g_lcd_query_running_part,"app0");strcpy(g_lcd_query_boot_part,"app0");
+ remember_retry_baseline();
+ done_ids={"nightly_20260920","nightly_20260919","nightly_20260918","nightly_20260917", "nightly_20260916","nightly_20260915","nightly_20260914","nightly_20260912"};
+}
+static void denied(const char* name,const std::function<void()>& change,bool discovery=false){
+ ++cases;if(discovery)reset_discovery();else reset_hint();change();const auto policy=sense_policy::store.bytes;
  const CoordinatorCreditState credit=g_coord_credit;const auto history=done_ids;
  bool reconciled=true;CHECK(!sense_policy::reconcile_resolved_lcd_hint(reconciled));CHECK(!reconciled);
  CHECK(erases==0&&commits==0&&sets==0&&due_present);CHECK(sense_policy::store.bytes==policy);
@@ -330,6 +379,50 @@ int main(){
  CHECK(!reconcile_resolved_lcd_hint(reconciled)&&!reconciled&&erases==0);
  ++cases;reset_hint();namespace_absent=true;reconciled=true;
  CHECK(!reconcile_resolved_lcd_hint(reconciled)&&!reconciled&&erases==0);
+ // The actual207 refusal fixture: keep comparison/origin/accounting bytes
+ // untouched while retiring the hint, then use the ordinary manual grant.
+ ++cases;reset_discovery();const Record captured=state_record;Retained captured_before;
+ Record expected{};CHECK(reserve_discovery(captured,fresh_clock(),false,false,expected,"manual",nullptr,true)==Admission::ALLOWED);
+ CHECK(enter("manual",true));
+ uint8_t expected_bytes[kRecordBytes];CHECK(encode(expected,expected_bytes));
+ CHECK(store.bytes==std::vector<uint8_t>(expected_bytes,expected_bytes+sizeof(expected_bytes)));
+ CHECK(!strcmp(state_record.origin,captured.origin)&&!memcmp(&state_record.target,&captured.target,sizeof(captured.target)));
+ CHECK(work.live&&!work.legacy&&erases==1&&commits==1&&!due_present&&hash_reads==0);
+ CHECK(done_ids==captured_before.history&&!legacy_commits);
+ CHECK(credit_encode(g_coord_credit,actual_credit)&&!memcmp(actual_credit,captured_before.credit,sizeof(actual_credit)));
+ ++cases;reset_discovery();Retained discovery_before;reconciled=false;
+ CHECK(reconcile_resolved_lcd_hint(reconciled)&&reconciled);discovery_before.unchanged();
+ CHECK(!due_present&&erases==1&&commits==1&&opens==closes);
+ // Automatic calendar recovery owns its separate gate; no manual authority
+ // may be inferred from a reason string, even during a normal time window.
+ for(const char* reason:{"manual","lcd_due","nightly"}){
+  ++cases;reset_discovery();manual_request=false;normal_window=true;Retained before;
+  CHECK(!enter(reason,true)&&!work.live&&due_present&&erases==0);before.unchanged();
+ }
+ denied("closed discovery empty target",[]{state_record.target={};},true);
+ denied("legacy deferred discovery",[]{state_record.deferred_path=true;},true);
+ denied("active discovery",[]{Record next;CHECK(reserve_discovery(state_record,fresh_clock(),false,false,next,nullptr,nullptr,true)==Admission::ALLOWED);state_record=next;},true);
+ denied("discovery one-shot",[]{state_record.one_shot.phase=OneShotPhase::CLOSED;},true);
+ denied("discovery bench",[]{state_record.bench.state=BenchState::ACTIVE;},true);
+ denied("discovery pending owner",[]{g_coord_credit.pending=g_coord_credit.schedule;},true);
+ denied("discovery deferred owner",[]{g_coord_credit.deferred=g_coord_credit.schedule;},true);
+ denied("discovery completion owner",[]{strcpy(g_coord_completion_target,"6.4.201");},true);
+ denied("discovery stale peer",[]{g_peer_gate.proof_ms=now_ms-2000;},true);
+ denied("discovery receiver not idle",[]{g_lcd_query_recovery_idle=false;},true);
+ denied("discovery unsafe transport",[]{retry_safe=false;},true);
+ denied("discovery invalid local",[]{local_valid=false;},true);
+ denied("discovery below peer floor",[]{strcpy(g_lcd_ota_query_resp_fw,"6.4.200");remember_retry_baseline();},true);
+ denied("discovery uncertain storage",[]{g_ota_storage_uncertain=true;},true);
+ denied("discovery intent expires while storing",[]{inject=[](const char* e){if(!strcmp(e,"open_write"))manual_request=false;};},true);
+ denied("discovery user arrives while storing",[]{inject=[](const char* e){if(!strcmp(e,"capacity"))user_busy=true;};},true);
+ for(unsigned failure=0;failure<3;++failure){
+  ++cases;reset_discovery();Retained before;
+  if(failure==0)nvs_erase_fail=true;else if(failure==1)nvs_commit_fail=true;else nvs_readback_fail=true;
+  CHECK(!enter("manual",true)&&!work.live&&g_ota_storage_uncertain&&get_lcd_ota_due_nvs());before.unchanged();
+ }
+ ++cases;reset_discovery();Retained expired;unsigned reads_after=0;
+ inject=[&](const char* e){if(!strcmp(e,"readback")&&++reads_after==4)now_ms+=2000;};
+ CHECK(!enter("manual",true)&&!work.live&&erases==1&&!due_present);expired.unchanged();
  printf("PASS %u cases / %u checks: production orphan repair, typed checked setter, refusals, idempotence, manual grant and automatic no-GET\n",cases,checks);
 }
 '''
@@ -351,6 +444,7 @@ def run(root, out):
     paths = ['halo_ota_demo/firmware/shared/SenseDurablePolicyRuntime.h',
              'halo_ota_demo/firmware/shared/SenseDurablePolicyState.h',
              'halo_ota_demo/firmware/shared/DurableOtaPolicy.h',
+             'halo_ota_demo/firmware/shared/DurableOtaDiscovery.h',
              'halo_ota_demo/firmware/shared/CoordinatorCreditState.h',
              'halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.ino',
              'tools/test_postboot_policy_settlement.py', 'tools/test_ota_resolved_hint.py']

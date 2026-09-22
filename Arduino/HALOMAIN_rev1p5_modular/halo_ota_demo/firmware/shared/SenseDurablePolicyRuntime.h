@@ -165,16 +165,14 @@ static bool running_matches(const durable_ota::Target&t,uint32_t started,uint32_
   return nvs_capacity_image_valid()&&!strcmp(t.version,kFirmwareVersion)&&
     image_matches(esp_ota_get_running_partition(),t,started,budget)&&nvs_capacity_image_valid();
 }
-// A completed canonical campaign can outlive a readiness-only LCD hint. Its
-// completion authority is distinct from today's installed pair: a later
-// service image must not be hashed as the old target, or resolve active work.
+// Completed comparison authority can outlive a readiness-only LCD hint. An
+// explicit user request may also recover a closed nondeferred discovery that
+// retained that comparison. A later image never resolves active target work.
 // This predicate is also rechecked by the hint writer after blocking NVS work.
 static bool resolved_lcd_hint_ready() {
   const auto* r=current();
   if(!state_loaded||!state_present||!state_allowed||!r||
-     r->phase!=durable_ota::Phase::RESOLVED||!durable_ota::shape(*r)||
-     !durable_ota::target_valid(r->target)||r->bench.state!=durable_ota::BenchState::NONE||
-     r->one_shot.phase!=durable_ota::OneShotPhase::NONE||
+     !durable_ota::completed_comparison_hint_authority(*r,halo_ota_manual_override_active())||
      !durable_ota::clock_valid(*r,fresh_clock(work.normal))||
      !g_coord_credit_loaded||!g_coord_credit_mutations||!g_coord_credit_persisted||
      !credit_state_shape(g_coord_credit)||g_coord_credit.pending.id[0]||
@@ -211,15 +209,16 @@ static bool reconcile_resolved_lcd_hint(bool& reconciled) {
   bool due=false;
   if(!resolved_lcd_hint_ready()||!ota_storage_read_debt(due)||!due)return false;
   const auto* r=current();
-  // Already-RESOLVED authority permits the same completed comparison used by
-  // manual discovery recovery. Each board independently meets its old floor;
+  // Retained completed-target authority uses the same comparison as manual
+  // discovery recovery. Each board independently meets its old floor;
   // a staged service upgrade need not have identical current version labels.
   if(!(compareSemver(kFirmwareVersion,r->target.version)>0||
        running_matches(r->target,work.original_start,work.original_budget))||
      !resolved_lcd_hint_ready()||
      !set_lcd_ota_due_nvs(false,resolved_lcd_hint_ready))return false;
   reconciled=true; // A verified erase stays final even if the lease just ended.
-  Serial.println("[OTA_POLICY] lcd_hint_retired authority=resolved credit=unchanged");
+  Serial.printf("[OTA_POLICY] lcd_hint_retired authority=%s credit=unchanged\n",
+    r->phase==durable_ota::Phase::RESOLVED?"resolved":"closed_discovery");
   return !get_lcd_ota_due_nvs()&&!unresolved_legacy()&&resolved_lcd_hint_ready();
 }
 static bool rollback_matches(const durable_ota::Record&r,uint32_t started,uint32_t budget) {
@@ -361,7 +360,8 @@ static bool enter(const char* reason,bool retained_legacy) {
     }
     r=current();
   }
-  if(r&&r->phase==durable_ota::Phase::RESOLVED&&!resolved_now&&retained_legacy&&
+  if(r&&durable_ota::completed_comparison_hint_authority(*r,halo_ota_manual_override_active())&&
+     !resolved_now&&retained_legacy&&
      !g_coord_pending[0]){
     bool reconciled=false;
     if(!reconcile_resolved_lcd_hint(reconciled)){
