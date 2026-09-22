@@ -4842,14 +4842,13 @@
     }
   },
   "current_validation_blocker": {
-    "status": "ONE207_206_CASE_PASS_PAIRED207_OTA_ACCEPTANCE_PENDING",
-    "details": "One first-attempt claim/image case passed. Repeat provisioning, voice and input interruption/resume remain unqualified.",
+    "status": "REPRODUCED_MANUAL_AND_SCHEDULED_OTA_ADMISSION_FAILURE",
+    "report": "docs/FUNCTIONAL_207_20260922.md",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
-      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+      "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
+      "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
     },
-    "candidate_installed": false,
-    "no_public_promotion": false
+    "next_work": "Narrow closed-DISCOVERY orphan admission and same-boot calendar-credit adoption fixes with regression coverage; preserve all active-update/storage/accounting guards."
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6549,7 +6548,7 @@
   },
   "current_working_source": {
     "version": "6.4.207",
-    "status": "PUBLISHED_PAIRED_RELEASE_SCOPED_207_206_BENCH_PASS",
+    "status": "PUBLISHED_207_OTA_ADMISSION_BLOCKER_FOUND",
     "artifact_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
     "artifact_source_firmware_tree": "2489f338c55c9a9af14f49c4408ea70fc8d50f24",
     "build_id": "6.4.207-20260922T073628Z-fcf6fb220f1f",
@@ -6626,7 +6625,7 @@
     "current_public_ota_version": "6.4.207",
     "git_remote_push_performed": false,
     "installed": false,
-    "device_acceptance": "PASS_ONE_207_206_PROVISIONING_IMMEDIATE_CHECKIN_CLOUD_SLEEP_CASE",
+    "device_acceptance": "SCOPED_IMAGE_LIST_SLEEP_PASS_MANUAL_AND_SCHEDULED_OTA_FAIL_VOICE_SEMANTICS_UNQUALIFIED",
     "device_evidence": {
       "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
       "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
@@ -6667,6 +6666,7 @@
       "sha256": "c024baee4ba4169bec078742a7e7dc570e63718a61a4b2e72ec501a78d3cd563"
     },
     "limits": [
+      "September22 functional campaign reproduces manual and genuine02:00 scheduled OTA policy_deferred before download in retained closedDISCOVERY+ownerlessLCDdue state; timer and Wi-Fi work. LCD remains206. Voice cloud ingest passed but acoustic transcript empty; no list/delete acceptance. See docs/FUNCTIONAL_207_20260922.md.",
       "One actual phone provisioning and immediate Check-in on Sense207/LCD206 passed first account claim and first image PUT; public LCD207 has matching runtime dependencies except generated version metadata but its exact bytes have not been installed on the bench.",
       "No new paired207 OTA transfer, scheduled OTA, cold-power, USB-free or exhaustive product qualification.",
       "Repeat provisioning, ordinary voice and input interruption/resume remain separate acceptance work. Voice allocation policy is unchanged.",
@@ -6680,6 +6680,10 @@
     "private_release_package": {
       "path": "/Users/MattTaylor/halo-releases/6.4.207.ARCHIVE-RECORD.json",
       "sha256": "112aa711d71a00309e4affb1e4d8a74fdbff7f50698fc8aa89338cee84838ecb"
+    },
+    "functional_campaign_20260922": {
+      "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
+      "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
     }
   },
   "previous_working_source_187": {
@@ -10848,5 +10852,15 @@
       "Manual-lcd201-01 stopped at a test-controller cached-peer check before sending OTA; it is not a failed OTA attempt.",
       "Retained diagnostic context returned orphan_closure=Corrupt and context_conflict=Busy; later open/seal succeeded. OTA passes do not establish complete diagnostic-journal health."
     ]
+  },
+  "previous_current_validation_blocker_207_release": {
+    "status": "ONE207_206_CASE_PASS_PAIRED207_OTA_ACCEPTANCE_PENDING",
+    "details": "One first-attempt claim/image case passed. Repeat provisioning, voice and input interruption/resume remain unqualified.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+    },
+    "candidate_installed": false,
+    "no_public_promotion": false
   }
 }

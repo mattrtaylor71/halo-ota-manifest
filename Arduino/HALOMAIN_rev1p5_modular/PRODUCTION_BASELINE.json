@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "PUBLISHED_PAIRED_RELEASE_SCOPED_207_206_BENCH_PASS",
+  "status": "PUBLISHED_207_OTA_ADMISSION_BLOCKER_FOUND",
   "designated_date": "2026-09-22",
   "minimum_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
   "minimum_source_firmware_tree": "2489f338c55c9a9af14f49c4408ea70fc8d50f24",
@@ -46,7 +46,7 @@
     "finished_epoch": 1790065175.027339
   },
   "installed": false,
-  "device_acceptance": "PASS_ONE_207_206_PROVISIONING_IMMEDIATE_CHECKIN_CLOUD_SLEEP_CASE",
+  "device_acceptance": "SCOPED_IMAGE_LIST_SLEEP_PASS_MANUAL_AND_SCHEDULED_OTA_FAIL_VOICE_SEMANTICS_UNQUALIFIED",
   "retained_installed_pair": {
     "version": "Sense6.4.207/LCD6.4.206",
     "installed": {
@@ -94,5 +94,9 @@
       "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
     },
     "acceptance": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP"
+  },
+  "functional_campaign_20260922": {
+    "path": "/Users/MattTaylor/halo-functional207-20260922/CAMPAIGN-RESULT.json",
+    "sha256": "0b3d69dea5234eb2dba1dbcc71d22ed44ac737982890ee6be85f0ba958a7634f"
   }
 }

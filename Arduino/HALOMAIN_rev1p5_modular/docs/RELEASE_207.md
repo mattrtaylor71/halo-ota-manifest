@@ -1,5 +1,14 @@
 # HALO 6.4.207 production release
 
+**September 22 test follow-up: OTA admission is blocked on the bench.**
+Camera uploads, list refreshes and normal sleep passed, but both manual OTA and
+the genuine 02:00 timer attempt refused before downloading. Voice reached the
+cloud; the acoustic fixture produced an empty transcript, so voice-to-list and
+deletion remain unqualified. The installed pair remains Sense207/LCD206.
+See the [functional campaign](FUNCTIONAL_207_20260922.md) for findings, exact
+receipts and limits. No firmware or published artifact was changed by the test.
+The release-time evidence below remains preserved as its original checkpoint.
+
 **Published for Sense and LCD on September 22, 2026.** This is the source for
 future firmware work. Continue from `fcf6fb220f1f4983557669e8e3b552f910e079c1`
 or reviewed descendants on `codex/halo-production-baseline-197`. The branch
