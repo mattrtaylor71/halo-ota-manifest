@@ -1,3 +1,7 @@
+# 6.4.211 published — discard and dish confirmation subtitles
+
+LCD Got it subtitles now say “Updating your kitchen...” for discard and “Macros available in app” for dish. Check-in wording and 210 automatic check-in behavior remain unchanged. The label resets for each screen presentation; no camera, network, OTA or storage implementation changes. Exact 114-suite snapshot gate, paired canonical builds/artifact checks and full public readbacks passed. Installation and device test pending; retained installed 209 evidence stays separate. [Release details](docs/RELEASE_211.md).
+
 # 6.4.210 published — check-in skips quantity confirmation
 
 Sense check-in skips quantity/expiry input, queues quantity 1 with no manual expiry, then uses the existing Got it screen. LCD runtime, camera capture, network, OTA and storage implementations are unchanged. Exact 114-suite snapshot gate, paired canonical builds/artifact checks and full public readbacks passed. Installation and device test pending; retained installed 209 evidence stays separate. [Release details](docs/RELEASE_210.md).
