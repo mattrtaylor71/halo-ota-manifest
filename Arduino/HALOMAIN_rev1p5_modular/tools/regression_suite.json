@@ -115,6 +115,12 @@
       "timeout_seconds": 180
     },
     {
+      "id": "test_image_put_integration",
+      "path": "tools/test_image_put_integration.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
       "id": "test_image_upload_contract",
       "path": "tools/test_image_upload_contract.py",
       "args": [],

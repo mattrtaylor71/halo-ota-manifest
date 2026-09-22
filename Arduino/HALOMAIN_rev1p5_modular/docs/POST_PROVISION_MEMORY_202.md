@@ -254,3 +254,16 @@ frames do not establish the whole call-chain stack margin.
 installation or publication occurred. The bench retains Sense203/LCD201;
 public paired201 and EOL197 remain unchanged. Exact ELF review and a current
 board-specific service plan remain prerequisites to a physical candidate test.
+
+### Completed204 offline audit; physical acceptance pending
+
+[The image PUT audit](IMAGE_UPLOAD_MEMORY_204_AUDIT.md) now records the completed
+HTTP/resource and exact-ELF review, canonical artifact hashes, 44 automated ELF
+checks plus manual review, and the corrected audit-tool incident. The added
+whole-PUT comparison passes 154 scenarios / 1,769 assertions, and the expanded
+full working-tree gate passes all 112 suites with candidate runtime sources
+unchanged. The sealed candidate's original111-suite snapshot receipt remains
+separate. No new firmware blocker was found; this does not establish an AES
+fix. At this checkpoint the bench remains Sense203/LCD201, with private204
+installation and physical acceptance pending. Public paired201 and EOL197
+remain unchanged.
