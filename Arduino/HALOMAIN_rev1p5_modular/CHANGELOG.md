@@ -1,3 +1,7 @@
+# 6.4.201 published — repair completed OTA hints
+
+A stale `lcd_ota_due` flag could block discovery after its canonical campaign was already RESOLVED, producing “Update postponed.” Retire only the proven orphan hint after trusted storage, fresh correlated healthy peer proof and idle transport checks; preserve unresolved transfers, policy/history/accounting and the production02:00Pacific schedule. Both105-suite gates and paired canonical builds/public readbacks pass. Sense201 was USB bootstrapped without changing NVS; LCD199→201 manual OTA and a paired201 no-update check passed with SDKVALID and paired sleep. No new Sense OTA transfer or scheduled/full-product qualification is claimed. [Repair, evidence and limits](docs/OTA_RESOLVED_HINT_REPAIR_201.md).
+
 # 6.4.200 published — clearer provisioning instructions
 
 Enlarge the side scroll hint from 12 to 16 px, extend its 4 px arrow around the full length of the text, and match the app’s white Profile badge and custom kitchen assistant device icon. Actual LVGL page renders and all 104 offline suites passed. Paired canonical builds, exact-snapshot gate and complete public download verification passed. User manual installation is pending; the known saved OTA hint can still defer this bench unit. [Release identity and limits](docs/PROVISIONING_UI_RELEASE_200.md). [Visuals and validation](docs/PROVISIONING_READABILITY_20260921.md).
