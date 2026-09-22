@@ -242,3 +242,15 @@ evidence. The mitigation is not yet proved to cure the AES failure: repeat
 provision→immediate Check-in on the candidate and require first-attempt PUT200,
 exact cloud-image integrity, user priority and dark saved recovery. Do not
 publish or declare an AES fix solely from these host results.
+
+The scoped Sense candidate is now built as
+`6.4.204-20260922T041510Z-ea8c32fe1325`, source
+`ea8c32fe132543c0abfb8aceedb766147d475e8c`. The exact materialized snapshot
+also passed all111 suites, canonical compilation and the reviewed artifact
+checker. Static global RAM remains159508bytes, the same as203. The compiled
+upload-worker frame is1936bytes versus1776bytes in203; these per-function
+frames do not establish the whole call-chain stack margin.
+`release204/QUALIFICATION.json` binds the build/test receipts. No LCD build,
+installation or publication occurred. The bench retains Sense203/LCD201;
+public paired201 and EOL197 remain unchanged. Exact ELF review and a current
+board-specific service plan remain prerequisites to a physical candidate test.
