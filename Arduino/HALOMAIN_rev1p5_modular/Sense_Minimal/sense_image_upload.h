@@ -5,6 +5,7 @@
 #ifndef SENSE_IMAGE_UPLOAD_H
 #define SENSE_IMAGE_UPLOAD_H
 #include <mbedtls/sha256.h>
+#include "../halo_ota_demo/firmware/shared/ScopedTlsMemory.h"
 
 static bool sense_image_hex(const char* s, size_t n) {
   if (!s || strnlen(s, n + 1) != n) return false;
@@ -158,6 +159,9 @@ static bool sense_image_contract_reply(const UploadJob& job, bool reconcile, int
 
 static bool sense_image_presign_request(const UploadJob& job, PresignReply& out,
                                         uint32_t deadline_ms, bool reconcile) {
+  // The nested HTTP client is destroyed before this task-local allocation
+  // scope ends; the validated reply keeps its own URL and receipt Strings.
+  halo_tls_memory::Scope tls_memory;
   char token_guard[65];
   if (deadline_expired(deadline_ms) || !sense_image_operation_token(job,token_guard)) return false;
   char owner[64]={},device[32]={}; load_owner_id_or_default(owner,sizeof(owner));

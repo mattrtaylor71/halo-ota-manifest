@@ -16,6 +16,7 @@
 #include "NtpDnsGuard.h"
 #include "ProvisioningClaimJob.h"
 #include "ProvisioningClaimTransport.h"
+#include "ScopedTlsMemory.h"
 #include <WiFiClientSecure.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -1128,6 +1129,9 @@ extern "C" bool halo_provisioning_claim_worker_poll() {
       ~DmaGuard() { halo_tls_restore_dma_reserve(); }
     } dma;
     const String url = String(PROVISIONING_CLAIM_BASE_URL) + kProvisioningClaimPath;
+    // Only this worker's mbedTLS allocations prefer PSRAM. Keep the scope
+    // through all client destructors; AP HTTP/WPA and other tasks stay default.
+    halo_tls_memory::Scope tls_memory;
     result = provision_claim::transport(g_owner_claim_job, *request, url.c_str(),
                                         kAmazonRootCa1, OTA_TLS_INSECURE_DEBUG);
   }

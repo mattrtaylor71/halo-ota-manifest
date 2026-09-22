@@ -25,6 +25,7 @@ PREFIX = r'''
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <set>
 #include <vector>
 struct String:std::string {
  using std::string::string;using std::string::operator=;
@@ -45,6 +46,7 @@ struct Scenario {
  size_t queue_limit=SIZE_MAX,image_bytes=4096;
  uint32_t write_ms=0,body_write_ms=0,budget=60000,start_ms=1000;
  unsigned cancel_pace=0,foreground_pace=0;
+ bool external_oom=false;
  std::string reply="HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
 };
 static Scenario scenario;
@@ -59,7 +61,35 @@ static std::vector<std::string> requests;
 static std::string diagnostics;
 static uint8_t reserve;
 static uint8_t* g_camera_dma_reserve=&reserve;
-static constexpr int ESP_OK=0,MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP_DMA=4;
+static constexpr int ESP_OK=0,MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP_DMA=4,MALLOC_CAP_SPIRAM=8;
+using TaskHandle_t=void*;
+static TaskHandle_t task=reinterpret_cast<void*>(1);
+static TaskHandle_t xTaskGetCurrentTaskHandle(){return task;}
+static std::set<void*> external_live;
+static unsigned tls_allocations=0,tls_frees=0,foreign_probes=0;
+static bool expect_tls_scope=false;
+static void* heap_caps_calloc(size_t n,size_t size,uint32_t caps){
+ assert(caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+ if(scenario.external_oom)return nullptr;
+ void* p=std::calloc(n,size);if(p)external_live.insert(p);return p;
+}
+static void heap_caps_free(void* p){external_live.erase(p);std::free(p);}
+#include "halo_ota_demo/firmware/shared/ScopedTlsMemory.h"
+static void* tls_allocate(size_t bytes,bool scoped){
+ void* p=halo_tls_memory::calloc(1,bytes);assert(p);
+ assert((external_live.count(p)!=0)==(scoped&&!scenario.external_oom));
+ for(size_t n=0;n<bytes;++n)assert(static_cast<uint8_t*>(p)[n]==0);
+ ++tls_allocations;return p;
+}
+static void tls_free(void* p){if(p){halo_tls_memory::free(p);++tls_frees;}}
+static void foreign_probe(){
+ const TaskHandle_t saved=task;task=reinterpret_cast<void*>(2);
+ {halo_tls_memory::Scope foreign;assert(!expect_tls_scope||!foreign.active());
+  // While the image owns the scope, foreground/OTA/voice tasks still use
+  // the exact default allocator even if they attempt their own scope.
+  void* p=tls_allocate(511,!expect_tls_scope);tls_free(p);}
+ task=saved;++foreign_probes;
+}
 static size_t heap_caps_get_free_size(int){return alive?6000:30000;}
 static size_t heap_caps_get_largest_free_block(int){return alive?700:13000;}
 using Hook=void(*)(size_t,uint32_t,const char*);static Hook failure_hook=nullptr;
@@ -121,12 +151,20 @@ struct Stream {
 };
 struct WiFiClientSecure:Stream {
  size_t response_offset=0;
- virtual ~WiFiClientSecure(){stop();}
- void stop(){assert(!in_sdk);alive=false;queued_bytes=0;}
+ void* context=nullptr;void* records=nullptr;
+ WiFiClientSecure(){context=tls_allocate(512,expect_tls_scope);}
+ virtual ~WiFiClientSecure(){
+  stop();
+  // Destructor work must still see the image scope. These are SDK doubles,
+  // not a model of the actual Arduino context's C++ new allocation.
+  void* p=tls_allocate(127,expect_tls_scope);tls_free(p);tls_free(context);
+ }
+ void stop(){assert(!in_sdk);alive=false;queued_bytes=0;tls_free(records);records=nullptr;}
  void setHandshakeTimeout(uint32_t){}
  int lastError(char* b,size_t n){snprintf(b,n,"test");return 48;}
  virtual int connect(const char*,uint16_t,int32_t){
   assert(!alive);++attempts;requests.emplace_back();response_offset=0;queued_bytes=0;body_writes=0;
+  assert(!records);records=tls_allocate(2048,expect_tls_scope);foreign_probe();
   alive=attempts>scenario.connect_failures;
   if(scenario.cancel_connect)paused=true;
   if(scenario.foreground_connect)foreground_active=true;
@@ -179,6 +217,8 @@ static const std::string image(4096,'I');
 using Put=bool(*)(const String&,const uint8_t*,size_t,const char*,uint32_t,uint32_t,bool*,const PresignReply*,int*);
 static void run(Put put,const char* name,Scenario config,bool expect_ok,int expect_code,unsigned expect_attempts,bool expect_budget=false,bool durable=true,bool reserve_held=true){
  ++cases;case_name=name;scenario=config;paused=config.initial_cancel;foreground_active=false;
+ expect_tls_scope=put==candidate_put;require(external_live.empty());
+ tls_allocations=tls_frees=foreign_probes=0;task=reinterpret_cast<void*>(1);
  alive=locked=in_sdk=false;now_ms=config.start_ms;attempts=resets=locks=unlocks=releases=acquires=trace_reports=0;
  max_write=closed_writes=0;requests.clear();diagnostics.clear();g_camera_dma_reserve=reserve_held?&reserve:nullptr;
  queued_bytes=peak_queue=wire_at_pace_abort=0;queue_failures=body_writes=writes_after_abort=pace_waits=0;paced_delays.clear();
@@ -190,6 +230,10 @@ static void run(Put put,const char* name,Scenario config,bool expect_ok,int expe
  require(ok==expect_ok);require(code==expect_code);require(attempts==expect_attempts);require(aborted==expect_budget);
  require(!alive&&!locked&&!sense_memory::current&&sense_memory::failures.phase==sense_memory::Idle);
  require(locks==unlocks&&releases==acquires&&bool(g_camera_dma_reserve)==reserve_held);
+ require(tls_allocations==tls_frees&&external_live.empty());require(foreign_probes==attempts);
+ // No image transport return may leave allocation routing active for the
+ // next task operation, including early cancellation and exhausted retries.
+ void* outside=tls_allocate(333,false);tls_free(outside);
  require(url==before&&payload==saved_image);require(max_write<=512);require(writes_after_abort==0);
  if(config.saved||paused)require(resets==0);
  if(ok){const std::string path=url.substr(url.find('/',8));
@@ -209,6 +253,7 @@ static void exercise(Put put){
   std::string(" HTTP/1.1\r\nHost: fixture.s3.amazonaws.com\r\nContent-Type: image/jpeg\r\nContent-Length: 4096\r\nIf-None-Match: *\r\nx-amz-checksum-sha256: ").size()+checksum.size()+
   std::string("\r\nConnection: close\r\n\r\n").size();
  run(put,"normal exact request",s,true,200,1);
+ s.external_oom=true;run(put,"PSRAM allocation failure retains default fallback and cleanup",s,true,200,1);s={};
  run(put,"legacy optional receipt headers",s,true,200,1,false,false);
  run(put,"no DMA reservation initially",s,true,200,1,false,true,false);
  s.saved=true;run(put,"saved exact retry",s,true,200,1);
@@ -289,10 +334,10 @@ static void exercise_pacing(Put put,bool paced){
   require(now_ms==s.start_ms+(bytes>512?2u:0u));
  }
 }
-int main(){sense_memory::begin();exercise(candidate_put);
+int main(){halo_tls_memory::initialize(true);sense_memory::begin();exercise(candidate_put);
  exercise_pacing(candidate_put,true);
  BASELINE_RUN
- printf("PASS %u whole-production PUT cases / %u assertions; actual client, exact requests, retries, 412/uncertainty, DMA/HTTP cleanup, positive-time TX pressure, pacing input/deadlines, allocation-report lifetime\n",cases,checks);
+ printf("PASS %u whole-production PUT cases / %u assertions; actual client and TLS allocation scope, exact requests, retries, 412/uncertainty, DMA/HTTP cleanup, positive-time TX pressure, pacing input/deadlines, allocation-report lifetime\n",cases,checks);
 }
 '''
 
@@ -322,10 +367,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix='halo-put-integration-') as tmp:
         out = a.out or Path(tmp);out.mkdir(parents=True, exist_ok=True)
         cpp, exe = out/'integration.cpp', out/'integration'
+        for name in ('esp_heap_caps.h', 'freertos/FreeRTOS.h', 'freertos/task.h'):
+            stub=out/'sdk-stubs'/name;stub.parent.mkdir(parents=True,exist_ok=True);stub.write_text('#pragma once\n')
         cpp.write_text(harness(a.source_root,a.baseline_source_root))
         cmd = [shutil.which('clang++') or 'c++','-std=c++17','-O1','-g','-Wall','-Wextra',
                '-Wno-unused-function','-Wno-unused-variable','-fsanitize=address,undefined','-fno-omit-frame-pointer',
-               '-I',str(a.source_root),str(cpp),'-o',str(exe)]
+               '-I',str(out/'sdk-stubs'),'-I',str(a.source_root),str(cpp),'-o',str(exe)]
         build = subprocess.run(cmd,capture_output=True,text=True,timeout=40)
         (out/'build.log').write_text(build.stdout+build.stderr)
         run = subprocess.run([str(exe)],capture_output=True,text=True,timeout=30) if not build.returncode else None

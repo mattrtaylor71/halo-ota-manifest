@@ -66,6 +66,7 @@ static bool halo_diag_auth_usb_line(const char*,size_t);
 #endif
 
 #include <mbedtls/platform.h>
+#include "../shared/ScopedTlsMemory.h"
 
 // Coalesce LIST_REFRESH requests (Sense wrapper only)
 static bool g_list_refresh_inflight = false;
@@ -7159,13 +7160,15 @@ void halo_prod_setup() {
       !ota_peer_schedule_completed(g_coord_pending)) {
     boot_ota_queue("coord_recovery");
   }
-  // Override mbedTLS allocator: allow PSRAM for TLS buffers.
-  // The prebuilt libs use CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC which restricts
-  // mbedTLS to internal SRAM only (~32KB available). Standard calloc/free
-  // with CONFIG_SPIRAM_USE_MALLOC routes large allocations (>4KB) to PSRAM.
+  // Install one stable dispatcher. Unscoped callers retain the existing
+  // default calloc behavior. Claim/image scopes also move small mbedTLS
+  // allocations to PSRAM, leaving internal DMA room for Wi-Fi and AES.
+  // Never swap global allocator hooks around a live request or redirect DMA.
   sense_memory::begin();
-  mbedtls_platform_set_calloc_free(calloc, free);
-  Serial.printf("[TLS_PSRAM] mbedTLS allocator overridden to use default heap (PSRAM-capable)\n");
+  halo_tls_memory::initialize(psramFound());
+  const int tls_allocator_rc = mbedtls_platform_set_calloc_free(halo_tls_memory::calloc, halo_tls_memory::free);
+  Serial.printf("[TLS_PSRAM] scoped_allocator rc=%d psram=%u default_outside_scope=1\n",
+                tls_allocator_rc, psramFound() ? 1u : 0u);
 
   g_boot_time_ms = millis();
   ensure_timezone_pt("boot");

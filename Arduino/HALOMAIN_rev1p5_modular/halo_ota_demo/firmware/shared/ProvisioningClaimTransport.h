@@ -2,6 +2,9 @@
 #include "ProvisioningClaimJob.h"
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+#include "../../../Sense_Minimal/sense_memory_diag.h"
+#endif
 
 namespace provision_claim {
 // Only the transport worker touches this client, including stop(). The SDK's
@@ -16,22 +19,40 @@ class Client : public WiFiClientSecure {
   int connect(const char* host, uint16_t port, int32_t timeout) override {
     if (cancel_now()) return 0;
     if (timeout <= 0 || timeout > 5000) timeout = 5000;
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+    sense_memory::point(sense_memory::BeforeConnect, sense_memory::Connect);
+#endif
     const int rc = WiFiClientSecure::connect(host, port, timeout);
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+    sense_memory::point(sense_memory::AfterConnect, sense_memory::Connect);
+#endif
     return cancel_now() ? 0 : rc;
   }
   size_t write(uint8_t byte) override { return write(&byte, 1); }
   size_t write(const uint8_t* data, size_t size) override {
     if (cancel_now()) return 0;
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+    sense_memory::point(sense_memory::FirstWrite, sense_memory::Write);
+#endif
     const size_t n = WiFiClientSecure::write(data, size);
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+    sense_memory::wrote(n);
+#endif
     return cancel_now() ? 0 : n;
   }
   int read() override {
     if (cancel_now()) return -1;
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+    sense_memory::point(sense_memory::FirstRead, sense_memory::Read);
+#endif
     const int n = WiFiClientSecure::read();
     return cancel_now() ? -1 : n;
   }
   int read(uint8_t* data, size_t size) override {
     if (cancel_now()) return -1;
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+    sense_memory::point(sense_memory::FirstRead, sense_memory::Read);
+#endif
     const int n = WiFiClientSecure::read(data, size);
     return cancel_now() ? -1 : n;
   }
@@ -83,6 +104,11 @@ class ResponseSink : public Stream {
 inline Result transport(Job& job, const Request& request, const char* url,
                         const char* ca, bool insecure) {
   Result result;
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+  // Declared before both clients so reporting follows their stop/destruction,
+  // including failed/cancelled setup. Identify the request without its body.
+  sense_memory::ClaimTrace memory_trace(request.queued_ms, request.generation);
+#endif
   Client client(job, request);
   HTTPClient http;
   if (insecure) client.setInsecure();
@@ -105,6 +131,9 @@ inline Result transport(Job& job, const Request& request, const char* url,
   http.end();
   client.stop();
   result.elapsed_ms = uint32_t(millis() - request.queued_ms);
+#if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
+  memory_trace.response(result.http_code);
+#endif
   return result;
 }
 }

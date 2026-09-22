@@ -287,6 +287,9 @@ static bool put_to_presigned_url(const String& url,
                                  bool* aborted_for_budget,
                                  const PresignReply* durable,
                                  int* response_code) {
+  // Keep mbedTLS allocations scoped to this image transport through every
+  // retry and the final client destructor, including early cancellation.
+  halo_tls_memory::Scope tls_memory;
   if (response_code) *response_code = 0;
   if (media_retry_network_cancelled()) return false;
   SenseBackupWifiCall backup_call; if (!backup_call) return false;

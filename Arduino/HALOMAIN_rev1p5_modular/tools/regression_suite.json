@@ -708,6 +708,15 @@
       "timeout_seconds": 180
     },
     {
+      "id": "test_scoped_tls_memory",
+      "path": "tools/test_scoped_tls_memory.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
+    },
+    {
       "id": "test_sense_memory_diag",
       "path": "tools/test_sense_memory_diag.py",
       "args": [

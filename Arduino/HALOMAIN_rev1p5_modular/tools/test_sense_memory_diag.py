@@ -114,6 +114,20 @@ int main(){
  reset();{
   ImagePutTrace trace(33);ok(trace.start(1));failures.guard.test_and_set();trace.finish();failures.guard.clear();
  }ok(output.find("complete=0")!=std::string::npos);
+ reset();{
+  ClaimTrace trace(4567,9);ok(current==&trace&&failures.phase==ClaimAttempt);
+  point(BeforeConnect,Connect);tls_live=true;free_bytes=10000;
+  point(AfterConnect,Connect);installed(48,4,"heap_caps_aligned_alloc");
+  trace.response(-1);ok(prints==0);
+  tls_live=false;free_bytes=30000;
+ }
+ ok(!current&&failures.phase==Idle);
+ ok(output.find("[CLAIM_MEM] queued_ms=4567 generation=9 http=-1 tls_bytes=0 mask=39")!=std::string::npos);
+ ok(output.find("owner=CLAIM_MEM generation=9")!=std::string::npos);
+ ok(output.find("bytes=48 caps=00000004 phase=2")!=std::string::npos);
+ ok(output.find("job=")==std::string::npos&&output.find("attempt=")==std::string::npos);
+ output.clear();{ClaimTrace trace(7000,9);trace.response(200);}
+ ok(output.find("failures=0 loss_seen=0 complete=1")!=std::string::npos);
  reset();std::vector<std::thread> threads;
  for(unsigned i=0;i<6;++i)threads.emplace_back([i]{for(unsigned n=0;n<10000;++n)failures.record(100+i,100+i,"stress");});
  for(auto& t:threads)t.join();ok(failures.copy(ring,seq,lost));ok(seq<=60000&&lost<=1);ok(seq==60000||lost==1);
@@ -124,6 +138,7 @@ int main(){
 def main():
  p=argparse.ArgumentParser();p.add_argument('--source-root',type=Path,default=ROOT);p.add_argument('--out',type=Path);a=p.parse_args();root=a.source_root.resolve()
  text=(root/HEADER).read_text();client=(root/'Sense_Minimal/sense_media_retry_client.h').read_text();voice=(root/'Sense_Minimal/sense_voice.h').read_text()
+ assert 'HALO_SENSE_PROD_WRAPPER' not in text, 'Trace layout cannot depend on a translation-unit-local wrapper macro'
  put=(root/'Sense_Minimal/sense_upload_exec.h').read_text().split('static bool put_to_presigned_url(',1)[1]
  assert '#include "sense_memory_diag.h"' in client
  assert voice.index('sense_memory::VoiceTrace memory_trace')<voice.index('SenseMediaRetryClient client;')

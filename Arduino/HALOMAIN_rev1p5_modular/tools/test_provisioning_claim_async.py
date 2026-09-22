@@ -15,7 +15,8 @@ from test_provisioning_display_status import definition
 ROOT = Path(__file__).resolve().parents[1]
 SHARED = 'halo_ota_demo/firmware/shared/'
 FILES = [SHARED+x for x in ['ProvisioningClaimJob.h', 'ProvisioningClaimTransport.h',
-         'ProvisioningManager.cpp', 'ProvisioningManager.h']]+[
+         'ProvisioningManager.cpp', 'ProvisioningManager.h', 'ScopedTlsMemory.h']]+[
+         'Sense_Minimal/sense_memory_diag.h',
          'Sense_Minimal/Sense_Minimal.ino', 'halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.ino']
 
 STUB = r'''
@@ -30,11 +31,35 @@ STUB = r'''
 #include <thread>
 #include <condition_variable>
 #include <mutex>
+#include <cstdlib>
+#include <cstdarg>
 using String=std::string;
 static std::atomic<uint32_t> clock_ms{1};
 static uint32_t millis(){return clock_ms.load();}
 static unsigned checks=0,failures=0;
 static void check(bool b,const char* text){++checks;if(!b){++failures;printf("FAIL %s\n",text);}}
+static unsigned ssl_objects=0,http_objects=0;
+static bool tls_connected=false,in_failure_hook=false,destructor_fault=false;
+static std::string diagnostic_output;
+using FailedAlloc=void(*)(size_t,uint32_t,const char*);
+static FailedAlloc allocation_hook=nullptr;
+static void allocation_failure(size_t bytes,uint32_t caps,const char* fn){
+ in_failure_hook=true;if(allocation_hook)allocation_hook(bytes,caps,fn);in_failure_hook=false;
+}
+static constexpr int ESP_OK=0,MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP_DMA=4,MALLOC_CAP_SPIRAM=8;
+static int heap_caps_register_failed_alloc_callback(FailedAlloc hook){allocation_hook=hook;return ESP_OK;}
+static size_t heap_caps_get_free_size(int){check(!in_failure_hook,"failure hook never queries heap");return 30000-256*ssl_objects-128*http_objects-(tls_connected?10000:0);}
+static size_t heap_caps_get_largest_free_block(int){check(!in_failure_hook,"failure hook never queries largest block");return tls_connected?5000:12000;}
+static void* heap_caps_calloc(size_t n,size_t size,int caps){check(caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT),"TLS scope requests only external8bit");return std::calloc(n,size);}
+static void heap_caps_free(void* p){std::free(p);}
+using TaskHandle_t=void*;
+static TaskHandle_t xTaskGetCurrentTaskHandle(){static thread_local int task;return &task;}
+static struct {
+ void printf(const char* fmt,...){
+  check(!in_failure_hook&&!ssl_objects&&!http_objects&&!tls_connected,"diagnostic prints after both client destructors");
+  char text[700];va_list args;va_start(args,fmt);std::vsnprintf(text,sizeof text,fmt,args);va_end(args);diagnostic_output+=text;
+ }
+} Serial;
 static int handshake_s=0,connect_ms=0,read_ms=0,stop_calls=0,post_calls=0,body_reads=0;
 static int response_code=200,content_size=-1;
 static bool begin_ok=true,connect_ok=true,ca_set=false,insecure_set=false;
@@ -47,7 +72,9 @@ class Stream {public:
  bool write_error=false;unsigned timeout=3000;
 };
 class WiFiClientSecure:public Stream {public:
- virtual int connect(const char*,uint16_t,int32_t v){connect_ms=v;if(connect_hook)connect_hook();return connect_ok?1:0;}
+ WiFiClientSecure(){++ssl_objects;}
+ virtual ~WiFiClientSecure(){if(destructor_fault)allocation_failure(24,MALLOC_CAP_DMA,"destructor_fixture");--ssl_objects;}
+ virtual int connect(const char*,uint16_t,int32_t v){connect_ms=v;tls_connected=true;if(connect_hook)connect_hook();return connect_ok?1:0;}
  virtual uint8_t connected(){return 1;}
  virtual int read(uint8_t*,size_t){if(read_hook)read_hook();return 1;}
  int read()override{if(read_hook)read_hook();return 1;}
@@ -56,9 +83,11 @@ class WiFiClientSecure:public Stream {public:
  size_t write(const uint8_t*,size_t n)override{return n;}
  void setHandshakeTimeout(unsigned v){handshake_s=v;}
  void setCACert(const char*){ca_set=true;}void setInsecure(){insecure_set=true;}
- void stop(){++stop_calls;}
+ void stop(){++stop_calls;tls_connected=false;}
 };
 class HTTPClient {public:
+ HTTPClient(){++http_objects;}
+ ~HTTPClient(){--http_objects;}
  bool begin(WiFiClientSecure& c,const char*){client=&c;return begin_ok;}
  void setConnectTimeout(int n){ct=n;}void setTimeout(unsigned n){read_ms=n;}
  void setReuse(bool b){reuse=b;}void addHeader(const char*,const char*){}
@@ -87,6 +116,9 @@ class HTTPClient {public:
 
 PREFIX = r'''
 #include "HTTPClient.h"
+#define HALO_SCOPED_TLS_MEMORY_TEST 1
+#define HALO_MEMORY_DIAGNOSTICS_TEST 1
+#include "ScopedTlsMemory.h"
 #include "ProvisioningClaimJob.h"
 #include "ProvisioningClaimTransport.h"
 #include <ArduinoJson.h>
@@ -168,11 +200,17 @@ static void reset(){
  connect_hook=post_hook=read_hook=nullptr;response_code=200;content_size=-1;
  begin_ok=connect_ok=true;response_body="{\"owner_id\":\"new-owner\"}";
  handshake_s=connect_ms=read_ms=stop_calls=post_calls=body_reads=0;ca_set=insecure_set=false;
+ check(!ssl_objects&&!http_objects&&!tls_connected&&!sense_memory::current,"prior transport fully destroyed and trace unowned");
+ diagnostic_output.clear();destructor_fault=false;
+ sense_memory::failures.guard.clear();sense_memory::failures.sequence=0;sense_memory::failures.dropped=0;
+ sense_memory::failures.phase=sense_memory::Idle;
+ for(auto& x:sense_memory::failures.ring)x={};
  server_instance=Server{};
 }
 static void queue(){const int before=post_calls;check(!g_provisioning_manager->tryClaimOwnerId(),"queue returns without success");check(g_owner_claim_job.busy()&&post_calls==before,"main submits without network");}
 static void run(){check(halo_provisioning_claim_worker_poll(),"worker takes one job");check(!ntp_active&&!dma_active,"all transport guards closed before publication");}
 int main(){
+ sense_memory::begin();halo_tls_memory::initialize(true);
  reset();queue();check(!g_provisioning_manager->tryClaimOwnerId()&&g_provisioning_manager->claim_attempts==1,"one slot and one attempt");
  run();check(ProvisioningState::owner.empty(),"worker never applies owner");
  check(g_provisioning_manager->applyClaimResult()&&ProvisioningState::owner=="new-owner","main commits matching success");
@@ -180,6 +218,25 @@ int main(){
  check(!g_provisioning_manager->applyClaimResult()&&!halo_provisioning_claim_worker_poll(),"no duplicate consume or transport");
  check(handshake_s==8&&connect_ms==5000&&read_ms==3000&&ca_set&&!insecure_set,"real client bounded with CA verification");
  check(!g_owner_claim_job.busy()&&!ntp_active&&!dma_active,"success releases slot and guards");
+ check(diagnostic_output.find("[CLAIM_MEM] queued_ms=1 generation=")!=String::npos,"claim trace identifies queue timestamp and generation");
+ check(diagnostic_output.find("http=200 tls_bytes=")!=String::npos&&diagnostic_output.find("mask=63 hook=1 failures=0 loss_seen=0 complete=1")!=String::npos,"successful claim has all six heap phases");
+ check(diagnostic_output.find("point=0 internal=30000")!=String::npos&&diagnostic_output.find("point=5 internal=30000")!=String::npos,"claim snapshots bracket full client lifetime");
+ check(diagnostic_output.find("CODE123")==String::npos&&diagnostic_output.find("new-owner")==String::npos&&diagnostic_output.find("claim.invalid")==String::npos,"claim diagnostic contains no request response or endpoint");
+
+ // Actual dispatcher counters include TLS allocations while the worker scope
+ // is alive, and failed allocations are captured in their transport phase.
+ reset();queue();connect_hook=[](){
+  void* p=halo_tls_memory::calloc(1,96);halo_tls_memory::free(p);
+  allocation_failure(48,MALLOC_CAP_DMA,"heap_caps_aligned_alloc");connect_ok=false;
+ };run();g_provisioning_manager->applyClaimResult();
+ check(diagnostic_output.find("http=-1 tls_bytes=0 mask=39 hook=1 failures=1 loss_seen=0 complete=1")!=String::npos,"failed connect has truthful phase mask and failure count");
+ check(diagnostic_output.find("bytes=48 caps=00000004 phase=2")!=String::npos,"claim preserves failed size caps and connect phase");
+ check(diagnostic_output.find("[TLS_ALLOC] owner=CLAIM_MEM")!=String::npos&&diagnostic_output.find("external_calls=1 external_requested_bytes=96 small_external_calls=1 small_external_requested_bytes=96 external_failures=0 default_fallbacks=0")!=String::npos,"claim reports actual external request deltas");
+ diagnostic_output.clear();clock_ms=2200;connect_hook=nullptr;connect_ok=true;queue();run();g_provisioning_manager->applyClaimResult();
+ check(diagnostic_output.find("[CLAIM_MEM] queued_ms=2200")!=String::npos&&diagnostic_output.find("failures=0 loss_seen=0 complete=1")!=String::npos,"retry excludes first claim allocation failure");
+ check(diagnostic_output.find("external_calls=0 external_requested_bytes=0")!=String::npos,"retry excludes earlier allocator counters");
+ reset();queue();destructor_fault=true;run();g_provisioning_manager->applyClaimResult();
+ check(diagnostic_output.find("bytes=24 caps=00000004")!=String::npos,"failure in client destructor remains within trace lifetime");
 
  // Main continues servicing callbacks while a real worker is held in POST.
  reset();queue();std::mutex mu;std::condition_variable cv;bool entered=false,release=false;
@@ -293,8 +350,12 @@ def main():
     p.add_argument('--arduino-json',type=Path,default=Path.home()/'Documents/Arduino/libraries/ArduinoJson/src')
     a=p.parse_args();a.out.mkdir(parents=True,exist_ok=True)
     (a.out/'HTTPClient.h').write_text(STUB);(a.out/'WiFiClientSecure.h').write_text('#pragma once\n#include "HTTPClient.h"\n')
+    (a.out/'esp_heap_caps.h').write_text('#pragma once\n#include "HTTPClient.h"\n')
+    (a.out/'freertos').mkdir(exist_ok=True)
+    for name in ('FreeRTOS.h','task.h'):
+        (a.out/'freertos'/name).write_text('#pragma once\n#include "HTTPClient.h"\n')
     (a.out/'test.cpp').write_text(harness(a.source_root))
-    cmd=[shutil.which('clang++') or 'c++','-std=c++11','-pthread','-Wall','-Wextra',
+    cmd=[shutil.which('clang++') or 'c++','-std=c++17','-pthread','-Wall','-Wextra',
          '-fsanitize=address,undefined','-fno-omit-frame-pointer','-I'+str(a.out),
          '-I'+str(a.source_root/SHARED),'-I'+str(a.arduino_json),str(a.out/'test.cpp'),'-o',str(a.out/'test')]
     c=subprocess.run(cmd,text=True,capture_output=True,timeout=45);(a.out/'compile.log').write_text(c.stdout+c.stderr)
