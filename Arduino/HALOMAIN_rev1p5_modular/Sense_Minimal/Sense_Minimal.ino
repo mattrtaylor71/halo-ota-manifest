@@ -3059,43 +3059,9 @@ static bool parse_input_message(const char* json_str) {
     }
     // TODO: Handle other menu items (Kitchen, Health, Home) in future
   } else if (strcmp(type, "INPUT_EXPIRY_DATE") == 0) {
-    // Expiration date received from LCD (for check-in mode)
-    const char* expiry_date = doc["expiry_date"] | "";
-    int quantity = doc["quantity"] | 1;
-    if (quantity < 1) {
-      quantity = 1;
-    }
-    pending_quantity = (uint16_t)quantity;
-    Serial.printf("[UART] Expiration date received: '%s' (len=%d) quantity=%d\n",
-                  expiry_date, strlen(expiry_date), quantity);
-    
-    // Mark that we received a response (even if empty)
-    expiry_date_response_received = true;
-    
-    // Handle both empty and non-empty expiry dates
-    // Empty string means user skipped entering a date - proceed immediately
-    if (strlen(expiry_date) < sizeof(pending_expiry_date)) {
-      strncpy(pending_expiry_date, expiry_date, sizeof(pending_expiry_date) - 1);
-      pending_expiry_date[sizeof(pending_expiry_date) - 1] = '\0';
-      
-      // Update active check-in job if it exists
-      if (active_checkin_job != NULL && strcmp(active_checkin_job->mode, "check-in") == 0) {
-        strncpy(active_checkin_job->expiry_date, expiry_date, sizeof(active_checkin_job->expiry_date) - 1);
-        active_checkin_job->expiry_date[sizeof(active_checkin_job->expiry_date) - 1] = '\0';
-        active_checkin_job->quantity = (uint16_t)quantity;
-        if (strlen(expiry_date) > 0) {
-          Serial.printf("[UART] Updated active check-in job with expiration date: %s\n", expiry_date);
-        } else {
-          Serial.println("[UART] Updated active check-in job with empty expiry date (user skipped) - proceeding immediately");
-        }
-      } else {
-        if (strlen(expiry_date) > 0) {
-          Serial.printf("[UART] Stored expiration date for next check-in job: %s\n", expiry_date);
-        } else {
-          Serial.println("[UART] Stored empty expiry date for next check-in job (user skipped)");
-        }
-      }
-    }
+    // Check-in now submits one item immediately after capture. A delayed
+    // confirmation from an older LCD must not modify this or the next image.
+    Serial.println("[UART] Ignoring legacy check-in quantity/expiry input");
   } else if (strcmp(type, "INPUT_DISCARD_OPTIONS") == 0) {
     bool add_to_shopping_list = (doc["add_to_shopping_list"] | false);
     pending_discard_add_to_shopping_list = add_to_shopping_list;
@@ -3422,25 +3388,16 @@ static void op_worker_task(void *arg) {
       current_job.active = true;
       diag_record_action(op_type_name(job.type));
       
-      // If this is a check-in job, set it as the active job and apply pending expiration date
+      // Check-in has no follow-up input: each capture submits one item.
       if (strcmp(job.mode, "check-in") == 0) {
-        active_checkin_job = &current_job;
+        active_checkin_job = NULL;
         active_discard_job = NULL;
-        // Clear expiry date first to ensure we start fresh
         current_job.expiry_date[0] = '\0';
-        current_job.quantity = (pending_quantity < 1) ? 1 : pending_quantity;
+        current_job.quantity = 1;
+        pending_expiry_date[0] = '\0';
         pending_quantity = 1;
         current_job.add_to_shopping_list = false;
-        // Reset flag for new job
         expiry_date_response_received = false;
-        // Apply pending expiration date if available
-        if (pending_expiry_date[0] != '\0') {
-          strncpy(current_job.expiry_date, pending_expiry_date, sizeof(current_job.expiry_date) - 1);
-          current_job.expiry_date[sizeof(current_job.expiry_date) - 1] = '\0';
-          Serial.printf("[OP_WORKER] Applied pending expiration date to check-in job: %s\n", pending_expiry_date);
-          pending_expiry_date[0] = '\0';  // Clear pending date
-          expiry_date_response_received = true;  // Mark as received if we had a pending date
-        }
       } else if (strcmp(job.mode, "discard") == 0) {
         active_discard_job = &current_job;
         active_checkin_job = NULL;
@@ -3690,44 +3647,8 @@ static void op_worker_task(void *arg) {
             }
           }
               
-          // Wait for any required user choice before enqueue (only if we successfully copied the image)
-          if (job_buf != NULL && job_len > 0) {
-            if (strcmp(job.mode, "check-in") == 0) {
-              Serial.println("[OP_WORKER] SCAN: Check-in mode - waiting for expiry date...");
-              scan_ui_status_emit("WAITING_INPUT", "Waiting for expiry date...", job.mode, job.job_id, false);
-              flow_step(job.job_id, "WAITING_INPUT");
-
-              unsigned long wait_start = millis();
-              const unsigned long MAX_EXPIRY_WAIT_MS = 30000;
-              expiry_date_response_received = false;
-
-              Serial.println("[OP_WORKER] SCAN: Waiting for expiry date (checking every 100ms)...");
-              while (!expiry_date_response_received && (millis() - wait_start) < MAX_EXPIRY_WAIT_MS) {
-                if (expiry_date_response_received) {
-                  if (active_checkin_job != NULL) {
-                    strncpy(current_job.expiry_date, active_checkin_job->expiry_date, sizeof(current_job.expiry_date) - 1);
-                    current_job.expiry_date[sizeof(current_job.expiry_date) - 1] = '\0';
-                    current_job.quantity = active_checkin_job->quantity > 0 ? active_checkin_job->quantity : 1;
-                    if (current_job.expiry_date[0] != '\0') {
-                      Serial.printf("[OP_WORKER] SCAN: Expiry date received: %s\n", current_job.expiry_date);
-                    } else {
-                      Serial.println("[OP_WORKER] SCAN: Empty expiry date received (user skipped) - proceeding immediately");
-                    }
-                  }
-                  break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(100));
-              }
-
-              if (!expiry_date_response_received) {
-                Serial.println("[OP_WORKER] SCAN: Check-in mode - expiry date timeout, proceeding without it");
-              } else if (current_job.expiry_date[0] == '\0') {
-                Serial.println("[OP_WORKER] SCAN: Check-in mode - empty expiry date received, proceeding without it");
-              }
-            }
-          }
-          
-          // UI completes here for check-in/out; background upload continues
+          // Queue the captured image immediately. DONE shows the existing
+          // "Got it!" screen only after the upload worker accepts ownership.
           if (current_job.state == OP_DONE || job_buf == NULL || job_len == 0) {
             scan_ui_inflight_set(false, "scan_error");
             skip_upload = true;

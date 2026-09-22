@@ -283,6 +283,145 @@ int main(){
 '''
 
 
+def automatic_checkin_harness(root):
+    """Run the actual Sense capture branch and LCD routing, with hardware doubles.
+
+    The legacy choice tests above intentionally remain: an older Sense may
+    still send WAITING_INPUT, and discard still requires the shared screen.
+    """
+    sense = (root / 'Sense_Minimal/Sense_Minimal.ino').read_text()
+    scan = (root / 'Sense_Minimal/sense_scan.h').read_text()
+    route = (root / 'LCD_Minimal/lcd_ship_route.h').read_text()
+    worker = sense[sense.index('// Set as current job and mark foreground'):]
+    setup = definition(worker, 'if (strcmp(job.mode, "check-in") == 0)')
+    legacy = definition(sense, 'if (strcmp(type, "INPUT_EXPIRY_DATE") == 0)')
+    capture = definition(worker, 'if (is_check_mode)')
+    lcd = '\n'.join(definition(route, signature) for signature in (
+        'static bool ship_mode_is_check(', 'static bool ship_mode_is_discard(',
+        'static bool ship_mode_is_dish(', 'static void ship_route_log(',
+        'static ScreenId route_ship_ui(',
+    ))
+    return AUTO_PREFIX + lcd + '\n' + definition(scan, 'static void scan_send_terminal_status(') + r'''
+static void begin_checkin() {
+  current_job=job; current_job.active=true;
+''' + setup + r'''
+}
+static void legacy_expiry(unsigned quantity, const char* expiry) {
+  const char* type="INPUT_EXPIRY_DATE";
+  StaticJsonDocument<256> doc;doc["quantity"]=quantity;doc["expiry_date"]=expiry;
+''' + legacy + r'''
+}
+static void capture_checkin() {
+  const bool is_check_mode=true;
+  Frame* fb=nullptr;
+  UploadJob::CameraUploadMeta capture_meta{};
+  uint8_t* job_buf=nullptr;size_t job_len=0;bool skip_upload=false;
+''' + capture + r'''
+  assert(skip_upload);
+}
+''' + AUTO_CASES
+
+
+AUTO_PREFIX = r'''
+#include <ArduinoJson.h>
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+#define HALO_CAMERA_KEEP_INIT 0
+#define pdMS_TO_TICKS(x) (x)
+static constexpr unsigned CAMERA_UI_CAPTURE_DELAY_MS=0;
+enum {OP_RECORDING,OP_DONE};
+struct Job {char mode[24]="check-in",expiry_date[16]="";uint16_t quantity=1;bool add_to_shopping_list=false,active=false;uint32_t job_id=71;int state=OP_RECORDING;};
+struct UploadJob {struct CameraUploadMeta {int marker=0;};};
+static Job job,current_job,*active_checkin_job=nullptr,*active_discard_job=nullptr;
+static char pending_expiry_date[16]="";
+static uint16_t pending_quantity=1;
+static bool expiry_date_response_received=false,scan_terminal_sent=false;
+static unsigned clock_ms=1000,wait_calls=0,queue_calls=0,frame_returns=0,free_calls=0;
+static bool camera_ok=true,capture_ok=true,alloc_ok=true,queue_ok=true,inject_late=false;
+static uint8_t frame_bytes[16]={0xff,0xd8},copy_bytes[16];
+struct Frame {uint8_t* buf=frame_bytes;size_t len=sizeof(frame_bytes);int width=1280,height=1024;} frame;
+static Job queued;
+static std::vector<std::string> phases,events;
+static unsigned millis(){return clock_ms;}
+static void vTaskDelay(unsigned ms){clock_ms+=ms;++wait_calls;}
+static struct {template<class...T>void printf(const char*,T...){}void println(const char*){}} Serial;
+static struct {unsigned getFreeHeap(){return 100000;}} ESP;
+static void camera_timeline_reset(const char*){}
+static void camera_timeline_event(const char*,int32_t){}
+static void camera_timeline_complete(bool,void*,const char*){}
+static void diag_note_stage(const char*,int){}
+static void diag_record_error(const char*,int,const char*){}
+static void diag_record_error_persistent(const char*,int,const char*){}
+static void uart_send_sense_diag(const char*,const char*,const char*,int,const char*){}
+static void diag_record_action_event(const char*,const char*,const char*,const char*,int){}
+static bool init_camera(){return camera_ok;}
+static void deinit_camera(){}
+static bool warmup_and_capture(Frame*& out,bool){out=capture_ok?&frame:nullptr;return capture_ok;}
+static void legacy_expiry(unsigned,const char*);
+static void capture_camera_meta_snapshot(UploadJob::CameraUploadMeta* out,Frame*){out->marker=27;}
+static uint8_t* allocate_upload_buffer(size_t n,bool* psram){assert(n==sizeof(copy_bytes));*psram=true;if(inject_late)legacy_expiry(88,"2031-02-03");return alloc_ok?copy_bytes:nullptr;}
+static void esp_camera_fb_return(Frame*){++frame_returns;}
+static void recorded_free(void* p){assert(p==copy_bytes);++free_calls;}
+#define free recorded_free
+static unsigned upload_queue_count(){return 0;}
+static void presign_set_error_text(const char*){}
+static void scan_ui_inflight_set(bool,const char*){}
+static void flow_step(uint32_t,const char*){}
+static bool scan_ui_status_emit(const char* phase,const char*,const char*,uint32_t,bool){phases.emplace_back(phase);events.emplace_back(phase);return true;}
+static bool queue_upload_job(uint32_t id,const char* mode,const char* expiry,uint16_t qty,bool add,const UploadJob::CameraUploadMeta* meta,uint8_t* buf,size_t len,uint8_t,bool,uint32_t){
+ ++queue_calls;events.emplace_back("QUEUE");assert(meta->marker==27&&buf==copy_bytes&&len==sizeof(copy_bytes));
+ assert(!std::memcmp(buf,frame_bytes,len));queued={};queued.job_id=id;strcpy(queued.mode,mode);strcpy(queued.expiry_date,expiry);queued.quantity=qty;queued.add_to_shopping_list=add;return queue_ok;
+}
+enum ScreenId {SCREEN_UNKNOWN,SCREEN_SHIP_HOLD_STILL,SCREEN_SHIP_EXPIRY_CHOICE,SCREEN_SHIP_LOGGED,SCREEN_SHIP_ERROR,SCREEN_SHIP_PROCESSING};
+struct ui_status_t {const char* op;const char* mode;const char* phase;const char* text;const char* ui_policy;uint32_t job_id;};
+static bool g_ship_ui_finalized=false;static uint32_t g_ship_ui_finalized_job_id=0;
+static const char* ship_infer_phase(const char* phase,const char*){return phase;}
+'''
+
+
+AUTO_CASES = r'''
+static void reset(){
+ job={};current_job={};queued={};active_checkin_job=&current_job;active_discard_job=nullptr;
+ pending_quantity=39;strcpy(pending_expiry_date,"2030-12-31");expiry_date_response_received=true;
+ scan_terminal_sent=false;camera_ok=capture_ok=alloc_ok=queue_ok=true;inject_late=false;
+ clock_ms=1000;wait_calls=queue_calls=frame_returns=free_calls=0;phases.clear();events.clear();
+ g_ship_ui_finalized=false;g_ship_ui_finalized_job_id=0;
+}
+static ScreenId route(const char* phase,const char* mode="check-in",uint32_t id=71){ui_status_t s={"SCAN",mode,phase,"","",id};return route_ship_ui(&s);}
+static void default_metadata(){assert(current_job.quantity==1&&!current_job.expiry_date[0]&&!current_job.add_to_shopping_list&&active_checkin_job==nullptr);}
+static unsigned count(const char* phase){unsigned n=0;for(const auto& p:phases)n+=p==phase;return n;}
+int main(){
+ reset();legacy_expiry(99,"2032-01-02");begin_checkin();default_metadata();
+ inject_late=true;capture_checkin();default_metadata();
+ assert(queue_calls==1&&queued.quantity==1&&!queued.expiry_date[0]&&!queued.add_to_shopping_list);
+ assert(queued.job_id==job.job_id&&frame_returns==1&&free_calls==0&&wait_calls==0);
+ assert(count("WAITING_INPUT")==0&&count("ERROR")==0&&count("DONE")==1);
+ assert(events.size()>=2&&events[events.size()-2]=="QUEUE"&&events.back()=="DONE");
+ assert(route("DONE")==SCREEN_SHIP_LOGGED&&g_ship_ui_finalized_job_id==job.job_id);
+ for(const char* late:{"DONE","WAITING_INPUT","CAPTURING","UPLOADING"})assert(route(late)==SCREEN_UNKNOWN);
+ legacy_expiry(700,"2033-04-05");assert(queue_calls==1);default_metadata();
+ ++job.job_id;begin_checkin();default_metadata();capture_checkin();
+ assert(queue_calls==2&&queued.job_id==72&&queued.quantity==1&&!queued.expiry_date[0]);
+ puts("PASS actual Sense capture queues quantity1 once without confirmation/wait; late legacy input/status cannot create a job or contaminate next capture");
+ for(int failure=0;failure<4;++failure){
+  reset();begin_checkin();if(failure==0)camera_ok=false;if(failure==1)capture_ok=false;if(failure==2)alloc_ok=false;if(failure==3)queue_ok=false;
+  capture_checkin();assert(count("ERROR")==1&&count("DONE")==0&&count("WAITING_INPUT")==0&&wait_calls==0);
+  assert(queue_calls==(failure==3?1u:0u)&&free_calls==(failure==3?1u:0u));
+  assert(route("ERROR")==SCREEN_SHIP_ERROR&&route("DONE")==SCREEN_UNKNOWN);
+ }
+ puts("PASS actual camera-init/capture/allocation/queue failures remain errors with no false Got it or ownership leak");
+ reset();assert(route("WAITING_INPUT","discard")==SCREEN_SHIP_EXPIRY_CHOICE);
+ assert(route("DONE","discard")==SCREEN_SHIP_LOGGED);
+ reset();assert(route("WAITING_INPUT")==SCREEN_SHIP_EXPIRY_CHOICE);
+ puts("PASS discard choice route and older-Sense WAITING_INPUT compatibility retained");
+}
+'''
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-root', type=Path, default=Path(__file__).resolve().parents[1])
@@ -294,9 +433,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix='halo-scan-choice-') as directory:
         source = Path(directory) / 'test.cpp'
         binary = Path(directory) / 'test'
-        source.write_text(harness(args.source_root))
-        subprocess.run([compiler, '-std=c++17', '-Wno-deprecated-declarations', '-I', str(args.arduino_json), str(source), '-o', str(binary)], check=True, timeout=30)
-        subprocess.run([str(binary)], check=True, timeout=5)
+        for generate in (harness, automatic_checkin_harness):
+            source.write_text(generate(args.source_root))
+            subprocess.run([compiler, '-std=c++17', '-Wno-deprecated-declarations', '-I', str(args.arduino_json), str(source), '-o', str(binary)], check=True, timeout=30)
+            subprocess.run([str(binary)], check=True, timeout=5)
 
 
 if __name__ == '__main__':

@@ -145,10 +145,9 @@ static void flow_plan_print(uint32_t job_id, const char* mode) {
   if (mode && (strcmp(mode, "check-in") == 0 || strcmp(mode, "check-out") == 0 || strcmp(mode, "check_out") == 0)) {
     Serial.println("1) LCD: show HOLD_STILL (phase=CAPTURING)");
     Serial.println("2) Sense: init camera + capture");
-    Serial.println("3) LCD: show EXPIRY (phase=WAITING_INPUT)");
-    Serial.println("4) LCD->Sense: INPUT_EXPIRY_DATE");
-    Serial.println("5) LCD: show LOGGED for 2s (phase=DONE)");
-    Serial.println("6) Sense: background presign + upload (no UI_STATUS)");
+    Serial.println("3) Sense: enqueue captured image (no follow-up input)");
+    Serial.println("4) LCD: show Got it! (phase=DONE)");
+    Serial.println("5) Sense: background presign + upload (no UI_STATUS)");
   } else if (scan_mode_is_dish(mode)) {
     Serial.println("1) LCD: show HOLD_STILL (phase=CAPTURING)");
     Serial.println("2) Sense: capture + enqueue upload");
