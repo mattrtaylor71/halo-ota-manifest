@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -154,6 +155,11 @@ def main():
     source = (args.source_root.resolve() / HEADER).read_text()
     compiler = shutil.which("clang++") or shutil.which("g++")
     assert compiler, "Native C++ compiler required"
+    sdk = Path.home() / "Library/Arduino15/packages/esp32/tools/esp32s3-libs/3.3.8"
+    target = Path.home() / "Library/Arduino15/packages/esp32/tools/esp-x32/2601/bin/xtensa-esp32s3-elf-g++"
+    flags = sdk / "flags/cpp_flags"
+    assert target.is_file() and flags.is_file(), "Pinned S3 compiler and actual SDK flags required"
+    assert "-mdisable-hardware-atomics" in flags.read_text()
     variants = {
         "production": source,
         "alignment_negative": source.replace("__real_heap_caps_aligned_alloc(line, rounded, caps)",
@@ -180,21 +186,51 @@ def main():
             assert build.returncode == 0, build.stdout + build.stderr
             run = subprocess.run([str(executable)], text=True, capture_output=True, timeout=30)
             results[name] = {"exit_code": run.returncode, "output": run.stdout + run.stderr}
+        # Compile the actual header with production's SDK flags (especially
+        # -mdisable-hardware-atomics), not a flag-free synthetic std::atomic
+        # primitive. Boundary declarations are doubled; exact ELF placement
+        # and resolved callees still require the canonical artifact review.
+        (tmp / "wrapper.h").write_text(source)
+        (tmp / "esp_attr.h").write_text('#pragma once\n#define IRAM_ATTR __attribute__((section(".iram1.alloc_test")))\n')
+        probe = '#include "wrapper.h"\nextern "C" void probe_scope_store(bool value) { g_camera_psram_dma_allocation.store(value); }\n'
+        assembly = tmp / "target.s"
+        subprocess.run([str(target), "@" + str(flags), "-Os", "-S", "-x", "c++",
+                        "-I", str(tmp), "-o", str(assembly), "-"], input=probe,
+                       text=True, capture_output=True, check=True, timeout=30)
+        target_assembly = assembly.read_text()
+        wrapper_asm = target_assembly.split("__wrap_heap_caps_aligned_alloc:", 1)[1].split(
+            "\t.size\t__wrap_heap_caps_aligned_alloc", 1)[0]
+        store_asm = target_assembly.split("probe_scope_store:", 1)[1].split(
+            "\t.size\tprobe_scope_store", 1)[0]
+        assert re.search(r"\bl8ui\b", wrapper_asm), "Scope load must be an inline byte load"
+        assert re.search(r"\bs8i\b", store_asm), "Scope store must be an inline byte store"
+        assert not re.search(r"\bcall\w*\b", store_asm), "Scope store contains an out-of-line call"
+        assert "__atomic_" not in wrapper_asm + store_asm
+        assert "CameraPsramAllocationFlag4load" not in wrapper_asm
+        assert "_ZNKSt6atomicIbE4load" not in wrapper_asm, "Flash std::atomic load returned"
+        literals = set(re.findall(r"^\s*\.word\s+([A-Za-z_]\w*)\s*$", target_assembly, re.M))
+        assert literals <= {"g_camera_psram_dma_allocation", "__real_heap_caps_aligned_alloc",
+                            "esp_cache_msync", "heap_caps_free"}, literals
     passed = results["production"]["exit_code"] == 0 and all(
         data["exit_code"] != 0 for name, data in results.items() if name != "production")
     result = {
         "status": "PASS" if passed else "FAIL",
         "scope": "Actual header with native ASan/UBSan and SDK boundary doubles; allocation forwarding, "
                  "overflow, cache line ownership, sync ordering/flags, cleanup and four detected mutations. "
-                 "No physical DMA/cache, target link or camera-init lifecycle claim.",
+                 "Actual header target assembly under SDK cpp_flags verifies inline byte flag load/store. "
+                 "No physical DMA/cache, final target link or camera-init lifecycle claim.",
         "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        "target_cpp_flags": {"path": str(flags), "sha256": hashlib.sha256(flags.read_bytes()).hexdigest()},
+        "target_assembly_sha256": hashlib.sha256(target_assembly.encode()).hexdigest(),
         "variants": results,
     }
     if args.out:
         args.out.mkdir(parents=True, exist_ok=True)
         (args.out / "RESULT.json").write_text(json.dumps(result, indent=2) + "\n")
+        (args.out / "target.s").write_text(target_assembly)
     print(results["production"]["output"], end="")
     print("PASS four mutation controls" if passed else json.dumps(result, indent=2))
+    print("PASS actual SDK flags: inline target byte load/store; no atomic helper")
     return 0 if passed else 1
 
 

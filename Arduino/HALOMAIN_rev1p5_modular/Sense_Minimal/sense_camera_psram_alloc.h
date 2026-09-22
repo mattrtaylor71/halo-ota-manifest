@@ -1,5 +1,4 @@
 #pragma once
-#include <atomic>
 #include <stddef.h>
 #include <stdint.h>
 #include <esp_attr.h>
@@ -9,7 +8,20 @@
 
 // Included by the Sense sketch only. The canonical Sense linker wraps the SDK
 // allocator; the camera owner enables this only during fallback camera init.
-inline std::atomic<bool> g_camera_psram_dma_allocation{false};
+// libstdc++ may outline atomic<bool>::load into flash under the actual SDK
+// flags. Keep the allocator's ordinary cache-off forwarding path in IRAM.
+// These builtins retain atomic access without an out-of-line library method.
+class CameraPsramAllocationFlag {
+  bool value_ = false;
+public:
+  inline __attribute__((always_inline)) bool load() const {
+    return __atomic_load_n(&value_, __ATOMIC_RELAXED);
+  }
+  inline __attribute__((always_inline)) void store(bool value) {
+    __atomic_store_n(&value_, value, __ATOMIC_SEQ_CST);
+  }
+};
+inline CameraPsramAllocationFlag g_camera_psram_dma_allocation;
 static_assert(CONFIG_ESP32S3_DATA_CACHE_LINE_SIZE == 64,
               "Camera allocation contract requires the pinned 64-byte cache line");
 
@@ -21,7 +33,7 @@ extern "C" void* IRAM_ATTR __wrap_heap_caps_aligned_alloc(size_t alignment,
                                                         uint32_t caps) {
   // Preserve every ordinary allocation, including zero-size semantics. The
   // pinned camera archive requests precisely these caps and 16-byte alignment.
-  if (!g_camera_psram_dma_allocation.load(std::memory_order_relaxed) ||
+  if (!g_camera_psram_dma_allocation.load() ||
       alignment != 16 || caps != (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) || !size)
     return __real_heap_caps_aligned_alloc(alignment, size, caps);
 

@@ -87,3 +87,13 @@ physical unit: reproduce setup→immediate check-in without sleep/reset, verify
 OV2640/direct-DMA logs, decode actual JPEGs, confirm cloud delivery, repeat
 captures, then check voice, normal capture, user priority and paired sleep.
 Host coverage is not evidence of real image integrity or a production release.
+
+The first203 candidate (`release203`, source858217b) passed both110-suite gates,
+canonical compilation and artifact checks, but exact ELF review caught a target
+defect before installation: the IRAM allocator wrapper called an outlined
+`std::atomic<bool>::load` method in flash on its ordinary forwarding path.
+`release203/HOLD.json` explicitly prohibits installing or publishing those bytes.
+The scope flag now uses always-inline atomic compiler builtins; its focused
+target probe uses the real SDK flags, including disabled hardware atomics.
+The rebuilt candidate still requires a fresh full snapshot gate and exact ELF
+review. No hardware was changed by the held build.
