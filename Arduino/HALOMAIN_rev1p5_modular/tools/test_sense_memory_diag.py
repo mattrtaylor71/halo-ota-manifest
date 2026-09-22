@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Exercise bounded production failure-hook records, owner lifetime and loss reporting."""
-import argparse,hashlib,json,shutil,subprocess,tempfile
+import argparse,hashlib,json,re,shutil,subprocess,tempfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 HEADER='Sense_Minimal/sense_memory_diag.h'
@@ -49,25 +49,26 @@ int main(){
   ok(prints==0);free_bytes=30000;largest=12000;
  }
  ok(!current&&failures.phase==Idle);ok(output.find("http=-3 tls_bytes=512")!=std::string::npos);
- ok(output.find("failures=1 dropped=0 complete=1")!=std::string::npos);
+ ok(output.find("failures=1 loss_seen=0 complete=1")!=std::string::npos);
  ok(output.find("bytes=544 caps=00000005 phase=3")!=std::string::npos);
  ok(output.find("point=2 internal=10000 dma_free=10000 dma_largest=800")!=std::string::npos);
  ok(output.find("point=5 internal=30000 dma_free=30000 dma_largest=12000")!=std::string::npos);
  reset();{
   VoiceTrace trace(20,2);for(unsigned i=1;i<=7;++i)installed(i,5,"heap_caps_malloc");trace.response(202);
  }
- ok(output.find("failures=7 dropped=0 complete=0")!=std::string::npos);
+ ok(output.find("failures=7 loss_seen=0 complete=0")!=std::string::npos);
  size_t pos=0,count=0;while((pos=output.find("[ALLOC_FAIL]",pos))!=std::string::npos){++count;++pos;}ok(count==4);
  reset();{
   VoiceTrace trace(21,1);failures.guard.test_and_set();installed(90,5,"heap_caps_malloc");failures.guard.clear();
  }
- ok(output.find("failures=0 dropped=1 complete=0")!=std::string::npos);
+ ok(output.find("failures=0 loss_seen=1 complete=0")!=std::string::npos);
+ output.clear();{VoiceTrace trace(23,1);}ok(output.find("loss_seen=1 complete=0")!=std::string::npos);
  reset();registered=false;{VoiceTrace trace(22,1);}ok(output.find("complete=0")!=std::string::npos);registered=true;
  reset();std::vector<std::thread> threads;
  for(unsigned i=0;i<6;++i)threads.emplace_back([i]{for(unsigned n=0;n<10000;++n)failures.record(100+i,100+i,"stress");});
- for(auto& t:threads)t.join();ok(failures.copy(ring,seq,lost));ok(seq+lost==60000);
+ for(auto& t:threads)t.join();ok(failures.copy(ring,seq,lost));ok(seq<=60000&&lost<=1);ok(seq==60000||lost==1);
  for(auto& x:ring){ok(x.bytes==x.caps);ok(x.bytes>=100&&x.bytes<106);ok(uint32_t(seq-x.sequence)<4);}
- printf("PASS memory diagnostic: %u checks; hook storage=%zu trace_stack=%zu concurrent_events=%u\n",checks,sizeof(Failures),sizeof(VoiceTrace),seq+lost);
+ printf("PASS memory diagnostic: %u checks; hook storage=%zu trace_stack=%zu concurrent_events=60000 recorded=%u loss_seen=%u\n",checks,sizeof(Failures),sizeof(VoiceTrace),seq,lost);
 }
 '''
 def main():
@@ -77,13 +78,33 @@ def main():
  assert voice.index('sense_memory::VoiceTrace memory_trace')<voice.index('SenseMediaRetryClient client;')
  assert 'memory_trace.response(httpResponseCode);' in voice
  assert client.index('const int connected = WiFiClientSecure::connect')<client.index('point(sense_memory::AfterConnect')
+ # Compile the actual production primitive with the pinned S3 compiler. The
+ # toolchain reports is_always_lock_free=false even though these operations
+ # inline; inspect the emitted operations rather than deleting that safeguard.
+ target=Path.home()/'Library/Arduino15/packages/esp32/tools/esp-x32/2601/bin/xtensa-esp32s3-elf-g++'
+ assert target.is_file(), 'Pinned S3 compiler required for hook assembly coverage'
+ primitive=text[text.index('struct TryGate {'):text.index('struct Failure {')]
+ asm_source='#include <atomic>\n#include <stdint.h>\n'+primitive+r'''
+TryGate gate;std::atomic<uint32_t> word{0};
+extern "C" bool probe_gate(){return gate.test_and_set();}
+extern "C" void probe_clear(){gate.clear();}
+extern "C" void probe_store(uint32_t x){word.store(x,std::memory_order_relaxed);}
+extern "C" uint32_t probe_load(){return word.load(std::memory_order_relaxed);}
+'''
  code=PREFIX+'\n#include "'+str(root/HEADER)+'"\n'+TESTS
  with tempfile.TemporaryDirectory(prefix='halo-memory-diag-') as tmp:
+  asm=Path(tmp)/'target.s'
+  subprocess.run([str(target),'-std=gnu++17','-Os','-S','-x','c++','-o',str(asm),'-'],input=asm_source,text=True,check=True,capture_output=True,timeout=20)
+  target_asm=asm.read_text()
+  for name in ('probe_gate','probe_clear','probe_store','probe_load'):
+   body=target_asm.split(name+':',1)[1].split('\t.size\t'+name,1)[0]
+   assert not re.search(r'^\s*(?:call\w*|j\w*|b\w*)\s',body,re.M), name+' contains call or branch'
+   assert body.count('s32c1i')==(1 if name=='probe_gate' else 0), name+' CAS count'
   c=Path(tmp)/'test.cpp';b=Path(tmp)/'test';c.write_text(code)
   compiler=shutil.which('clang++') or shutil.which('g++');assert compiler
   build=subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-pthread',str(c),'-o',str(b)],capture_output=True,text=True,timeout=40)
   run=subprocess.run([str(b)],capture_output=True,text=True,timeout=30) if not build.returncode else None
- result={'status':'PASS' if run and run.returncode==0 else 'FAIL','scope':'Production header with SDK boundary doubles, loss/overflow/lifetime and concurrent callback coverage. No physical heap or TLS claim.','source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':build.stdout+build.stderr+(run.stdout+run.stderr if run else '')}
+ result={'status':'PASS' if run and run.returncode==0 else 'FAIL','scope':'Production header with SDK boundary doubles, loss/overflow/lifetime and concurrent callback coverage; actual S3 gate/store/load assembly has one CAS maximum and no calls/branches. No physical heap or TLS claim.','source_sha256':hashlib.sha256(text.encode()).hexdigest(),'target_assembly_sha256':hashlib.sha256(target_asm.encode()).hexdigest(),'output':build.stdout+build.stderr+(run.stdout+run.stderr if run else '')}
  if a.out:a.out.mkdir(parents=True,exist_ok=True);(a.out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
  print(result['output'],end='');return result['status']!='PASS'
 if __name__=='__main__':raise SystemExit(main())
