@@ -174,3 +174,50 @@ Public paired201 and EOL197 remain unchanged. Continue firmware work from207's
 reviewed source or descendants; do not publish this memory mitigation as
 physically qualified until the immediate post-provision claim/capture case is
 observed.
+
+## First physical repeat on Sense207 / LCD206
+
+The user's September 22 phone provisioning followed immediately by Check-in
+passed in `reprovision-memory207-01`. This is one physical case, not repeated
+reliability or a new full-product/OTA qualification.
+
+- Account claim attempt 1 returned HTTP 200 with a complete response in 1,039 ms.
+  Its allocation-failure window was complete, with zero failures or lost
+  events. The dispatcher recorded 158 small external allocation requests and
+  zero external allocation failures. The counter line truncates before
+  `default_fallbacks`; that particular value is unavailable.
+- Check-in began 0.801 s after the setup screen returned to Home. The existing
+  camera PSRAM fallback captured 158,011 B at 1280×1024. The camera reserve warning
+  still exists; this change does not eliminate all camera memory constraints.
+- Image presign and PUT both succeeded on attempt 1. The PUT's complete
+  allocation-failure window had zero failures/lost events; its allocator report
+  had zero external failures and zero default fallbacks.
+- The active PUT took 4.03 s; the complete pre-sleep upload flush took 5.58 s.
+  Confirm to PUT completion was 17.99 s, including the existing foreground
+  interaction/idle period. The upload still honors the user's active session.
+- Internal heap just after PUT connection was 27,672 B, compared with 16,764 B
+  on the previous Sense205 case. DMA free was 20,008 B versus 9,316 B; its largest
+  block was 10,228 B versus 5,108 B. These are matched checkpoints across two
+  cases, not instantaneous low-water measurements or exact causal savings.
+- S3 contained one matching owner/device/time/size object. Its FULL_OBJECT
+  SHA256 matched a conditional GET, and the JPEG decoded fully. SHA256:
+  `33896360ab13bc7db58456751f5cf2f31c66f86d6f3126ff537e07fc955d74e6`.
+  This confirms cloud image custody; backend recognition/inventory semantics
+  and an independent camera-buffer hash were not checked.
+- LCD showed completion for 4.49 s, returned to Home, accepted Check-in/Confirm,
+  and darkened at its normal idle timeout. It stayed dark during upload, then
+  both boards logged deep sleep. No USB reopen occurred in the following 316 s
+  of passive capture. This does not establish an overnight no-wake result.
+
+Evidence is sealed in `CASE-RESULT.json`, `cloud/RESULT.json`, raw serial bytes
+and timestamped logs. Capture 76728 was stopped normally and reaped with exit 0;
+all descriptors closed, no injected commands, one USB open per board. The
+Sense raw file retains a 17-byte final partial line; early boot before USB
+enumeration is outside this capture. Preserve these limitations and the
+truncated claim counter rather than treating the log as lossless.
+
+The observed first-attempt failures did not recur, and usable internal memory
+improved substantially in this case. Repeat provisioning, ordinary voice and
+input-interruption/resume coverage remain separate acceptance work. The
+exhausted-claim retry issue and permanent 64 KB OTA buffer remain unchanged.
+No new firmware was flashed or published for this read-only verification.
