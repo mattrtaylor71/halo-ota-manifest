@@ -874,7 +874,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.209",
+  "current_production_latest_version": "6.4.210",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -4850,17 +4850,17 @@
     }
   },
   "current_validation_blocker": {
-    "status": "SCOPED_PAIRED209_MANUAL_PASS_UI_MANIFEST_WAIT_FEEDBACK_ISSUE_OPEN",
-    "report": "docs/RELEASE_209.md",
-    "successful_acceptance": {
+    "status": "DEVICE_TEST_PENDING",
+    "report": "docs/RELEASE_210.md",
+    "retained_209_acceptance": {
       "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
       "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
     },
-    "earlier_failed_attempt": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/manual-user209-01-analysis/ATTEMPT1.json",
-      "sha256": "40e314a494b6a0329ccf46c1ad3d19b7cc745ec59b81974485533d54bb6221f8"
-    },
-    "next_work": "Retain the observed preflight UI lease expiry issue for a separately reviewed fix. Scheduled timer arm is verified; do not claim the next scheduled execution has occurred."
+    "limits": [
+      "210 installation and physical check-in behavior are pending; installed 209 evidence remains separate.",
+      "Got it acknowledges accepted local upload-queue ownership, not completed cloud delivery.",
+      "The prior manifest-wait UI lease issue and first-attempt network reliability remain open; no scheduled or full-product pass is claimed."
+    ]
   },
   "diagnostic_candidate151": {
     "version": "6.4.151",
@@ -6559,22 +6559,22 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.209",
-    "status": "PUBLISHED_INSTALLED_PAIRED209_SCOPED_MANUAL_OTA_PASS",
-    "artifact_source_commit": "cd2b84bc072a8f287c4f93bed99df091e04610ba",
-    "artifact_source_firmware_tree": "607b49e924d036923c4f90a911416918efc04cca",
-    "build_id": "6.4.209-20260922T175500Z-cd2b84bc072a",
+    "version": "6.4.210",
+    "status": "PUBLISHED_PAIRED210_DEVICE_TEST_PENDING",
+    "artifact_source_commit": "6eb91c7bed8bc89eed83ca785108b1f0a53deac3",
+    "artifact_source_firmware_tree": "8fb9086a91025d55438844d62444f3338828147f",
+    "build_id": "6.4.210-20260922T191011Z-6eb91c7bed8b",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from cd2b84bc072a8f287c4f93bed99df091e04610ba or reviewed descendants, preserving the208 runtime and all earlier fixes. Use a freshly inventoried unused210+ version.",
-    "change": "Version/build metadata only; no runtime changes.",
+    "source_selection": "Continue from 6eb91c7bed8bc89eed83ca785108b1f0a53deac3 or reviewed descendants, preserving this check-in change and all earlier fixes. Use freshly inventoried unused 211+.",
+    "change": "Sense check-in skips quantity/expiry input, queues quantity 1 with no manual expiry, then uses the existing Got it screen. LCD runtime, camera capture, network, OTA and storage implementations are unchanged.",
     "materialization": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/snapshot/materialization.json",
-      "sha256": "84e25749e240721247007b80b95bfa8baa683bf6428a2316c612dfda9c886823"
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/snapshot/materialization.json",
+      "sha256": "a56cbc510411272098beee9c324496fe1fc4e51f9b192fb3fb164d204d557005"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/regression/RESULT.json",
-      "sha256": "9ba8acf48113b0c007f0e877fcf194b47f8c84c79bcacb6852d94705a17a92cf"
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/regression/RESULT.json",
+      "sha256": "5964318fc5f57d3078d120e9cf8a94c04958eae82897d069198dd2a379a9b186"
     },
     "host_suite_count": 114,
     "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
@@ -6584,57 +6584,53 @@
     ],
     "artifact_checks": [
       {
-        "path": "/Users/MattTaylor/halo-release209-20260922/build/artifact-result-v2-sense-lcd.json",
-        "sha256": "f57155d0d071cd5a32cfd12fd653c00d172f7df7afaaafc714222ddb2e6fc7a3"
+        "path": "/Users/MattTaylor/halo-checkin210-20260922/build/artifact-result-v2-sense-lcd.json",
+        "sha256": "52bfefcc198e066fc582ec500f5e40cbf1b871758e9cd86a1ca4d7bb15542f4d"
       }
     ],
     "board_proofs": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-release209-20260922/build/sense/artifacts/verified.json",
-        "sha256": "5dad2eaa11f16fe741857edc3e165ead1ae5bc2bf0f8d3d4e94da5798274baf4"
+        "path": "/Users/MattTaylor/halo-checkin210-20260922/build/sense/artifacts/verified.json",
+        "sha256": "0020f48a71efeb1f1aaccf2a83453f2e2b0c2359c9e989d0f62bfb91559fb17b"
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-release209-20260922/build/lcd/artifacts/verified.json",
-        "sha256": "9ff03a8843ccf5f38d762af81c0c161e5ab885be49a2b71a4bc3522304033947"
+        "path": "/Users/MattTaylor/halo-checkin210-20260922/build/lcd/artifacts/verified.json",
+        "sha256": "d9842d12452d04c3a1ed656c4da5a2be0587869a54e392e52502448e4b21487c"
       }
     },
     "applications": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-release209-20260922/build/sense/artifacts/halo_sense_prod.ino.bin",
-        "sha256": "6dfc8840e25e1c3466eb1ec999a813f2b7707c03df5b458585dd282e6e65f9ca",
-        "bytes": 1874928
+        "path": "/Users/MattTaylor/halo-checkin210-20260922/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "3c98fa8484d38e3b0631a590c9f6cba3efaf75f50d6581587967c36e7e69781d",
+        "bytes": 1873392
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-release209-20260922/build/lcd/artifacts/halo_lcd_prod.ino.bin",
-        "sha256": "3bf8881e2db47c3f9a5c53296ba6bb4ff707744608675d87b0b0c87150c2ef72",
+        "path": "/Users/MattTaylor/halo-checkin210-20260922/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "e283fee6416e7dbaba5ac43c1f4be22bbbb2b275be0d00be94db71c18205c967",
         "bytes": 2032896
       }
     },
     "staging": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/stage001/result.json",
-      "sha256": "03ae14be1597553e88d1f5ba08b629eb5435295b7f60a5e2ba898ee51fc393e5"
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/stage001/result.json",
+      "sha256": "dea0482050a36296e41dbd8e75d6a37d25af35cb596aeafe2647b656bd1a4754"
     },
     "publication": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/promote001/result.json",
-      "sha256": "6c012b5cfd927d5d7890e2b677b19deacf3e7b6136f688f1fe7467b2b93ab956"
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/promote001/result.json",
+      "sha256": "edea767a7153a40f366451134a91f99d205e928f17835b10ed0afaf8f4945343"
     },
     "prepared_publication": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/publication/release.json",
-      "sha256": "cae9e542a8a13e78b6e33e1f25d49cc7944e1e29b25075020044dd49b3a47068"
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/publication/release.json",
+      "sha256": "19e03157ea863e9fe66b8189bc281229706e257c79fbaa24b357447d25541795"
     },
     "public_readback": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/PUBLIC-READBACK.json",
-      "sha256": "de4f824b2cc11387196e1052a48be81e8b0b39f9d7f463af803a6db1a942c367"
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/PUBLIC-READBACK.json",
+      "sha256": "b700acdc65ad301ca60456d9d513a2f3b1f90895b9cc895046187bc7b787c742"
     },
     "published": true,
-    "current_public_ota_version": "6.4.209",
-    "git_remote_push_performed": false,
-    "installed": true,
-    "device_acceptance": "PASS_PAIRED209_MANUAL_OTA_NATIVE_VALID_SLEEP_AND_NIGHTLY_ARM",
-    "device_evidence": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
-      "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
-    },
+    "current_public_ota_version": "6.4.210",
+    "installed": false,
+    "device_acceptance": "DEVICE_TEST_PENDING",
+    "device_evidence": null,
     "retained_installed_pair": {
       "version": "6.4.209",
       "installed": {
@@ -6652,89 +6648,39 @@
       },
       "scope": "One successful user-initiated paired manual OTA after a separate failed network attempt, exact image hashes, SDK VALID, native observed-pair settlement, fresh Home and paired sleep. Nightly persistence/arm verified; scheduled execution not yet observed."
     },
-    "retained_208_acceptance": {
-      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
-      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
-    },
-    "retained_factory_version": "6.4.197",
-    "schedule": "Production02:00 Pacific unchanged.",
-    "next_version_minimum": "6.4.210",
-    "next_version_requires_fresh_inventory_check": true,
-    "handoff": "docs/RELEASE_209.md",
-    "source_tag": {
-      "name": "halo-v6.4.209",
-      "object": "91133914f364a3d70c4485b8567729f3b3e30a12",
-      "commit": "cd2b84bc072a8f287c4f93bed99df091e04610ba",
-      "remote_push": false
-    },
-    "source_tag_receipt": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/SOURCE-TAG.json",
-      "sha256": "195064aac2cb9c60972ad5b36ee72cf4bdbe20bfe9a9dbb0bcb6ac2afb691894"
-    },
-    "source_scope_review": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/SCOPE-REVIEW.json",
-      "sha256": "b00056f0a40f7b60086b65491fb7bb7638a8d2bcb4b2acf4d76af60e71258558"
-    },
-    "release_record": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/RELEASE-RECORD.json",
-      "sha256": "b7be44936234e11f91e48e870cda791e629b2f2b1509b964e19be6344f879881"
-    },
-    "private_release_package": {
-      "path": "/Users/MattTaylor/halo-releases/6.4.209.ARCHIVE-RECORD.json",
-      "sha256": "dc49b7aa81a0bc090845911e9c474062512e7d7e037c1a6ae9b1dc558f8dbffc"
-    },
-    "limits": [
-      "One successful paired manual OTA after a separate weak-signal transport failure; not repeated reliability qualification.",
-      "Nightly schedule persistence and actual sleep timer arm verified for September23 at02:00 PDT; that scheduled execution has not yet occurred.",
-      "Earlier attempt exposed LCD preflight lease expiry before blocking manifest retries finished. The UI feedback issue remains open and was not changed by this version-only release.",
-      "Native policy_target_valid observed-pair settlement was logged; no new cloud policy report or raw NVS inspection was performed.",
-      "No separate209 same-version, power-cut, USB-free or full-product acceptance is claimed."
-    ],
-    "new_release_archive_created": true,
-    "previous_installed_pair_208": {
-      "version": "6.4.208",
-      "installed": {
-        "sense": "6.4.208 app0 SDK VALID",
-        "lcd": "6.4.208 app1 SDK VALID"
-      },
-      "installation_methods": {
-        "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
-        "lcd": "ordinary manual OTA from206/app0 to208/app1"
-      },
-      "acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
-      "first_manual_ota": {
-        "path": "/Users/MattTaylor/halo-ota208-20260922/manual208-01/FIRST-OTA-ACCEPTANCE.json",
-        "sha256": "5db811e1bf8b2b574cf3f35ef1eeb7ca0ba2d866704ec7ed4cf726c1d8c88108"
-      },
-      "same_version_check": "PASS",
-      "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
-      "same_version_manual": {
-        "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
-        "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
-      },
-      "device_acceptance": {
-        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
-        "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
-      }
-    },
-    "device_acceptance_record": {
+    "retained_209_acceptance": {
       "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
       "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
     },
-    "next_nightly": {
-      "request_id": "nightly_20260923",
-      "start_epoch": 1790154000,
-      "local_time": "2026-09-23T02:00:00-07:00",
-      "timezone": "America/Los_Angeles",
-      "lcd_preparation_wake_epoch": 1790153985,
-      "lcd_preparation_local_time": "2026-09-23T01:59:45-07:00",
-      "lcd_final_sleep_timer_s": 51837,
-      "sense_final_sleep_timer_s": 51852,
-      "schedule_modified": false
+    "retained_factory_version": "6.4.197",
+    "schedule": "Production 02:00 Pacific unchanged.",
+    "next_version_minimum": "6.4.211",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/RELEASE_210.md",
+    "source_tag": {
+      "name": "halo-v6.4.210",
+      "object": "9d086b80f70a16f216a058a7f487ed00e97f7be8",
+      "commit": "6eb91c7bed8bc89eed83ca785108b1f0a53deac3",
+      "firmware_tree": "8fb9086a91025d55438844d62444f3338828147f",
+      "remote_push": false,
+      "created_epoch": 1790104515.786798
     },
-    "earlier_failed_attempt": {
-      "path": "/Users/MattTaylor/halo-release209-20260922/manual-user209-01-analysis/ATTEMPT1.json",
-      "sha256": "40e314a494b6a0329ccf46c1ad3d19b7cc745ec59b81974485533d54bb6221f8"
+    "source_tag_receipt": {
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/SOURCE-TAG.json",
+      "sha256": "b446ef85c5d17fe1eebb462347fe6bc377466c0498085eee99ed90af7aab4622"
+    },
+    "limits": [
+      "210 installation and physical check-in behavior are pending; installed 209 evidence remains separate.",
+      "Got it acknowledges accepted local upload-queue ownership, not completed cloud delivery.",
+      "The prior manifest-wait UI lease issue and first-attempt network reliability remain open; no scheduled or full-product pass is claimed."
+    ],
+    "release_record": {
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/RELEASE-RECORD.json",
+      "sha256": "4d06eb6554b43d1eaea6bc5ab7c1a4666d35f05f82ac6765d2ab624b7061345f"
+    },
+    "private_release_package": {
+      "path": "/Users/MattTaylor/halo-checkin210-20260922/ARCHIVE-RECORD.json",
+      "sha256": "e4c23444e975fe4ca16355ab1acd327217f9270312fde5807c39e79e4ddc904e"
     }
   },
   "previous_working_source_187": {
@@ -10182,16 +10128,16 @@
   },
   "production_source_selection": {
     "authoritative_selector": "PRODUCTION_BASELINE.json",
-    "handoff": "docs/RELEASE_209.md",
-    "minimum_source_commit": "cd2b84bc072a8f287c4f93bed99df091e04610ba",
-    "source_tag": "halo-v6.4.209",
-    "source_tag_object": "91133914f364a3d70c4485b8567729f3b3e30a12",
+    "handoff": "docs/RELEASE_210.md",
+    "minimum_source_commit": "6eb91c7bed8bc89eed83ca785108b1f0a53deac3",
+    "source_tag": "halo-v6.4.210",
+    "source_tag_object": "9d086b80f70a16f216a058a7f487ed00e97f7be8",
     "canonical_branch": "codex/halo-production-baseline-197",
-    "minimum_new_version": "6.4.210",
+    "minimum_new_version": "6.4.211",
     "last_published_update": "2026-09-22",
-    "public_version": "6.4.209",
+    "public_version": "6.4.210",
     "factory_version_unchanged": "6.4.197",
-    "device_acceptance": "PASS_PAIRED209_MANUAL_OTA_NATIVE_VALID_SLEEP_AND_NIGHTLY_ARM"
+    "device_acceptance": "DEVICE_TEST_PENDING"
   },
   "baseline_freeze_20260919": {
     "scope": "Current source197 and exact196/197 artifacts; no runtime/build/publication change",
@@ -11289,5 +11235,197 @@
       "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
     },
     "next_work": "Observe the user's ordinary manual OTA; do not infer209 installation from publication or208 acceptance."
+  },
+  "previous_working_source_209": {
+    "version": "6.4.209",
+    "status": "PUBLISHED_INSTALLED_PAIRED209_SCOPED_MANUAL_OTA_PASS",
+    "artifact_source_commit": "cd2b84bc072a8f287c4f93bed99df091e04610ba",
+    "artifact_source_firmware_tree": "607b49e924d036923c4f90a911416918efc04cca",
+    "build_id": "6.4.209-20260922T175500Z-cd2b84bc072a",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from cd2b84bc072a8f287c4f93bed99df091e04610ba or reviewed descendants, preserving the208 runtime and all earlier fixes. Use a freshly inventoried unused210+ version.",
+    "change": "Version/build metadata only; no runtime changes.",
+    "materialization": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/snapshot/materialization.json",
+      "sha256": "84e25749e240721247007b80b95bfa8baa683bf6428a2316c612dfda9c886823"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/regression/RESULT.json",
+      "sha256": "9ba8acf48113b0c007f0e877fcf194b47f8c84c79bcacb6852d94705a17a92cf"
+    },
+    "host_suite_count": 114,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "built_boards": [
+      "sense",
+      "lcd"
+    ],
+    "artifact_checks": [
+      {
+        "path": "/Users/MattTaylor/halo-release209-20260922/build/artifact-result-v2-sense-lcd.json",
+        "sha256": "f57155d0d071cd5a32cfd12fd653c00d172f7df7afaaafc714222ddb2e6fc7a3"
+      }
+    ],
+    "board_proofs": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-release209-20260922/build/sense/artifacts/verified.json",
+        "sha256": "5dad2eaa11f16fe741857edc3e165ead1ae5bc2bf0f8d3d4e94da5798274baf4"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-release209-20260922/build/lcd/artifacts/verified.json",
+        "sha256": "9ff03a8843ccf5f38d762af81c0c161e5ab885be49a2b71a4bc3522304033947"
+      }
+    },
+    "applications": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-release209-20260922/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "6dfc8840e25e1c3466eb1ec999a813f2b7707c03df5b458585dd282e6e65f9ca",
+        "bytes": 1874928
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-release209-20260922/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "3bf8881e2db47c3f9a5c53296ba6bb4ff707744608675d87b0b0c87150c2ef72",
+        "bytes": 2032896
+      }
+    },
+    "staging": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/stage001/result.json",
+      "sha256": "03ae14be1597553e88d1f5ba08b629eb5435295b7f60a5e2ba898ee51fc393e5"
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/promote001/result.json",
+      "sha256": "6c012b5cfd927d5d7890e2b677b19deacf3e7b6136f688f1fe7467b2b93ab956"
+    },
+    "prepared_publication": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/publication/release.json",
+      "sha256": "cae9e542a8a13e78b6e33e1f25d49cc7944e1e29b25075020044dd49b3a47068"
+    },
+    "public_readback": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/PUBLIC-READBACK.json",
+      "sha256": "de4f824b2cc11387196e1052a48be81e8b0b39f9d7f463af803a6db1a942c367"
+    },
+    "published": true,
+    "current_public_ota_version": "6.4.209",
+    "git_remote_push_performed": false,
+    "installed": true,
+    "device_acceptance": "PASS_PAIRED209_MANUAL_OTA_NATIVE_VALID_SLEEP_AND_NIGHTLY_ARM",
+    "device_evidence": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+      "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
+    },
+    "retained_installed_pair": {
+      "version": "6.4.209",
+      "installed": {
+        "sense": "6.4.209 app1 SDK VALID",
+        "lcd": "6.4.209 app0 SDK VALID"
+      },
+      "installation_methods": {
+        "sense": "User manual OTA208/app0 to209/app1",
+        "lcd": "User manual OTA208/app1 to209/app0"
+      },
+      "acceptance": "PASS_PAIRED209_MANUAL_OTA_NATIVE_VALID_SLEEP_AND_NIGHTLY_ARM",
+      "device_acceptance": {
+        "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+        "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
+      },
+      "scope": "One successful user-initiated paired manual OTA after a separate failed network attempt, exact image hashes, SDK VALID, native observed-pair settlement, fresh Home and paired sleep. Nightly persistence/arm verified; scheduled execution not yet observed."
+    },
+    "retained_208_acceptance": {
+      "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+      "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+    },
+    "retained_factory_version": "6.4.197",
+    "schedule": "Production02:00 Pacific unchanged.",
+    "next_version_minimum": "6.4.210",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/RELEASE_209.md",
+    "source_tag": {
+      "name": "halo-v6.4.209",
+      "object": "91133914f364a3d70c4485b8567729f3b3e30a12",
+      "commit": "cd2b84bc072a8f287c4f93bed99df091e04610ba",
+      "remote_push": false
+    },
+    "source_tag_receipt": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/SOURCE-TAG.json",
+      "sha256": "195064aac2cb9c60972ad5b36ee72cf4bdbe20bfe9a9dbb0bcb6ac2afb691894"
+    },
+    "source_scope_review": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/SCOPE-REVIEW.json",
+      "sha256": "b00056f0a40f7b60086b65491fb7bb7638a8d2bcb4b2acf4d76af60e71258558"
+    },
+    "release_record": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/RELEASE-RECORD.json",
+      "sha256": "b7be44936234e11f91e48e870cda791e629b2f2b1509b964e19be6344f879881"
+    },
+    "private_release_package": {
+      "path": "/Users/MattTaylor/halo-releases/6.4.209.ARCHIVE-RECORD.json",
+      "sha256": "dc49b7aa81a0bc090845911e9c474062512e7d7e037c1a6ae9b1dc558f8dbffc"
+    },
+    "limits": [
+      "One successful paired manual OTA after a separate weak-signal transport failure; not repeated reliability qualification.",
+      "Nightly schedule persistence and actual sleep timer arm verified for September23 at02:00 PDT; that scheduled execution has not yet occurred.",
+      "Earlier attempt exposed LCD preflight lease expiry before blocking manifest retries finished. The UI feedback issue remains open and was not changed by this version-only release.",
+      "Native policy_target_valid observed-pair settlement was logged; no new cloud policy report or raw NVS inspection was performed.",
+      "No separate209 same-version, power-cut, USB-free or full-product acceptance is claimed."
+    ],
+    "new_release_archive_created": true,
+    "previous_installed_pair_208": {
+      "version": "6.4.208",
+      "installed": {
+        "sense": "6.4.208 app0 SDK VALID",
+        "lcd": "6.4.208 app1 SDK VALID"
+      },
+      "installation_methods": {
+        "sense": "USB inactive-bank bootstrap preserving NVS and207 fallback",
+        "lcd": "ordinary manual OTA from206/app0 to208/app1"
+      },
+      "acceptance": "PASS_SCOPED_PAIRED208_HEALTH_LCD_MANUAL_OTA_AND_NO_UPDATE",
+      "first_manual_ota": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/manual208-01/FIRST-OTA-ACCEPTANCE.json",
+        "sha256": "5db811e1bf8b2b574cf3f35ef1eeb7ca0ba2d866704ec7ed4cf726c1d8c88108"
+      },
+      "same_version_check": "PASS",
+      "scope": "One LCD206-to208 manual OTA and one paired208 no-update request with SDK VALID, terminal cleanup, natural Home and paired sleep. Sense USB bootstrap is separate; no physical scheduled208 or Sense self-OTA pass.",
+      "same_version_manual": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/same208-01/analysis/NO-UPDATE-REVIEW.json",
+        "sha256": "6d3aef1e86cd51d60f5cfbf22254f61e7f354fc83d1bf9dadcc795c5d4d53a36"
+      },
+      "device_acceptance": {
+        "path": "/Users/MattTaylor/halo-ota208-20260922/release208/DEVICE-ACCEPTANCE.json",
+        "sha256": "1e286ca50a1c24659bb11bbe0944bf7fb7c7a40ed19fbc6bc6cf0a40b5f8aea6"
+      }
+    },
+    "device_acceptance_record": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+      "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
+    },
+    "next_nightly": {
+      "request_id": "nightly_20260923",
+      "start_epoch": 1790154000,
+      "local_time": "2026-09-23T02:00:00-07:00",
+      "timezone": "America/Los_Angeles",
+      "lcd_preparation_wake_epoch": 1790153985,
+      "lcd_preparation_local_time": "2026-09-23T01:59:45-07:00",
+      "lcd_final_sleep_timer_s": 51837,
+      "sense_final_sleep_timer_s": 51852,
+      "schedule_modified": false
+    },
+    "earlier_failed_attempt": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/manual-user209-01-analysis/ATTEMPT1.json",
+      "sha256": "40e314a494b6a0329ccf46c1ad3d19b7cc745ec59b81974485533d54bb6221f8"
+    }
+  },
+  "previous_current_validation_blocker_209": {
+    "status": "SCOPED_PAIRED209_MANUAL_PASS_UI_MANIFEST_WAIT_FEEDBACK_ISSUE_OPEN",
+    "report": "docs/RELEASE_209.md",
+    "successful_acceptance": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/DEVICE-ACCEPTANCE-209.json",
+      "sha256": "b2b754396bd965a77fa584119f62108f8c523436400dacacd0efe170d822267f"
+    },
+    "earlier_failed_attempt": {
+      "path": "/Users/MattTaylor/halo-release209-20260922/manual-user209-01-analysis/ATTEMPT1.json",
+      "sha256": "40e314a494b6a0329ccf46c1ad3d19b7cc745ec59b81974485533d54bb6221f8"
+    },
+    "next_work": "Retain the observed preflight UI lease expiry issue for a separately reviewed fix. Scheduled timer arm is verified; do not claim the next scheduled execution has occurred."
   }
 }

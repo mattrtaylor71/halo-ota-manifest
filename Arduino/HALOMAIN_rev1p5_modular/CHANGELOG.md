@@ -1,3 +1,7 @@
+# 6.4.210 published — check-in skips quantity confirmation
+
+Sense check-in skips quantity/expiry input, queues quantity 1 with no manual expiry, then uses the existing Got it screen. LCD runtime, camera capture, network, OTA and storage implementations are unchanged. Exact 114-suite snapshot gate, paired canonical builds/artifact checks and full public readbacks passed. Installation and device test pending; retained installed 209 evidence stays separate. [Release details](docs/RELEASE_210.md).
+
 # 6.4.209 published — version-only manual OTA bump
 
 Publish the tested 208 runtime under 209 at the user’s request; only generated version/build metadata changes. Exact 114-suite snapshot tests, paired canonical builds/artifact checks and full public binary readbacks pass. Source `cd2b84bc072a`, local tag `halo-v6.4.209`. The user’s second manual attempt installed both 209 boards with exact hashes, SDK VALID, native observed-pair settlement, Home and sleep. The nightly timer is stored and armed; scheduled execution is not yet observed. The first network failure exposed an unfixed preflight UI lease expiry issue. Factory 197/frozen 158 are unchanged. [Release details](docs/RELEASE_209.md).
