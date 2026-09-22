@@ -1,8 +1,10 @@
 # Provisioning and first-upload memory audit
 
-Private candidate work following Sense205 / LCD206. Public paired201 and EOL197
-remain unchanged. This note distinguishes the observed failure, the scoped
-mitigation, and the larger memory opportunity that has not been implemented.
+This records the candidate work following Sense205 / LCD206 and its first
+physical repeat. Paired207 is now published; see the publication addendum and
+[release handoff](RELEASE_207.md). EOL197 remains unchanged. The note distinguishes
+the observed failure, the scoped mitigation, and the larger memory opportunity
+that has not been implemented.
 
 ## Observed failure
 
@@ -170,7 +172,7 @@ started and no flash was attempted. Its stdout JSON was retained and verified;
 the corrected wrapper consumes stdout. Preserve `wake-service01` evidence.
 This host receipt error is separate from firmware behavior.
 
-Public paired201 and EOL197 remain unchanged. Continue firmware work from207's
+At this private checkpoint, public paired201 and EOL 197 remained unchanged. Continue firmware work from207's
 reviewed source or descendants; do not publish this memory mitigation as
 physically qualified until the immediate post-provision claim/capture case is
 observed.
@@ -221,3 +223,7 @@ improved substantially in this case. Repeat provisioning, ordinary voice and
 input-interruption/resume coverage remain separate acceptance work. The
 exhausted-claim retry issue and permanent 64 KB OTA buffer remain unchanged.
 No new firmware was flashed or published for this read-only verification.
+
+## Paired 207 publication
+
+Both canonical207 images are now published and fully read back, with the exact 113-suite snapshot gate and local source tag verified. [The release handoff](RELEASE_207.md) records the final artifacts and publication receipts. The physical case above remains Sense207/LCD206 evidence; publishing LCD207 does not establish its installation or broaden acceptance. EOL 197 and frozen 158 recovery remain unchanged.

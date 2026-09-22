@@ -1,4 +1,4 @@
-> Current development/factory baseline: **197**, with published OTA **196**. Read [the current handoff](PRODUCTION_BASELINE_197.md). The dated acceptance records below are historical;158 remains the separately frozen scheduled-OTA recovery package, not the source for new releases.
+> Current public release: **207**. Read [the release handoff](RELEASE_207.md). The observed bench is Sense207/LCD206: one first-attempt phone provisioning and immediate Check-in passed, with cloud image verification and paired sleep. Exact paired 207 installation and broader acceptance remain untested. EOL 197 and frozen 158 recovery remain unchanged; the dated records below are historical.
 
 # Scheduled 157→158 OTA accepted; production Pacific schedule restored
 

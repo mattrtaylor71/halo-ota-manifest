@@ -1,3 +1,9 @@
+# 6.4.207 published — post-provision memory and display fixes
+
+Prefer PSRAM for mbedTLS allocations only within account-claim and image transports, retaining task ownership, cancellation, deadlines and default allocation elsewhere. This release also includes the reviewed camera PSRAM fallback, reduced image URL temporaries, image-body pacing and bounded LCD completion/guardian fixes from private 203–206. Both 113-suite gates, paired canonical builds and complete public readbacks passed; local tag `halo-v6.4.207` identifies source `fcf6fb220f1f`.
+
+One phone provisioning and immediate Check-in on Sense207/LCD206 passed its first claim, presign and PUT, with verified cloud image bytes, normal LCD behavior and paired sleep. Exact paired 207 installation, repeated reliability, voice and interruption/resume remain untested. Camera reserve warnings and exhausted-claim retry bookkeeping remain open. EOL 197 and frozen 158 recovery are unchanged. [Release evidence and limits](docs/RELEASE_207.md).
+
 # 6.4.201 published — repair completed OTA hints
 
 A stale `lcd_ota_due` flag could block discovery after its canonical campaign was already RESOLVED, producing “Update postponed.” Retire only the proven orphan hint after trusted storage, fresh correlated healthy peer proof and idle transport checks; preserve unresolved transfers, policy/history/accounting and the production02:00Pacific schedule. Both105-suite gates and paired canonical builds/public readbacks pass. Sense201 was USB bootstrapped without changing NVS; LCD199→201 manual OTA and a paired201 no-update check passed with SDKVALID and paired sleep. No new Sense OTA transfer or scheduled/full-product qualification is claimed. [Repair, evidence and limits](docs/OTA_RESOLVED_HINT_REPAIR_201.md).

@@ -874,7 +874,7 @@
     "retained_failed_campaign_defer_until": "2026-09-11 15:04:13 America/Los_Angeles",
     "retained_debt_limit": "The2am wake is restored, but the failed campaign retains its previous not_before/next_normal eligibility; timezone restoration is not a policy reset or a promise of another OTA at the first2am wake."
   },
-  "current_production_latest_version": "6.4.201",
+  "current_production_latest_version": "6.4.207",
   "published_manual_test_bumps": [
     {
       "version": "6.4.115",
@@ -1763,39 +1763,27 @@
     "instruction": "Retain these scoped Software Update copy and voice motion fixes in future builds. Only LCD was built/checked; a paired124 release still requires matching Sense build and publication. Current public production remains123; do not treat124 as installed or visually accepted."
   },
   "last_verified_device_health": {
-    "version": "Sense6.4.201/LCD6.4.201",
-    "status": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP",
-    "installed": {
-      "sense": {
-        "version": "6.4.201",
-        "running": "app0",
-        "boot": "app0",
-        "state": "VALID",
-        "installation": "USB inactive-bank service"
-      },
-      "lcd": {
-        "version": "6.4.201",
-        "running": "app1",
-        "boot": "app1",
-        "state": "VALID",
-        "installation": "manual OTA from 6.4.199"
-      }
-    },
+    "version": "Sense6.4.207/LCD6.4.206",
+    "status": "PASS_ONE_207_206_PROVISIONING_IMMEDIATE_CHECKIN_CLOUD_SLEEP_CASE",
     "paired_health": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
-      "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/postservice207-health01/RESULT.json",
+      "sha256": "94b46a262ceb5f7e31bc6ee92de96834ff953353e0c8c050b4a456eae58e2a6b"
     },
-    "scope": "USB Sense repair followed by one manual LCD OTA and one no-update check; paired SDKVALID/Home/sleep and unchanged 02:00Pacific arm.",
+    "functional_evidence": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
+    },
     "limitations": [
-      "Sense was installed through an inactive-bank USB bootstrap preserving NVS; only the LCD transferred by OTA in this run.",
-      "One Settings-equivalent USB command per case; no direct visual review of the rendered result or physical button gesture is claimed.",
-      "USB-instrumented finite tests; no new cold-power, power-interruption, scheduled-OTA or full-product qualification.",
-      "Production 02:00 Pacific arm was observed; timer firing and a scheduled transfer were not exercised.",
-      "Prior immediate post-provision voice AES allocation failure is unchanged; no new upload reliability claim.",
-      "The stale hint and admission failure are proved; the original hint-writing event is not in the available logs.",
-      "Manual-lcd201-01 stopped at a test-controller cached-peer check before sending OTA; it is not a failed OTA attempt.",
-      "Retained diagnostic context returned orphan_closure=Corrupt and context_conflict=Busy; later open/seal succeeded. OTA passes do not establish complete diagnostic-journal health."
-    ]
+      "One actual phone provisioning and immediate Check-in on Sense207/LCD206 passed first account claim and first image PUT; public LCD207 has matching runtime dependencies except generated version metadata but its exact bytes have not been installed on the bench.",
+      "No new paired207 OTA transfer, scheduled OTA, cold-power, USB-free or exhaustive product qualification.",
+      "Repeat provisioning, ordinary voice and input interruption/resume remain separate acceptance work. Voice allocation policy is unchanged.",
+      "Existing camera DMA reserve warning and fragmentation remain; successful PSRAM fallback was observed.",
+      "Claim allocator counter line truncates before default_fallbacks; complete claim and PUT failure windows reported zero allocation failures.",
+      "Exhausted account-claim retry bookkeeping and permanent 64 KB internal OTA marker buffer remain separate open work.",
+      "Cloud image custody/checksum/decode verified; downstream recognition or inventory semantics were not tested in this case.",
+      "Earlier private QUALIFICATION.json is a historical pre-install checkpoint, not the current release status."
+    ],
+    "scope": "One private Sense207/LCD206 provisioning and immediate Check-in; paired207 OTA remains untested."
   },
   "previous_development_baseline_124": {
     "version": "6.4.124",
@@ -4854,13 +4842,13 @@
     }
   },
   "current_validation_blocker": {
-    "status": "OTA_ORPHAN_REPAIRED_SCOPED_TESTS_PASS_OTHER_LIMITS_RETAINED",
-    "details": "The stale completed LCD hint is repaired and manual LCD OTA/no-update checks pass. Prior first-wake post-provision voice AES allocation issue remains; no new full-product or scheduled qualification.",
+    "status": "ONE207_206_CASE_PASS_PAIRED207_OTA_ACCEPTANCE_PENDING",
+    "details": "One first-attempt claim/image case passed. Repeat provisioning, voice and input interruption/resume remain unqualified.",
     "evidence": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
-      "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
     },
-    "candidate_installed": true,
+    "candidate_installed": false,
     "no_public_promotion": false
   },
   "diagnostic_candidate151": {
@@ -6560,132 +6548,138 @@
     }
   },
   "current_working_source": {
-    "version": "6.4.201",
-    "status": "PUBLISHED_INSTALLED_SCOPED_OTA_REPAIR_PASS",
-    "artifact_source_commit": "8ca5b14868074a2eea792b519e5b942b0f7371da",
-    "artifact_source_firmware_tree": "709687d3dc2018e02bc5eee13a884db4bc18a69c",
-    "build_id": "6.4.201-20260921T233740Z-8ca5b1486807",
+    "version": "6.4.207",
+    "status": "PUBLISHED_PAIRED_RELEASE_SCOPED_207_206_BENCH_PASS",
+    "artifact_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
+    "artifact_source_firmware_tree": "2489f338c55c9a9af14f49c4408ea70fc8d50f24",
+    "build_id": "6.4.207-20260922T073628Z-fcf6fb220f1f",
     "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
     "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
-    "source_selection": "Continue from 8ca5b14868074a2eea792b519e5b942b0f7371da or reviewed descendants, preserving the 201 completed-hint repair, 200 UI and all199 fixes. EOL remains197.",
+    "source_selection": "Continue from fcf6fb220f1f4983557669e8e3b552f910e079c1 or reviewed descendants, preserving the 207 scoped TLS allocator, 206 LCD provisioning fix, camera recovery, image upload pacing, 201 OTA repair and all earlier fixes. EOL stays197.",
     "materialization": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/snapshot/materialization.json",
-      "sha256": "3e3658854dfefd8efacdbeec2f6d48785723303d029680cda97736eccc833e0c"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/snapshot/materialization.json",
+      "sha256": "1954fbe834a1cf6f987d5bae2c3f9929c866d94eba28283385231f530e9885e2"
     },
     "working_host_tests": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/regression001/RESULT.json",
-      "sha256": "764bfd84e436ae79ae178203c701e334408c6761ab309a94240f46d1dc72ad28"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/memory207-audit/regression-working01/RESULT.json",
+      "sha256": "301ebdfdc1ba176e5e2c3630263431509bea66d142949e77be6e7344d15f12a3"
     },
     "host_tests": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/regression/RESULT.json",
-      "sha256": "e4f7c1e873e7260f6dc7f5c8fd4cbc9f24c0fad220e7258b61efc4d0660c996d"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/regression/RESULT.json",
+      "sha256": "496ae0d58dcf4fc5b8cbc10b4a90b636210cb2db2136a3c1ce3abefc3f1db168"
     },
-    "host_suite_count": 105,
+    "host_suite_count": 113,
     "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
     "built_boards": [
       "sense",
       "lcd"
     ],
-    "artifact_checks": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/artifact-result-v2-sense-lcd.json",
-      "sha256": "f5118c7965f247626a053f92ff8c30214004858f3f5f478e07c5a407a41d33e1"
-    },
+    "artifact_checks": [
+      {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/artifact-result-v2-sense.json",
+        "sha256": "2921768b2616a0a1445c7294006eeac0900ba67730e8051bfaf288f397556a99"
+      },
+      {
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/artifact-result-v2-lcd.json",
+        "sha256": "1f7fc8c4e74a687cc70ca5a093a39f211654b474e44b2f83f1fc0aaf53e340ef"
+      }
+    ],
     "board_proofs": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/sense/artifacts/verified.json",
-        "sha256": "110af8c9d1ad720be2c9513a6813020bdda72c0e8cbd2a2cb9f3fe894dfdfe25"
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/sense/artifacts/verified.json",
+        "sha256": "e6a1bc7389ed1f9690c2d364cbd57286d4dbee3959e39e4a398d37e1cc633600"
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/lcd/artifacts/verified.json",
-        "sha256": "daa34d4610e54ffd3668ac35f5df02bb7647f66aeb58c1fbd50ad02cbfa13566"
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/lcd/artifacts/verified.json",
+        "sha256": "e3cf3473f2e68a93b1aca78727c25a00fbcb858b96c1ed17cdbf25d843bf0fd0"
       }
     },
     "applications": {
       "sense": {
-        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/sense/artifacts/halo_sense_prod.ino.bin",
-        "sha256": "37e01eb846a9342e30cfb06c54c30fdc47c66c763c8f2e2969fa5442b048ae97",
-        "bytes": 1869952
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "a6a46832b39dd7b05b677657b7af1e17818b5a234909b7357f1c77e120076e0e",
+        "bytes": 1874752
       },
       "lcd": {
-        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/lcd/artifacts/halo_lcd_prod.ino.bin",
-        "sha256": "5cbdeccecba68671116a567d0cd9b2a8b12c88656e1b9b994d46fa5d4c93e24c",
-        "bytes": 2032864
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "ffb78b24586709e570c9a6647e5dd4f0462f80897ac2388173fd35312d147338",
+        "bytes": 2033104
       }
     },
     "publication": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/promote001/result.json",
-      "sha256": "3f92e3f905ec6daa851e5809aceedb014e1af9454aabf4a4ae4b198fa82125a3"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/promote001/result.json",
+      "sha256": "d08a61a6f12472c10d783e3f1ec782b3b954efd4805678109dfabeac3ec4546f"
+    },
+    "staging": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/stage001/result.json",
+      "sha256": "6b745f88f6459d229243eb4c10366d3f41242aa62460593df2cd883dd7802c21"
     },
     "prepared_publication": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/publication/release.json",
-      "sha256": "c50c3d0cb1e44f335e1b135b386830321a62312c3e97fcf0c63d2e949d51a7ff"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/publication/release.json",
+      "sha256": "e0fdf6a94d0bf41d1625ae2100a00564ca51282fb9704d044fa7c19e097cf13f"
     },
     "public_readback": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/PUBLIC-READBACK.json",
-      "sha256": "da9103b23464848d623f42af5089c8382cc82149f556e04f1fd8b25cd3f5df30"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/PUBLIC-READBACK.json",
+      "sha256": "d923a2cd64ae5138745c0b3f13cb168d0f03098519ff6571c53e7cf3faf78c71"
     },
     "published": true,
-    "current_public_ota_version": "6.4.201",
+    "current_public_ota_version": "6.4.207",
     "git_remote_push_performed": false,
-    "installed": true,
-    "device_acceptance": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP",
+    "installed": false,
+    "device_acceptance": "PASS_ONE_207_206_PROVISIONING_IMMEDIATE_CHECKIN_CLOUD_SLEEP_CASE",
     "device_evidence": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
-      "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
-    },
-    "bootstrap_installation": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/service-sense01/service/result.json",
-      "sha256": "81bd2150a3edad3ef409d0608f75bc45184060d444ce898ce06311d3ff16916c"
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+      "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
     },
     "retained_installed_pair": {
-      "version": "6.4.201",
-      "installation_methods": {
-        "sense": "USB inactive-bank service",
-        "lcd": "manual OTA"
+      "version": "Sense6.4.207/LCD6.4.206",
+      "installed": {
+        "sense": "6.4.207 app1 SDK VALID",
+        "lcd": "6.4.206 app0 SDK VALID"
       },
       "health": {
-        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
-        "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
-      },
-      "acceptance": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP"
-    },
-    "previous_installed_pair_199": {
-      "version": "6.4.199",
-      "installation": {
-        "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
-        "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/postservice207-health01/RESULT.json",
+        "sha256": "94b46a262ceb5f7e31bc6ee92de96834ff953353e0c8c050b4a456eae58e2a6b"
       },
       "functional_test": {
-        "path": "/Users/MattTaylor/halo-postclaim199-20260921/reprovision-voice199-01/TEST-RESULT.json",
-        "sha256": "c63c9d040f3ac2db713afd1cef548dc46f78b72a4e7c9e8f409833118ea053b5"
+        "path": "/Users/MattTaylor/halo-provision-memory202-20260921/reprovision-memory207-01/CASE-RESULT.json",
+        "sha256": "ff62655d2af06c8ff83d9100df0752eca145545eca9382ba0eaa0f2612447866"
       },
-      "acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE"
+      "acceptance": "PASS_ONE_FIRST_ATTEMPT_CLAIM_AND_IMAGE_UPLOAD_WITH_CLOUD_VERIFICATION"
     },
     "retained_factory_version": "6.4.197",
-    "schedule": "Production 02:00 Pacific unchanged; next canonical arm verified at1790067600, LCDwake1790067585. No allowance/history/unresolved-debt reset; only proven resolved orphan hint retired by guarded firmware.",
-    "next_version_minimum": "6.4.202",
+    "schedule": "Production 02:00 Pacific unchanged. Latest case logged next nightly target1790067600; no schedule, allowance or debt modifications for this release.",
+    "next_version_minimum": "6.4.208",
     "next_version_requires_fresh_inventory_check": true,
-    "handoff": "docs/OTA_RESOLVED_HINT_REPAIR_201.md",
+    "handoff": "docs/RELEASE_207.md",
     "source_tag": {
-      "name": "halo-v6.4.201",
-      "object": "18df5750f48f178b474ad3cff8ed11d4949a9446",
-      "commit": "8ca5b14868074a2eea792b519e5b942b0f7371da",
+      "name": "halo-v6.4.207",
+      "object": "de5ab8df945e59ce66e600b410fd645ed9732496",
+      "commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
       "remote_push": false
     },
+    "release_readiness": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/release-review/READINESS.json",
+      "sha256": "9c4e72be5484a465bcae73114b750aeae64f4ee1d12b108487f5631a20ed5e8e"
+    },
+    "source_scope_review": {
+      "path": "/Users/MattTaylor/halo-provision-memory202-20260921/release207/release-review/REVIEW.md",
+      "sha256": "c024baee4ba4169bec078742a7e7dc570e63718a61a4b2e72ec501a78d3cd563"
+    },
     "limits": [
-      "Sense was installed through an inactive-bank USB bootstrap preserving NVS; only the LCD transferred by OTA in this run.",
-      "One Settings-equivalent USB command per case; no direct visual review of the rendered result or physical button gesture is claimed.",
-      "USB-instrumented finite tests; no new cold-power, power-interruption, scheduled-OTA or full-product qualification.",
-      "Production 02:00 Pacific arm was observed; timer firing and a scheduled transfer were not exercised.",
-      "Prior immediate post-provision voice AES allocation failure is unchanged; no new upload reliability claim.",
-      "The stale hint and admission failure are proved; the original hint-writing event is not in the available logs.",
-      "Manual-lcd201-01 stopped at a test-controller cached-peer check before sending OTA; it is not a failed OTA attempt.",
-      "Retained diagnostic context returned orphan_closure=Corrupt and context_conflict=Busy; later open/seal succeeded. OTA passes do not establish complete diagnostic-journal health."
+      "One actual phone provisioning and immediate Check-in on Sense207/LCD206 passed first account claim and first image PUT; public LCD207 has matching runtime dependencies except generated version metadata but its exact bytes have not been installed on the bench.",
+      "No new paired207 OTA transfer, scheduled OTA, cold-power, USB-free or exhaustive product qualification.",
+      "Repeat provisioning, ordinary voice and input interruption/resume remain separate acceptance work. Voice allocation policy is unchanged.",
+      "Existing camera DMA reserve warning and fragmentation remain; successful PSRAM fallback was observed.",
+      "Claim allocator counter line truncates before default_fallbacks; complete claim and PUT failure windows reported zero allocation failures.",
+      "Exhausted account-claim retry bookkeeping and permanent 64 KB internal OTA marker buffer remain separate open work.",
+      "Cloud image custody/checksum/decode verified; downstream recognition or inventory semantics were not tested in this case.",
+      "Earlier private QUALIFICATION.json is a historical pre-install checkpoint, not the current release status."
     ],
-    "receipt_revision": 2,
+    "recorded_epoch": 1790065542.762676,
     "private_release_package": {
-      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/ARCHIVE-RECORD-v2.json",
-      "sha256": "bfe994284dd3e302b9fe8d5b167d94e0a8989b5d56f4fb9ae9a705b57d822313"
+      "path": "/Users/MattTaylor/halo-releases/6.4.207.ARCHIVE-RECORD.json",
+      "sha256": "112aa711d71a00309e4affb1e4d8a74fdbff7f50698fc8aa89338cee84838ecb"
     }
   },
   "previous_working_source_187": {
@@ -10133,16 +10127,16 @@
   },
   "production_source_selection": {
     "authoritative_selector": "PRODUCTION_BASELINE.json",
-    "handoff": "docs/OTA_RESOLVED_HINT_REPAIR_201.md",
-    "minimum_source_commit": "8ca5b14868074a2eea792b519e5b942b0f7371da",
-    "source_tag": "halo-v6.4.201",
-    "source_tag_object": "18df5750f48f178b474ad3cff8ed11d4949a9446",
+    "handoff": "docs/RELEASE_207.md",
+    "minimum_source_commit": "fcf6fb220f1f4983557669e8e3b552f910e079c1",
+    "source_tag": "halo-v6.4.207",
+    "source_tag_object": "de5ab8df945e59ce66e600b410fd645ed9732496",
     "canonical_branch": "codex/halo-production-baseline-197",
-    "minimum_new_version": "6.4.202",
-    "last_published_update": "2026-09-21",
-    "public_version": "6.4.201",
+    "minimum_new_version": "6.4.208",
+    "last_published_update": "2026-09-22",
+    "public_version": "6.4.207",
     "factory_version_unchanged": "6.4.197",
-    "device_acceptance": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP"
+    "device_acceptance": "PASS_ONE_207_206_PROVISIONING_IMMEDIATE_CHECKIN_CLOUD_SLEEP_CASE"
   },
   "baseline_freeze_20260919": {
     "scope": "Current source197 and exact196/197 artifacts; no runtime/build/publication change",
@@ -10679,6 +10673,180 @@
       "Home is confirmed by firmware logs, not a screenshot or direct visual inspection.",
       "The60.438s quiet observation proves no USB re-enumeration or further captured raw logs during that interval; it is not independent electrical proof of no possible internal wake.",
       "This single physical manual update demonstrates explicit manual budget admission. Repeated no-update taps and daily unbounded manual usage remain covered by host tests, not repeated physical actions in this run."
+    ]
+  },
+  "previous_working_source_201": {
+    "version": "6.4.201",
+    "status": "PUBLISHED_INSTALLED_SCOPED_OTA_REPAIR_PASS",
+    "artifact_source_commit": "8ca5b14868074a2eea792b519e5b942b0f7371da",
+    "artifact_source_firmware_tree": "709687d3dc2018e02bc5eee13a884db4bc18a69c",
+    "build_id": "6.4.201-20260921T233740Z-8ca5b1486807",
+    "working_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15",
+    "firmware_root": "/Users/MattTaylor/halo-camera-recovery-2026-09-15/Arduino/HALOMAIN_rev1p5_modular",
+    "source_selection": "Continue from 8ca5b14868074a2eea792b519e5b942b0f7371da or reviewed descendants, preserving the 201 completed-hint repair, 200 UI and all199 fixes. EOL remains197.",
+    "materialization": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/snapshot/materialization.json",
+      "sha256": "3e3658854dfefd8efacdbeec2f6d48785723303d029680cda97736eccc833e0c"
+    },
+    "working_host_tests": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/regression001/RESULT.json",
+      "sha256": "764bfd84e436ae79ae178203c701e334408c6761ab309a94240f46d1dc72ad28"
+    },
+    "host_tests": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/regression/RESULT.json",
+      "sha256": "e4f7c1e873e7260f6dc7f5c8fd4cbc9f24c0fad220e7258b61efc4d0660c996d"
+    },
+    "host_suite_count": 105,
+    "build_status": "BOTH_CANONICAL_BUILDS_AND_ARTIFACT_CHECKS_PASS",
+    "built_boards": [
+      "sense",
+      "lcd"
+    ],
+    "artifact_checks": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/artifact-result-v2-sense-lcd.json",
+      "sha256": "f5118c7965f247626a053f92ff8c30214004858f3f5f478e07c5a407a41d33e1"
+    },
+    "board_proofs": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/sense/artifacts/verified.json",
+        "sha256": "110af8c9d1ad720be2c9513a6813020bdda72c0e8cbd2a2cb9f3fe894dfdfe25"
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/lcd/artifacts/verified.json",
+        "sha256": "daa34d4610e54ffd3668ac35f5df02bb7647f66aeb58c1fbd50ad02cbfa13566"
+      }
+    },
+    "applications": {
+      "sense": {
+        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/sense/artifacts/halo_sense_prod.ino.bin",
+        "sha256": "37e01eb846a9342e30cfb06c54c30fdc47c66c763c8f2e2969fa5442b048ae97",
+        "bytes": 1869952
+      },
+      "lcd": {
+        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/build/lcd/artifacts/halo_lcd_prod.ino.bin",
+        "sha256": "5cbdeccecba68671116a567d0cd9b2a8b12c88656e1b9b994d46fa5d4c93e24c",
+        "bytes": 2032864
+      }
+    },
+    "publication": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/promote001/result.json",
+      "sha256": "3f92e3f905ec6daa851e5809aceedb014e1af9454aabf4a4ae4b198fa82125a3"
+    },
+    "prepared_publication": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/publication/release.json",
+      "sha256": "c50c3d0cb1e44f335e1b135b386830321a62312c3e97fcf0c63d2e949d51a7ff"
+    },
+    "public_readback": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/PUBLIC-READBACK.json",
+      "sha256": "da9103b23464848d623f42af5089c8382cc82149f556e04f1fd8b25cd3f5df30"
+    },
+    "published": true,
+    "current_public_ota_version": "6.4.201",
+    "git_remote_push_performed": false,
+    "installed": true,
+    "device_acceptance": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP",
+    "device_evidence": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
+      "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
+    },
+    "bootstrap_installation": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/service-sense01/service/result.json",
+      "sha256": "81bd2150a3edad3ef409d0608f75bc45184060d444ce898ce06311d3ff16916c"
+    },
+    "retained_installed_pair": {
+      "version": "6.4.201",
+      "installation_methods": {
+        "sense": "USB inactive-bank service",
+        "lcd": "manual OTA"
+      },
+      "health": {
+        "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
+        "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
+      },
+      "acceptance": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP"
+    },
+    "previous_installed_pair_199": {
+      "version": "6.4.199",
+      "installation": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/INSTALL-RESULT.json",
+        "sha256": "4be3c8f388ce90a64fc884d037a83e65204b597da911e32184f41b914d8ccf3e"
+      },
+      "functional_test": {
+        "path": "/Users/MattTaylor/halo-postclaim199-20260921/reprovision-voice199-01/TEST-RESULT.json",
+        "sha256": "c63c9d040f3ac2db713afd1cef548dc46f78b72a4e7c9e8f409833118ea053b5"
+      },
+      "acceptance": "RECOVERED_VOICE_DELIVERY_AND_CALENDAR_PASS_IMMEDIATE_UPLOAD_MEMORY_FAILURE"
+    },
+    "retained_factory_version": "6.4.197",
+    "schedule": "Production 02:00 Pacific unchanged; next canonical arm verified at1790067600, LCDwake1790067585. No allowance/history/unresolved-debt reset; only proven resolved orphan hint retired by guarded firmware.",
+    "next_version_minimum": "6.4.202",
+    "next_version_requires_fresh_inventory_check": true,
+    "handoff": "docs/OTA_RESOLVED_HINT_REPAIR_201.md",
+    "source_tag": {
+      "name": "halo-v6.4.201",
+      "object": "18df5750f48f178b474ad3cff8ed11d4949a9446",
+      "commit": "8ca5b14868074a2eea792b519e5b942b0f7371da",
+      "remote_push": false
+    },
+    "limits": [
+      "Sense was installed through an inactive-bank USB bootstrap preserving NVS; only the LCD transferred by OTA in this run.",
+      "One Settings-equivalent USB command per case; no direct visual review of the rendered result or physical button gesture is claimed.",
+      "USB-instrumented finite tests; no new cold-power, power-interruption, scheduled-OTA or full-product qualification.",
+      "Production 02:00 Pacific arm was observed; timer firing and a scheduled transfer were not exercised.",
+      "Prior immediate post-provision voice AES allocation failure is unchanged; no new upload reliability claim.",
+      "The stale hint and admission failure are proved; the original hint-writing event is not in the available logs.",
+      "Manual-lcd201-01 stopped at a test-controller cached-peer check before sending OTA; it is not a failed OTA attempt.",
+      "Retained diagnostic context returned orphan_closure=Corrupt and context_conflict=Busy; later open/seal succeeded. OTA passes do not establish complete diagnostic-journal health."
+    ],
+    "receipt_revision": 2,
+    "private_release_package": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/ARCHIVE-RECORD-v2.json",
+      "sha256": "bfe994284dd3e302b9fe8d5b167d94e0a8989b5d56f4fb9ae9a705b57d822313"
+    }
+  },
+  "previous_current_validation_blocker_201": {
+    "status": "OTA_ORPHAN_REPAIRED_SCOPED_TESTS_PASS_OTHER_LIMITS_RETAINED",
+    "details": "The stale completed LCD hint is repaired and manual LCD OTA/no-update checks pass. Prior first-wake post-provision voice AES allocation issue remains; no new full-product or scheduled qualification.",
+    "evidence": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
+      "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
+    },
+    "candidate_installed": true,
+    "no_public_promotion": false
+  },
+  "previous_verified_device_health_201": {
+    "version": "Sense6.4.201/LCD6.4.201",
+    "status": "PASS_SCOPED_REPAIR_LCD_MANUAL_OTA_NO_UPDATE_PAIRED_HEALTH_SLEEP",
+    "installed": {
+      "sense": {
+        "version": "6.4.201",
+        "running": "app0",
+        "boot": "app0",
+        "state": "VALID",
+        "installation": "USB inactive-bank service"
+      },
+      "lcd": {
+        "version": "6.4.201",
+        "running": "app1",
+        "boot": "app1",
+        "state": "VALID",
+        "installation": "manual OTA from 6.4.199"
+      }
+    },
+    "paired_health": {
+      "path": "/Users/MattTaylor/halo-ota-orphan201-20260921/release201/DEVICE-ACCEPTANCE-v2.json",
+      "sha256": "354c09b4939a2ba3fb4d04644c9ca6cfe4d713489c327b87722b78df985feff7"
+    },
+    "scope": "USB Sense repair followed by one manual LCD OTA and one no-update check; paired SDKVALID/Home/sleep and unchanged 02:00Pacific arm.",
+    "limitations": [
+      "Sense was installed through an inactive-bank USB bootstrap preserving NVS; only the LCD transferred by OTA in this run.",
+      "One Settings-equivalent USB command per case; no direct visual review of the rendered result or physical button gesture is claimed.",
+      "USB-instrumented finite tests; no new cold-power, power-interruption, scheduled-OTA or full-product qualification.",
+      "Production 02:00 Pacific arm was observed; timer firing and a scheduled transfer were not exercised.",
+      "Prior immediate post-provision voice AES allocation failure is unchanged; no new upload reliability claim.",
+      "The stale hint and admission failure are proved; the original hint-writing event is not in the available logs.",
+      "Manual-lcd201-01 stopped at a test-controller cached-peer check before sending OTA; it is not a failed OTA attempt.",
+      "Retained diagnostic context returned orphan_closure=Corrupt and context_conflict=Busy; later open/seal succeeded. OTA passes do not establish complete diagnostic-journal health."
     ]
   }
 }

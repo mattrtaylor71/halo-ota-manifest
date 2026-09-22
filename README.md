@@ -1,12 +1,12 @@
 # HALO production firmware
 
-**6.4.158 is the frozen default for all future firmware work.** Its paired scheduled OTA passed and the unit's daily schedule is restored to 02:00 Pacific. Start in [Arduino/HALOMAIN_rev1p5_modular](Arduino/HALOMAIN_rev1p5_modular), using this checkout or a reviewed descendant of `halo-v6.4.158`.
+**6.4.207 is the current paired public release.** Start in [Arduino/HALOMAIN_rev1p5_modular](Arduino/HALOMAIN_rev1p5_modular), continuing from source `fcf6fb220f1f4983557669e8e3b552f910e079c1` or reviewed descendants. Use an unused 208+ version after fresh inventory.
 
-- [Frozen release handoff, recovery, and retention](Arduino/HALOMAIN_rev1p5_modular/docs/FROZEN_RELEASE_158.md)
+- [Current release, evidence and limits](Arduino/HALOMAIN_rev1p5_modular/docs/RELEASE_207.md)
+- [Authoritative production selector](Arduino/HALOMAIN_rev1p5_modular/PRODUCTION_BASELINE.json)
 - [Build and publish the next version](Arduino/HALOMAIN_rev1p5_modular/docs/BUILD_AND_RELEASE.md)
-- [OTA results, failure analysis, and repeatable test procedure](Arduino/HALOMAIN_rev1p5_modular/docs/OTA_158_VALIDATION.md)
-- [Machine-readable current baseline and preserved historical evidence](Arduino/HALOMAIN_rev1p5_modular/RELEASE_BASELINE.json)
+- [Frozen 158 recovery and retention](Arduino/HALOMAIN_rev1p5_modular/docs/FROZEN_RELEASE_158.md)
 
-The local tag `halo-v6.4.158` preserves exact artifact source `b6d06da5997e2252a3472697f30dc8111ab90367`. The current checkout also includes subsequent acceptance and handoff documentation. Do not reset it to an older release just because an old report calls that release “current.” The `Arduino/HALOMAIN_rev1` folder is legacy reference material.
+The bench remains Sense207/app1 and LCD206/app0, both SDK VALID. One phone provisioning and immediate Check-in passed on first attempts, with cloud image verification and paired sleep. Exact paired 207 installation and broader reliability checks remain untested; publication does not expand that acceptance.
 
-The acceptance is scoped to the tested OTA path and supports a monitored rollout. USB-free, power-interruption, factory-station, and full product regression on 158 have not been newly qualified. Documentation preservation does not expand that scope.
+EOL factory selection remains 197. The immutable `halo-v6.4.158` tag and package retain their historical scheduled-OTA qualification. [RELEASE_BASELINE.json](Arduino/HALOMAIN_rev1p5_modular/RELEASE_BASELINE.json) preserves that history separately from current development. The `Arduino/HALOMAIN_rev1` folder is legacy reference material.
