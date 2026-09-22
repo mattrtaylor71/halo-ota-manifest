@@ -97,3 +97,25 @@ The scope flag now uses always-inline atomic compiler builtins; its focused
 target probe uses the real SDK flags, including disabled hardware atomics.
 The rebuilt candidate still requires a fresh full snapshot gate and exact ELF
 review. No hardware was changed by the held build.
+
+The corrected203r2 build is `6.4.203-20260922T031517Z-ee7f2f493e0e`,
+source `ee7f2f493e0e883b25b809c1ca8d417d2ac7af8d`, firmware tree
+`559a0cf3e19662902d8253dca3ad619ade350beb`. Its complete exact-snapshot
+gate passed all110 suites; canonical Sense build and artifact checks passed.
+Exact ELF SHA256 is
+`99c1a6bc9b2b338fcbbc47f97e4bf8415c29658f502f59040febc8276f0a9cca`.
+`elf203-review/actual203r2/MANUAL_REVIEW.json` verifies the wrapper's internal
+code/data, inline scope-flag access, actual camera linkage, unconditional flag
+clear and OV2640 guard. It also rechecks the202 diagnostic hook's internal
+single-CAS path. These are compiled-path checks; physical JPEG integrity and
+delivery are still pending.
+
+The first203 installation attempt, `service203-01`, stopped before any firmware
+write: the actuator worker stalled while configuring USB. No stroke was sent,
+the passive capture opened neither board and `service_attempts` remained0.
+The supervisor exited1; the worker's exit code/reap was not observed. A later
+read-only check proves that worker PID24593 and its process group are absent;
+the original timeout receipt remains unchanged. The next attempt waits for a
+manual wake, then uses the existing fresh identity/idle/diagnostic-lease gates
+and NVS-preserving inactive-bank service. Public paired201 and EOL197 remain
+unchanged; this candidate is not a production release or an OTA test.
