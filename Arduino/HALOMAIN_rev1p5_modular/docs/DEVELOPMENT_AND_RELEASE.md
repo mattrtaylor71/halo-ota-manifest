@@ -25,6 +25,12 @@ provisioning, quota or partition behavior. No firmware release is needed to star
 following this process. The retained 211 physical-test limits remain documented
 in [its handoff](RELEASE_211.md); choosing it as production does not invent tests.
 
+Include a [resource-impact review](RESOURCE_REVIEW.md) when changing firmware.
+Use the exact-artifact report to compare static RAM and real OTA-slot headroom,
+then collect runtime evidence for allocation/lifetime changes. The
+[resource audit](RESOURCE_AUDIT_20260922.md) ranks future PSRAM opportunities;
+these proposals are separate from the already-built, held 212 candidate.
+
 ## Local candidate workspace
 
 Use `/Users/MattTaylor/halo-firmware-candidates/` for candidates and evidence.

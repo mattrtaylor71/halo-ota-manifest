@@ -754,6 +754,15 @@
       "path": "tools/test_firmware_candidate.py",
       "args": [],
       "timeout_seconds": 90
+    },
+    {
+      "id": "test_resource_report",
+      "path": "tools/test_resource_report.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 60
     }
   ]
 }

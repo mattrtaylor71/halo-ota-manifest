@@ -18,6 +18,14 @@ python3 -B tools/verify_frozen_baseline.py
 
 Resolve any ancestry or hash mismatch before proceeding. Make only the requested change, run the complete [host regression gate](REGRESSION_TESTING.md), and commit the reviewed source before preparing release artifacts. The guard verifies current-source ancestry and historical recovery bytes; it does not establish device acceptance of new code. The source preparer independently enforces the same current source floor and minimum new version.
 
+Include the [resource-impact review](RESOURCE_REVIEW.md) with the change. After
+artifact verification, retain an offline `tools/resource_report.py` report for
+both exact board proofs and compare resource-affecting changes with their
+baseline. Use actual BIN/partition slot margins, not just the Arduino sketch
+maximum. The report is static evidence; allocation changes also need relevant
+runtime memory and responsiveness measurements. See the
+[initial audit and ranked proposals](RESOURCE_AUDIT_20260922.md).
+
 Allocate an unused version **6.4.212 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.

@@ -67,6 +67,7 @@ At that earlier178/179 checkpoint, public manifests remained162. The older-manif
 
 ## Safe Edit Rules
 
+- Review resources for every firmware change using [Resource review](docs/RESOURCE_REVIEW.md). Record maximum allocation/capabilities, lifetime/owner, overlap, failure cleanup and foreground responsiveness. Copy-only changes may record unchanged ownership and build-size delta; resource-affecting changes require before/after artifact reports and relevant runtime evidence. Read the [both-board audit](docs/RESOURCE_AUDIT_20260922.md) for proposed opportunities and restrictions. Do not turn proposals into untested PSRAM/stack/DMA changes or alter held 212 artifacts.
 - Change one subsystem at a time.
 - Preserve current behavior unless the task explicitly requires a fix.
 - Do not casually change pins, baud rates, wake timing, sleep sequencing, OTA URLs, or message names.
