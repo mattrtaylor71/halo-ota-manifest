@@ -1,10 +1,10 @@
-# 6.4.224 candidate — reconcile completed media retries
+# 6.4.224 published — reconcile completed media retries
 
-Backport bounded erased-VoiceFlash proof and fresh inventory after confirmed saved-image/voice deletion to production 211 behavior. Preserve genuine backlog, unreadable storage, ownership checks and the production retry/sleep/OTA policy. Includes the approved 212 power-reminder wording. All 119 working-source host suites passed and source review found no new correctness issues; exact-snapshot builds, device acceptance and publication remain pending. Private 223 is an OTA baseline only. [Release scope](docs/RETRY_RECONCILIATION_RELEASE_20260928.md).
+Backport bounded erased-VoiceFlash proof and fresh inventory after confirmed saved-image/voice deletion to production211 behavior, with the approved212 power reminder. Preserve genuine backlog, unknown storage and the existing retry/sleep/OTA policy. Both119-suite gates, canonical builds, paired publication and complete public readbacks passed for source `518691c8d3bd`. One exact224/app1 SDKVALID bench pair has composed limited OTA, real saved-media recovery, cloud custody and subsequent75.219s passive USB-absence evidence. Original OTA/media/health controllers remain incomplete for documented observation failures; no first Sense boot, uninterrupted media-ending quiet, new scheduled02:00 execution or full-product pass is claimed. Continue on `codex/halo-retry-release`; future versions require unused225+ after inventory. [Release evidence and limits](docs/RELEASE_224.md).
 
-# Unreleased tooling — private firmware development workflow
+# Historical tooling checkpoint — private firmware development workflow
 
-Production remains 6.4.211. Added local candidate planning/preparation/verification, read-only paired production status, documented state-preserving bench installation, exact-version production publish approval, and disabled legacy single-board publishing CLI writes. Build/flash/test requests do not imply publishing. No device runtime or production artifacts changed. [Workflow](docs/DEVELOPMENT_AND_RELEASE.md).
+At this tooling checkpoint, production remained6.4.211. Added local candidate planning/preparation/verification, read-only paired production status, documented state-preserving bench installation, exact-version production publish approval, and disabled legacy single-board publishing CLI writes. Build/flash/test requests do not imply publishing. No device runtime or production artifacts changed. [Workflow](docs/DEVELOPMENT_AND_RELEASE.md).
 
 # 6.4.211 published — discard and dish confirmation subtitles
 
