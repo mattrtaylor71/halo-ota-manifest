@@ -82,6 +82,28 @@ static std::map<std::string,std::vector<uint8_t>> files;
 static unsigned writes=0,removes=0;
 static bool truncate_next_write=false,rename_fail=false,mount_failure=false;
 static std::vector<bool> mount_arguments;
+// The raw partition boundary is read-only. The normal persistence suite leaves
+// it absent; the erased-store suite supplies bytes, read faults and elapsed time.
+struct esp_partition_t {uint32_t size;bool encrypted;};
+static esp_partition_t raw_partition={0,false};
+static std::vector<uint8_t> raw_partition_bytes;
+static bool raw_partition_present=false;
+static size_t raw_read_fail_at=SIZE_MAX;
+static uint32_t raw_read_elapsed_ms=0;
+static unsigned raw_read_calls=0;
+static size_t raw_bytes_read=0;
+static const int ESP_PARTITION_TYPE_DATA=1,ESP_PARTITION_SUBTYPE_DATA_SPIFFS=0x82,ESP_OK=0;
+static const esp_partition_t* esp_partition_find_first(int type,int subtype,const char* label){
+  assert(type==ESP_PARTITION_TYPE_DATA&&subtype==ESP_PARTITION_SUBTYPE_DATA_SPIFFS&&!label);
+  return raw_partition_present?&raw_partition:nullptr;
+}
+static int esp_partition_read(const esp_partition_t* part,size_t offset,void* buffer,size_t length){
+  assert(part==&raw_partition&&length&&length<=256&&offset<=part->size&&length<=part->size-offset);
+  ++raw_read_calls;now_ms+=raw_read_elapsed_ms;
+  if(raw_read_fail_at>=offset&&raw_read_fail_at-offset<length)return -1;
+  assert(raw_partition_bytes.size()==part->size);
+  memcpy(buffer,raw_partition_bytes.data()+offset,length);raw_bytes_read+=length;return ESP_OK;
+}
 class File{
  public:
   File()=default;
@@ -126,8 +148,18 @@ static bool sense_uart_ordinary_tx_allowed(){return ordinary_uart_allowed;}
 static bool foreground_active=false,voice_recording_active=false;
 static std::atomic<bool> g_media_retry_user_paused{false};
 static struct {bool active=false;} current_job;
-static void media_retry_inventory(halo_media_retry::Store,bool){}
-static void media_retry_saved(halo_media_retry::Store){}
+static halo_media_retry::State retry_state;
+static uint32_t retry_durable_word=0;
+static bool retry_write_ok=true;
+static unsigned retry_inventory_calls=0;
+static void media_retry_inventory(halo_media_retry::Store store,bool pending){
+  ++retry_inventory_calls;halo_media_retry::inventory(retry_state,store,pending);
+  if(retry_write_ok)retry_durable_word=halo_media_retry::encode(retry_state);
+}
+static void media_retry_saved(halo_media_retry::Store store){
+  halo_media_retry::saved(retry_state,store);
+  if(retry_write_ok)retry_durable_word=halo_media_retry::encode(retry_state);
+}
 static bool upload_inflight=false,dish_scan_inflight=false,scan_ui_inflight=false;
 static int g_boot_reset_reason=0;
 static const char* reset_reason_label(int){return "host";}
@@ -174,6 +206,9 @@ static UploadJob fixture(char id='a'){
 }
 static void reset(){files.clear();writes=removes=errors=sd_writes=sd_marks=0;now_ms=1000;now_epoch=1800000000;
  fresh=true;owner="owner-a";device="device-a";truncate_next_write=rename_fail=sd_save_ok=mount_failure=false;mount_arguments.clear();
+ raw_partition_present=false;raw_partition={0,false};raw_partition_bytes.clear();raw_read_fail_at=SIZE_MAX;
+ raw_read_elapsed_ms=raw_read_calls=0;raw_bytes_read=0;
+ retry_state={};retry_durable_word=0;retry_write_ok=true;retry_inventory_calls=0;
  g_upload_persist_ready=false;g_upload_persist_attempted_this_boot=false;g_voice_spool_replayed_this_boot=false;
  g_upload_persist_replay_not_before_ms=0;g_upload_persist_last_check_ms=0;
  boot_ota_pending=false;ordinary_uart_allowed=true;foreground_active=voice_recording_active=current_job.active=false;

@@ -261,8 +261,33 @@ static bool sense_image_spool_delete(const UploadJob& job) {
   sense_image_spool_identity(d, job);
   d["len"] = (uint32_t)job.image_len; d["crc32"] = job.image.crc32;
   sense_image_spool_json(d, "IMAGE_SPOOL_DELETE");
-  return sense_image_spool_read(d, "IMAGE_SPOOL_DELETE_ACK", job.image.request_id, deadline) &&
+  const bool deleted = sense_image_spool_read(d, "IMAGE_SPOOL_DELETE_ACK", job.image.request_id, deadline) &&
          d["ok"].is<unsigned>() && d["ok"].as<unsigned>() == 1;
+  if (!deleted) return false;
+  // A confirmed delete does not prove the queue is empty. Refresh this owner's
+  // inventory within the original lease/deadline so the final delivered image
+  // does not leave a stale retry. Unknown stays pending; the proven deletion
+  // still succeeds if this optional inventory cannot finish or the user takes over.
+  if (!sense_image_spool_remaining(deadline) || !sense_image_owner_matches(job) ||
+      g_media_retry_user_paused.load() || foreground_active || current_job.active || voice_recording_active) return true;
+  char probe[17] = {};
+  snprintf(probe, sizeof(probe), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+  d.clear(); d["owner_id"] = job.image.owner_id; d["device_id"] = job.image.device_id;
+  d["probe"] = probe;
+  sense_image_spool_json(d, "IMAGE_SPOOL_LIST_REQ");
+  if (sense_image_spool_read(d, "IMAGE_SPOOL_LIST", nullptr, deadline) &&
+      d["ok"].is<unsigned>() && d["ok"].as<unsigned>() == 1 &&
+      (!strcmp(d["reason"] | "", "ok") || !strcmp(d["reason"] | "", "empty")) &&
+      !strcmp(d["probe"] | "", probe) && !strcmp(d["owner_id"] | "", job.image.owner_id) &&
+      !strcmp(d["device_id"] | "", job.image.device_id) && d["count"].is<uint32_t>() &&
+      sense_image_spool_remaining(deadline) && sense_image_owner_matches(job) &&
+      !g_media_retry_user_paused.load() && !foreground_active && !current_job.active && !voice_recording_active) {
+    g_image_spool_depth = d["count"].as<uint32_t>();
+    media_retry_inventory(halo_media_retry::ImageSd, g_image_spool_depth != 0);
+    if (!g_image_spool_depth) g_image_spool_cursor[0] = 0;
+    Serial.printf("[IMAGE_SD] post_delete inventory=%lu\n", (unsigned long)g_image_spool_depth);
+  }
+  return true;
 }
 
 static bool sense_image_spool_mark_attempt(UploadJob& job, uint32_t epoch) {

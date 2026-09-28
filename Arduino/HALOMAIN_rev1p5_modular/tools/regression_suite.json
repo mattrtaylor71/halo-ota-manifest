@@ -763,6 +763,24 @@
         "{case_out}"
       ],
       "timeout_seconds": 60
+    },
+    {
+      "id": "test_erased_voice_flash",
+      "path": "tools/test_erased_voice_flash.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_voice_post_delete_inventory",
+      "path": "tools/test_voice_post_delete_inventory.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_image_post_delete_inventory",
+      "path": "tools/test_image_post_delete_inventory.py",
+      "args": [],
+      "timeout_seconds": 180
     }
   ]
 }

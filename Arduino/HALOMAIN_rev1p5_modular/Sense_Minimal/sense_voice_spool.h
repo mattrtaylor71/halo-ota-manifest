@@ -274,8 +274,33 @@ static bool sense_voice_spool_delete(const UploadJob& job) {
   sense_voice_spool_identity(d, job);
   d["len"] = (uint32_t)job.image_len; d["crc32"] = job.voice.crc32;
   sense_voice_spool_json(d, "VOICE_SPOOL_DELETE");
-  return sense_voice_spool_read(d, "VOICE_SPOOL_DELETE_ACK", job.voice.request_id, deadline) &&
+  const bool deleted = sense_voice_spool_read(d, "VOICE_SPOOL_DELETE_ACK", job.voice.request_id, deadline) &&
          d["ok"].is<unsigned>() && d["ok"].as<unsigned>() == 1;
+  if (!deleted) return false;
+  // Deleting this record does not prove the queue is empty. Refresh the actual
+  // owner's inventory inside the original lease/deadline so its last delivered
+  // record does not leave a stale one-minute retry. Unknown remains pending;
+  // the proven delete still succeeds even if this optional query cannot finish.
+  if (!sense_voice_spool_remaining(deadline) || !sense_voice_owner_matches(job) ||
+      g_media_retry_user_paused.load() || foreground_active || current_job.active || voice_recording_active) return true;
+  char probe[17] = {};
+  snprintf(probe, sizeof(probe), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+  d.clear(); d["owner_id"] = job.voice.owner_id; d["device_id"] = job.voice.device_id;
+  d["probe"] = probe;
+  sense_voice_spool_json(d, "VOICE_SPOOL_LIST_REQ");
+  if (sense_voice_spool_read(d, "VOICE_SPOOL_LIST", nullptr, deadline) &&
+      d["ok"].is<unsigned>() && d["ok"].as<unsigned>() == 1 &&
+      (!strcmp(d["reason"] | "", "ok") || !strcmp(d["reason"] | "", "empty")) &&
+      !strcmp(d["probe"] | "", probe) && !strcmp(d["owner_id"] | "", job.voice.owner_id) &&
+      !strcmp(d["device_id"] | "", job.voice.device_id) && d["count"].is<uint32_t>() &&
+      sense_voice_spool_remaining(deadline) && sense_voice_owner_matches(job) &&
+      !g_media_retry_user_paused.load() && !foreground_active && !current_job.active && !voice_recording_active) {
+    g_voice_spool_depth = d["count"].as<uint32_t>();
+    media_retry_inventory(halo_media_retry::VoiceSd, g_voice_spool_depth != 0);
+    if (!g_voice_spool_depth) g_voice_spool_cursor[0] = 0;
+    Serial.printf("[VOICE_SD] post_delete inventory=%lu\n", (unsigned long)g_voice_spool_depth);
+  }
+  return true;
 }
 
 static bool sense_voice_spool_mark_attempt(UploadJob& job, uint32_t epoch) {

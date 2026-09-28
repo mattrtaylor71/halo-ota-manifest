@@ -9,7 +9,7 @@
  * Entire file is guarded by HALO_SENSE_PROD_WRAPPER && HALO_SENSE_UPLOAD_PERSISTENCE.
  *
  * Prerequisites (must be declared before #include "sense_upload_persist.h"):
- *   - FS.h, SPIFFS.h
+ *   - FS.h, SPIFFS.h, esp_partition.h (provided by esp_ota_ops.h)
  *   - UploadJob struct from sense_ops.h
  *   - diag_sanitize_token(), diag_record_action_event() from sense_diag.h
  *   - wifi_is_connected() from sense_wifi.h
@@ -551,6 +551,48 @@ static bool upload_persist_load(UploadJob* job) {
 
 // ── Setup ────────────────────────────────────────────────────────────
 
+static bool upload_persist_blank_probe_result(const char* result, uint32_t total,
+                                              uint32_t checked, uint32_t started) {
+  Serial.printf("[UPLOAD_PERSIST] blank_probe result=%s bytes=%lu total=%lu elapsed_ms=%lu\n",
+                result, (unsigned long)checked, (unsigned long)total,
+                (unsigned long)(uint32_t(millis()) - started));
+  return strcmp(result, "erased") == 0;
+}
+
+static bool upload_persist_partition_is_erased() {
+  const uint32_t started = millis();
+  // Match SPIFFS.begin(false)'s default partition selection exactly. A failed
+  // mount is not an empty inventory: prove every byte without formatting it.
+  const esp_partition_t* part = esp_partition_find_first(
+      ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, nullptr);
+  if (!part) return upload_persist_blank_probe_result("missing", 0, 0, started);
+  if (part->encrypted)
+    return upload_persist_blank_probe_result("encrypted", part->size, 0, started);
+  // Bounded startup work on unfamiliar layouts; the current partition is 192KiB.
+  if (!part->size || part->size > 1024U * 1024U)
+    return upload_persist_blank_probe_result("size", part->size, 0, started);
+  uint8_t bytes[256];
+  uint32_t checked = 0;
+  while (checked < part->size) {
+    if (uint32_t(millis() - started) >= 500U)
+      return upload_persist_blank_probe_result("timeout", part->size, checked, started);
+    const size_t length = part->size - checked < sizeof(bytes)
+                              ? part->size - checked : sizeof(bytes);
+    if (esp_partition_read(part, checked, bytes, length) != ESP_OK)
+      return upload_persist_blank_probe_result("read_error", part->size, checked, started);
+    // Even a final successful read cannot convert an expired probe into proof.
+    if (uint32_t(millis() - started) >= 500U)
+      return upload_persist_blank_probe_result("timeout", part->size, checked, started);
+    for (size_t i = 0; i < length; ++i) {
+      if (bytes[i] != 0xff)
+        return upload_persist_blank_probe_result("nonblank", part->size, checked, started);
+    }
+    checked += length;
+    if (checked < part->size && checked % 4096U == 0) delay(1);
+  }
+  return upload_persist_blank_probe_result("erased", part->size, checked, started);
+}
+
 static void upload_persist_setup() {
   if (!g_upload_persist_mutex)
     g_upload_persist_mutex = xSemaphoreCreateRecursiveMutexStatic(&g_upload_persist_mutex_storage);
@@ -561,6 +603,11 @@ static void upload_persist_setup() {
   if (!SPIFFS.begin(false)) {
     // Mount failure is not permission to erase queued user recordings.
     Serial.println("[UPLOAD_PERSIST] mount_failed retained; internal fallback disabled");
+    if (upload_persist_partition_is_erased()) {
+      // This resolves only the empty-store hint. Backup capacity is still
+      // unavailable, and every other store's pending work remains independent.
+      media_retry_inventory(halo_media_retry::VoiceFlash, false);
+    }
     return;
   }
   g_upload_persist_ready = true;

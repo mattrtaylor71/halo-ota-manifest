@@ -1,3 +1,7 @@
+# 6.4.224 candidate — reconcile completed media retries
+
+Backport bounded erased-VoiceFlash proof and fresh inventory after confirmed saved-image/voice deletion to production 211 behavior. Preserve genuine backlog, unreadable storage, ownership checks and the production retry/sleep/OTA policy. Includes the approved 212 power-reminder wording. All 119 working-source host suites passed and source review found no new correctness issues; exact-snapshot builds, device acceptance and publication remain pending. Private 223 is an OTA baseline only. [Release scope](docs/RETRY_RECONCILIATION_RELEASE_20260928.md).
+
 # Unreleased tooling — private firmware development workflow
 
 Production remains 6.4.211. Added local candidate planning/preparation/verification, read-only paired production status, documented state-preserving bench installation, exact-version production publish approval, and disabled legacy single-board publishing CLI writes. Build/flash/test requests do not imply publishing. No device runtime or production artifacts changed. [Workflow](docs/DEVELOPMENT_AND_RELEASE.md).
