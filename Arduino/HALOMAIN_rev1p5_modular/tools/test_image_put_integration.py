@@ -65,6 +65,7 @@ static constexpr int ESP_OK=0,MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP
 using TaskHandle_t=void*;
 static TaskHandle_t task=reinterpret_cast<void*>(1);
 static TaskHandle_t xTaskGetCurrentTaskHandle(){return task;}
+static uint32_t uxTaskGetStackHighWaterMark(TaskHandle_t target){assert(!target&&!alive&&!in_sdk);return 4321;}
 static std::set<void*> external_live;
 static unsigned tls_allocations=0,tls_frees=0,foreign_probes=0;
 static bool expect_tls_scope=false;
@@ -96,7 +97,7 @@ using Hook=void(*)(size_t,uint32_t,const char*);static Hook failure_hook=nullptr
 static int heap_caps_register_failed_alloc_callback(Hook h){failure_hook=h;return 0;}
 static struct {
  template<class... A>void printf(const char* f,A... a){char b[768];snprintf(b,sizeof b,f,a...);
-  if(!strncmp(b,"[IMAGE_PUT_MEM]",15)||!strncmp(b,"[ALLOC_FAIL]",12)){
+  if(!strncmp(b,"[IMAGE_PUT_MEM]",15)||!strncmp(b,"[ALLOC_FAIL]",12)||!strncmp(b,"[WORKER_STACK]",14)){
    assert(!alive&&!in_sdk);diagnostics+=b;
    if(strstr(b,"tls_bytes="))++trace_reports;
   }}
@@ -334,7 +335,7 @@ static void exercise_pacing(Put put,bool paced){
   require(now_ms==s.start_ms+(bytes>512?2u:0u));
  }
 }
-int main(){halo_tls_memory::initialize(true);sense_memory::begin();exercise(candidate_put);
+int main(){halo_tls_memory::initialize(true);sense_memory::begin();sense_memory::bind_upload_worker();exercise(candidate_put);
  exercise_pacing(candidate_put,true);
  BASELINE_RUN
  printf("PASS %u whole-production PUT cases / %u assertions; actual client and TLS allocation scope, exact requests, retries, 412/uncertainty, DMA/HTTP cleanup, positive-time TX pressure, pacing input/deadlines, allocation-report lifetime\n",cases,checks);

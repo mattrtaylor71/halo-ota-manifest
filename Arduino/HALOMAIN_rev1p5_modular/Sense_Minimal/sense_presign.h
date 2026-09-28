@@ -39,22 +39,24 @@ static bool do_presign_request_simple(const char* url,
                                       String& resp_body,
                                       uint32_t deadline_ms) {
   diag_note_stage("presign", 0);
-  StaticJsonDocument<256> doc;
-  char owner_id[64] = {0};
-  char device_id[32] = {0};
-  load_owner_id_or_default(owner_id, sizeof(owner_id));
-  load_runtime_device_id(device_id, sizeof(device_id));
-  if (owner_id[0] == '\0') {
-    presign_set_error_text("Owner not set");
-    Serial.println("[PRESIGN] owner_id empty -> abort");
-    diag_record_error("presign", -1, "owner_missing");
-    return false;
-  }
-  doc["device_id"] = device_id;
-  doc["user_id"] = owner_id;
-  doc["type"] = type ? type : "";
   String body;
-  serializeJson(doc, body);
+  {
+    StaticJsonDocument<256> doc;
+    char owner_id[64] = {0};
+    char device_id[32] = {0};
+    load_owner_id_or_default(owner_id, sizeof(owner_id));
+    load_runtime_device_id(device_id, sizeof(device_id));
+    if (owner_id[0] == '\0') {
+      presign_set_error_text("Owner not set");
+      Serial.println("[PRESIGN] owner_id empty -> abort");
+      diag_record_error("presign", -1, "owner_missing");
+      return false;
+    }
+    doc["device_id"] = device_id;
+    doc["user_id"] = owner_id;
+    doc["type"] = type ? type : "";
+    serializeJson(doc, body);
+  } // Release the JSON document before transport; body owns the payload.
 
   // Piggyback undelivered error telemetry
   char err_buf[512];
@@ -146,34 +148,36 @@ static bool do_presign_request(const char* base_url,
                                uint32_t deadline_ms) {
   diag_note_stage("presign", 0);
   String presign_url = String(base_url) + String(endpoint ? endpoint : "");
-  StaticJsonDocument<512> doc;
-  char owner_id[64] = {0};
-  char device_id[32] = {0};
-  load_owner_id_or_default(owner_id, sizeof(owner_id));
-  load_runtime_device_id(device_id, sizeof(device_id));
-  if (owner_id[0] == '\0') {
-    presign_set_error_text("Owner not set");
-    Serial.println("[PRESIGN] owner_id empty -> abort");
-    diag_record_error("presign", -1, "owner_missing");
-    return false;
-  }
-  doc["user_id"] = owner_id;
-  doc["device_id"] = device_id;
-  doc["owner"] = owner ? owner : "";
-  doc["action"] = action ? action : "";
-  doc["type"] = type ? type : "";
-  doc["content_type"] = "image/jpeg";
-  if (expiry_date && expiry_date[0]) {
-    doc["product_expiration"] = expiry_date;
-  }
-  if (type && strcmp(type, "discard") == 0) {
-    doc["add_to_shopping_list"] = add_to_shopping_list;
-  }
-  if (camera_meta) {
-    append_camera_meta_json(doc, *camera_meta);
-  }
   String body;
-  serializeJson(doc, body);
+  {
+    StaticJsonDocument<512> doc;
+    char owner_id[64] = {0};
+    char device_id[32] = {0};
+    load_owner_id_or_default(owner_id, sizeof(owner_id));
+    load_runtime_device_id(device_id, sizeof(device_id));
+    if (owner_id[0] == '\0') {
+      presign_set_error_text("Owner not set");
+      Serial.println("[PRESIGN] owner_id empty -> abort");
+      diag_record_error("presign", -1, "owner_missing");
+      return false;
+    }
+    doc["user_id"] = owner_id;
+    doc["device_id"] = device_id;
+    doc["owner"] = owner ? owner : "";
+    doc["action"] = action ? action : "";
+    doc["type"] = type ? type : "";
+    doc["content_type"] = "image/jpeg";
+    if (expiry_date && expiry_date[0]) {
+      doc["product_expiration"] = expiry_date;
+    }
+    if (type && strcmp(type, "discard") == 0) {
+      doc["add_to_shopping_list"] = add_to_shopping_list;
+    }
+    if (camera_meta) {
+      append_camera_meta_json(doc, *camera_meta);
+    }
+    serializeJson(doc, body);
+  } // Release the JSON document before transport; body owns the payload.
 
   // Piggyback undelivered error telemetry on presign request.
   // Append errors JSON array to the serialized body string to avoid

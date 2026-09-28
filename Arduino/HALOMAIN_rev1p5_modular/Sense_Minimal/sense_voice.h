@@ -32,6 +32,7 @@
 #define SENSE_VOICE_H
 #include <mbedtls/sha256.h>
 #include "sense_media_network.h"
+#include "../halo_ota_demo/firmware/shared/ScopedTlsMemory.h"
 
 // ── Voice WiFi helpers ─────────────────────────────────────────────
 
@@ -435,8 +436,10 @@ static bool voice_upload_and_parse(const UploadJob& job) {
   bool accepted = false;
   for (uint8_t attempt = 1; attempt <= max_attempts; ++attempt) {
     if (media_retry_network_cancelled()) break;
-    // Declared before the TLS client: reporting runs after its destruction.
-    sense_memory::VoiceTrace memory_trace(voice_job_id, attempt);
+    // The allocator scope outlives tracing and both clients. Diagnostics run
+    // after HTTP/TLS destruction while the same-task preference is still active.
+    halo_tls_memory::Scope tls_memory;
+    sense_memory::VoiceTrace memory_trace(voice_job_id, attempt, tls_memory.active());
     SenseMediaRetryClient client;
     HTTPClient http;
     client.setInsecure();

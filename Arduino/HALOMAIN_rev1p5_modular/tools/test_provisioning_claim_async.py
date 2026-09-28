@@ -54,6 +54,9 @@ static void* heap_caps_calloc(size_t n,size_t size,int caps){check(caps==(MALLOC
 static void heap_caps_free(void* p){std::free(p);}
 using TaskHandle_t=void*;
 static TaskHandle_t xTaskGetCurrentTaskHandle(){static thread_local int task;return &task;}
+static uint32_t uxTaskGetStackHighWaterMark(TaskHandle_t target){
+ if(target||in_failure_hook||ssl_objects||http_objects||tls_connected)std::abort();return 4321;
+}
 static struct {
  void printf(const char* fmt,...){
   check(!in_failure_hook&&!ssl_objects&&!http_objects&&!tls_connected,"diagnostic prints after both client destructors");
@@ -210,7 +213,7 @@ static void reset(){
 static void queue(){const int before=post_calls;check(!g_provisioning_manager->tryClaimOwnerId(),"queue returns without success");check(g_owner_claim_job.busy()&&post_calls==before,"main submits without network");}
 static void run(){check(halo_provisioning_claim_worker_poll(),"worker takes one job");check(!ntp_active&&!dma_active,"all transport guards closed before publication");}
 int main(){
- sense_memory::begin();halo_tls_memory::initialize(true);
+ sense_memory::begin();sense_memory::bind_upload_worker();halo_tls_memory::initialize(true);
  reset();queue();check(!g_provisioning_manager->tryClaimOwnerId()&&g_provisioning_manager->claim_attempts==1,"one slot and one attempt");
  run();check(ProvisioningState::owner.empty(),"worker never applies owner");
  check(g_provisioning_manager->applyClaimResult()&&ProvisioningState::owner=="new-owner","main commits matching success");
@@ -219,6 +222,7 @@ int main(){
  check(handshake_s==8&&connect_ms==5000&&read_ms==3000&&ca_set&&!insecure_set,"real client bounded with CA verification");
  check(!g_owner_claim_job.busy()&&!ntp_active&&!dma_active,"success releases slot and guards");
  check(diagnostic_output.find("[CLAIM_MEM] queued_ms=1 generation=")!=String::npos,"claim trace identifies queue timestamp and generation");
+ check(diagnostic_output.find("qualified=1 min_free_bytes=4321 since=task_start")!=String::npos,"claim worker stack bytes measured after client cleanup");
  check(diagnostic_output.find("http=200 tls_bytes=")!=String::npos&&diagnostic_output.find("mask=63 hook=1 failures=0 loss_seen=0 complete=1")!=String::npos,"successful claim has all six heap phases");
  check(diagnostic_output.find("point=0 internal=30000")!=String::npos&&diagnostic_output.find("point=5 internal=30000")!=String::npos,"claim snapshots bracket full client lifetime");
  check(diagnostic_output.find("CODE123")==String::npos&&diagnostic_output.find("new-owner")==String::npos&&diagnostic_output.find("claim.invalid")==String::npos,"claim diagnostic contains no request response or endpoint");

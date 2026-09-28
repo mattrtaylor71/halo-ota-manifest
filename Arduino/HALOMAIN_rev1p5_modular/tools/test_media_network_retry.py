@@ -26,7 +26,7 @@ def definition(text, signature):
     return text[start:end]
 
 
-def harness(root):
+def _base_harness(root):
     voice = (root / 'Sense_Minimal/sense_voice.h').read_text()
     put = (root / 'Sense_Minimal/sense_upload_exec.h').read_text()
     http = (root / 'Sense_Minimal/sense_http.h').read_text()
@@ -353,6 +353,44 @@ int main(){
 }
 '''
 
+
+
+def harness(root):
+    """Actual allocator implementation with only its SDK boundaries doubled.
+
+    The header is embedded without platform include directives so every derived
+    transport harness can use it without a private Arduino SDK include path.
+    No allocator algorithm is rewritten. Ordinary behavioral suites leave the
+    dispatcher disabled; test_voice_tls_memory enables and faults it explicitly.
+    """
+    code = _base_harness(root)
+    allocator = (root / 'halo_ota_demo/firmware/shared/ScopedTlsMemory.h').read_text()
+    for directive in ('#pragma once', '#include <esp_heap_caps.h>',
+                      '#include <freertos/FreeRTOS.h>', '#include <freertos/task.h>'):
+        assert allocator.count(directive) == 1
+        allocator = allocator.replace(directive, '', 1)
+    boundary = r"""
+#include <atomic>
+#include <set>
+#include <cstdlib>
+#ifndef HALO_HOST_TLS_TASK_DEFINED
+#define HALO_HOST_TLS_TASK_DEFINED 1
+using TaskHandle_t=void*;
+static TaskHandle_t xTaskGetCurrentTaskHandle(){return reinterpret_cast<void*>(static_cast<uintptr_t>(task));}
+#endif
+static constexpr uint32_t MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP_DMA=4,MALLOC_CAP_SPIRAM=8;
+static bool host_tls_external_oom=false;
+static std::set<void*> host_tls_external_live;
+static void* heap_caps_calloc(size_t count,size_t bytes,uint32_t caps){
+ assert(caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+ if(host_tls_external_oom)return nullptr;
+ void* p=std::calloc(count,bytes);if(p)host_tls_external_live.insert(p);return p;
+}
+static void heap_caps_free(void* p){host_tls_external_live.erase(p);std::free(p);}
+"""
+    marker = 'struct Stream {'
+    assert code.count(marker) == 1
+    return code.replace(marker, boundary + allocator + '\n' + marker, 1)
 
 def no_core():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))

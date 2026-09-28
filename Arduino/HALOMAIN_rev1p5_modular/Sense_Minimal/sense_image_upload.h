@@ -167,9 +167,12 @@ static bool sense_image_presign_request(const UploadJob& job, PresignReply& out,
   char owner[64]={},device[32]={}; load_owner_id_or_default(owner,sizeof(owner));
   load_runtime_device_id(device,sizeof(device));
   if(strcmp(owner,job.image.owner_id)||strcmp(device,job.image.device_id)) return false;
-  DynamicJsonDocument request(2048);
-  if (!sense_image_contract_request(job,reconcile,request)) return false;
-  String body; serializeJson(request,body);
+  String body;
+  {
+    DynamicJsonDocument request(2048);
+    if (!sense_image_contract_request(job,reconcile,request)) return false;
+    serializeJson(request,body);
+  } // Only the owning serialized body is needed during TLS and reply parsing.
   const String url=String(CHECKIN_API_BASE_URL)+CHECKIN_PRESIGN_ENDPOINT;
   int code=0; String response;
   const bool sent=http_post_json_with_retries(url.c_str(),body,code,response,

@@ -53,6 +53,7 @@ static unsigned ack_checks=0;
 ''')
     source = replace_once(source, 'static bool media_retry_network_active(){return background&&task==owner;}\nstatic bool media_retry_network_cancelled(){return media_retry_network_active()&&paused;}\nstatic bool media_upload_network_active(){return media_retry_network_active();}\nstatic bool media_voice_list_active(){return false;}\nstatic uint32_t media_voice_list_remaining_ms(){return UINT32_MAX;}\nstatic bool media_voice_list_timed_out(){return false;}', r'''
 #include "Sense_Minimal/sense_user_activity.h"
+#define HALO_HOST_TLS_TASK_DEFINED 1
 using TaskHandle_t=void*;
 static TaskHandle_t xTaskGetCurrentTaskHandle(){return reinterpret_cast<void*>(static_cast<uintptr_t>(task));}
 static uint32_t millis();

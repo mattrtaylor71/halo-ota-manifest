@@ -628,7 +628,6 @@ static uint16_t voice_peak_abs = 0;
 static uint64_t voice_sum_abs = 0;
 static size_t voice_sample_count = 0;
 static size_t voice_nonzero_sample_count = 0;
-static SemaphoreHandle_t mic_mutex = NULL;
 static SemaphoreHandle_t wifi_connect_mutex = NULL;
 static char g_voice_session_id[96] = "";
 static unsigned long g_voice_session_last_turn_ms = 0;
@@ -702,23 +701,8 @@ static bool wake_pin_is_active_level(int level);
 static void wake_pin_configure_rtc_input_inactive_pull();
 static uint32_t sleep_deny_retry_ms(const char* reason, unsigned long now_ms);
 
-enum UiEvtType { UI_EVT_STATUS, UI_EVT_LIST_UPDATE, UI_EVT_VOICE_ITEMS, UI_EVT_ERROR };
-
-struct UiEvent {
-  UiEvtType type;
-  char op[8];      // "VOICE"/"SCAN"
-  char phase[16];  // "RECORDING"/"UPLOADING"/...
-  char text[64];
-  // Payload data (items, meal result, etc.)
-  JsonArray items;  // For UI_VOICE_ITEMS
-  int calories;
-  float protein_g, carbs_g, fat_g;
-  float confidence;
-};
-
 // Operation queues
 static QueueHandle_t op_queue = NULL;
-static QueueHandle_t ui_event_queue = NULL;
 static volatile bool foreground_active = false;
 #if HALO_SPOOL_TEST
 static uint8_t g_test_fail_uploads = 0;   // bench: force N upload failures
@@ -1981,6 +1965,7 @@ static bool uploads_held_for_session(const char** why_out) {
 }
 
 static void upload_worker_task(void *arg) {
+  sense_memory::bind_upload_worker();
   Serial.println("[UPLOAD] Background upload task started");
   for (;;) {
 #ifdef HALO_SENSE_PROD_WRAPPER
@@ -4057,9 +4042,8 @@ void setup() {
   
   // Initialize operation queues
   op_queue = xQueueCreate(OP_QUEUE_MAX, sizeof(OpJob));
-  ui_event_queue = xQueueCreate(20, sizeof(UiEvent));
   upload_queue = xQueueCreate(UPLOAD_QUEUE_MAX, sizeof(UploadJob));
-  if (op_queue == NULL || ui_event_queue == NULL) {
+  if (op_queue == NULL) {
     Serial.println("ERROR: Failed to create operation queues!");
   } else {
     Serial.println("[SETUP] Operation queues created");
@@ -4089,12 +4073,6 @@ void setup() {
     Serial.println("ERROR: Failed to allocate voice audio buffer!");
   } else {
     Serial.printf("[SETUP] Voice audio buffer allocated: %d bytes\n", AUDIO_BUFFER_SIZE);
-  }
-  
-  // Initialize mutexes
-  mic_mutex = xSemaphoreCreateMutex();
-  if (mic_mutex == NULL) {
-    Serial.println("ERROR: Failed to create mic_mutex!");
   }
   
   // Initialize I2S audio system and register voice_audio_callback

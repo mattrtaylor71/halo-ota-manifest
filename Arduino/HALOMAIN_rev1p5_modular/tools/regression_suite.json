@@ -781,6 +781,21 @@
       "path": "tools/test_image_post_delete_inventory.py",
       "args": [],
       "timeout_seconds": 180
+    },
+    {
+      "id": "test_presign_json_lifetime",
+      "path": "tools/test_presign_json_lifetime.py",
+      "args": [],
+      "timeout_seconds": 60
+    },
+    {
+      "id": "test_voice_tls_memory",
+      "path": "tools/test_voice_tls_memory.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
     }
   ]
 }

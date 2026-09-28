@@ -65,6 +65,12 @@ inline void failed_alloc(size_t bytes, uint32_t caps, const char* function_name)
   failures.record(bytes, caps, function_name);
 }
 inline bool registered = false;
+// Bound by the worker itself before claim/media dispatch. Other tasks must not
+// be reported as the upload worker even when they use the shared Trace helper.
+inline std::atomic<TaskHandle_t> upload_worker_task{nullptr};
+inline void bind_upload_worker() {
+  upload_worker_task.store(xTaskGetCurrentTaskHandle(), std::memory_order_relaxed);
+}
 inline void begin() {
   if (registered) return;
   const auto rc = heap_caps_register_failed_alloc_callback(failed_alloc);
@@ -76,13 +82,13 @@ struct Trace;
 // never touches this stack pointer. It reads only the atomic scalar phase.
 inline Trace* current = nullptr;
 struct Trace {
-  uint32_t heap[PointCount][3]{};
+  uint32_t heap[PointCount][5]{};
   uint32_t job, attempt = 0, start_sequence = 0, start_dropped = 0, sent = 0;
   const bool image;
   const Owner owner;
   uint8_t mask = 0;
   int result = 0;
-  bool owns = false, initial_valid = false;
+  bool owns = false, initial_valid = false, voice_scope_active = false;
 #if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
   halo_tls_memory::Counters allocator_start{};
 #endif
@@ -98,7 +104,7 @@ struct Trace {
     current = this; owns = true;
     Failure ignored[4]; initial_valid = failures.copy(ignored, start_sequence, start_dropped);
 #if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
-    if (owner != Owner::Voice) allocator_start = halo_tls_memory::snapshot();
+    if (owner != Owner::Voice || voice_scope_active) allocator_start = halo_tls_memory::snapshot();
 #endif
     failures.phase.store(owner == Owner::Claim ? ClaimAttempt :
                          (image ? ImagePutAttempt : VoiceAttempt), std::memory_order_relaxed);
@@ -112,6 +118,8 @@ struct Trace {
     heap[p][0] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     heap[p][1] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     heap[p][2] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    heap[p][3] = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    heap[p][4] = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     mask |= 1u << p;
   }
   void response(int code) { result = code; }
@@ -124,19 +132,37 @@ struct Trace {
     const char* label = owner == Owner::Claim ? "CLAIM_MEM" : (image ? "IMAGE_PUT_MEM" : "VOICE_MEM");
     const char* id_key = owner == Owner::Claim ? "queued_ms" : "job";
     const char* ordinal_key = owner == Owner::Claim ? "generation" : "attempt";
+    const TaskHandle_t task = xTaskGetCurrentTaskHandle();
+    if (task && task == upload_worker_task.load(std::memory_order_relaxed)) {
+      // Pinned ESP-IDF 5.5.4 task.h: minimum unused BYTES since task creation,
+      // not words or a per-attempt minimum. Query only after client cleanup.
+      const uint32_t minimum = uxTaskGetStackHighWaterMark(nullptr);
+      Serial.printf("[WORKER_STACK] owner=%s %s=%lu %s=%lu task=%08lx qualified=1 min_free_bytes=%lu since=task_start\n",
+        label, id_key, (unsigned long)job, ordinal_key, (unsigned long)attempt,
+        (unsigned long)(uintptr_t)task, (unsigned long)minimum);
+    } else {
+      Serial.printf("[WORKER_STACK] owner=%s %s=%lu %s=%lu task=%08lx qualified=0\n",
+        label, id_key, (unsigned long)job, ordinal_key, (unsigned long)attempt,
+        (unsigned long)(uintptr_t)task);
+    }
 #if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
-    // Same-task deltas after client cleanup. These are cumulative requests,
+    // A refused/disabled voice scope cannot qualify another task's counters.
+    // Same-task deltas after client cleanup are cumulative requests,
     // never a claim about simultaneously live bytes or saved internal RAM.
-    if (owner != Owner::Voice) {
+    if (owner == Owner::Voice && !voice_scope_active) {
+      Serial.printf("[TLS_ALLOC] owner=%s %s=%lu %s=%lu scope_active=0 counters_qualified=0\n",
+        label, id_key, (unsigned long)job, ordinal_key, (unsigned long)attempt);
+    } else {
       const auto end = halo_tls_memory::snapshot();
-      Serial.printf("[TLS_ALLOC] owner=%s %s=%lu %s=%lu external_calls=%lu external_requested_bytes=%lu small_external_calls=%lu small_external_requested_bytes=%lu external_failures=%lu default_fallbacks=%lu\n",
+      Serial.printf("[TLS_ALLOC] owner=%s %s=%lu %s=%lu external_calls=%lu external_requested_bytes=%lu small_external_calls=%lu small_external_requested_bytes=%lu external_failures=%lu default_fallbacks=%lu%s\n",
         label, id_key, (unsigned long)job, ordinal_key, (unsigned long)attempt,
         (unsigned long)(uint32_t)(end.external_calls - allocator_start.external_calls),
         (unsigned long)(uint32_t)(end.external_requested_bytes - allocator_start.external_requested_bytes),
         (unsigned long)(uint32_t)(end.small_external_calls - allocator_start.small_external_calls),
         (unsigned long)(uint32_t)(end.small_external_requested_bytes - allocator_start.small_external_requested_bytes),
         (unsigned long)(uint32_t)(end.external_failures - allocator_start.external_failures),
-        (unsigned long)(uint32_t)(end.default_fallbacks - allocator_start.default_fallbacks));
+        (unsigned long)(uint32_t)(end.default_fallbacks - allocator_start.default_fallbacks),
+        owner == Owner::Voice ? " scope_active=1 counters_qualified=1" : "");
     }
 #endif
     Serial.printf("[%s] %s=%lu %s=%lu http=%d tls_bytes=%lu mask=%u hook=%u failures=%lu loss_seen=%lu complete=%u\n",
@@ -146,9 +172,10 @@ struct Trace {
       (unsigned long)(valid ? dropped : 1),
       registered && valid && uint32_t(last - start_sequence) <= 4u && dropped == 0 ? 1u : 0u);
     for (unsigned i = 0; i < PointCount; ++i) if (mask & (1u << i))
-      Serial.printf("[%s] %s=%lu %s=%lu point=%u internal=%lu dma_free=%lu dma_largest=%lu\n",
+      Serial.printf("[%s] %s=%lu %s=%lu point=%u internal=%lu dma_free=%lu dma_largest=%lu psram_free=%lu psram_largest=%lu\n",
         label, id_key, (unsigned long)job, ordinal_key, (unsigned long)attempt, i, (unsigned long)heap[i][0],
-        (unsigned long)heap[i][1], (unsigned long)heap[i][2]);
+        (unsigned long)heap[i][1], (unsigned long)heap[i][2],
+        (unsigned long)heap[i][3], (unsigned long)heap[i][4]);
     if (valid) for (const auto& x : observed) {
       const uint32_t delta = x.sequence - start_sequence;
       if (!delta || delta > uint32_t(last - start_sequence)) continue;
@@ -161,7 +188,7 @@ struct Trace {
   ~Trace() { finish(); }
 };
 struct VoiceTrace : Trace {
-  VoiceTrace(uint32_t j, uint32_t a) : Trace(j, false) { start(a); }
+  VoiceTrace(uint32_t j, uint32_t a, bool scope_active = false) : Trace(j, false) { voice_scope_active = scope_active; start(a); }
 };
 struct ImagePutTrace : Trace {
   explicit ImagePutTrace(uint32_t j) : Trace(j, true) {}
@@ -176,7 +203,8 @@ inline void point(Point p, Phase phase) {
 inline void wrote(size_t bytes) { if (current) current->sent += uint32_t(bytes); }
 #else
 inline void begin() {}
-struct VoiceTrace { VoiceTrace(uint32_t, uint32_t) {} void response(int) {} };
+inline void bind_upload_worker() {}
+struct VoiceTrace { VoiceTrace(uint32_t, uint32_t, bool = false) {} void response(int) {} };
 struct ClaimTrace { ClaimTrace(uint32_t, uint32_t) {} void response(int) {} };
 struct ImagePutTrace {
   explicit ImagePutTrace(uint32_t) {}

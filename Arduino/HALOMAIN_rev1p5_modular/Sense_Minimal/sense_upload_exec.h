@@ -176,31 +176,33 @@ static bool upload_put_reset_with_budget(const char* reason, uint32_t deadline_m
 static bool get_presign_checkin(PresignReply& out, const char* expiry_date, uint16_t quantity, const UploadJob::CameraUploadMeta* camera_meta, uint32_t deadline_ms) {
   String presign_url = String(CHECKIN_API_BASE_URL) + String(CHECKIN_PRESIGN_ENDPOINT);
 
-  StaticJsonDocument<512> doc;
-  char owner_id[64] = {0};
-  char device_id[32] = {0};
-  load_owner_id_or_default(owner_id, sizeof(owner_id));
-  load_runtime_device_id(device_id, sizeof(device_id));
-  doc["user_id"] = owner_id;
-  doc["device_id"] = device_id;
-  doc["owner"] = owner_id;
-  doc["action"] = "IN";
-  doc["type"] = "grocery";
-  doc["content_type"] = "image/jpeg";
-
-  if (expiry_date != NULL && strlen(expiry_date) > 0) {
-    doc["product_expiration"] = expiry_date;
-    Serial.printf("[CHECKIN_PRESIGN] Including expiration date: %s\n", expiry_date);
-  }
-  uint16_t safe_quantity = (quantity < 1) ? 1 : quantity;
-  doc["quantity"] = safe_quantity;
-  Serial.printf("[CHECKIN_PRESIGN] Including quantity: %u\n", (unsigned)safe_quantity);
-  if (camera_meta) {
-    append_camera_meta_json(doc, *camera_meta);
-  }
-
   String body;
-  serializeJson(doc, body);
+  {
+    StaticJsonDocument<512> doc;
+    char owner_id[64] = {0};
+    char device_id[32] = {0};
+    load_owner_id_or_default(owner_id, sizeof(owner_id));
+    load_runtime_device_id(device_id, sizeof(device_id));
+    doc["user_id"] = owner_id;
+    doc["device_id"] = device_id;
+    doc["owner"] = owner_id;
+    doc["action"] = "IN";
+    doc["type"] = "grocery";
+    doc["content_type"] = "image/jpeg";
+
+    if (expiry_date != NULL && strlen(expiry_date) > 0) {
+      doc["product_expiration"] = expiry_date;
+      Serial.printf("[CHECKIN_PRESIGN] Including expiration date: %s\n", expiry_date);
+    }
+    uint16_t safe_quantity = (quantity < 1) ? 1 : quantity;
+    doc["quantity"] = safe_quantity;
+    Serial.printf("[CHECKIN_PRESIGN] Including quantity: %u\n", (unsigned)safe_quantity);
+    if (camera_meta) {
+      append_camera_meta_json(doc, *camera_meta);
+    }
+
+    serializeJson(doc, body);
+  } // Release the JSON document before transport; body owns the payload.
 
   // Piggyback undelivered error telemetry
   char err_buf[512];

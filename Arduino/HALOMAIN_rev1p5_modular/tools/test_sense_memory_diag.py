@@ -12,12 +12,24 @@ PREFIX=r'''
 #include <string>
 #include <thread>
 #include <vector>
-static constexpr int ESP_OK=0,MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP_DMA=4;
+static constexpr int ESP_OK=0,MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP_DMA=4,MALLOC_CAP_SPIRAM=8;
 static unsigned samples=0,registrations=0,prints=0;static bool in_hook=false;
 static bool tls_live=false;
-static size_t free_bytes=30000,largest=12000;static std::string output;
-static size_t heap_caps_get_free_size(int){assert(!in_hook);++samples;return free_bytes;}
-static size_t heap_caps_get_largest_free_block(int){assert(!in_hook);++samples;return largest;}
+using TaskHandle_t=void*;
+static TaskHandle_t task=reinterpret_cast<void*>(1);
+static unsigned stack_queries=0;
+static uint32_t stack_minimum=4321;
+static TaskHandle_t xTaskGetCurrentTaskHandle(){return task;}
+static uint32_t uxTaskGetStackHighWaterMark(TaskHandle_t target){
+ assert(!target&&!in_hook&&!tls_live);++stack_queries;return stack_minimum;
+}
+static size_t free_bytes=30000,largest=12000,psram_free=2000000,psram_largest=1000000;static std::string output;
+static size_t heap_caps_get_free_size(int caps){assert(!in_hook);++samples;
+ assert(caps==(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)||caps==(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA)||caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+ return caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)?psram_free:free_bytes;}
+static size_t heap_caps_get_largest_free_block(int caps){assert(!in_hook);++samples;
+ assert(caps==(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA)||caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+ return caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)?psram_largest:largest;}
 using Hook=void(*)(size_t,uint32_t,const char*);static Hook installed=nullptr;
 static int heap_caps_register_failed_alloc_callback(Hook h){++registrations;installed=h;return 0;}
 static struct {template<class...A>void printf(const char*fmt,A...args){assert(!in_hook&&!tls_live);++prints;char b[700];snprintf(b,sizeof b,fmt,args...);output+=b;}}Serial;
@@ -29,7 +41,8 @@ static unsigned checks=0;
 static void ok(bool x){++checks;assert(x);}
 static void reset(){
  current=nullptr;failures.guard.clear();failures.sequence=0;failures.dropped=0;failures.phase=Idle;
- for(auto& x:failures.ring)x={};output.clear();samples=prints=0;free_bytes=30000;largest=12000;
+ task=reinterpret_cast<void*>(1);stack_queries=0;stack_minimum=4321;upload_worker_task.store(nullptr);
+ for(auto& x:failures.ring)x={};output.clear();samples=prints=0;free_bytes=30000;largest=12000;psram_free=2000000;psram_largest=1000000;
 }
 struct SenseMediaRetryClient {
  void connect(){tls_live=true;point(BeforeConnect,Connect);free_bytes=10000;largest=800;point(AfterConnect,Connect);}
@@ -48,7 +61,19 @@ static void production_declaration_lifetime(unsigned exit_phase) {
  point(FirstRead,Read);memory_trace.response(200);
 }
 int main(){
+ static_assert(sizeof(Trace::heap)==PointCount*5*sizeof(uint32_t),"five distinct metrics per phase");
+ static_assert(sizeof(Trace::heap)-PointCount*3*sizeof(uint32_t)==56,"exactly 56 extra stack bytes for phase-matched PSRAM");
  begin();begin();ok(registrations==1&&registered&&installed==failed_alloc);
+ reset();{VoiceTrace trace(5,1);}
+ ok(stack_queries==0&&output.find("qualified=0")!=std::string::npos);
+ ok(output.find("min_free_bytes=")==std::string::npos);
+ reset();bind_upload_worker();{VoiceTrace trace(6,2);}
+ ok(stack_queries==1&&output.find("[WORKER_STACK] owner=VOICE_MEM job=6 attempt=2 task=00000001 qualified=1 min_free_bytes=4321 since=task_start")!=std::string::npos);
+ output.clear();stack_minimum=3210;{ClaimTrace trace(700,3);}
+ ok(stack_queries==2&&output.find("owner=CLAIM_MEM queued_ms=700 generation=3 task=00000001 qualified=1 min_free_bytes=3210 since=task_start")!=std::string::npos);
+ output.clear();task=reinterpret_cast<void*>(2);{VoiceTrace trace(7,1);}
+ ok(stack_queries==2&&output.find("task=00000002 qualified=0")!=std::string::npos);
+ ok(output.find("min_free_bytes=")==std::string::npos);
  reset();failures.phase=Write;in_hook=true;installed(544,5,"heap_caps_aligned_alloc");in_hook=false;
  ok(samples==0&&prints==0);Failure ring[4];uint32_t seq=0,lost=0;
  ok(failures.copy(ring,seq,lost));ok(seq==1&&lost==0);
@@ -57,19 +82,21 @@ int main(){
  failures.guard.test_and_set();in_hook=true;installed(12,5,nullptr);in_hook=false;
  ok(!failures.copy(ring,seq,lost));failures.guard.clear();ok(failures.copy(ring,seq,lost));ok(seq==1&&lost==1);
  reset();{
-  VoiceTrace trace(17,1);ok(samples==3&&current==&trace);
-  point(BeforeConnect,Connect);free_bytes=10000;largest=800;
-  point(AfterConnect,Connect);point(AfterConnect,Connect);ok(samples==9);
+  VoiceTrace trace(17,1);ok(samples==5&&current==&trace);
+  point(BeforeConnect,Connect);free_bytes=10000;largest=800;psram_free=1000000;psram_largest=500000;
+  point(AfterConnect,Connect);point(AfterConnect,Connect);ok(samples==15);
   point(FirstWrite,Write);in_hook=true;installed(544,5,"heap_caps_aligned_alloc");in_hook=false;
   wrote(512);trace.response(-3);ok(prints==0);
   {VoiceTrace nested(18,1);ok(current==&trace);}
-  ok(prints==0);free_bytes=30000;largest=12000;
+  ok(prints==0);free_bytes=30000;largest=12000;psram_free=2000000;psram_largest=1000000;
  }
  ok(!current&&failures.phase==Idle);ok(output.find("http=-3 tls_bytes=512")!=std::string::npos);
  ok(output.find("failures=1 loss_seen=0 complete=1")!=std::string::npos);
  ok(output.find("bytes=544 caps=00000005 phase=3")!=std::string::npos);
- ok(output.find("point=2 internal=10000 dma_free=10000 dma_largest=800")!=std::string::npos);
- ok(output.find("point=5 internal=30000 dma_free=30000 dma_largest=12000")!=std::string::npos);
+ ok(output.find("point=2 internal=10000 dma_free=10000 dma_largest=800 psram_free=1000000 psram_largest=500000")!=std::string::npos);
+ ok(output.find("point=5 internal=30000 dma_free=30000 dma_largest=12000 psram_free=2000000 psram_largest=1000000")!=std::string::npos);
+ reset();psram_free=psram_largest=0;{VoiceTrace trace(19,1);}
+ ok(output.find("psram_free=0 psram_largest=0")!=std::string::npos);
  reset();{
   VoiceTrace trace(20,2);for(unsigned i=1;i<=7;++i)installed(i,5,"heap_caps_malloc");trace.response(202);
  }
@@ -138,6 +165,8 @@ int main(){
 def main():
  p=argparse.ArgumentParser();p.add_argument('--source-root',type=Path,default=ROOT);p.add_argument('--out',type=Path);a=p.parse_args();root=a.source_root.resolve()
  text=(root/HEADER).read_text();client=(root/'Sense_Minimal/sense_media_retry_client.h').read_text();voice=(root/'Sense_Minimal/sense_voice.h').read_text()
+ worker=(root/'Sense_Minimal/Sense_Minimal.ino').read_text().split('static void upload_worker_task(void *arg) {',1)[1]
+ assert worker.index('sense_memory::bind_upload_worker();')<worker.index('halo_provisioning_claim_worker_poll()')
  assert 'HALO_SENSE_PROD_WRAPPER' not in text, 'Trace layout cannot depend on a translation-unit-local wrapper macro'
  put=(root/'Sense_Minimal/sense_upload_exec.h').read_text().split('static bool put_to_presigned_url(',1)[1]
  assert '#include "sense_memory_diag.h"' in client
