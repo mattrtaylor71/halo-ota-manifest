@@ -18,6 +18,17 @@
 
 # HALO workspace baseline
 
+> **Private RAM qualification, September 28:** this checkout is on
+> `codex/ram-qualification`. Candidate **6.4.225** was built from
+> `245e8b4cd64ec1633e0a85fbb3a9487f4f80d71e` and installed on the Mac mini bench
+> pair, both app0 / SDK VALID, with 224 retained in app1. Production remains 224.
+> Version 225 is occupied; never rebuild different bytes under it. Further runtime
+> changes need a freshly inventoried unused 226+ version. See
+> [RAM qualification](Arduino/HALOMAIN_rev1p5_modular/docs/RAM_QUALIFICATION_20260928.md)
+> and the campaign report for the current finite test results and limitations.
+> Existing published-source metadata below describes production, not the current
+> private bench installation. No 225 publication is authorized by build/test work.
+
 Current development source is `518691c8d3bd609272b438ec31b82c4de1b6b053`, firmware tree `ae7726fdad7edea9d51ed4191da845deaef31455`, build `6.4.224-20260928T164640Z-518691c8d3bd`, tagged `halo-v6.4.224`. The authoritative checkout is `/Users/MattTaylor/halo-retry-release-20260928` on `codex/halo-retry-release`. Public224 is published and the bench pair is224/app1 SDKVALID with composed limited acceptance; retain all limits in `docs/RELEASE_224.md`. Start here or from reviewed descendants, not from211, private213–222 or the unrelated battery worktree. Use freshly inventoried unused225+; factory197/frozen158 remain separate.
 
 ## Historical device notes

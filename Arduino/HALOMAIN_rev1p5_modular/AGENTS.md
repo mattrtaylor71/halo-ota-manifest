@@ -18,6 +18,15 @@
 
 # HALO Firmware Agent Guide
 
+> **Private RAM qualification, September 28:** `codex/ram-qualification` contains
+> built candidate **6.4.225**, exact build source
+> `245e8b4cd64ec1633e0a85fbb3a9487f4f80d71e`. The Mini bench pair is now
+> 225 / app0 / SDK VALID, with 224 retained in app1. Public production is still
+> 224. Version 225 is occupied; different firmware bytes require a freshly
+> inventoried unused 226+ version. Read [RAM qualification](docs/RAM_QUALIFICATION_20260928.md)
+> for acceptance limits. Earlier production/bench checkpoints below are historical
+> where they differ. No 225 publication follows from testing it.
+
 Current development source is `518691c8d3bd609272b438ec31b82c4de1b6b053`, firmware tree `ae7726fdad7edea9d51ed4191da845deaef31455`, build `6.4.224-20260928T164640Z-518691c8d3bd`, tagged `halo-v6.4.224`. The authoritative checkout is `/Users/MattTaylor/halo-retry-release-20260928` on `codex/halo-retry-release`. Public224 is published and the bench pair is224/app1 SDKVALID with composed limited acceptance; retain all limits in `docs/RELEASE_224.md`. Start here or from reviewed descendants, not from211, private213–222 or the unrelated battery worktree. Use freshly inventoried unused225+; factory197/frozen158 remain separate.
 
 ## Historical device notes
@@ -114,5 +123,16 @@ At that earlier178/179 checkpoint, public manifests remained162. The older-manif
 - Leave hardware-heavy paths for later, smaller passes with explicit hardware validation.
 
 ## Actuator bench control
+
+The active September 28 campaign uses the commissioned **Mac mini** bench at
+`/Volumes/Trepo-Work/Workspaces/halo-firmware-bench`, its exact-device identity
+configuration and common hardware lease. Its USB relay resets only the Uno's
+5 V supply; it does not switch Halo or the 12 V motor supply. Use the qualified
+Mini control/runbooks in `/Users/MattTaylor/halo-mac-mini-bench-20260925`, not the
+historical MacBook-only wiring description below. Preserve the fixed calibrated
+stroke and one hardware operator. Evidence is in
+`/Users/MattTaylor/halo-ram-campaign-20260928/bench-private/`.
+
+Historical MacBook September 18 arrangement:
 
 Use the bounded exact-device `tools/tapctl.py` for the current replacement Uno; preserve `PUSH:500,200,500` at speed128. `--action probe` is nonmoving; `--action wake` requires a fresh Sense USB transition. Inspect receipts and stop on uncertain worker ownership. The relay is absent from the current wiring; the old relay helper pins a different Uno. Three physical cycles plus a final idle/reopen passed after a full USB/12V reset, but the original intermittent fault is not proved permanently cured. See [current evidence](docs/ACTUATOR_INVESTIGATION_20260918.md).

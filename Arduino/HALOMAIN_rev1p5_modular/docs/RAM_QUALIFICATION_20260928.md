@@ -2,11 +2,99 @@
 
 September 28, 2026. Production remains paired **6.4.224**, runtime source
 `518691c8d3bd609272b438ec31b82c4de1b6b053`; this branch starts from documentation
-descendant `88641024daa765b5197d54dc8ee232a00cd88296`. This is a private, unbuilt
-qualification candidate. Version 225 was freshly inventoried and reserved by
-the campaign; no version header, installed device or production route is changed
-by this source commit. Full host gates, canonical paired builds and physical
-RAM/stack measurements remain pending. See [224 acceptance limits](RELEASE_224.md).
+descendant `88641024daa765b5197d54dc8ee232a00cd88296`. Candidate **6.4.225** is
+privately built and installed on the commissioned Mac mini pair, both app0 / SDK
+VALID, with 224 retained in app1. Exact build source:
+`245e8b4cd64ec1633e0a85fbb3a9487f4f80d71e`; build
+`6.4.225-20260928T193058Z-245e8b4cd64e`. Both 122-suite gates and canonical paired
+artifact checks passed. The finite physical campaign is complete with the
+measurement/observability limits below. No public OTA publication has occurred.
+Version 225 is occupied and its bytes must remain immutable.
+Documentation commits after the build do not change its compiled-source identity.
+See [224 acceptance limits](RELEASE_224.md).
+
+Current report and detailed receipts:
+`/Users/MattTaylor/halo-ram-campaign-20260928/REPORT.md`.
+All hardware jobs are closed; no automatic continuation or repeated capture is
+pending. Continue private RAM work from this reviewed branch, keeping compiled
+225 immutable and published 224 separate.
+
+## Current qualified observations
+
+| Case | Lowest sampled internal / DMA free / largest DMA | Worker minimum unused |
+| --- | ---: | ---: |
+| 224 image with list | 36,000 / 28,336 / 17,396 B | Not instrumented |
+| 225 image with list | 39,536 / 31,872 / 17,396 B | 5,568 B |
+| 224 short voice | 29,824 / 22,160 / 17,396 B | Not instrumented |
+| 225 short voice | 41,644 / 33,980 / 18,420 B | 5,564 B |
+| 225 three-capture burst, first qualified upload | 32,140 / 24,476 / 18,420 B | 5,568 B |
+| 225 camera interrupting a voice upload | 38,864 / 31,200 / 17,396 B | 5,536 B |
+| 225 resumed voice after camera | 41,000 / 33,336 / 17,396 B | 5,564 B |
+| 225 maximum-duration voice | 41,628 / 33,964 / 17,396 B | 5,564 B |
+| 225 saved voice recovery | 41,592 / 33,928 / 17,396 B | 5,564 B |
+| 225 saved image recovery | 39,844 / 32,180 / 17,396 B | 5,580 B |
+
+These complete phase samples exceed the established review floors of
+24,576 / 16,384 / 8,192 B. Internal and DMA views overlap; do not add them.
+Different payloads and timing prevent interpreting before/after differences as
+isolated or guaranteed savings. The worker measure is bytes unused since task
+creation, not an operation-local peak. Incomplete/interleaved diagnostics are
+excluded; successful behavior does not manufacture missing resource evidence.
+
+Image-only, list refresh/scroll with image, short voice, three captures, and camera
+takeover during an active voice POST have passed finite behavior checks. The last
+maximum-duration assisted recording ran 10,011 ms, captured 320,000 B and received
+HTTP 202, followed by native sleep, normal calendar and 75 seconds quiet. It has
+a complete independently qualified six-phase resource trace. Original
+synthetic-gesture, lit-Home and admission
+observer failures remain failed, with eventual cloud/state reconciliation recorded
+separately. Ambient audio tests transport, not speech recognition or list semantics.
+
+Private installation preserved NVS, filesystems and the previous application bank.
+This is not a physical cold-power test or an OTA-transfer test. Provisioning,
+physical maximum microphone hold/release, acoustic intent and actual 2 a.m. OTA
+execution are not qualified by this campaign. The old resource model remains
+`REVIEW_REQUIRED`; its historical calibration was not rewritten to force a pass.
+
+### Offline recovery and final observation limits
+
+Interpret legacy getters from their source: `[TLS_RECOVERY] heap_internal` is
+the largest free internal block, despite its label. It is not total internal
+free bytes and must not be compared with the total-free review floor. Separate
+post-upload heap readings also remain outside the instrumented network phases.
+
+The real image and voice were saved during one bounded RAM-only diagnostic
+network fault. Native recovery delivered the voice after 300 seconds, then
+selected the existing 60-second follow-up for the remaining image. That wake
+could not obtain fresh clock synchronization within 15 seconds, so the unchanged
+admission gate preserved the image and selected another 300 seconds. The next
+wake obtained fresh time and delivered it. This is a recorded network/clock
+delay, not a new heap failure or stale already-delivered image.
+
+Both request-bound storage deletions, fresh empty inventories, pending=0 and
+backoff=0 are captured. Independent read-only cloud checks matched native
+SHA256 and length for the 152,459-byte image and 110,592-byte voice; the exact
+voice request completed with one ingest and worker execution. Final-boot pure
+predicate checks prove both zero retry arms and the next 02:00 Pacific calendar.
+
+The original offline controller remains failed because its Sense USB log ended
+before the final sleep marker. A separate read-only reconciliation proved both
+boards healthy, responsive and empty, but also remains failed because its LCD
+final sleep marker was missing. Both USB ports were then observed absent for
+about 96.8 seconds without reopening. Keep this as additive current-state and
+absence evidence; neither original failure becomes a complete paired-sleep pass.
+Other passing finite cases independently include native paired sleep, normal
+calendar and 75 seconds quiet. The original failing cases and all exclusions
+are retained in the campaign evidence; no payload, hint, credential or schedule
+was cleared to make testing pass.
+
+The ten complete candidate network traces clear the unchanged memory floors.
+The tightest sample is burst internal free 32,140 B (7,564 B above its floor),
+and the smallest observed worker unused value is 5,536 B. Thirteen excluded trace
+records and discarded serial tails remain explicit; there is no continuous
+worst-case guarantee. No observed RAM blocker was found in the measured paths.
+Production publication and any additional OTA/provisioning acceptance remain
+separate from this private campaign.
 
 ## Exact scope
 
@@ -80,10 +168,14 @@ voice share this trace; presign/camera transitions do not gain new heap traces.
   behavior. The new watermark scans once per completed trace and prints after
   client cleanup; it does not add work to the allocation-failure hook or a wait
   to foreground input. Its actual timing/stack overhead remains unmeasured.
-- Static/build evidence: pending. Use exact 224 and candidate paired proofs for
-  DRAM, IRAM, RTC, binary and OTA-slot deltas. Do not add overlapping internal/DMA
-  heap views or credit historical measured savings as guaranteed new headroom.
-- Runtime evidence: pending. Historical 213 before-attempt samples improved
+- Static/build evidence: canonical Sense application 1,876,336 B with 89,744 B
+  remaining in its slot; LCD 2,033,408 B with 588,032 B remaining. Static internal
+  DRAM delta is Sense +8 B / LCD 0; IRAM is unchanged. Actual compiler frames
+  grew 48 B for the upload worker and 64 B for voice and claim, while image
+  presign decreased 16 B. Frames are not summed into a call-chain bound.
+  See campaign `build-verification-225/BUILD-RESOURCE-HANDOFF.md`.
+- Runtime evidence: current qualified observations appear above; detailed phase
+  and provenance reports are in campaign `analysis-prep/`. Historical 213 before-attempt samples improved
   2,644–3,068 B; historical 215 matched voice networking samples improved
   8,628–8,632 B, but its interruption-image sample was 6,244 B lower. These were
   different finite workloads, not controlled predictions for 224 plus this patch.
@@ -120,13 +212,13 @@ diagnostic, voice, image and claim reruns plus the three voice negative controls
 These tests double RTOS, heaps, sockets and storage boundaries. They establish
 host behavior, not physical RAM margin, real response latency or acceptance.
 
-## Remaining gates and finite measurement plan
+## Original finite measurement plan and remaining limits
 
-After separate host-path preparation, run the complete working-tree gate on
-unchanged source. Then commit/review final source, materialize the reserved
-private version, run the snapshot's complete gate, and build/check both canonical
-artifacts. Keep before/after resource reports and actual compiler frame metadata.
-Do not claim stack qualification from a 12,288-byte task allocation.
+Both working-tree and immutable-snapshot gates have passed all 122 suites on
+unchanged source, followed by canonical paired builds and actual artifact checks.
+Before/after resource reports and compiler metadata are retained. No rerun or
+rebuild is needed merely for documentation updates. Do not claim stack
+qualification from a 12,288-byte task allocation.
 
 On exact installed candidate identities, measure successful, failed, cancelled
 and resumed voice, image PUT and claim with worker watermarks; matched internal
@@ -140,5 +232,6 @@ OTA or storage-fault case remains separately scoped and authorized.
 Shared source read: `engineering/halo-resource-testing`, revision
 `59409ca6-1b35-498a-9981-298565d95014`, dated September 23–24. Its production 211
 wording is historical. Local 224 source/release evidence controls the current
-baseline. No shared-memory save, device action or production publication is
-performed by this source step.
+baseline. No shared-memory save or production publication was performed. Device
+actions and current acceptance are recorded separately from the original source
+review and historical model evidence.
