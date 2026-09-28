@@ -802,6 +802,18 @@
       "path": "tools/test_host_paths.py",
       "args": [],
       "timeout_seconds": 30
+    },
+    {
+      "id": "test_shopping_refresh_feedback",
+      "path": "tools/test_shopping_refresh_feedback.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_haptics_disabled",
+      "path": "tools/test_haptics_disabled.py",
+      "args": [],
+      "timeout_seconds": 180
     }
   ]
 }

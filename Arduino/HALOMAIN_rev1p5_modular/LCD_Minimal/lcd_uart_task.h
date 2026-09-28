@@ -841,6 +841,8 @@ static void uart_task(void *arg) {
               resetActivityTimer();
               Serial.printf("[WAKE] Pulse sent, sense_state=%d awake_confirmed=%d\n",
                             (int)sense_state, sense_awake_confirmed ? 1 : 0);
+            } else if (strcmp(usb_buf, "haptics") == 0) {
+              haptic_report(); // Read-only driver state; never starts playback.
             } else if (strcmp(usb_buf, "uimem") == 0) {
               g_usb_ui_memory_requested.store(true); // UI owner performs the heap walk
             } else if (strcmp(usb_buf, "ui") == 0) {

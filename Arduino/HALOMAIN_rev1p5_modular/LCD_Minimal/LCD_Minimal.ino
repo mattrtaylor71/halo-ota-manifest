@@ -1139,132 +1139,8 @@ static const unsigned long PROVISION_QR_WAIT_TIMEOUT_MS = 12000;
 static volatile bool provision_refresh_pending = false;  // Refresh list after provisioning completes
 static volatile bool refresh_request_needs_send = false;  // Send INPUT_WAKE once Sense is awake
 
-// ── Haptics (DRV2605) ───────────────────────────────────────────────
-static const uint8_t HAPTIC_ADDR = 0x5A;
-static const i2c_port_t HAPTIC_I2C_PORT = I2C_NUM_0;
-static const uint8_t DRV2605_REG_STATUS = 0x00;
-static const uint8_t DRV2605_REG_MODE = 0x01;
-static const uint8_t DRV2605_REG_RTPIN = 0x02;
-static const uint8_t DRV2605_REG_LIBRARY = 0x03;
-static const uint8_t DRV2605_REG_WAVESEQ1 = 0x04;
-static const uint8_t DRV2605_REG_WAVESEQ2 = 0x05;
-static const uint8_t DRV2605_REG_GO = 0x0C;
-static const uint8_t DRV2605_REG_OVERDRIVE = 0x0D;
-static const uint8_t DRV2605_REG_SUSTAINPOS = 0x0E;
-static const uint8_t DRV2605_REG_SUSTAINNEG = 0x0F;
-static const uint8_t DRV2605_REG_BREAK = 0x10;
-static const uint8_t DRV2605_REG_AUDIOMAX = 0x13;
-static const uint8_t DRV2605_REG_RATEDV = 0x16;
-static const uint8_t DRV2605_REG_CLAMPV = 0x17;
-static const uint8_t DRV2605_REG_FEEDBACK = 0x1A;
-static const uint8_t DRV2605_REG_CONTROL3 = 0x1D;
-static const uint8_t DRV2605_MODE_INTTRIG = 0x00;
-static const uint8_t DRV2605_EFFECT_CLICK = 4;  // Sharp Click - 100%
-static const bool HAPTIC_USE_LRA = true;
-static const uint8_t HAPTIC_RATEDV_FULL = 0xFF;
-static const uint8_t HAPTIC_CLAMPV_FULL = 0xFF;
-static const uint8_t HAPTIC_RATEDV_SCROLL = 0x10;
-static const uint8_t HAPTIC_CLAMPV_SCROLL = 0x10;
-static bool haptic_ready = false;
-static unsigned long last_haptic_ms = 0;
-static const unsigned long HAPTIC_MIN_INTERVAL_MS = 40;
-
-static bool haptic_write(uint8_t reg, uint8_t value) {
-  uint8_t data[2] = {reg, value};
-  return i2c_master_write_to_device(HAPTIC_I2C_PORT, HAPTIC_ADDR, data, sizeof(data),
-                                    pdMS_TO_TICKS(20)) == ESP_OK;
-}
-
-static bool haptic_read(uint8_t reg, uint8_t* value) {
-  if (!value) {
-    return false;
-  }
-  return i2c_master_write_read_device(HAPTIC_I2C_PORT, HAPTIC_ADDR, &reg, 1, value, 1,
-                                      pdMS_TO_TICKS(20)) == ESP_OK;
-}
-
-static bool haptic_write_mask(uint8_t reg, uint8_t clear_mask, uint8_t set_mask) {
-  uint8_t value = 0;
-  if (!haptic_read(reg, &value)) {
-    return false;
-  }
-  value &= clear_mask;
-  value |= set_mask;
-  return haptic_write(reg, value);
-}
-
-static void haptic_init() {
-  if (haptic_ready) {
-    return;
-  }
-  uint8_t status = 0;
-  if (!haptic_read(DRV2605_REG_STATUS, &status)) {
-    return;
-  }
-  uint8_t chip_id = (status >> 5) & 0x07;
-  if (chip_id != 0x03 && chip_id != 0x04 && chip_id != 0x06 && chip_id != 0x07) {
-    return;
-  }
-  // Internal trigger, ERM open-loop (mirrors reference init)
-  if (!haptic_write(DRV2605_REG_MODE, DRV2605_MODE_INTTRIG)) {
-    return;
-  }
-  haptic_write(DRV2605_REG_RTPIN, 0);
-  haptic_write(DRV2605_REG_LIBRARY, HAPTIC_USE_LRA ? 6 : 1);
-  haptic_write(DRV2605_REG_WAVESEQ1, DRV2605_EFFECT_CLICK);
-  haptic_write(DRV2605_REG_WAVESEQ2, 0);
-  haptic_write(DRV2605_REG_OVERDRIVE, 0);
-  haptic_write(DRV2605_REG_SUSTAINPOS, 0);
-  haptic_write(DRV2605_REG_SUSTAINNEG, 0);
-  haptic_write(DRV2605_REG_BREAK, 0);
-  haptic_write(DRV2605_REG_AUDIOMAX, 0x64);
-  // Max drive voltages (strongest output)
-  haptic_write(DRV2605_REG_RATEDV, HAPTIC_RATEDV_FULL);
-  haptic_write(DRV2605_REG_CLAMPV, HAPTIC_CLAMPV_FULL);
-  if (HAPTIC_USE_LRA) {
-    // LRA mode: set LRA bit, clear ERM open-loop
-    haptic_write_mask(DRV2605_REG_FEEDBACK, 0xFF, 0x80);
-    haptic_write_mask(DRV2605_REG_CONTROL3, 0xDF, 0x00);
-  } else {
-    // ERM open-loop
-    haptic_write_mask(DRV2605_REG_FEEDBACK, 0x7F, 0x00);
-    haptic_write_mask(DRV2605_REG_CONTROL3, 0xFF, 0x20);
-  }
-  haptic_ready = true;
-}
-
-static void haptic_pulse_with_strength(uint8_t ratedv, uint8_t clampv) {
-  unsigned long now = millis();
-  if (now - last_haptic_ms < HAPTIC_MIN_INTERVAL_MS) {
-    return;
-  }
-  if (!haptic_ready) {
-    haptic_init();
-  }
-  if (!haptic_ready) {
-    return;
-  }
-  if (ratedv != HAPTIC_RATEDV_FULL || clampv != HAPTIC_CLAMPV_FULL) {
-    haptic_write(DRV2605_REG_RATEDV, ratedv);
-    haptic_write(DRV2605_REG_CLAMPV, clampv);
-  }
-  haptic_write(DRV2605_REG_WAVESEQ1, DRV2605_EFFECT_CLICK);
-  haptic_write(DRV2605_REG_WAVESEQ2, 0);
-  haptic_write(DRV2605_REG_GO, 1);
-  if (ratedv != HAPTIC_RATEDV_FULL || clampv != HAPTIC_CLAMPV_FULL) {
-    haptic_write(DRV2605_REG_RATEDV, HAPTIC_RATEDV_FULL);
-    haptic_write(DRV2605_REG_CLAMPV, HAPTIC_CLAMPV_FULL);
-  }
-  last_haptic_ms = now;
-}
-
-static void haptic_pulse() {
-  haptic_pulse_with_strength(HAPTIC_RATEDV_FULL, HAPTIC_CLAMPV_FULL);
-}
-
-static void haptic_pulse_scroll() {
-  haptic_pulse_with_strength(HAPTIC_RATEDV_SCROLL, HAPTIC_CLAMPV_SCROLL);
-}
+// Haptics are disabled for every unit; initialization only parks the driver.
+#include "lcd_haptics.h"
 
 // ── OTA Lock (Sense-coordinated) ───────────────────────────────────────
 static volatile bool ota_locked = false;
@@ -1955,7 +1831,6 @@ typedef enum {
   EVT_SHOW_PROVISION_INTRO,
   EVT_HIDE_PROVISION_INTRO,
   EVT_RESET_UI,
-  EVT_HAPTIC_TICK,
   EVT_STOP_GLOWING,     // From UART: UI task calls stop_glowing_animation + lv_timer_handler
   EVT_START_GLOWING,    // From UART: UI task calls start_glowing_animation(reason)
   EVT_UI_STATUS_IDLE,   // From UART: UI task calls set_status_reset_visible(false), stop_glowing if
@@ -3255,10 +3130,10 @@ static void refresh_sm_set_state(RefreshState state, const char* reason) {
     refresh_last_wake_send_ms = 0;
     refresh_done_ms = 0;
     last_proof_of_life_ms = now_ms;
-    if (!is_glowing_animation) {
-      start_glowing_animation("refresh_sm");
-      lv_timer_handler();
-    }
+    // PONG/SYNC_ACK reach this transition on uart_task without the LVGL
+    // mutex. Publish state only: ui_task already renders the refresh ring
+    // under its owner lock. Even a timer-only call here can race an active
+    // event and leave LVGL's event chain pointing into an expired task frame.
   } else if (state == REFRESH_COMPLETE || state == REFRESH_FAILED) {
     refresh_done_ms = now_ms;
   }
@@ -4898,7 +4773,6 @@ void loop() {
     touch_move_max_d2 = 0;    // new gesture: reset the drag tracker
     long_press_sent = false;
     Serial.printf("[TOUCH] Touch pressed at (%d, %d) - stored as (%d, %d)\n", touch_x, touch_y, touch_press_x, touch_press_y);
-    haptic_pulse();
     resetActivityTimer();
     
     {

@@ -481,13 +481,6 @@ static void knob_left_cb(void *arg, void *data) {
     xQueueSendFromISR(app_event_queue, &evt, &xHigherPriorityTaskWoken);
   }
 
-  // Haptic tick (queued to UI task)
-  app_event_t h_evt = {};
-  h_evt.type = EVT_HAPTIC_TICK;
-  if (app_event_queue != NULL) {
-    xQueueSendFromISR(app_event_queue, &h_evt, &xHigherPriorityTaskWoken);
-  }
-  
   // Queue UART TX message (NOT sent here - uart_task will send it)
   if (!refresh_request_pending && !ui_busy) {
     tx_msg_t tx_msg = {};
@@ -533,13 +526,6 @@ static void knob_right_cb(void *arg, void *data) {
     xQueueSendFromISR(app_event_queue, &evt, &xHigherPriorityTaskWoken);
   }
 
-  // Haptic tick (queued to UI task)
-  app_event_t h_evt = {};
-  h_evt.type = EVT_HAPTIC_TICK;
-  if (app_event_queue != NULL) {
-    xQueueSendFromISR(app_event_queue, &h_evt, &xHigherPriorityTaskWoken);
-  }
-  
   // Queue UART TX message (NOT sent here - uart_task will send it)
   if (!refresh_request_pending && !ui_busy) {
     tx_msg_t tx_msg = {};

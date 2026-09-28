@@ -1722,9 +1722,16 @@ static int shopping_list_apply_delete_result(const char* id, bool ok) {
 // Touches LVGL — UI-task only. `reason` is for logging/wake tagging.
 static void shopping_list_trigger_refresh(const char* reason) {
   const char* r = reason ? reason : "list_refresh";
+  const bool show_ring = !(reason && strcmp(reason, "entry_revalidate") == 0);
   // Guard: never stack a second refresh while one is pending/inflight
   if (refresh_state == REFRESH_WAKE_PENDING || refresh_state == REFRESH_INFLIGHT) {
-    Serial.printf("[SHOPPING_LIST] refresh ignored (%s) — already %s\n",
+    // A user can join the silent refresh started on list entry. Promote only
+    // its feedback; retain the existing request, deadline and animation phase.
+    if (show_ring && !shopping_list_refresh_show_ring) {
+      shopping_list_refresh_show_ring = true;
+      shopping_list_refresh_indicator_sync(true);
+    }
+    Serial.printf("[SHOPPING_LIST] refresh joined (%s) — already %s\n",
                   r, refresh_state == REFRESH_INFLIGHT ? "inflight" : "wake_pending");
     return;
   }
@@ -1732,7 +1739,7 @@ static void shopping_list_trigger_refresh(const char* reason) {
   // Gate the spinning ring on the trigger reason: entry-revalidate is the only
   // silent one (clean list-open); touch_pull / encoder / usb all show the ring.
   // Set fresh on EVERY trigger so each refresh's ring visibility is correct.
-  shopping_list_refresh_show_ring = !(reason && strcmp(reason, "entry_revalidate") == 0);
+  shopping_list_refresh_show_ring = show_ring;
   request_sense_wake(r);
   refresh_sm_set_wake_pending(r);
   // Show refreshing feedback (border-ring sweep)

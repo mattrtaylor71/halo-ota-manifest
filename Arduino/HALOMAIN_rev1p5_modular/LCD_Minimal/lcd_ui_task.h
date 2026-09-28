@@ -1168,9 +1168,6 @@ static void ui_task(void *arg) {
         status_screen_shown_time = 0;
         lv_timer_handler();
         processed_anything = true;
-      } else if (evt.type == EVT_HAPTIC_TICK) {
-        haptic_pulse_scroll();
-        processed_anything = true;
       } else if (evt.type == EVT_MENU_SELECTED) {
         // Menu item selected - send to Sense board and handle accordingly
         int selected_index = evt.data.menu_index;

@@ -1,3 +1,7 @@
+# Private 226 source — restore shopping refresh feedback; disable haptics
+
+Restore the earlier216/217 LCD refresh fixes omitted when225 branched from published224: explicit refresh joins reveal the existing ring without duplicate requests, and UART refresh-state handling no longer renders LVGL outside its owner task. Disable all touch/scroll haptics and park the driver in standby with read-only verification. Retain225 Sense RAM changes. Build/device qualification is pending at this source checkpoint; public224 is unchanged. [Scope and evidence](docs/LCD_REFRESH_HAPTICS_226.md).
+
 # 6.4.224 published — reconcile completed media retries
 
 Backport bounded erased-VoiceFlash proof and fresh inventory after confirmed saved-image/voice deletion to production211 behavior, with the approved212 power reminder. Preserve genuine backlog, unknown storage and the existing retry/sleep/OTA policy. Both119-suite gates, canonical builds, paired publication and complete public readbacks passed for source `518691c8d3bd`. One exact224/app1 SDKVALID bench pair has composed limited OTA, real saved-media recovery, cloud custody and subsequent75.219s passive USB-absence evidence. Original OTA/media/health controllers remain incomplete for documented observation failures; no first Sense boot, uninterrupted media-ending quiet, new scheduled02:00 execution or full-product pass is claimed. Continue on `codex/halo-retry-release`; future versions require unused225+ after inventory. [Release evidence and limits](docs/RELEASE_224.md).
