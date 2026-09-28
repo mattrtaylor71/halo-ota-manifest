@@ -7,6 +7,7 @@ No device, network, firmware build, or source mutation occurs.
 """
 import argparse
 from pathlib import Path
+from host_paths import arduino_user
 import resource
 import shutil
 import subprocess
@@ -157,7 +158,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--uart-rx', type=Path, default=ROOT / 'LCD_Minimal/lcd_uart_rx.h')
     parser.add_argument('--arduino-json', type=Path,
-                        default=Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src')
+                        default=arduino_user() / 'libraries/ArduinoJson/src')
     args = parser.parse_args()
     if not (args.arduino_json / 'ArduinoJson.h').is_file():
         parser.error('Provide the canonical ArduinoJson include directory with --arduino-json')

@@ -6,6 +6,7 @@ LVGL geometry, device timing or backend request is simulated as hardware proof.
 """
 import argparse
 from pathlib import Path
+from host_paths import arduino_user
 import shutil
 import subprocess
 import tempfile
@@ -231,7 +232,7 @@ static void shopping_list_screen_populate();
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source-root', type=Path, default=Path(__file__).resolve().parents[1])
-    p.add_argument('--arduino-json', type=Path, default=Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src')
+    p.add_argument('--arduino-json', type=Path, default=arduino_user() / 'libraries/ArduinoJson/src')
     a = p.parse_args()
     compiler = shutil.which('clang++') or shutil.which('g++')
     assert compiler and (a.arduino_json / 'ArduinoJson.h').is_file()

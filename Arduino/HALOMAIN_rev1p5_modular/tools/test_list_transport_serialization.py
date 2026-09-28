@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from host_paths import arduino_user
 import shutil
 import subprocess
 import tempfile
@@ -282,7 +283,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-root', type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument('--out', type=Path)
-    parser.add_argument('--arduino-json', type=Path, default=Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src')
+    parser.add_argument('--arduino-json', type=Path, default=arduino_user() / 'libraries/ArduinoJson/src')
     parser.add_argument('--sanitize', action='store_true')
     args = parser.parse_args()
     if args.out:

@@ -69,6 +69,16 @@ class CandidateTests(unittest.TestCase):
             self.prepare()
         self.assertFalse(self.out.exists())
 
+    def test_known_relocated_checker_allowed_but_changed_bytes_refused(self):
+        digest = dev.reference(dev.CHECKER)['sha256']
+        with patch.object(dev, 'CHECKER_SHA', '0' * 64), patch.object(dev, 'MINI_CHECKER_SHA', digest):
+            result = self.prepare()
+            self.assertEqual(result['artifact_checker']['sha256'], digest)
+            self.assertEqual(result['commands']['check_artifacts'][2], str(dev.CHECKER))
+            dev.CHECKER.write_text('# altered relocated checker\n')
+            with self.assertRaisesRegex(ValueError, 'checker changed'):
+                dev.prepare(self.f.source, self.f.base / 'other', '6.4.102', 1790100000, 'production')
+
     def test_changed_materialization_and_source_refused_before_verifier_import(self):
         self.prepare()
         path = self.out / 'snapshot/materialization.json'

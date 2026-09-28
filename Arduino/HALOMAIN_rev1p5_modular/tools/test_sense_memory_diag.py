@@ -2,6 +2,7 @@
 """Exercise bounded production failure-hook records, owner lifetime and loss reporting."""
 import argparse,hashlib,json,re,shutil,subprocess,tempfile
 from pathlib import Path
+from host_paths import arduino_data
 ROOT=Path(__file__).resolve().parents[1]
 HEADER='Sense_Minimal/sense_memory_diag.h'
 PREFIX=r'''
@@ -183,7 +184,7 @@ def main():
  # Compile the actual production primitive with the pinned S3 compiler. The
  # toolchain reports is_always_lock_free=false even though these operations
  # inline; inspect the emitted operations rather than deleting that safeguard.
- target=Path.home()/'Library/Arduino15/packages/esp32/tools/esp-x32/2601/bin/xtensa-esp32s3-elf-g++'
+ target=arduino_data() / 'packages/esp32/tools/esp-x32/2601/bin/xtensa-esp32s3-elf-g++'
  assert target.is_file(), 'Pinned S3 compiler required for hook assembly coverage'
  primitive=text[text.index('struct TryGate {'):text.index('struct Failure {')]
  asm_source='#include <atomic>\n#include <stdint.h>\n'+primitive+r'''

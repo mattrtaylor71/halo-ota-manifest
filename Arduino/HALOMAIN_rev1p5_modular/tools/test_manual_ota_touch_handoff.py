@@ -4,6 +4,7 @@ No device, network or firmware build. Reuses the durable admission harness;
 ArduinoJson is the local firmware library. A frozen source is a negative control.
 """
 from pathlib import Path
+from host_paths import arduino_user
 import argparse
 import hashlib
 import json
@@ -220,7 +221,7 @@ def run(root, out, negative=False, sanitize=False, arduino_json=None):
     out.mkdir(parents=True, exist_ok=False)
     src = out / 'test.cpp'
     src.write_text(harness(root, negative))
-    library = arduino_json or Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src'
+    library = arduino_json or arduino_user() / 'libraries/ArduinoJson/src'
     command = ['c++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-I' + str(library),
                '-I' + str(root / 'halo_ota_demo/firmware/shared'), str(src), '-o', str(out / 'test')]
     if sanitize:

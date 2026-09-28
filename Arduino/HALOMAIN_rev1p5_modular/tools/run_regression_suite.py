@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from host_paths import arduino_data, arduino_user, mbedtls_prefix, negative_source_root
 import re
 import shutil
 import signal
@@ -110,10 +111,10 @@ def preflight(root, suites, history_root, negative_root):
     binaries = ('clang++', 'c++', 'cc', 'cmake', 'git', 'arduino-cli')
     missing = [name for name in binaries if shutil.which(name) is None]
     required = [
-        Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src/ArduinoJson.h',
-        Path.home() / 'Documents/Arduino/libraries/lvgl/lvgl.h',
-        Path.home() / 'Library/Arduino15/packages/esp32/hardware/esp32/3.3.8/libraries/Preferences/src/Preferences.cpp',
-        Path('/opt/homebrew/opt/mbedtls/include/mbedtls/md.h'),
+        arduino_user() / 'libraries/ArduinoJson/src/ArduinoJson.h',
+        arduino_user() / 'libraries/lvgl/lvgl.h',
+        arduino_data() / 'packages/esp32/hardware/esp32/3.3.8/libraries/Preferences/src/Preferences.cpp',
+        mbedtls_prefix() / 'include/mbedtls/md.h',
         negative_root / 'LCD_Minimal/lcd_voice_spool.h',
     ]
     missing += [str(p) for p in required if not p.is_file()]
@@ -215,8 +216,7 @@ def main():
     parser.add_argument('--list', action='store_true')
     parser.add_argument('--materialization', type=Path)
     parser.add_argument('--history-repo', type=Path)
-    parser.add_argument('--negative-source-root', type=Path, default=Path.home() /
-        'halo-device-analytics-2026-09-10/offline-backup-20260915/candidate163-002/snapshot/source')
+    parser.add_argument('--negative-source-root', type=Path, default=negative_source_root())
     args = parser.parse_args()
     root = args.source_root.resolve()
     suites = load_catalog(root)

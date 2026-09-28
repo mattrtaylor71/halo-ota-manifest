@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from host_paths import arduino_user
 import re
 import shutil
 import struct
@@ -97,7 +98,7 @@ def png(path, width, height, rgb):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-root', type=Path, default=ROOT)
-    parser.add_argument('--lvgl', type=Path, default=Path.home() / 'Documents/Arduino/libraries/lvgl')
+    parser.add_argument('--lvgl', type=Path, default=arduino_user() / 'libraries/lvgl')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)

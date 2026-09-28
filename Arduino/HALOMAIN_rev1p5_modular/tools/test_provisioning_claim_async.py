@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from host_paths import arduino_user
 import shutil
 import subprocess
 from test_provisioning_display_status import definition
@@ -351,7 +352,7 @@ def harness(root):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--source-root',type=Path,default=ROOT);p.add_argument('--out',type=Path,required=True)
-    p.add_argument('--arduino-json',type=Path,default=Path.home()/'Documents/Arduino/libraries/ArduinoJson/src')
+    p.add_argument('--arduino-json',type=Path,default=arduino_user() / 'libraries/ArduinoJson/src')
     a=p.parse_args();a.out.mkdir(parents=True,exist_ok=True)
     (a.out/'HTTPClient.h').write_text(STUB);(a.out/'WiFiClientSecure.h').write_text('#pragma once\n#include "HTTPClient.h"\n')
     (a.out/'esp_heap_caps.h').write_text('#pragma once\n#include "HTTPClient.h"\n')

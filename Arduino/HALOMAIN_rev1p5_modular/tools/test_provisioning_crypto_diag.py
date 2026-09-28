@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from host_paths import mbedtls_prefix
 import shutil
 import subprocess
 import tempfile
@@ -156,7 +157,7 @@ int main(){
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, default=ROOT)
-    parser.add_argument("--mbedtls-prefix", type=Path, default=Path("/opt/homebrew/opt/mbedtls"))
+    parser.add_argument("--mbedtls-prefix", type=Path, default=mbedtls_prefix())
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
     root = args.source_root.resolve()

@@ -9,13 +9,14 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from host_paths import arduino_data
 import shutil
 import subprocess
 from test_provisioning_display_status import definition
 
 ROOT = Path(__file__).resolve().parents[1]
 MANAGER = "halo_ota_demo/firmware/shared/ProvisioningManager.cpp"
-SDK = Path.home() / "Library/Arduino15/packages/esp32/hardware/esp32/3.3.8/cores/esp32"
+SDK = arduino_data() / 'packages/esp32/hardware/esp32/3.3.8/cores/esp32'
 
 PREFIX = r'''
 #include <algorithm>

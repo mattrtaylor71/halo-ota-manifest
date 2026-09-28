@@ -1,11 +1,12 @@
 """Actual LCD service/OTA_LOCK/release regression; fake I/O, no device access."""
 import argparse
 from pathlib import Path
+from host_paths import arduino_user
 import subprocess
 import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
-JSON=Path.home()/'Documents/Arduino/libraries/ArduinoJson/src'
+JSON=arduino_user() / 'libraries/ArduinoJson/src'
 
 
 def definition(source, signature):

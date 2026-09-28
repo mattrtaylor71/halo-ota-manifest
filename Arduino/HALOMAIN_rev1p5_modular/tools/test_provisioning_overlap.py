@@ -9,6 +9,7 @@ stress test. List tests execute the real pre-request owner-admission slice.
 """
 import argparse
 from pathlib import Path
+from host_paths import arduino_data
 import hashlib
 import json
 import re
@@ -17,7 +18,7 @@ import shutil
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-PREFS = Path.home() / 'Library/Arduino15/packages/esp32/hardware/esp32/3.3.8/libraries/Preferences/src/Preferences.cpp'
+PREFS = arduino_data() / 'packages/esp32/hardware/esp32/3.3.8/libraries/Preferences/src/Preferences.cpp'
 
 
 def definition(text, signature):

@@ -5,6 +5,7 @@ awake-proof predicate, ACK byte replay and Sense duplicate suppression are the
 production definitions, compiled directly from their source.
 """
 from pathlib import Path
+from host_paths import arduino_user
 import shutil
 import subprocess
 import tempfile
@@ -12,7 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED = ROOT / 'halo_ota_demo/firmware/shared'
-ARDUINO_JSON = Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src'
+ARDUINO_JSON = arduino_user() / 'libraries/ArduinoJson/src'
 
 
 def definition(text, signature):

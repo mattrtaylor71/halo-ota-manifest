@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run the production delete/inventory function against typed UART fault edges."""
 from pathlib import Path
+from host_paths import arduino_user
 import shutil
 import subprocess
 import tempfile
@@ -100,7 +101,7 @@ def main():
         (path / 'test.cpp').write_text(harness())
         subprocess.run([shutil.which('clang++') or 'c++', '-std=c++17', '-O1',
                         '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-                        '-I'+str(Path('/Users/MattTaylor/Documents/Arduino/libraries/ArduinoJson/src')),
+                        '-I'+str(arduino_user() / 'libraries/ArduinoJson/src'),
                         str(path/'test.cpp'), '-o', str(path/'test')], check=True, timeout=45)
         subprocess.run([str(path/'test')], check=True, timeout=10)
 

@@ -3,6 +3,7 @@
 Real ArduinoJson validates replies. No serial, network, or firmware execution.
 """
 from pathlib import Path
+from host_paths import arduino_user
 import shutil
 import subprocess
 import tempfile
@@ -10,7 +11,7 @@ import unittest
 from test_retry_peer_ready import definition
 
 ROOT = Path(__file__).resolve().parents[1]
-JSON = Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src'
+JSON = arduino_user() / 'libraries/ArduinoJson/src'
 
 
 def harness():

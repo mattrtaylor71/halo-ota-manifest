@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from host_paths import arduino_user
 import re
 import resource
 import signal
@@ -12,7 +13,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-LVGL = Path.home() / 'Documents/Arduino/libraries/lvgl'
+LVGL = arduino_user() / 'libraries/lvgl'
 CONFIG = ROOT / 'LCD_Minimal/lv_conf.h'
 SOURCES = [LVGL / 'src/misc' / name for name in ('lv_mem.c', 'lv_tlsf.c', 'lv_gc.c')]
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Run the real Sense retry-arm transaction with timed ACK loss/cancellation."""
 from pathlib import Path
+from host_paths import arduino_user
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-JSON_INCLUDE = Path.home() / "Documents/Arduino/libraries/ArduinoJson/src"
+JSON_INCLUDE = arduino_user() / 'libraries/ArduinoJson/src'
 SOURCE = r'''
 #include <ArduinoJson.h>
 #include <assert.h>

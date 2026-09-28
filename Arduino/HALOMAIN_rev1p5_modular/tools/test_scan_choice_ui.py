@@ -6,6 +6,7 @@ input deadlines, and quantity motion cancellation. No hardware or network use.
 """
 import argparse
 from pathlib import Path
+from host_paths import arduino_user
 import re
 import shutil
 import subprocess
@@ -425,7 +426,7 @@ int main(){
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-root', type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument('--arduino-json', type=Path, default=Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src')
+    parser.add_argument('--arduino-json', type=Path, default=arduino_user() / 'libraries/ArduinoJson/src')
     args = parser.parse_args()
     compiler = shutil.which('clang++') or shutil.which('g++')
     if not compiler or not (args.arduino_json / 'ArduinoJson.h').is_file():

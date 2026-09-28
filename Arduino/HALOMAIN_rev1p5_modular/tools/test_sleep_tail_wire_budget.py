@@ -11,6 +11,7 @@ import argparse
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from host_paths import arduino_user
 import shutil
 import subprocess
 import tempfile
@@ -19,7 +20,7 @@ import unittest
 from test_manual_ota_clock import definition
 
 ROOT = Path(__file__).resolve().parents[1]
-ARDUINO_JSON = Path.home() / "Documents/Arduino/libraries/ArduinoJson/src"
+ARDUINO_JSON = arduino_user() / 'libraries/ArduinoJson/src'
 FIFO_BYTES = 128
 BAUD = 115200
 

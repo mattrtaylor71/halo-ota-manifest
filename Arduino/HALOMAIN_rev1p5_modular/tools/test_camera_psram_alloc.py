@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from host_paths import arduino_data
 import re
 import shutil
 import subprocess
@@ -155,8 +156,8 @@ def main():
     source = (args.source_root.resolve() / HEADER).read_text()
     compiler = shutil.which("clang++") or shutil.which("g++")
     assert compiler, "Native C++ compiler required"
-    sdk = Path.home() / "Library/Arduino15/packages/esp32/tools/esp32s3-libs/3.3.8"
-    target = Path.home() / "Library/Arduino15/packages/esp32/tools/esp-x32/2601/bin/xtensa-esp32s3-elf-g++"
+    sdk = arduino_data() / 'packages/esp32/tools/esp32s3-libs/3.3.8'
+    target = arduino_data() / 'packages/esp32/tools/esp-x32/2601/bin/xtensa-esp32s3-elf-g++'
     flags = sdk / "flags/cpp_flags"
     assert target.is_file() and flags.is_file(), "Pinned S3 compiler and actual SDK flags required"
     assert "-mdisable-hardware-atomics" in flags.read_text()

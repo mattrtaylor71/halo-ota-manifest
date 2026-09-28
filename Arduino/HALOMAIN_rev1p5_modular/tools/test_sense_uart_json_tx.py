@@ -7,12 +7,13 @@ ArduinoJson parser are the production definitions.
 """
 import argparse
 from pathlib import Path
+from host_paths import arduino_user
 import shutil
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-ARDUINO_JSON = Path.home() / 'Documents/Arduino/libraries/ArduinoJson/src'
+ARDUINO_JSON = arduino_user() / 'libraries/ArduinoJson/src'
 
 
 def definition(text, signature):

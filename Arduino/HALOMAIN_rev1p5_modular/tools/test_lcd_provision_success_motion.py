@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from host_paths import arduino_user
 import re
 import subprocess
 from test_provisioning_display_status import definition
@@ -122,7 +123,7 @@ int main(){
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source-root', type=Path, default=ROOT)
-    p.add_argument('--lvgl', type=Path, default=Path.home() / 'Documents/Arduino/libraries/lvgl')
+    p.add_argument('--lvgl', type=Path, default=arduino_user() / 'libraries/lvgl')
     p.add_argument('--out', type=Path, required=True)
     a = p.parse_args();root, out, lvgl = a.source_root.resolve(), a.out.resolve(), a.lvgl.resolve()
     out.mkdir(parents=True, exist_ok=False)
