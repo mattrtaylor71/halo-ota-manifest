@@ -2,9 +2,10 @@
 
 September 28, 2026. Requested by Matt after testing private 225. Production OTA
 remains 224. Version 226 was inventoried unused before preparation; publication
-requires a separate explicit release request. The paired build is now verified
-and ready for bench testing. It is **not installed or published**; neither Halo
-USB interface appeared during the two bounded wake attempts described below.
+requires a separate explicit release request. The paired build is verified and now **installed privately on the bench**,
+both boards 226/app1 SDK VALID. It is **not published**. The earlier USB-absence
+attempts below remain historical failures; the user subsequently repositioned
+the unit and a fresh actuator wake exposed both exact boards.
 
 ## Why these fixes were missing
 
@@ -98,9 +99,9 @@ is16 bytes larger. LCD static DRAM is8 bytes smaller and its image128 bytes
 smaller; IRAM/RTC sections are unchanged. The compiled LCD loop, UART task, UI
 task and refresh-trigger frames remain320,1648,800 and32 bytes respectively.
 These are individual compiler frames, not call-chain peaks or runtime free
-memory. No226 device resource measurement has been made. The historical resource
-model's source/calibration drift remains separate; it was not recalibrated to
-manufacture a passing result.
+memory. The focused device checks below do not qualify the full RAM campaign.
+The historical resource model's source/calibration drift remains separate;
+it was not recalibrated to manufacture a passing result.
 
 The first build job `20260928T151217-4371082a` was interrupted before compilation
 when the user moved the USB-C hub carrying the SSD. Matching macOS SIGBUS crash
@@ -116,14 +117,37 @@ After the hub move, only the proven Uno/relay location fields were rebound.
 Recovery15 received controller READY and completed one stroke, but again saw no
 Halo interface during40 seconds. All actuator workers closed and the lease was
 released. No firmware write, device command, NVS change or media capture occurred.
-The last qualified installed pair remains225/app0; a new live identity check is
-required before the prepared inactive-app1 service can run. Preserve225/app0.
+At that checkpoint the installed pair remained 225/app0. Subsequent guarded
+service cases 16/17 installed 226/app1 and preserved 225/app0, NVS, partition
+tables and filesystem regions. Fresh paired SDK VALID identity was observed
+in cases 18 and 25. The protected original 225 crash dump also remains intact.
 
-Remaining acceptance: manual wake/USB access, exact paired installation, actual
-voice/list refresh feedback, driver standby readback after interaction and
-bounded sleep/wake. There is no226 physical refresh, vibration, upload, OTA or
-full-functional pass. Production manifests were freshly read as paired224;
-no cloud writes were performed.
+Case 25 passed three native Home/List rebuild cycles with fresh UI-alive and
+list-state responses, no observed panic/reboot and normal paired sleep. Haptics
+read back MODE=64, GO=0, RTP=0, standby_verified=1 before and after. These USB
+handlers bypass the physical Settings hit-test and loopTask touch handler;
+registers do not measure actual vibration. No extended quiet interval is claimed.
+
+Case 18 failed admission before media/list/refresh/haptics actions because capture
+missed the early Wi-Fi connection row, despite a fresh SNTP row. The failed
+receipt is preserved. A separate case 26 started capture before its single wake.
+Its refresh joins showed the indicator during an actual voice POST, but that
+POST returned HTTP -11 and the device retained the audio for native retry.
+Case 26 closed FAIL_OR_INCOMPLETE, missing the required same-voice 202. It
+captured native REFRESH_COMPLETE → IDLE and paired sleep, but sent no final
+ring-hidden or haptics readback after the failure. Preserve this failure even
+if later native recovery succeeds. Separate command-free case 27 observed the
+native timer wake, same saved voice retry, HTTP 202, successful file deletion,
+empty spool, cleared retry hint/peer arm and normal paired sleep. LCD telemetry
+kept backlight/panel off during recovery. No host replay or queue clearing
+was performed. Cloud correlation separately confirmed the initial request had
+completed: its acceptance occurred about 305 ms after the device timeout. The
+pre-retry cloud snapshot is not evidence of post-retry worker counts.
+
+Physical Settings gestures, visible animation, a successful overlapping upload,
+OTA transfer and full-product acceptance remain unqualified. Public OTA remains
+paired 224; this work did not publish a release. See the
+[225 crash investigation](SHOPPING_LIST_PANIC_225_20260928.md).
 
 Compact build receipts and static/frame reports:
 `/Users/MattTaylor/halo-refresh-haptics-20260928/build226/recovery01/receipt-bundle/`.
