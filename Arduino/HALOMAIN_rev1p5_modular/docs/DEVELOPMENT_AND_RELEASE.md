@@ -1,6 +1,7 @@
 # Develop privately, release deliberately
 
-**Production is 6.4.211.** Its paired public OTA manifests, tagged source and
+**Production is recorded in `PRODUCTION_BASELINE.json` and verified against both
+live manifests (6.4.224 on September 28).** Its public OTA manifests, tagged source and
 archived images stay unchanged while we develop the next version. A user tapping
 Software Update on a normal production unit sees the production manifest, not
 files we compile or flash over USB.
@@ -8,7 +9,12 @@ files we compile or flash over USB.
 The normal process is:
 
 1. Make and commit the requested change on a `codex/` development branch based
-   on the current production source.
+   on current production or a reviewed private descendant. Compare that base
+   with the last bench candidate and explicitly record which private fixes are
+   retained or deferred. Starting from production alone must not silently drop
+   already approved private work. For the current RAM branch, preserve225 RAM
+   changes and the restored refresh/haptics fixes in
+   [the226 source handoff](LCD_REFRESH_HAPTICS_226.md).
 2. Allocate an unused version, prepare an immutable local candidate, and run the
    host tests and canonical builds. The candidate is **not published**.
 3. Flash only the identified bench unit by USB; test the affected functions and
@@ -22,8 +28,8 @@ The normal process is:
 
 This changes host tooling and workflow, not the firmware's OTA, Wi-Fi, sleep,
 provisioning, quota or partition behavior. No firmware release is needed to start
-following this process. The retained 211 physical-test limits remain documented
-in [its handoff](RELEASE_211.md); choosing it as production does not invent tests.
+following this process. Current production's physical-test limits remain in
+[the224 handoff](RELEASE_224.md); choosing a baseline does not invent tests.
 
 Include a [resource-impact review](RESOURCE_REVIEW.md) when changing firmware.
 Use the exact-artifact report to compare static RAM and real OTA-slot headroom,
@@ -59,8 +65,8 @@ check, not evidence that production changed.
 
 Before allocating a version, check current baseline, local candidates/tags and
 immutable cloud artifacts as described in [Build and release](BUILD_AND_RELEASE.md).
-The next available starting range is 6.4.212+. An example version is not a
-reservation. Use normal numeric versions because the device's version comparison
+Use the current inventory, not an old example's version number. An example is
+not a reservation. Use normal numeric versions because the device's version comparison
 expects them; do not invent `-dev` suffixes. Once a version has been installed
 or remotely staged, new changed firmware gets a new version. Skipped production
 version numbers are fine.

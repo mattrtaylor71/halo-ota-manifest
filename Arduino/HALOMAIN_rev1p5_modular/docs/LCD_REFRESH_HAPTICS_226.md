@@ -2,8 +2,9 @@
 
 September 28, 2026. Requested by Matt after testing private 225. Production OTA
 remains 224. Version 226 was inventoried unused before preparation; publication
-requires a separate explicit release request. Build and device results are
-pending at this source checkpoint and must be recorded from actual receipts.
+requires a separate explicit release request. The paired build is now verified
+and ready for bench testing. It is **not installed or published**; neither Halo
+USB interface appeared during the two bounded wake attempts described below.
 
 ## Why these fixes were missing
 
@@ -73,3 +74,58 @@ The existing border design is retained. Company source
 branding, icon, typography or copy and requires no brand exception. Shared
 resource guidance: `engineering/halo-resource-testing`; live Git/build/device
 receipts take precedence over dated shared snapshots for deployment state.
+
+## Built candidate and current qualification
+
+- Compiled source: `1ce0d04e95b1b2a039b27364a616a535642cd10b` on
+  `codex/ram-qualification`; build `6.4.226-20260928T221036Z-1ce0d04e95b1`.
+- Mini candidate:
+  `/Volumes/Trepo-Work/Workspaces/halo-firmware-bench/candidates/6.4.226-recovery01`.
+- Full working-source gate: all124 suites pass; result SHA256
+  `a3736afe54f7319fa01426f36ad80db7d5fba5c7e8a0cf74483ee9dc0aab47ab`.
+- Full immutable-snapshot gate: all124 suites pass; result SHA256
+  `f3a93762678621e7eab2459d0195ed894c11432231811174282ece900b311194`.
+- Canonical paired compilation, unchanged locked environment, artifact checker
+  and candidate verification pass. This qualifies build integrity, not hardware.
+
+| Board | Application bytes | SHA256 | OTA slot margin |
+| --- | ---: | --- | ---: |
+| Sense | 1,876,352 | `ccb96ab2242959572ebdd8a552073296bf97b514e3524f62ee66b047555eb823` | 89,728 |
+| LCD | 2,033,280 | `6a4282f3a818595a87eda90a64aa344c60732daaccf88a686bf598440d907aaf` | 588,160 |
+
+Compared with225, Sense static RAM/IRAM/RTC sections are unchanged and its image
+is16 bytes larger. LCD static DRAM is8 bytes smaller and its image128 bytes
+smaller; IRAM/RTC sections are unchanged. The compiled LCD loop, UART task, UI
+task and refresh-trigger frames remain320,1648,800 and32 bytes respectively.
+These are individual compiler frames, not call-chain peaks or runtime free
+memory. No226 device resource measurement has been made. The historical resource
+model's source/calibration drift remains separate; it was not recalibrated to
+manufacture a passing result.
+
+The first build job `20260928T151217-4371082a` was interrupted before compilation
+when the user moved the USB-C hub carrying the SSD. Matching macOS SIGBUS crash
+reports prove force-unmounted executable backing files. Original candidate/run
+and partial gate evidence remain intact. After complete storage, toolchain,
+source and snapshot checks, fresh job `20260928T152837-5989e913` built the same
+source/version/epoch in the separate recovery directory. See the
+[Mini recovery notes](MAC_MINI_BENCH.md).
+
+Physical limits are explicit: baseline attempt14 completed one actuator stroke
+but saw no Halo USB arrival; it opened no board ports and made no media requests.
+After the hub move, only the proven Uno/relay location fields were rebound.
+Recovery15 received controller READY and completed one stroke, but again saw no
+Halo interface during40 seconds. All actuator workers closed and the lease was
+released. No firmware write, device command, NVS change or media capture occurred.
+The last qualified installed pair remains225/app0; a new live identity check is
+required before the prepared inactive-app1 service can run. Preserve225/app0.
+
+Remaining acceptance: manual wake/USB access, exact paired installation, actual
+voice/list refresh feedback, driver standby readback after interaction and
+bounded sleep/wake. There is no226 physical refresh, vibration, upload, OTA or
+full-functional pass. Production manifests were freshly read as paired224;
+no cloud writes were performed.
+
+Compact build receipts and static/frame reports:
+`/Users/MattTaylor/halo-refresh-haptics-20260928/build226/recovery01/receipt-bundle/`.
+Current continuation checkpoint:
+`/Users/MattTaylor/halo-refresh-haptics-20260928/STATUS.json`.

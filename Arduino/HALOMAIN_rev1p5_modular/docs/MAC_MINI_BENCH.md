@@ -1,5 +1,36 @@
 # Current production source on the Mac mini
 
+## September 28 hub-move recovery
+
+The USB-C hub also carries the build SSD. Moving it during the first226 snapshot
+gate force-unmounted executable backing files: macOS recorded matching SIGBUS
+crashes for the job worker, pipeline and regression runner, with the kernel
+message `Object has no pager because the backing vnode was force unmounted`.
+This was a storage interruption before compilation, not a firmware assertion.
+
+Before resuming after such a move, verify the actual external APFS UUID
+`84213E3E-886F-4110-850F-27A262DED004`, storage guard, locked toolchain, exact Git
+source/snapshot and absence of the old processes. Preserve interrupted evidence.
+Never create a replacement directory on the internal disk at a missing mount.
+Keep the hub attached while a build or flash is active.
+
+For this observed pre-compilation interruption only, the original226 directory
+and job were retained; a fresh `candidates/6.4.226-recovery01` was authorized with
+the same source `1ce0d04e95b1b2a039b27364a616a535642cd10b`, version and epoch.
+No226 binary had been built or published. The unchanged canonical candidate
+tools and bounded nonhardware runner are used; wrapper allocation rules and
+artifact/proof records are not weakened or edited. This is not permission to
+rebuild changed firmware under an occupied version.
+
+USB serial identities survive a port move; physical locations change. The
+verified Uno moved to `2-1.2.2.4` and its USB5V relay to `2-1.2.2.3`.
+Only those two location fields were updated after passive identity proof.
+Sense/LCD locations were not inferred while their interfaces were absent.
+See `/Users/MattTaylor/halo-ram-campaign-20260928/followup226-prep/HUB-MOVE-HANDOFF.json`
+and `/Users/MattTaylor/halo-refresh-haptics-20260928/build226/`.
+
+## Original qualification and source migration
+
 September 28, 2026. This is a private build migration, not installation or
 production approval. Production remains paired6.4.224. New work preserves the
 published224 source floor and uses freshly inventoried unused225+.
