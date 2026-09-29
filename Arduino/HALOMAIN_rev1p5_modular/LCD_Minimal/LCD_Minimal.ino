@@ -1186,6 +1186,31 @@ struct LcdCoordCriticalGuard {
   LcdCoordCriticalGuard() { portENTER_CRITICAL(&g_lcd_coord_mux); }
   ~LcdCoordCriticalGuard() { portEXIT_CRITICAL(&g_lcd_coord_mux); }
 };
+// Background schedule delivery owns CPU/UART time, never the visible UI or
+// user inactivity clock. Atomic expiry cannot erase a concurrently renewed hold.
+static std::atomic<uint32_t> g_lcd_maintenance_awake_until_ms{0};
+static bool lcd_maintenance_awake_active() {
+  const uint32_t now = (uint32_t)millis();
+  uint32_t until = g_lcd_maintenance_awake_until_ms.load();
+  if (!until || (int32_t)(until - now) > 0) return until != 0;
+  if (g_lcd_maintenance_awake_until_ms.compare_exchange_strong(until, 0)) return false;
+  return until && (int32_t)(until - now) > 0;
+}
+static bool lcd_maintenance_awake_extend() {
+  LcdCoordCriticalGuard guard;
+  // The final sleep commit owns this same lock. Never accept a hold after it.
+  if (g_sleep_transition) return false;
+  uint32_t until = (uint32_t)millis() + 8000U;
+  if (!until) until = 1; // reserve zero for inactive, at most one extra millisecond
+  g_lcd_maintenance_awake_until_ms.store(until);
+  return true;
+}
+static bool lcd_maintenance_sleep_begin() {
+  LcdCoordCriticalGuard guard;
+  if (lcd_maintenance_awake_active()) return false;
+  g_sleep_transition = true;
+  return true;
+}
 static void lcd_coord_cancel_preflight(bool only_if_expired) {
   portENTER_CRITICAL(&g_lcd_coord_mux);
   const uint32_t until = g_lcd_coord_lease_until_ms.load();
@@ -5811,7 +5836,9 @@ void loop() {
   if (!g_in_light_sleep && GUARDIAN_FORCE_SLEEP_MS > 0) {
     unsigned long awake_ms = lcd_guardian_awake_ms((uint32_t)now_ms);
     if (awake_ms >= GUARDIAN_FORCE_SLEEP_MS) {
-      if (lcd_ota_uart_active() || sleep_blocked_for_ota()) {
+      if (lcd_maintenance_awake_active()) {
+        // Continue through normal idle rendering so the panel may go dark.
+      } else if (lcd_ota_uart_active() || sleep_blocked_for_ota()) {
         // All sleep paths honor the same finite OTA ownership
         static bool guardian_ota_defer_logged = false;
         if (!guardian_ota_defer_logged) {
@@ -6025,6 +6052,9 @@ void loop() {
 #endif
     if (!inhibit_reason && sleep_blocked_for_ota()) {
       inhibit_reason = "ota_hold";
+    }
+    if (!inhibit_reason && lcd_maintenance_awake_active()) {
+      inhibit_reason = "maintenance_delivery";
     }
     if (inhibit_reason) {
       unsigned long now_ms = millis();

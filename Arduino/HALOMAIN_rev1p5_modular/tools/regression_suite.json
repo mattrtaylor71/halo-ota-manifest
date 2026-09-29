@@ -175,6 +175,12 @@
       "timeout_seconds": 180
     },
     {
+      "id": "test_lcd_background_awake",
+      "path": "tools/test_lcd_background_awake.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
       "id": "test_lcd_idle_visibility",
       "path": "tools/test_lcd_idle_visibility.py",
       "args": [],

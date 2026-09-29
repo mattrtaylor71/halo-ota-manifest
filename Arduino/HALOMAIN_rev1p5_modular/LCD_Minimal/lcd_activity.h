@@ -105,6 +105,10 @@ static bool lcd_sleep_intent_allowed(const char** reason_out) {
     if (reason_out) *reason_out = "ota_pending";
     return false;
   }
+  if (lcd_maintenance_awake_active()) {
+    if (reason_out) *reason_out = "maintenance_delivery";
+    return false;
+  }
   if (provisioning_input_locked()) {
     if (reason_out) *reason_out = "provisioning";
     return false;
@@ -637,7 +641,7 @@ static void init_ui_stack(int saved_count) {
 }
 
 static void enter_ship_ota_sleep() {
-  g_sleep_transition = true;
+  if (!lcd_maintenance_sleep_begin()) return;
   if (g_lcd_initialized) {
     lcd_panel_set_power(false);
   }
@@ -698,7 +702,7 @@ static void enter_ship_ota_sleep() {
 }
 
 static void enter_maintenance_sleep() {
-  g_sleep_transition = true;
+  if (!lcd_maintenance_sleep_begin()) return;
   if (g_lcd_initialized) {
     lcd_panel_set_power(false);
   }

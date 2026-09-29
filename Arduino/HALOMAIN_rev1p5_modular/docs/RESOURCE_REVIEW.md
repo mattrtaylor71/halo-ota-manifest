@@ -1,10 +1,12 @@
 # Resource review for firmware changes
 
 Use this alongside [development and release](DEVELOPMENT_AND_RELEASE.md).
-The initial [both-board audit](RESOURCE_AUDIT_20260922.md) records actual 212
-artifacts and proposed optimizations. Production remains 211; candidate 212 is
-[on hold](RELEASE_CANDIDATE_212.md). A resource proposal is not an implemented
-change or authorization to publish.
+The initial [both-board audit](RESOURCE_AUDIT_20260922.md) records historical 212
+artifacts and proposed optimizations. Read the current private checkpoint in
+`AGENTS.md` and the published identity in `PRODUCTION_BASELINE.json` before
+selecting source or artifacts; this original audit does not select a development
+baseline. The [212 hold](RELEASE_CANDIDATE_212.md) is a historical record.
+A resource proposal is not an implemented change or authorization to publish.
 
 ## Review every change, measure changes that can affect resources
 

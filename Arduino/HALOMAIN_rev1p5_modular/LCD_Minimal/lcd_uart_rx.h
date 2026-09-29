@@ -582,17 +582,8 @@ static void uart_process_received_message(const char* json_str) {
   // touch maintenance state here. Without this the LCD idle-sleeps before NTP
   // completes and never receives the real window (Sense can't wake a sleeping LCD).
   if (strcmp(type, "MAINT_KEEPALIVE") == 0) {
-    if (g_sleep_transition) return;
+    if (!lcd_maintenance_awake_extend()) return;
     const char* request_id = doc["request_id"] | "";
-    resetActivityTimer();
-    unsigned long until = millis() + 8000UL;  // bridge to next keepalive / real window
-    if (!ota_stay_awake_until_ms || (int32_t)(until - ota_stay_awake_until_ms) > 0) {
-      ota_stay_awake_until_ms = until;
-    }
-    if (g_sleep_transition) {
-      g_sleep_transition = false;
-      Serial.println("[LCD_MAINT] abort sleep transition (maint_keepalive)");
-    }
     Serial.printf("[UART][MAINT_KEEPALIVE] rx request_id=%s -> stay_awake\n",
                   (request_id && request_id[0]) ? request_id : "-");
     return;
@@ -724,11 +715,7 @@ static void uart_process_received_message(const char* json_str) {
       // that background message as activity falsely cancels sleep and relights
       // the panel. Storage and acknowledgment still run in both cases.
       if (!g_lcd_sleep_handshake_active.load()) {
-        resetActivityTimer();
-        unsigned long arm_until = millis() + 8000UL;
-        if (!ota_stay_awake_until_ms || (int32_t)(arm_until - ota_stay_awake_until_ms) > 0) {
-          ota_stay_awake_until_ms = arm_until;
-        }
+        lcd_maintenance_awake_extend();
       } else {
         Serial.println("[LCD_MAINT] future arm stored during sleep handshake; idle unchanged");
       }

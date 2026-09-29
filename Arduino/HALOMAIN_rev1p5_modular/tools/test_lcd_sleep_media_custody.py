@@ -65,6 +65,7 @@ struct LcdMaintenanceStorageGuard {
 static constexpr unsigned SLEEP_DENY_MAX_COUNT=4,SLEEP_LINK_RETRY_MS=2000;
 static unsigned long last_sleep_retry_log_ms;
 static bool notify_sense_sleep();
+static void lcd_sleep_touch_watch_begin(){}
 '''
     if 'static bool s_sleep_media_deferred' not in text:
         declarations += 'static bool s_sleep_media_deferred=false;\n'
@@ -99,7 +100,7 @@ static uint32_t g_{kind}_started_ms=0,g_{kind}_last_frame_ms=0,g_{kind}_sd_faile
     enter=definition(sleep,'static void enterLightSleep() {')
     end=enter.index('  sleep_handshake_fail_count = 0;\n  sleep_deny_count = 0;')
     prefix=enter[:end]
-    gate=definition(enter,'  struct SleepCommitGate {')+' sleep_commit_guard;\n'
+    gate='' if 'struct SleepCommitGate {' in prefix else definition(enter,'  struct SleepCommitGate {')+' sleep_commit_guard;\n'
     text+='\n'+prefix+gate+'''  ++teardown;
   if(lock_depth && g_lcd_sleep_commit_gate.load() && !lcd_voice_link_idle() && !lcd_image_link_idle())++blocked_admissions;
 }\n'''
@@ -108,7 +109,11 @@ static uint32_t g_{kind}_started_ms=0,g_{kind}_last_frame_ms=0,g_{kind}_sd_faile
     # that same guard before reading link-idle and publishing active custody.
     if 'sleep_defer_for_media' in sleep:
         assert enter.count('LcdMaintenanceStorageGuard sleep_arm_guard;')==1
-        assert enter.index('LcdMaintenanceStorageGuard sleep_arm_guard;')<enter.index('sense_awake_confirmed = false;')<enter.index('struct SleepCommitGate')
+        assert enter.index('LcdMaintenanceStorageGuard sleep_arm_guard;')<enter.index('sense_awake_confirmed = false;')
+        if 'lcd_maintenance_awake_active()' in enter:
+            assert enter.index('struct SleepCommitGate') < enter.index('lcd_sleep_touch_watch_begin();') < enter.index('sense_awake_confirmed = false;')
+        else:
+            assert enter.index('sense_awake_confirmed = false;') < enter.index('struct SleepCommitGate')
         for kind in ('voice','image'):
             src=(root/f'LCD_Minimal/lcd_{kind}_spool.h').read_text()
             fn=definition(src,f'static bool lcd_{kind}_uart(')

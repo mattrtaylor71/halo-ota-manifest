@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+from test_lcd_maintenance_sleep import maintenance_awake_source
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ('LCD_Minimal/LCD_Minimal.ino', 'LCD_Minimal/lcd_activity.h',
@@ -94,7 +95,7 @@ static unsigned long last_user_activity_ms=0,last_touch_or_input_ms=0,home_shown
 static int ui_screen_state=0;
 static bool ui_is_sleep_eligible_menu_screen(int){return true;}
 static bool g_lcd_maintenance_active=false,g_lcd_maintenance_aborted=false;
-''' + constants + '\n' + helpers + '\n' + gate + '\n' + touch + r'''
+''' + maintenance_awake_source(main, active_only=True) + constants + '\n' + helpers + '\n' + gate + '\n' + touch + r'''
 static bool controlled_handshake(){
  ++handshakes;
  if(!peer_denies)return true;

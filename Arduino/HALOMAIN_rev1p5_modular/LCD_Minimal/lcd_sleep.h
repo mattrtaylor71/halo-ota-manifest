@@ -182,6 +182,13 @@ static bool sleep_defer_for_provisioning() {
   return true;
 }
 
+static bool s_sleep_maintenance_deferred = false;
+static bool sleep_defer_for_maintenance() {
+  if (!lcd_maintenance_awake_active()) return false;
+  s_sleep_maintenance_deferred = true;
+  return true;
+}
+
 static void enterLightSleep() {
 #if HALO_DEV_NO_SLEEP
   // Bench builds never idle-sleep, so USB-CDC stays up and reflashing is instant.
@@ -198,6 +205,8 @@ static void enterLightSleep() {
   resetActivityTimer();
   return;
 #endif
+  s_sleep_maintenance_deferred = false;
+  if (sleep_defer_for_maintenance()) return;
   if (sleep_blocked_for_ota()) {
     Serial.println("[SLEEP] blocked (ota_pending)");
     resetActivityTimer();
@@ -223,7 +232,7 @@ static void enterLightSleep() {
   uint16_t dummy_x = 0, dummy_y = 0;
   if (!force_sleep && !notify_sense_sleep()) {
     // Active ownership is not a failed handshake or Sense denial.
-    if (s_sleep_media_deferred || s_sleep_provision_deferred) return;
+    if (s_sleep_media_deferred || s_sleep_provision_deferred || s_sleep_maintenance_deferred) return;
     if (sleep_cancelled_by_user_input) {
       Serial.println("[SLEEP] user_input cancelled pre_sleep");
       resetActivityTimer();
@@ -273,7 +282,30 @@ static void enterLightSleep() {
   LcdMaintenanceStorageGuard sleep_arm_guard;
   if (sleep_defer_for_media()) return;
   if (sleep_defer_for_provisioning()) return;
+  if (sleep_defer_for_maintenance()) return;
   if (sleep_blocked_for_ota()) { resetActivityTimer(); return; }
+
+  // Commit before mutating UI/Sense state. A renewal between the storage
+  // precheck and this lock defers sleep without masquerading as user activity.
+  // Once committed, the same lock makes later background renewals decline.
+  struct SleepCommitGate {
+    bool acquired = false;
+    SleepCommitGate() {
+      LcdCoordCriticalGuard guard;
+      if (lcd_maintenance_awake_active()) return;
+      g_lcd_sleep_commit_gate.store(true);
+      g_sleep_transition = true;
+      acquired = true;
+    }
+    ~SleepCommitGate() {
+      if (!acquired) return;
+      LcdCoordCriticalGuard guard;
+      g_lcd_sleep_commit_gate.store(false);
+    }
+  } sleep_commit_guard;
+  if (!sleep_commit_guard.acquired) return;
+  Serial.println("[SLEEP] transition_begin");
+  lcd_sleep_touch_watch_begin();
 
   sleep_handshake_fail_count = 0;
   sleep_deny_count = 0;
@@ -322,24 +354,6 @@ static void enterLightSleep() {
     Serial.println("[SLEEP] skip_ui_reset (lvgl_inactive)");
   }
 
-  // Serialize timer selection through final sleep against arm commits and
-  // BEGIN startup. Every return destroys this guard; deep sleep resets it.
-  // No NVS operation occurs under the short coordinator critical section.
-  if (sleep_blocked_for_ota()) { resetActivityTimer(); return; }
-  struct SleepCommitGate {
-    SleepCommitGate() {
-      LcdCoordCriticalGuard guard;
-      g_lcd_sleep_commit_gate.store(true);
-      g_sleep_transition = true;
-    }
-    ~SleepCommitGate() {
-      LcdCoordCriticalGuard guard;
-      g_lcd_sleep_commit_gate.store(false);
-    }
-  } sleep_commit_guard;
-  Serial.println("[SLEEP] transition_begin");
-  // Everything below here is the window in which a tap used to be dropped.
-  lcd_sleep_touch_watch_begin();
   if (sleep_blocked_for_ota()) {
     lcd_sleep_touch_watch_end();
     abort_sleep_transition("ota_before_teardown", lcd_sleep_touch_fired());
@@ -721,6 +735,8 @@ struct LcdSleepHandshakeScope {
 // Send sleep signal to Sense board before LCD goes to sleep
 static bool notify_sense_sleep() {
   LcdSleepHandshakeScope handshake_scope;
+  s_sleep_maintenance_deferred = false;
+  if (sleep_defer_for_maintenance()) return false;
   s_sleep_media_deferred = false;
   if (sleep_defer_for_media()) return false;
   s_sleep_provision_deferred = false;
@@ -826,6 +842,7 @@ static bool notify_sense_sleep() {
     while (millis() < deadline_ms) {
       if (sleep_defer_for_media()) return false;
       if (sleep_defer_for_provisioning()) return false;
+      if (sleep_defer_for_maintenance()) return false;
       if (sleep_blocked_for_ota()) {
         Serial.println("[SLEEP] abort wait (ota_pending)");
         return false;

@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import tempfile
 
-from test_lcd_maintenance_sleep import definition
+from test_lcd_maintenance_sleep import definition, maintenance_awake_source
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ('idle', 'keepalive', 'future_arm', 'list_home', 'list_screen',
@@ -30,6 +30,7 @@ def harness(root):
     actual = (definition(activity, 'static void lcd_guardian_begin_foreground(')
               + '\n') if guardian else ''
     actual += '\n'.join((
+        maintenance_awake_source(main),
         definition(activity, 'static void resetActivityTimer() {'),
         definition(main, 'static void lcd_allow_visible_ui('),
         definition(anim, 'static void lcd_set_backlight_level('),
@@ -88,6 +89,7 @@ static uint32_t g_lcd_maintenance_wake_in_s=0,g_lcd_maintenance_remaining_s=0;
 static std::atomic<bool> g_lcd_sleep_handshake_active{false};
 static std::atomic<uint32_t> guardian_awake_start_ms{0};
 static std::atomic<bool> guardian_sleep_triggered{false};
+struct LcdCoordCriticalGuard {};
 static bool lv_is_initialized(){return true;}
 static void lcd_lvgl_wait_tx_done(int){}
 static void lcd_panel_set_power(bool on){if(on)++power_on_count;}

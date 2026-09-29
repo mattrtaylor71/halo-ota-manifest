@@ -30,6 +30,21 @@ def definition(text, anchor):
     return text[start:end]
 
 
+def maintenance_awake_source(main, active_only=False):
+    anchor = 'static bool lcd_maintenance_awake_active() {'
+    if anchor not in main:
+        # An old-source control has no background lease; retain its actual
+        # UART activity/OTA writes while allowing the same observations.
+        return 'static bool lcd_maintenance_awake_active(){return false;}\n'
+    actual = next(line for line in main.splitlines()
+                  if line.startswith('static std::atomic<uint32_t> g_lcd_maintenance_awake_until_ms')) + '\n'
+    actual += definition(main, anchor) + '\n'
+    if not active_only:
+        actual += definition(main, 'static bool lcd_maintenance_awake_extend() {') + '\n'
+        actual += definition(main, 'static bool lcd_maintenance_sleep_begin() {') + '\n'
+    return actual
+
+
 def harness(root):
     main = (root / 'LCD_Minimal/LCD_Minimal.ino').read_text()
     sleep = (root / 'LCD_Minimal/lcd_sleep.h').read_text()
@@ -43,16 +58,17 @@ def harness(root):
     scope = definition(sleep, scope_anchor) + ';\n' if scope_anchor in sleep else ''
     media = ('static bool s_sleep_media_deferred=false;\n' + definition(sleep, 'static bool sleep_defer_for_media() {')) if 'static bool sleep_defer_for_media() {' in sleep else ''
     provision = ('#include "' + str(root / 'LCD_Minimal/lcd_provision_flow.h') + '"\nstatic LcdProvisionFlow provision_flow;\nstatic bool s_sleep_provision_deferred=false;\n' + definition(sleep, 'static bool sleep_defer_for_provisioning() {')) if 'static bool sleep_defer_for_provisioning() {' in sleep else ''
+    maintenance = ('static bool s_sleep_maintenance_deferred=false;\n' + definition(sleep, 'static bool sleep_defer_for_maintenance() {')) if 'static bool sleep_defer_for_maintenance() {' in sleep else ''
     guardian = '\n'.join(definition(activity, anchor) for anchor in (
         'static void lcd_guardian_begin_foreground(', 'static uint32_t lcd_guardian_awake_ms(')
         if anchor in activity)
     actual = '\n'.join((
-        guardian,
+        guardian, maintenance_awake_source(main),
         definition(activity, 'static void resetActivityTimer() {'),
         definition(main, 'static bool sleep_blocked_for_ota() {'),
         definition(main, 'static void cancel_pending_sleep_for_user_input(const char* reason) {'),
         definition(animation, 'static void abort_sleep_transition(const char* reason, bool user_input = true) {'),
-        arm, scope, media, provision,
+        arm, scope, media, provision, maintenance,
         definition(sleep, 'static bool notify_sense_sleep() {'),
     ))
     # Execute the actual teardown call arguments, including a coincident real
@@ -203,12 +219,12 @@ int main(int argc,char** argv){
     assert(!g_sleep_transition);
   }else if(scenario=="ordinary_arm"){
     receive_future_arm(3600,3500);assert_future_arm_preserved();
-    assert(last_user_activity_ms==now_ms && home_shown_ms==now_ms);
-    assert(ota_stay_awake_until_ms==now_ms+8000 && sleep_blocked_for_ota());
+    assert(last_user_activity_ms==9000 && home_shown_ms==9000);
+    assert(!ota_stay_awake_until_ms && !sleep_blocked_for_ota() && lcd_maintenance_awake_active());
     now_ms+=100;ota_stay_awake_until_ms=now_ms+20000;receive_future_arm(3600,3500);
     assert(ota_stay_awake_until_ms==now_ms+20000);
     ui_screen_state=SCREEN_SHOPPING_LIST;now_ms+=100;receive_future_arm(3600,3500);
-    assert(home_shown_ms==now_ms && last_user_activity_ms==now_ms);
+    assert(home_shown_ms==9000 && last_user_activity_ms==9000);
     assert(!g_lcd_sleep_handshake_active.load());
   }else{
     if(scenario=="early_provisioning")provisioning_active=true;
@@ -243,9 +259,12 @@ int main(int argc,char** argv){
     }else{
       assert(!result && sleep_messages==0);
     }
-    // Every exit releases the scope: later ordinary arming still refreshes idle.
+    // Every exit releases the scope: later arming holds UART, not user idle.
+    const auto prior_activity=last_user_activity_ms,prior_home=home_shown_ms;
+    const auto prior_ota=ota_stay_awake_until_ms;
     now_ms+=100;receive_future_arm(3600,3500);
-    assert(last_user_activity_ms==now_ms && ota_stay_awake_until_ms==now_ms+8000);
+    assert(last_user_activity_ms==prior_activity && home_shown_ms==prior_home);
+    assert(ota_stay_awake_until_ms==prior_ota && lcd_maintenance_awake_active());
   }
   printf("PASS %s\n",scenario.c_str());
 }
