@@ -23,13 +23,21 @@ inline Band band(uint8_t percent) {
 inline uint8_t estimate_percent(uint16_t mv) {
   // No diode-drop correction: that path is not characterized. These anchors
   // intentionally do not relabel the observed 3944 mV probe start as full.
-  static constexpr uint16_t volts[] = {3300,3500,3600,3700,3800,3900,4000,4100,4200};
+  // A small display-only full plateau keeps a freshly unplugged unit at100%.
+  // It is neither a charge-complete measurement nor a battery policy threshold.
+  constexpr uint16_t full_mv = 4150;
+  if(mv >= full_mv) return 100;
+  static constexpr uint16_t volts[] = {3300,3500,3600,3700,3800,3900,4000,4100,full_mv};
   static constexpr uint8_t percents[] = {0,5,10,25,50,75,90,97,100};
   if(mv <= volts[0]) return 0;
   for(unsigned i=1;i<sizeof(percents);++i) {
-    if(mv <= volts[i]) return uint8_t(percents[i-1] +
-      (uint32_t(mv-volts[i-1])*(percents[i]-percents[i-1]) +
-       (volts[i]-volts[i-1])/2)/(volts[i]-volts[i-1]));
+    if(mv <= volts[i]) {
+      const unsigned value = percents[i-1] +
+        (uint32_t(mv-volts[i-1])*(percents[i]-percents[i-1]) +
+         (volts[i]-volts[i-1])/2)/(volts[i]-volts[i-1]);
+      // Nearest-integer interpolation must not move the exact full cutoff.
+      return uint8_t(value < 100 ? value : 99);
+    }
   }
   return 100;
 }

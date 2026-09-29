@@ -7,6 +7,9 @@ private candidate after 230, not a production publication. Public OTA remains
 224. Private paired 232 is now installed on the identified Mini bench unit;
 the focused build/navigation/power-read/sleep checks below passed September 29.
 Physical visual review and electrical percentage calibration remain separate.
+The follow-up source revision below removes the transient dashes and widens
+the 100% display range at Matt's September 29 request; its new build and
+installation are pending and must not be confused with installed 232.
 
 ## Display behavior
 
@@ -30,7 +33,7 @@ a full cell or remaining battery percentage.
 | Estimated 11–25% | Amber arc and number matching the existing microphone/dots |
 | Estimated 0–10% | Red arc and number |
 | External power | Bright green lightning bolt with a static layered glow; no arc or percentage |
-| Unknown or stale | Neutral track and `--`; no fabricated 0%/100% or charging claim |
+| Unknown or stale | Blank on startup; a previously confirmed indicator may bridge a transient gap for at most 1.5 seconds, then disappears |
 
 The exact overlapping user boundaries are resolved as **25% amber, 10% red**.
 The filled lightning silhouette uses bright local green `#2EA86A`, with a
@@ -76,15 +79,42 @@ The private lookup is deliberately explicit and bounded:
 | 3900 | 75 |
 | 4000 | 90 |
 | 4100 | 97 |
-| 4200 or higher, when otherwise admitted as battery | 100 |
+| 4150 or higher, when otherwise admitted as battery | 100 |
 
 Intermediate values use rounded linear interpolation between adjacent anchors,
-clamped to 0–100. A causal median of up to five distinct valid samples feeds a
+clamped to 0–100. Below 4150 mV the result is capped at 99, so rounding cannot
+move the full-display threshold. The top anchor was lowered from 4200 mV at
+Matt's request: the old curve displayed 99% over 4150–4183 mV, so this small
+plateau includes that entire former 99% range. Lower anchors through 4100 mV
+are unchanged. This is display rounding, not proof of a fully charged cell.
+A causal median of up to five distinct valid samples feeds a
 fixed-point low-pass with approximately ten-second settling scale. Source
 changes clear that filter rather than blending USB voltage into battery history.
 This is a **provisional system-rail estimate, not a calibrated state-of-charge
 curve or remaining-runtime prediction**. The anchors do not establish a battery
 warning/shutdown policy and must not become OTA or power-safety thresholds.
+
+## September 29 display transition revision
+
+Unknown on initial Home entry is blank. A previously confirmed bolt or battery
+reading may bridge a temporary unknown observation for at most 1,500 ms from
+the **first** unknown observation; subsequent unknown observations cannot
+extend that deadline. A fresh battery reading crossfades from a confirmed bolt
+over 240 ms. A reading arriving near the hold deadline shortens the fade so
+the old bolt cannot outlive the original 1,500 ms budget. Reconnecting confirmed
+external power replaces an in-progress fade immediately.
+
+Home unload, dark/headless/sleep/OTA/provisioning states, a new ADC boot or an
+owner-loop observation gap over 350 ms reset transition history. A later visit
+cannot replay an old bolt. Persistent unknown readings become blank, never an
+invented percentage or an unconfirmed lightning bolt. Only primitive draw
+opacity changes; neither user activity nor the underlying validity/power state
+is modified.
+
+Matt reported 99% after unplugging installed 232. That visual observation is
+consistent with the old lookup's top range, but the finite USB capture received
+no bytes, so no exact unplug voltage is claimed. New electrical observations
+remain separate from the exhaustive estimator and native renderer tests.
 
 ## Evidence and remaining calibration gap
 
@@ -134,16 +164,19 @@ clock read, task, queue, network request or persistent write. Its median sort
 uses five `uint16_t` values on the stack; arithmetic is bounded and integer based.
 
 `lcd_home_power.h` borrows the existing synchronized power snapshot. Existing
-LVGL owners call its service with a 250 ms maximum check cadence only while
-Home is visible, initialized, lit and outside sleep, provisioning, headless
-maintenance and OTA modes. The draw callback does no sampling, USB inspection,
+LVGL owners check the observation at most every 250 ms while Home is visible,
+initialized, lit and outside sleep, provisioning, headless maintenance and OTA
+modes. A 240 ms transition uses the existing owner loop to redraw only the
+footer at most every 40 ms, plus its completion frame. It introduces no timer,
+task, animation object, widget, layer or canvas. A fixed 28-byte motion record
+tracks presentation continuity separately from the unchanged 40-byte model. The draw callback does no sampling, USB inspection,
 clock, UART, activity or power work. Home owns its event descriptor; there is
 no new widget or touch target. LVGL may still use its existing rasterization
 scratch allocation for drawing primitives, so "no new canvas" does not imply
 zero renderer memory use.
 
-The indicator redraws its lower-screen region only when mode, band or displayed
-percentage changes. Final paired artifact deltas, compiler frames and actual
+The indicator redraws its lower-screen region when mode, band or displayed
+percentage changes, or for those bounded transition frames. Final paired artifact deltas, compiler frames and actual
 Home resource samples must accompany the private build. The separate completed
 230 voice/list results do not qualify this new renderer or its resource usage.
 
@@ -226,6 +259,21 @@ bounds check. Evidence and source hashes are in
 That external harness is separate evidence, not yet a registered release-gate
 suite. Physical touch timing, hold/release behavior and actual-panel acceptance
 remain pending; command injection cannot prove them.
+
+## Follow-up focused validation before private 233 build
+
+The revised estimator passed **24,210 assertions**, including the exact
+4,149/4,150 mV boundary and exhaustive top-range plateau checks. The actual-LVGL
+renderer passed **459,730 pixel/lifecycle checks** and its missing-callback
+negative control. Evidence is in
+`/Users/MattTaylor/halo-battery-menu-20260928/render12-smooth-bound/RESULT.json`.
+It covers blank cold/expired Unknown, a bounded confirmed-state hold, the
+crossfade and clipped late-arrival deadline, new boots and interrupted/hidden
+Home. All 15 objects, the warmed 83,040-byte host LVGL free pool and repeated
+state/rebuild allocation equality are retained. The motion record adds 28 fixed
+bytes; the model stays 40 bytes. These replace the focused follow-up figures,
+not the historical 232 results below. Canonical build and device acceptance
+remain separate pending steps.
 
 ## Private 232 installation and focused device result
 

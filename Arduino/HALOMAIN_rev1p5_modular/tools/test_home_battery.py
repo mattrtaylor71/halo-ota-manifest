@@ -30,6 +30,11 @@ int main() {
   }
   CHECK(estimate_percent(3300)==0);CHECK(estimate_percent(3600)==10);
   CHECK(estimate_percent(3700)==25);CHECK(estimate_percent(4200)==100);
+  CHECK(estimate_percent(4100)==97);
+  CHECK(estimate_percent(4149)==99);CHECK(estimate_percent(4150)==100);
+  CHECK(estimate_percent(4151)==100);CHECK(estimate_percent(4160)==100);
+  for(unsigned mv=3300;mv<4150;++mv)CHECK(estimate_percent(mv)<100);
+  for(unsigned mv=4150;mv<=4250;++mv)CHECK(estimate_percent(mv)==100);
   Model m;
   CHECK(m.update({},false).mode==Mode::Unknown);
   auto v=sample(3800);
@@ -65,6 +70,8 @@ int main() {
   CHECK(m.update(sample(3600,10),false).percent==10);
   // Boot or >5s gap starts afresh, without taking many UI redraws to catch up.
   CHECK(m.update(sample(4200,1,2),false).percent==100);
+  CHECK(m.update(sample(4150,1,3),false).percent==100);
+  CHECK(m.update(sample(4149,1,4),false).percent==99);
   CHECK(m.update(sample(3700,20,2),false).percent==25);
   m.reset();CHECK(m.update(sample(3900),false).percent==75);
   // A single noisy low sample is median filtered; sustained change converges.

@@ -66,6 +66,7 @@ def harness(root):
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include <algorithm>
 #define ARDUINO_USB_MODE 1
 #define ARDUINO_USB_CDC_ON_BOOT 1
 #define EXAMPLE_LCD_H_RES 360
@@ -114,13 +115,16 @@ static void create(){
 ''' + creation + r'''
  lv_scr_load(ship_menu_screen);lv_obj_update_layout(ship_menu_screen);
 }
-static void reading(unsigned mv,bool usb=false){clock_ms+=1000;usb_attached=usb;
+static void reading(unsigned mv,bool usb=false,unsigned elapsed=1000){clock_ms+=elapsed;usb_attached=usb;
  input={};input.received=true;input.sample.status=halo_power::Status::Ok;
  input.sample.boot_id=1;input.sample.sequence=clock_ms;input.sample.uptime_ms=clock_ms;
  input.sample.system_supply_mv=mv;input.sample.raw_min=1000;input.sample.raw_max=1200;
  input.sample.samples=halo_power::kSamples;
 }
 static void force(unsigned mv,bool usb=false){s_home_power_model=home_battery::Model{};reading(mv,usb);lcd_home_power_service();}
+static void tick(unsigned elapsed,const char* name=nullptr){clock_ms+=elapsed;lcd_home_power_service();frame(name);}
+static void advance(unsigned elapsed){while(elapsed){unsigned step=elapsed<40?elapsed:40;tick(step);elapsed-=step;}}
+static void blank(const std::vector<uint32_t>& baseline,const char* reason){check(std::equal(pixels,pixels+W*H,baseline.begin()),reason);}
 static uint32_t color(uint32_t value){return lv_color_to32(lv_color_hex(value));}
 static uint32_t arc_pixel(int degrees){double angle=degrees*3.141592653589793/180;
  int x=int(std::round(180+165*std::cos(angle))),y=int(std::round(180+165*std::sin(angle)));
@@ -143,7 +147,7 @@ int main(int argc,char**){
  lv_disp_draw_buf_init(&draw,buffer,nullptr,W*12);static lv_disp_drv_t display;lv_disp_drv_init(&display);
  display.hor_res=W;display.ver_res=H;display.draw_buf=&draw;display.flush_cb=flush;lv_disp_drv_register(&display);
  lv_obj_t* base=lv_scr_act();create();
- check(lv_obj_remove_event_cb(ship_menu_screen,lcd_home_power_draw),"remove callback for unchanged baseline");
+ check(lv_obj_remove_event_cb(ship_menu_screen,lcd_home_power_event),"remove callback for unchanged baseline");
  frame("baseline.ppm");std::vector<uint32_t> baseline(pixels,pixels+W*H);
  for(int y=0;y<H;++y)for(int x=0;x<W;++x)if((x-180)*(x-180)+(y-180)*(y-180)>180*180)
   check(pixels[y*W+x]==color(COL_CREAM),"whole shifted menu remains inside circular aperture");
@@ -151,6 +155,7 @@ int main(int argc,char**){
  lv_mem_monitor_t before_registration,after_registration;lv_mem_monitor(&before_registration);
  if(argc==1)lcd_home_power_register(ship_menu_screen);
  lv_mem_monitor(&after_registration);
+ force(3056,true);frame("initial-unknown.ppm");blank(baseline,"cold unknown draws neither bolt nor placeholder");
  force(3920);frame("battery-78.ppm");
  check(s_home_power_display.mode==home_battery::Mode::Battery&&s_home_power_display.percent==78,"actual policy supplies78 percent");
  check(arc_pixel(90)==color(HOME_POWER_TEAL),"battery arc visible");
@@ -173,10 +178,43 @@ int main(int argc,char**){
  check(bolt_ink>40,"green glowing lightning bolt visible");preserve(baseline);
  force(3056,true);frame("unknown-usb-low-rail.ppm");
  check(s_home_power_display.mode==home_battery::Mode::Unknown,"USB low rail does not masquerade as low battery");
- check(arc_pixel(90)==color(COL_TERT),"unknown has neutral arc");preserve(baseline);
- force(4650,true);frame();input.age_ms=5001;clock_ms+=300;lcd_home_power_service();frame("stale.ppm");
- check(s_home_power_display.mode==home_battery::Mode::Unknown,"stale external source removes bolt");
- check(arc_pixel(90)==color(COL_TERT),"stale state is neutral");
+ blank(baseline,"unknown low USB is blank");preserve(baseline);
+ force(4650,true);frame();std::vector<uint32_t> bolt(pixels,pixels+W*H);
+ reading(3056,true,250);lcd_home_power_service();frame("unknown-settling-held.ppm");
+ const uint32_t first_unknown=s_home_power_motion.unknown_since_ms;
+ check(s_home_power_display.mode==home_battery::Mode::ExternalPower,"brief unknown retains confirmed bolt");
+ check(std::equal(pixels,pixels+W*H,bolt.begin()),"held bolt remains visually unchanged");
+ advance(1499);check(s_home_power_motion.unknown_since_ms==first_unknown,"repeated unknown cannot refresh settling deadline");
+ check(s_home_power_display.mode==home_battery::Mode::ExternalPower,"settling hold remains before absolute limit");
+ tick(1,"unknown-expired.ppm");check(s_home_power_display.mode==home_battery::Mode::Unknown,"uncertain claim expires at1500ms");
+ blank(baseline,"expired unknown is blank without dashes");advance(500);blank(baseline,"continued unknown cannot resurrect held bolt");
+ force(4650,true);frame();input.age_ms=5001;tick(250);advance(1500);frame("stale.ppm");
+ check(s_home_power_display.mode==home_battery::Mode::Unknown,"prolonged stale external source removes bolt");blank(baseline,"stale input eventually blank");
+ force(4650,true);frame();reading(3920,false,250);lcd_home_power_service();frame("fade-start.ppm");
+ check(s_home_power_motion.fading&&s_home_power_motion.opacity==0,"fresh battery begins240ms crossfade from bolt");
+ const unsigned fade_reads=view_calls;tick(120,"fade-middle.ppm");
+ check(s_home_power_motion.fading&&s_home_power_motion.opacity>100&&s_home_power_motion.opacity<155,"midpoint uses partial opacity");
+ check(arc_pixel(90)!=color(COL_CREAM)&&arc_pixel(90)!=color(HOME_POWER_TEAL),"intermediate arc is partly faded");preserve(baseline);
+ tick(120,"fade-finished.ppm");check(!s_home_power_motion.fading&&s_home_power_motion.opacity==255,"fade completes within240ms");
+ check(arc_pixel(90)==color(HOME_POWER_TEAL),"finished battery has exact full color");check(view_calls==fade_reads,"fade frames do not add sampler reads");preserve(baseline);
+ force(4650,true);frame();reading(3056,true,250);lcd_home_power_service();frame();advance(1150);
+ reading(3920,false,250);lcd_home_power_service();frame("late-valid-fade.ppm");
+ check(s_home_power_motion.fading&&s_home_power_motion.opacity>100,"late valid sample shortens old bolt fade");
+ tick(100);check(!s_home_power_motion.fading,"late valid sample cannot extend old state past1500ms");
+ check(arc_pixel(90)==color(HOME_POWER_TEAL),"late valid battery becomes fully visible within original limit");
+ force(4650,true);frame();reading(3056,true,250);input.sample.boot_id=2;lcd_home_power_service();frame("changed-boot-unknown.ppm");
+ blank(baseline,"new ADC boot discards prior claim immediately");
+ bool* interrupt_flags[]={&g_idle_screen_dark,&g_background_wake_dark,&g_ota_screen_active};
+ for(auto flag:interrupt_flags){
+  force(4650,true);frame();reading(3920,false,250);lcd_home_power_service();frame();
+  *flag=true;unsigned reads=view_calls,flush=flushes;tick(40);
+  check(view_calls==reads&&flushes==flush,"inactive interruption performs no sampling or redraw");
+  check(s_home_power_display.mode==home_battery::Mode::Unknown&&!s_home_power_motion.fading,"inactive interruption clears transition");
+  *flag=false;input.received=false;tick(40);blank(baseline,"return after interruption cannot replay old bolt");
+ }
+ force(4650,true);frame();lv_scr_load(base);check(s_home_power_display.mode==home_battery::Mode::Unknown,"Home unload clears continuity");
+ input.received=false;lv_scr_load(ship_menu_screen);tick(40);blank(baseline,"Home reentry with no reading is blank");
+ force(4650,true);frame();input.received=false;tick(351);blank(baseline,"skipped owner loop cannot replay stale bolt");
  force(3920);frame();const unsigned calls_before=view_calls,flush_before=flushes;
  lcd_home_power_service();frame();check(view_calls==calls_before&&flushes==flush_before,"same cadence produces no reads or redraws");
  clock_ms+=250;lcd_home_power_service();frame();check(view_calls==calls_before+1&&flushes==flush_before,"same presentation does not invalidate");
@@ -210,9 +248,9 @@ int main(int argc,char**){
   check(first.free_size==last.free_size,"each normal Home rebuild has exactly stable heap");}
  lv_mem_monitor(&last);check(first.free_size==last.free_size,"20 Home rebuilds free callback and recreate without growth");
  check(objects(ship_menu_screen)==object_count,"Home rebuild count stable");check(lv_mem_test()==LV_RES_OK,"LVGL heap remains intact");
- printf("PASS actual Home power renderer: %u checks; %u unchanged objects; callback_bytes=%u; heap_after_warmup=%u; model_bytes=%zu; presentation_bytes=%zu\n",
+ printf("PASS actual Home power renderer: %u checks; %u unchanged objects; callback_bytes=%u; heap_after_warmup=%u; model_bytes=%zu; presentation_bytes=%zu; transition_bytes=%zu\n",
   checks,object_count,unsigned(before_registration.free_size-after_registration.free_size),unsigned(last.free_size),sizeof(s_home_power_model),
-  sizeof(s_home_power_display)+sizeof(s_home_power_checked)+sizeof(s_home_power_last_check_ms));
+  sizeof(s_home_power_display)+sizeof(s_home_power_checked)+sizeof(s_home_power_last_check_ms),sizeof(s_home_power_motion));
  return 0;
 }
 '''
