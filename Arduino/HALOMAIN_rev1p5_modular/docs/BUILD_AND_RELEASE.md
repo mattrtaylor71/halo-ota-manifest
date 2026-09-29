@@ -1,6 +1,6 @@
 # Build and release from the current production source
 
-**Current published firmware: 6.4.211; device testing pending.** Discard and dish now use their requested Got it subtitles; 210 automatic check-in is retained. Paired canonical artifacts, all 114 exact-snapshot host suites and complete public downloads passed. The last verified installed pair remains 209 (Sense app1/LCD app0 SDK VALID). Source `731e4897c845e6bb891f277f0e82e210c380150c`, tag `halo-v6.4.211`; future versions require unused 212+ after inventory. Camera, network, OTA and storage behavior are unchanged; prior network/UI lease limits remain open. Factory 197/frozen 158 stay separate. [Current handoff](RELEASE_211.md).
+**Current published firmware: 6.4.233 (September 29).** Exact compiled source `730bdd4cedbfe27e1708dc9e986900c8349024f2`, tag `halo-v6.4.233`, branch `codex/ram-qualification`. All130 exact-snapshot suites, paired canonical artifacts and complete public downloads passed. Both boards are233/app1/SDK VALID after verified inactive-bank service; finite Home/List/Home, power/UI resource samples,10.004-second panel-off, timer arming and paired sleep/75s quiet passed. No new233 OTA transfer, scheduled execution or full-product qualification is claimed. Preserve the cumulative225–233 changes and retained limits in [the current handoff](RELEASE_233.md). New different bytes require freshly inventoried unused234+. Factory197/frozen158 stay separate.
 
 The retained `RELEASE_BASELINE.json.current_baseline` and `development_baseline` identify historical158 recovery/scheduled qualification. They do not select new development. Its tag, package and previous acceptance stay immutable; see [historical158 recovery](FROZEN_RELEASE_158.md). Retain the immutable158/196/197/198 packages under `/Users/MattTaylor/halo-releases`, with their hashes and original evidence. Never rebuild/relabel existing versions.
 
@@ -10,7 +10,7 @@ Follow [Development and release](DEVELOPMENT_AND_RELEASE.md) for the candidate w
 
 ## Before changing anything
 
-Work on a clean, reviewed descendant of the required 211 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
+Work on a clean, reviewed descendant of the required233 source. Preserve unrelated user work. Run the read-only baseline guard from the firmware root:
 
 ```sh
 python3 -B tools/verify_frozen_baseline.py
@@ -26,13 +26,13 @@ maximum. The report is static evidence; allocation changes also need relevant
 runtime memory and responsiveness measurements. See the
 [initial audit and ranked proposals](RESOURCE_AUDIT_20260922.md).
 
-Allocate an unused version **6.4.212 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
+Allocate an unused version **6.4.234 or later** from the current release record and actual immutable artifact inventory. A version written in an example is not a reservation. The source preparer validates metadata but does not allocate versions or compare against production latest. Never recycle a published version or change a frozen payload in place.
 
 For the commands below, set actual reviewed values. Use Python 3.12, absolute output paths outside Git, and fresh directories. Avoid spaces in the snapshot path because the LCD LVGL configuration path is a compiler macro.
 
 ```sh
 PY=/Users/MattTaylor/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12
-RELEASE_VERSION='<allocated-unused-version-at-least-6.4.212>'
+RELEASE_VERSION='<allocated-unused-version-at-least-6.4.234>'
 BUILD_EPOCH='<explicit-UTC-Unix-second>'
 OUT='/absolute/path/to/new-release-workspace'
 mkdir "$OUT"

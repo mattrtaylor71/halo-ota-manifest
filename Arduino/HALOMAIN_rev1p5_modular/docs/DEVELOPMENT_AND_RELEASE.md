@@ -1,7 +1,7 @@
 # Develop privately, release deliberately
 
 **Production is recorded in `PRODUCTION_BASELINE.json` and verified against both
-live manifests (6.4.224 on September 28).** Its public OTA manifests, tagged source and
+live manifests (6.4.233 on September 29).** Its public OTA manifests, tagged source and
 archived images stay unchanged while we develop the next version. A user tapping
 Software Update on a normal production unit sees the production manifest, not
 files we compile or flash over USB.
@@ -12,9 +12,10 @@ The normal process is:
    on current production or a reviewed private descendant. Compare that base
    with the last bench candidate and explicitly record which private fixes are
    retained or deferred. Starting from production alone must not silently drop
-   already approved private work. For the current RAM branch, preserve225 RAM
-   changes and the restored refresh/haptics fixes in
-   [the226 source handoff](LCD_REFRESH_HAPTICS_226.md).
+   already approved private work. The current233 source on `codex/ram-qualification` includes225–233 RAM,
+   refresh ownership/feedback, haptics-off, display timing, system-power telemetry,
+   voice/list response budget and Home battery presentation. Preserve these
+   changes; see [the233 release handoff](RELEASE_233.md).
 2. Allocate an unused version, prepare an immutable local candidate, and run the
    host tests and canonical builds. The candidate is **not published**.
 3. Flash only the identified bench unit by USB; test the affected functions and
@@ -29,7 +30,7 @@ The normal process is:
 This changes host tooling and workflow, not the firmware's OTA, Wi-Fi, sleep,
 provisioning, quota or partition behavior. No firmware release is needed to start
 following this process. Current production's physical-test limits remain in
-[the224 handoff](RELEASE_224.md); choosing a baseline does not invent tests.
+[the233 handoff](RELEASE_233.md); choosing a baseline does not invent tests.
 
 Include a [resource-impact review](RESOURCE_REVIEW.md) when changing firmware.
 Use the exact-artifact report to compare static RAM and real OTA-slot headroom,

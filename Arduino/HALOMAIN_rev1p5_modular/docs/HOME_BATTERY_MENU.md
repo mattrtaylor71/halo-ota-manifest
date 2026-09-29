@@ -1,4 +1,6 @@
-# Home battery indicator — private implementation
+# Home battery indicator — implementation and historical bench evidence
+
+**Publication update, September 29:** exact233 is now published for both boards and fully read back. See [RELEASE_233.md](RELEASE_233.md) for current identity and qualification limits. The dated private-candidate narrative below records its pre-publication state; it does not override the current release.
 
 September 28, 2026. Matt requested a bottom-edge battery arc and percentage on
 the existing five-card Home menu, with a bright green glowing lightning bolt
