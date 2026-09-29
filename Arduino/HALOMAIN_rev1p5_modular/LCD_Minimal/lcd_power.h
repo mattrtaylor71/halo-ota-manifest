@@ -84,6 +84,35 @@ static halo_power::View lcd_power_view() {
   return view;
 }
 
+// USB-only cached diagnostic. The full cloud JSON is larger than the 256-byte
+// HWCDC TX buffer; keep this versioned line small and make one bounded write.
+// Lack of space drops this observation; never wait, retry, sample or wake.
+static size_t lcd_power_diag_format(const halo_power::View& v, char* out, size_t capacity) {
+  if (!out || !capacity) return 0;
+  const halo_power::Snapshot& s = v.sample;
+  const bool valid = v.received && halo_power::valid(s);
+  const bool age_known = v.received && v.age_known;
+  char mv[8] = "null", age[24] = "null";
+  if (valid) snprintf(mv, sizeof(mv), "%u", unsigned(s.system_supply_mv));
+  if (age_known) snprintf(age, sizeof(age), "%llu", (unsigned long long)v.age_ms);
+  const int n = snprintf(out, capacity,
+      "[POWER1] {\"v\":1,\"b\":%lu,\"q\":%lu,\"s\":%u,\"mv\":%s,\"a\":%s,"
+      "\"f\":%s,\"ok\":%s,\"lo\":%u,\"hi\":%u,\"n\":%u}\n",
+      (unsigned long)s.boot_id, (unsigned long)s.sequence,
+      unsigned(v.received ? s.status : halo_power::Status::NotSampled), mv, age,
+      valid && age_known && v.age_ms <= halo_power::kFreshMs ? "true" : "false",
+      valid ? "true" : "false", unsigned(s.raw_min), unsigned(s.raw_max), unsigned(s.samples));
+  if (n <= 0 || size_t(n) >= capacity) { out[0] = '\0'; return 0; }
+  return size_t(n);
+}
+
+static void lcd_power_diag_write() {
+  char line[192];
+  const size_t n = lcd_power_diag_format(lcd_power_view(), line, sizeof(line));
+  if (n && Serial.availableForWrite() >= int(n))
+    (void)Serial.write(reinterpret_cast<const uint8_t*>(line), n);
+}
+
 static void lcd_power_sleep_cancel() {
   s_lcd_power_sleep_pending = false;
   s_lcd_power_sleep_sequence = 0;

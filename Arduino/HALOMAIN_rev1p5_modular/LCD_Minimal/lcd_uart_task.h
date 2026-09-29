@@ -129,11 +129,13 @@ static void uart_task(void *arg) {
     
     // Coalesce optional supply telemetry behind real user work. This task is
     // the binary-mode owner; never use the deferred ring or wake GPIO for it.
+    // A recent PONG is enough for this unacked snapshot even if startup SYNC
+    // was missed. The service separately requires a <=2s real control reply.
     lcd_power_uart_service(!binary_xfer_active && !g_in_light_sleep &&
         !g_sleep_transition && !ota_locked && !g_lcd_ota_uart_receiving &&
         !yielded_early && !deferred_awake_tx_pending() &&
         (!uart_tx_queue || uxQueueMessagesWaiting(uart_tx_queue) == 0) &&
-        sense_ready_for_control_tx());
+        sense_awake_confirmed);
 
     // Drain: hand a spooled image back to the Sense. Done here rather than in
     // the RX handler so the ~16s stream does not block line parsing, and before
@@ -281,9 +283,7 @@ static void uart_task(void *arg) {
               lcd_id1_request(usb_buf);
             } else if (strcmp(usb_buf, "power") == 0 || strcmp(usb_buf, "GET_POWER") == 0) {
               // Read the existing snapshot only: no ADC work, peer wake or cloud call.
-              char power_json[halo_power::kJsonCapacity];
-              if (halo_power::json(lcd_power_view(), power_json, sizeof(power_json)))
-                Serial.printf("[POWER] %s\n", power_json);
+              lcd_power_diag_write();
             } else if (strcasecmp(usb_buf, "fw") == 0 || strcasecmp(usb_buf, "ver") == 0) {
               // Canonical machine-readable line — reuses the SAME partition/state
               // logic as LCD_OTA_QUERY_RESP (lcd_build_fw_status_json in

@@ -1,9 +1,11 @@
 # Private supply telemetry candidate
 
-September 28, 2026. Implementation checkpoint, pending complete host gates,
-canonical paired builds and finite device acceptance. Intended unused version
-6.4.228 was inventoried; it is not yet built, installed or published. Public
-firmware remains224; the bench baseline is private227. Continue from the227
+September 28, 2026. Candidate6.4.228 is built from clean source
+`08836719356fa92dca5aa9cc6954074ef23ed42c`, build
+`6.4.228-20260929T031433Z-08836719356f`. The canonical Mini full128-suite
+snapshot gate and paired production builds passed before device work. Finite
+device acceptance stopped with the two telemetry defects documented below; no publication is authorized. Public firmware
+remains224; the pre-install bench baseline is private227. Continue from the227
 descendant branch, retaining RAM, shopping refresh, haptics-off and10-second
 visible-inactivity fixes. Do not change the separate discharge probe.
 
@@ -112,3 +114,72 @@ Mini before compilation/device work. The canonical build wrapper runs that exact
 snapshot gate before either compiler; a failure must stop the build. Retain the
 MacBook receipt even if the Mini gate passes. Moving temporary directories is not
 an established fix for the MacBook problem.
+
+## Qualified Mini build and resource comparison
+
+Canonical job `20260928T201627-fc001bf3` completed with exit0. The exact
+128-suite snapshot passed before either compiler, including the unchanged
+LVGL intentional-abort test that stalled on the MacBook. The environment lock,
+camera-driver checks, paired artifact verifier and candidate verifier passed.
+The separate MacBook failure above remains recorded.
+
+| Board | Application bytes | OTA slot remaining | Static DRAM change from227 | Application change |
+| --- | ---: | ---: | ---: | ---: |
+| Sense | 1,880,960 | 85,120 (4.33%) | +64 | +4,624 |
+| LCD | 2,046,528 | 574,912 (21.93%) | +336 | +12,896 |
+
+IRAM and RTC section totals are unchanged on both boards. The LCD's measured
+336-byte DRAM delta includes newly linked SDK state; it is not merely the113-byte
+source mailbox estimate. The static report is authoritative for linked totals.
+
+Individual compiler frames: Sense bounded `write_request`896→1440bytes;
+`parse_input_message`768→896; header helper656/592 in its two translation units.
+LCD UART task1648→1664, new power-send helper432, sampling owner96; loop320→288.
+These frames cannot be summed into a complete task bound or credited as runtime
+headroom. Device samples must assess overlapping calls, HTTPClient temporary
+Strings and ADC/calibration initialization. The historical resource guard remains
+`REVIEW_REQUIRED` for source drift; its calibration/lock was not rewritten.
+
+Sense BIN SHA256 `99c563cc28e660dadf71ac89ca934c1388c56ba9f703e005686d029c0255f11a`.
+LCD BIN SHA256 `0e49f9db147420fddfb682ee07f9bdffdbf9d33f9ff993cf3b62bc3c7a6c475e`.
+Mini candidate: `/Volumes/Trepo-Work/Workspaces/halo-firmware-bench/candidates/6.4.228`.
+Local evidence: `/Users/MattTaylor/halo-power-audit-20260928/build228/SUMMARY.json`;
+root artifact review `ROOT-ARTIFACT-REVIEW.json` in that directory. The mirror
+`receipt-bundle05` retains128-suite logs/proofs and resource/frame reports.
+
+The inactive-bank installer passed22 offline guard checks and was separately
+reviewed against the prior227 installer. Its authorization is private bench only:
+protect227/app0 and all device data while writing228/app1 after fresh exact-board
+identity and empty mounted-media inventories. Installation/SDK validation and
+physical behavior are separate evidence, not implied by this build result.
+
+
+## Hardware result: installed, telemetry acceptance failed
+
+Both boards were installed on app1 and observed SDK VALID, with227/app0 and
+protected device data preserved. Service receipts live at
+`/Users/MattTaylor/halo-power-audit-20260928/bench-private/INSTALL-PAIR.json`.
+The first separate readiness-to-installer handoff expired during natural sleep,
+with no commands or flash writes; the integrated readiness installer then passed.
+
+The first health cycle (Sense boot284, LCD boot1846845330) measured Home panel-off
+at10.0147seconds despite six maintenance keepalives. Both boards slept normally;
+the recorded normal nightly target was September29,02:00Pacific, with media retry
+arm0. The case stopped before its75-second quiet qualification and second wake.
+It remains FAIL_OR_INCOMPLETE, not a passing power test.
+
+LCD ADC initialization succeeded and partial USB prefixes showed3182–3200mV.
+Those truncated records cannot qualify complete sample provenance. The requested
+JSON readout exceeded the bounded256-byte USB output buffer. Separately, the
+optional UART send path required `link_synced`, although this ordinary boot had
+an accepted PONG and awake proof without a SYNC exchange. No power frame reached
+Sense. One exact read-only cloud query confirmed that boot284's ordinary
+pre-sleep report retained `system_power.status=peer_missing`, null voltage and
+false valid/fresh flags. Cloud retention works; complete measurement forwarding
+did not pass. No further228 media test was run after this failure.
+
+Raw evidence: `bench-private/power228-health-20260928-05` under the audit directory;
+cloud correlation: `acceptance228-cloud-health05/CORRELATION.json`. Candidate228
+bytes remain immutable. The narrow correction will use a separately inventoried
+version, preserve the bounded USB timeout and all transfer/sleep/user-work guards,
+and must pass independent tests before another device acceptance attempt.

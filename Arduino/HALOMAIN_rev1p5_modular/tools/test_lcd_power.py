@@ -18,7 +18,10 @@ CASES = ('mean', 'cadence', 'adc_failure', 'channel_failure', 'calibration_failu
          'burst_deadline', 'sleep_sent', 'sleep_no_peer', 'sleep_busy',
          'sleep_short_write', 'cancel_activity', 'cancel_skipped_sleep',
          'coalesce', 'max_wire', 'teardown', 'headless', 'headless_busy',
-         'tx_cadence', 'tx_no_control', 'tx_old_control', 'tx_forced_bypass')
+         'tx_cadence', 'tx_no_control', 'tx_old_control', 'tx_forced_bypass',
+         'production_pong_unsynced', 'production_no_control', 'production_old_control',
+         'production_asleep', 'production_binary', 'production_priority',
+         'production_sleep_ota', 'diag_max', 'diag_missing', 'diag_capacity')
 
 SDK = r'''
 #pragma once
@@ -55,9 +58,12 @@ def harness(root):
     assert enter.index('lcd_power_deinit();') < enter.index('esp_deep_sleep_start();')
     service = uart_task[uart_task.index('lcd_power_uart_service('):uart_task.index('// Drain: hand a spooled image')]
     for guard in ('!binary_xfer_active', '!g_in_light_sleep', '!g_sleep_transition',
-                  '!ota_locked', '!g_lcd_ota_uart_receiving', 'sense_ready_for_control_tx()',
+                  '!ota_locked', '!g_lcd_ota_uart_receiving', 'sense_awake_confirmed',
                   '!yielded_early', '!deferred_awake_tx_pending()', 'uxQueueMessagesWaiting(uart_tx_queue) == 0'):
         assert guard in service
+    binary_start = uart_task.index('const bool binary_xfer_active =')
+    binary = uart_task[binary_start:uart_task.index(';', binary_start)+1]
+    assert 'lcd_power_diag_write();' in uart_task
     rx = (root / 'LCD_Minimal/lcd_uart_rx.h').read_text()
     assert rx.count('lcd_power_note_control_reply();') == 2
     for kind in ('PONG', 'SYNC_ACK'):
@@ -79,7 +85,14 @@ def harness(root):
 static uint64_t now_ms=1000;
 static unsigned long millis(){return (unsigned long)now_ms;}
 static int64_t esp_timer_get_time(){return int64_t(now_ms*1000);}
-static struct {template<class... A>void printf(const char*,A...){}} Serial;
+static std::string usb_wire;
+static int usb_capacity=256;
+static unsigned usb_writes=0;
+static struct {
+ template<class... A>void printf(const char*,A...){}
+ int availableForWrite(){return usb_capacity;}
+ size_t write(const uint8_t*s,size_t n){++usb_writes;usb_wire.append(reinterpret_cast<const char*>(s),n);return n;}
+} Serial;
 static unsigned delay_scale=1,delays=0;
 static void delay(unsigned n){now_ms+=n*delay_scale;++delays;}
 using portMUX_TYPE=int;
@@ -128,6 +141,18 @@ static esp_err_t adc_cali_raw_to_voltage(adc_cali_handle_t h,int raw,int*out){
  *out=1900+(raw-2000)*(raw-2000);return ESP_OK;
 }
 ''' + '#include "' + str(adapter) + '"\n' + r'''
+static bool g_img_rx_binary_mode=false,g_lcd_ota_binary_mode=false,g_spool_tx_pending=false,g_spool_tx_active=false;
+static bool g_in_light_sleep=false,g_sleep_transition=false,ota_locked=false,g_lcd_ota_uart_receiving=false;
+static bool yielded_early=false,deferred=false,sense_awake_confirmed=true,link_synced=false;
+static void* uart_tx_queue=(void*)1;
+static unsigned queued=0;
+static bool deferred_awake_tx_pending(){return deferred;}
+static unsigned uxQueueMessagesWaiting(void*){return queued;}
+// Compile the production task's actual binary predicate and full outer call.
+// The old helper-only harness could not catch the extra link_synced requirement.
+static void production_tx(){
+''' + binary + '\n' + service + r'''
+}
 static void owner(bool allow=true){lcd_power_owner_service(allow);}
 static void prepare(){assert(!lcd_power_prepare_sleep(true));}
 static void tx(bool allow=true){lcd_power_note_control_reply();lcd_power_uart_service(allow);}
@@ -135,7 +160,11 @@ int main(int argc,char**argv){
  assert(argc==2);mode=argv[1];
  assert(!lcd_power_view().received);
  if(mode=="burst_deadline")delay_scale=5;
- if(mode=="sleep_busy"){
+ if(mode=="diag_missing"){
+   lcd_power_diag_write();assert(reads==0&&creates==0&&wire.empty()&&usb_writes==1);
+   assert(usb_wire.find("\"mv\":null")!=std::string::npos&&usb_wire.find("\"a\":null")!=std::string::npos);
+   assert(usb_wire.find("\"s\":0")!=std::string::npos&&usb_wire.find("\"ok\":false")!=std::string::npos);
+ }else if(mode=="sleep_busy"){
    prepare();for(unsigned n=0;n<3;++n){now_ms+=40;owner(false);assert(!lcd_power_prepare_sleep(true));}
    now_ms+=30;owner(false);assert(lcd_power_prepare_sleep(true));assert(reads==0&&creates==0&&wire.empty());
    // Rechecking cannot renew the same absolute preparation deadline.
@@ -198,6 +227,41 @@ int main(int argc,char**argv){
      }else if(mode=="tx_forced_bypass"){
        tx();assert(uart_tx_count==1);const auto first=now_ms;prepare();owner();tx();
        assert(now_ms-first<3000&&uart_tx_count==2&&lcd_power_prepare_sleep(true));
+     }else if(mode.rfind("production_",0)==0){
+       assert(!link_synced&&sense_awake_confirmed);
+       if(mode!="production_no_control")lcd_power_note_control_reply();
+       if(mode=="production_old_control")now_ms+=2001;
+       if(mode=="production_asleep")sense_awake_confirmed=false;
+       if(mode=="production_binary"){
+         for(bool* flag:{&g_img_rx_binary_mode,&g_lcd_ota_binary_mode,&g_spool_tx_pending,&g_spool_tx_active,&g_suppress_uart_json_tx}){
+           *flag=true;production_tx();assert(wire.empty());*flag=false;
+         }
+       }else if(mode=="production_priority"){
+         yielded_early=true;production_tx();yielded_early=false;assert(wire.empty());
+         deferred=true;production_tx();deferred=false;assert(wire.empty());
+         queued=1;production_tx();queued=0;assert(wire.empty());
+       }else if(mode=="production_sleep_ota"){
+         for(bool* flag:{&g_in_light_sleep,&g_sleep_transition,&ota_locked,&g_lcd_ota_uart_receiving}){
+           *flag=true;production_tx();assert(wire.empty());*flag=false;
+         }
+       }else{
+         production_tx();
+         assert((uart_tx_count==1)==(mode=="production_pong_unsynced"));
+         if(mode!="production_pong_unsynced")assert(wire.empty());
+       }
+     }else if(mode=="diag_max"){
+       auto maximum=v;maximum.sample.boot_id=UINT32_MAX;maximum.sample.sequence=UINT32_MAX;
+       maximum.sample.system_supply_mv=6600;maximum.sample.raw_min=4094;maximum.sample.raw_max=4094;maximum.age_ms=UINT64_MAX;
+       char line[192];const size_t n=lcd_power_diag_format(maximum,line,sizeof(line));
+       assert(n&&n<sizeof(line)&&n<256&&line[n-1]=='\n'&&std::string(line).rfind("[POWER1] {",0)==0);
+       assert(std::string(line).find("\"a\":18446744073709551615")!=std::string::npos);
+       char tiny[16];assert(!lcd_power_diag_format(maximum,tiny,sizeof(tiny))&&tiny[0]=='\0');
+       printf("diag_max_bytes=%zu\n",n);
+     }else if(mode=="diag_capacity"){
+       char line[192];const size_t n=lcd_power_diag_format(lcd_power_view(),line,sizeof(line));
+       const auto before=reads;usb_capacity=0;lcd_power_diag_write();assert(usb_wire.empty()&&usb_writes==0);
+       usb_capacity=int(n)-1;lcd_power_diag_write();assert(usb_wire.empty()&&usb_writes==0);
+       usb_capacity=int(n);lcd_power_diag_write();assert(usb_wire==line&&usb_writes==1&&reads==before&&wire.empty());
      }
    }
  }
