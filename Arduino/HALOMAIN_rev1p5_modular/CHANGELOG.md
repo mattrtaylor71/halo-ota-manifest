@@ -1,3 +1,7 @@
+# Private 227 built — background maintenance no longer extends display inactivity
+
+Separate keepalive and future schedule-delivery grace from the visible user idle timer. Preserve finite CPU/UART ownership, real input, actual OTA and all approved 225/226 changes. Late renewal is checked before sleep mutates UI state. Both 125-suite gates and canonical paired artifact checks pass for source `4602b6b105f7`; LCD static DRAM increases eight bytes. Installation and physical timing remain pending because the actuator stroke did not wake either board. Last verified bench pair is226/app1 SDK VALID; public224 is unchanged. [Cause, build and limits](docs/BACKGROUND_MAINTENANCE_DISPLAY_20260928.md).
+
 # Private 226 source — restore shopping refresh feedback; disable haptics
 
 Restore the earlier216/217 LCD refresh fixes omitted when225 branched from published224: explicit refresh joins reveal the existing ring without duplicate requests, and UART refresh-state handling no longer renders LVGL outside its owner task. Disable all touch/scroll haptics and park the driver in standby with read-only verification. Retain225 Sense RAM changes. Build/device qualification is pending at this source checkpoint; public224 is unchanged. [Scope and evidence](docs/LCD_REFRESH_HAPTICS_226.md).

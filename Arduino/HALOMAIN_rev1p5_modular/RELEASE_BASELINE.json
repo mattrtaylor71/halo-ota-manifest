@@ -11756,5 +11756,28 @@
       "No separate209 same-version, power-cut, USB-free or full-product acceptance is claimed."
     ],
     "scope": "One successful user-initiated paired manual OTA after a separate failed network attempt, exact image hashes, SDK VALID, native observed-pair settlement, fresh Home and paired sleep. Nightly persistence/arm verified; scheduled execution not yet observed."
+  },
+  "private_candidate_227": {
+    "version": "6.4.227",
+    "status": "BUILT_VERIFIED_NOT_INSTALLED_OR_PUBLISHED",
+    "artifact_source_commit": "4602b6b105f7dca43ea4a7de2f2a2823029da8f5",
+    "build_id": "6.4.227-20260929T002631Z-4602b6b105f7",
+    "build_epoch": 1790641591,
+    "branch": "codex/ram-qualification",
+    "handoff": "docs/BACKGROUND_MAINTENANCE_DISPLAY_20260928.md",
+    "candidate": "/Volumes/Trepo-Work/Workspaces/halo-firmware-bench/candidates/6.4.227",
+    "readiness": {
+      "path": "/Users/MattTaylor/halo-background-display-20260928/build227/receipt-bundle/evidence/background227-verification-20260928/READINESS.json",
+      "sha256": "c2fbe25a6111d915649c80ea29c2a7daf8301ebf88ada31e376421912b7b9a53"
+    },
+    "working_and_snapshot_suite_counts": [
+      125,
+      125
+    ],
+    "last_verified_bench": "Sense226/app1 and LCD226/app1, SDK VALID",
+    "device_validation": "Pending manual wake after one actuator stroke did not expose either USB port; no flash or repeated tap.",
+    "publication_authorized": false,
+    "published": false,
+    "source_selection": "Continue from this commit or reviewed descendants, preserving225 RAM and226 refresh/haptics fixes. Different bytes require unused228+ after fresh inventory. Published224 baseline fields are separate."
   }
 }
