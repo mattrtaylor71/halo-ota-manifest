@@ -350,6 +350,7 @@ static void ui_task(void *arg) {
       Serial.println("[OTA] overlay torn down (screen inactive)");
     }
 
+    lcd_home_power_service();
     app_event_t evt;
     provision_ui_resume_deferred();
     // A provisioning overlay can also cover Processing without a route change.

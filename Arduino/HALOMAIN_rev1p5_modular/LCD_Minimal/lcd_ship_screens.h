@@ -19,6 +19,8 @@ LV_IMG_DECLARE(mic_icon_img);
 // Home-only amber retains gold coding with readable contrast on white cards.
 static const uint32_t SHIP_HOME_SYMBOL_GOLD = 0xA66A00;
 
+#include "lcd_home_power.h"
+
 static int ship_main_menu_button_index_for_action(ship_menu_action_t action) {
   switch (action) {
   case SHIP_MENU_ACTION_LOG_DISH:
@@ -1015,6 +1017,7 @@ static void show_ship_main_menu_impl() {
     lv_obj_set_style_shadow_width(ship_menu_screen, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(ship_menu_screen, 0, LV_PART_MAIN);
     lv_obj_clear_flag(ship_menu_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lcd_home_power_register(ship_menu_screen);
 
     ship_main_menu_buttons[0] = lv_obj_create(ship_menu_screen);
     lv_obj_set_pos(ship_main_menu_buttons[0], SHIP_MAIN_MENU_TOP_BTN_X, SHIP_MAIN_MENU_TOP_BTN_Y);
@@ -1058,6 +1061,7 @@ static void show_ship_main_menu_impl() {
   ship_logged_hide_at_ms = 0;
   ship_main_menu_reset_visual_state();
   lv_scr_load(ship_menu_screen);
+  lcd_home_power_service();
   Serial.println("[SHIP_MENU] showing MAIN_MENU");
   lv_timer_handler();
   wifi_on_run_deferred_if_ready("main_menu");

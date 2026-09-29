@@ -371,6 +371,7 @@ static void ui_reset_lvgl_objects() {
   loading_screen = NULL;
   g_base_screen = NULL;
   ship_menu_screen = NULL;
+  lcd_home_power_reset();
   ship_menu_label = NULL;
   for (int i = 0; i < 4; ++i) {
     ship_main_menu_buttons[i] = NULL;

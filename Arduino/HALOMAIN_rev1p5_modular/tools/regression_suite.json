@@ -841,6 +841,21 @@
         "{case_out}"
       ],
       "timeout_seconds": 180
+    },
+    {
+      "id": "test_home_battery",
+      "path": "tools/test_home_battery.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_home_power",
+      "path": "tools/test_lcd_home_power.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 300
     }
   ]
 }
