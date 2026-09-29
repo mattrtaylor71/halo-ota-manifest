@@ -4,12 +4,11 @@ September 28, 2026. Matt requested a bottom-edge battery arc and percentage on
 the existing five-card Home menu, with a bright green glowing lightning bolt
 replacing the arc and number when external power is detected. This work is a
 private candidate after 230, not a production publication. Public OTA remains
-224. Private paired 232 is now installed on the identified Mini bench unit;
-the focused build/navigation/power-read/sleep checks below passed September 29.
-Physical visual review and electrical percentage calibration remain separate.
-The follow-up source revision below removes the transient dashes and widens
-the 100% display range at Matt's September 29 request; its new build and
-installation are pending and must not be confused with installed 232.
+224. Private paired 233 is now installed on the identified Mini bench unit;
+the focused build/navigation/power-read/sleep checks passed September 29.
+It removes transient dashes and widens the 100% display range at Matt's request.
+The previous 232 results below are retained as historical evidence. Physical
+unplug/transition review and electrical percentage calibration remain separate.
 
 ## Display behavior
 
@@ -55,7 +54,8 @@ The cloud still honestly reports `battery_percent:null`, `cell_mv:null` and
 The model requires a received, valid 32-sample measurement, known age no greater
 than five seconds, and a rail between 2500 and 5500 mV. That broad plausibility
 window is not a cell-safety range or calibrated battery range. Missing, invalid,
-stale or implausible input produces Unknown and resets presentation history.
+stale or implausible input produces Unknown and resets the model history; the
+LCD-only bounded visual hold described below does not change that raw result.
 Older sequence numbers or regressing sample uptime within one boot are refused.
 A new boot or a gap longer than five seconds resets filtering and source state.
 Duplicate reads do not advance the filter.
@@ -332,6 +332,69 @@ Closed device receipts are `evidence/home232-sense-service-v2-20260929`,
 This case does not certify physical pixels/touch, cell percentage accuracy,
 every user journey, an OTA transfer or the strict 2 am calendar proof (that
 field was unqualified). User power-switch/visual review is a separate capture.
+
+## Private 233 build qualification
+
+Completed September 29 from clean source
+`730bdd4cedbfe27e1708dc9e986900c8349024f2`, exact build
+`6.4.233-20260929T075757Z-730bdd4cedbf`. All 130 exact-snapshot suites,
+locked-toolchain checks and both canonical artifact verifications passed.
+The estimator passed 24,210 assertions and the actual-LVGL renderer passed
+459,730 checks, including its missing-callback negative control.
+
+Compared with installed 232, Sense's section sizes/application bytes are
+unchanged. LCD adds **32 bytes static DRAM** (the motion record itself is 28
+bytes), **608 application bytes**, and no IRAM. The LCD slot retains 572,480
+bytes; Sense retains 85,104 bytes. Actual service frame grows from 96 to 112
+bytes. New event/bolt/reset frames are 128/176/64 bytes; the former draw frame
+was inlined/restructured and its absence is not counted as a stack saving.
+The model frame stays 48 bytes, UI task 800, voice upload 1,232 and upload
+worker 2,064. These are individual compiler frames, not call-chain or device
+high-water marks. The historical resource guard remains REVIEW_REQUIRED.
+
+The hash-verified 453-file build mirror, exact binaries and detailed comparisons
+are under `/Users/MattTaylor/halo-battery-menu-20260928/build233/`.
+`SUMMARY.json` records all artifact/source hashes and paths. This is a private
+candidate only. Public OTA remains 224; no production upload or promotion ran.
+The validated service plan preserves installed 232/app0 and writes 233/app1
+only after fresh exact paired identities and empty mounted queues are observed.
+It does not erase NVS, storage, provisioning or the fallback application.
+Installation and physical animation/unplug acceptance must be recorded
+separately; passing this build does not establish them.
+
+## Private 233 device acceptance
+
+Both intended boards freshly reported exact 233/app1, boot app1 and SDK VALID
+in `home233-navigation-sleep-20260929`. Each installation preserved its entire
+232/app0 fallback, NVS, partition table and filesystems; only inactive app1 and
+the alternate OTA selector were written. No factory erase or public OTA ran.
+Three fixed actuator wakes were sufficient for the two services and final case;
+no relay reset or user intervention was needed.
+
+The finite Home case passed: Home → shopping list (11 items) → Home, followed
+by panel-off at **10,004 ms** idle (**10.09 seconds** observed after Home), native
+paired deep sleep and **75 seconds quiet** with neither USB reopening. Both
+mounted media queues were empty and retry arms cleared. This run also recorded
+a qualified next 02:00 Pacific maintenance arm for September 29, with LCD's
+15-second lead; it is timer-arm evidence, not an executed scheduled OTA.
+One unreadable initial voice-queue observation required the already reviewed
+bounded fresh query; it did not trigger media action or broaden the controller.
+
+The two fresh same-boot 32-sample ADC snapshots were **4,908 and 4,900 mV**,
+consistent with the external-power display condition. They do not measure cell
+charge or prove charging current. UI free/largest bytes were **79,544/78,884**
+at initial Home and **70,800/70,712** after list creation and Home return, above
+the unchanged floors and equal to the prior 232 observations. Retained list
+allocations explain the two snapshots' difference; they are not continuous
+minimums or a leak trend. The captures closed cleanly. Full closed results and
+worker/lease closure are retained under
+`/Users/MattTaylor/halo-battery-menu-20260928/device233/`.
+
+The host native renderer verifies the visual transition and exact threshold;
+this finite device case confirms actual power samples, normal navigation and
+sleep. A physical USB unplug/percentage transition remains Matt's visual check.
+No new camera/voice/provisioning journey or OTA transfer was claimed from this
+UI-focused case. The plain percentage remains an uncalibrated display estimate.
 
 ## Design provenance
 
