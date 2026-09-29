@@ -4,7 +4,9 @@ September 28, 2026. Matt requested a bottom-edge battery arc and percentage on
 the existing five-card Home menu, with a bright green glowing lightning bolt
 replacing the arc and number when external power is detected. This work is a
 private candidate after 230, not a production publication. Public OTA remains
-224. Hardware qualification and final compiled resource measurements are pending.
+224. Private paired 232 is now installed on the identified Mini bench unit;
+the focused build/navigation/power-read/sleep checks below passed September 29.
+Physical visual review and electrical percentage calibration remain separate.
 
 ## Display behavior
 
@@ -224,6 +226,64 @@ bounds check. Evidence and source hashes are in
 That external harness is separate evidence, not yet a registered release-gate
 suite. Physical touch timing, hold/release behavior and actual-panel acceptance
 remain pending; command injection cannot prove them.
+
+## Private 232 installation and focused device result
+
+Completed September 29, 2026, on Sense `1C:DB:D4:5C:D3:F0` and LCD
+`20:6E:F1:A1:2B:74` only. Exact source
+`e396c8e2cf2f7bc044a86b7b768316d8aa8a4fe9`, build
+`6.4.232-20260929T070436Z-e396c8e2cf2f`. Both boards freshly reported app0,
+boot app0 and SDK VALID. The previous 230/app1 banks, NVS, partition tables
+and filesystems were verified unchanged during the inactive-bank service.
+The superseded 231 candidate remains uninstalled. There was no public OTA
+publication, factory erase, setup reset or policy change.
+
+All **130** exact-snapshot regression suites and both canonical artifact checks
+passed. Compared with 230, Sense section sizes and application size are
+unchanged; LCD adds **56 bytes DRAM** and **2,720 bytes application**, with no
+IRAM increase. Remaining application-slot margins are 85,104 bytes for Sense
+and 573,088 bytes for LCD. Actual individual compiler frames are 192 bytes
+for footer drawing, 96 for its service and 48 for the model; the existing UI
+task frame remains 800 bytes. These are not whole-call-chain or runtime stack
+measurements. The older resource guard remains REVIEW_REQUIRED, not a public
+release approval.
+
+One finite device case passed (`PASS_HOME_POWER_NAVIGATION_PANEL_SLEEP`):
+
+- Fresh paired 232 identity and mounted, empty voice/image queues.
+- Home → shopping list (11 items) → Home using native console handlers.
+- Two cached ADC observations, 3,196 and 3,160 mV, each valid/fresh with 32
+  samples. USB was attached; this low system rail is ambiguous, so the expected
+  display is Unknown (`--`), not a fabricated percentage or external-power bolt.
+- LVGL pool free/largest: 79,544/78,884 bytes initially and 70,800/70,712 after
+  list creation and Home return, above the existing 32,768/16,384 review floors.
+  The two snapshots include retained list allocations; they do not establish
+  a leak trend or continuous minimum.
+- Native panel-off at exactly 10,000 ms idle (10.17 seconds observed after the
+  Home command), paired deep sleep, zero media-retry arms, then 75 seconds with
+  neither USB interface reopening. All capture workers exited and the shared
+  hardware lease was free at closure.
+
+The first service attempt stopped **before ROM entry or any write** because an
+empty-queue reply was interleaved with startup logging. A separate v2 host
+controller permits one additional fresh read only after an unreadable-reply
+timeout, retaining exact required fields, new offsets, existing two-query caps
+and immediate rejection of an unsafe inventory. Nine unit tests and 29 queue
+checks passed; the firmware did not change. The failed receipt is preserved.
+One later queue reply had valid required zero counts with an interleaved
+optional diagnostic tail; this is not claimed as a wholly clean log line.
+
+Evidence on the laptop is under
+`/Users/MattTaylor/halo-battery-menu-20260928/build232/` and `device232/`.
+The complete canonical build is on the Mini at
+`/Volumes/Trepo-Work/Workspaces/halo-firmware-bench/candidates/6.4.232`.
+Closed device receipts are `evidence/home232-sense-service-v2-20260929`,
+`evidence/home232-lcd-service-v2-20260929` and
+`evidence/home232-navigation-sleep-20260929` under that bench root.
+
+This case does not certify physical pixels/touch, cell percentage accuracy,
+every user journey, an OTA transfer or the strict 2 am calendar proof (that
+field was unqualified). User power-switch/visual review is a separate capture.
 
 ## Design provenance
 
