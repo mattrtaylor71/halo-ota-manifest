@@ -144,10 +144,51 @@ change and preservation of the unchanged cloud power schema.
 
 Independent source review identified the pre-detach cached-sample problem; it
 was corrected to await the next existing ADC sample. No further material pure-
-model issue was found in the reviewed version. Renderer inspection/screenshots,
-the full host gate, canonical paired build/resource checks and finite bench
-sleep/wake/input checks remain separate acceptance steps. Do not call this
+model issue was found in the reviewed version. The full host gate, canonical
+paired build/resource checks and finite bench sleep/wake/input checks remain
+separate acceptance steps. Do not call this
 production-ready or electrically calibrated based on a host model pass.
+
+The focused actual-LVGL renderer run passed **355,805 pixel/lifecycle checks**
+with the production LVGL configuration, actual Home creation block, existing
+theme/icon helpers, dish bitmap and Nunito12 font. Hardware observations and
+clock inputs are host doubles. Native 360×360 PNGs for 100%, 78%, 25%, 10%, 0%,
+external power, ambiguous low USB rail and stale input were generated in
+`/Users/MattTaylor/halo-battery-menu-20260928/render06/`. The root visually
+reviewed the 78% and external-power images and accepted their compact placement.
+`RESULT.json` in that directory records source hashes and the exact scope.
+
+- All 15 existing Home objects remain; every pixel in the five original
+  card/icon/shadow rectangles is unchanged. All new pixels, including the glow,
+  lie inside the round display aperture and the lower indicator region.
+- Percentage text uses Nunito12 at line y339; actual glyph ink fits below the
+  More-card shadow. The arc has center(180,180), outer radius177, width6 and
+  angles30–150. Neither layout nor touch geometry changes.
+- Three hundred display-state transitions retain exactly stable LVGL free
+  memory. Twenty successive normal Home rebuilds each retain exactly stable
+  free memory, unchanged object count and intact allocator state. No animation
+  or additional rendering layer is created.
+- The 64-bit host measured **24 bytes** for the Home event descriptor,
+  **40 bytes** for the fixed model and **8 bytes** across presentation scalars.
+  Warmed host LVGL free memory was **83,040 bytes**. These are focused host
+  measurements, not ESP32 descriptor size, full-product peak or device headroom.
+- The baseline fixture temporarily removes and reattaches the callback after
+  card allocation to obtain a clean reference image. Its allocation order
+  differs from normal Home construction by eight bytes. The lifecycle check
+  normalizes once to the source's callback-before-cards order, reports that
+  eight-byte difference, then requires exact equality on every rebuild;
+  no heap-growth tolerance is allowed.
+- A missing-callback negative control fails the named `battery arc visible`
+  assertion. Same-value updates cause no extra refresh, and dark, hidden,
+  headless, sleep, provisioning and OTA states do not borrow a sample or render.
+
+Earlier failed render receipts remain in `render01` through `render05`. The
+native comparison caught a real 14-pixel glow overlap with More's translucent
+shadow, corrected by moving only the bolt two pixels lower. Other failures
+were isolated fixture issues: probing inside the valid glow, clearing the
+presentation cache without destroying its screen, and the allocation-order
+comparison described above. The final checks retain exact pixel and heap
+comparisons rather than accepting those failures with wider tolerances.
 
 ## Design provenance
 
