@@ -1,6 +1,6 @@
-# Private 227 built — background maintenance no longer extends display inactivity
+# Private 227 installed — background maintenance no longer extends display inactivity
 
-Separate keepalive and future schedule-delivery grace from the visible user idle timer. Preserve finite CPU/UART ownership, real input, actual OTA and all approved 225/226 changes. Late renewal is checked before sleep mutates UI state. Both 125-suite gates and canonical paired artifact checks pass for source `4602b6b105f7`; LCD static DRAM increases eight bytes. Installation and physical timing remain pending because the actuator stroke did not wake either board. Last verified bench pair is226/app1 SDK VALID; public224 is unchanged. [Cause, build and limits](docs/BACKGROUND_MAINTENANCE_DISPLAY_20260928.md).
+Separate keepalive and future schedule-delivery grace from the visible user idle timer. Preserve finite CPU/UART ownership, real input, actual OTA and all approved 225/226 changes. Late renewal is checked before sleep mutates UI state. Both 125-suite gates and canonical paired artifact checks pass for source `4602b6b105f7`; LCD static DRAM increases eight bytes. Both bench boards are227/app0 SDK VALID with226/app1 and data preserved. Device logs measure panel-off at10.011s despite five keepalives; normal physical wake, empty stores, paired sleep and75s quiet passed. The composite extra dark-held tap test remains incomplete because Sense slept during actuator startup and the guard prevented movement; no touch-during-hold pass is claimed. Public224 is unchanged. [Cause, build and limits](docs/BACKGROUND_MAINTENANCE_DISPLAY_20260928.md).
 
 # Private 226 source — restore shopping refresh feedback; disable haptics
 

@@ -11759,7 +11759,7 @@
   },
   "private_candidate_227": {
     "version": "6.4.227",
-    "status": "BUILT_VERIFIED_NOT_INSTALLED_OR_PUBLISHED",
+    "status": "INSTALLED_PRIVATE_DISPLAY_TIMING_QUALIFIED_TOUCH_OVERLAP_UNTESTED",
     "artifact_source_commit": "4602b6b105f7dca43ea4a7de2f2a2823029da8f5",
     "build_id": "6.4.227-20260929T002631Z-4602b6b105f7",
     "build_epoch": 1790641591,
@@ -11774,10 +11774,32 @@
       125,
       125
     ],
-    "last_verified_bench": "Sense226/app1 and LCD226/app1, SDK VALID",
-    "device_validation": "Pending manual wake after one actuator stroke did not expose either USB port; no flash or repeated tap.",
+    "last_verified_bench": "Sense227/app0 and LCD227/app0, SDK VALID; preserved226/app1 and protected device data",
+    "device_validation": "Health33 passed exact paired identity, empty mounted queues, normal physical wake, native paired sleep and75s quiet. Timing34 measured panel-off10.010845s with5 natural keepalives; composite incomplete because guard refused dark tap after Sense slept during Uno startup, before any second PUSH. No new OTA or full-product pass.",
     "publication_authorized": false,
     "published": false,
-    "source_selection": "Continue from this commit or reviewed descendants, preserving225 RAM and226 refresh/haptics fixes. Different bytes require unused228+ after fresh inventory. Published224 baseline fields are separate."
+    "source_selection": "Continue from this commit or reviewed descendants, preserving225 RAM and226 refresh/haptics fixes. Different bytes require unused228+ after fresh inventory. Published224 baseline fields are separate.",
+    "hardware_evidence": {
+      "root": "/Users/MattTaylor/halo-ram-campaign-20260928/bench-private",
+      "sense_install": {
+        "case": "followup227-sense-service-20260928-36",
+        "sha256": "66d0b471b9b4a257ae61bdcee84c40c9dc05e26a2080c84289572e19b1e40f4d"
+      },
+      "lcd_install": {
+        "case": "followup227-lcd-service-20260928-32",
+        "sha256": "c5db16009d1007e732b568db9e61209c623b6870a90435d7cf24b2333e6dd810"
+      },
+      "paired_health": {
+        "case": "followup227-health-20260928-33",
+        "sha256": "a9da9f09f3b0fa6ff3775ff61fdd30737928b7faffd069e87f4000dc7eca8c15"
+      },
+      "idle_timing": {
+        "case": "followup227-idle-timing-20260928-34",
+        "sha256": "800dee8d0e173d0425e1e02e0b8691e970fd20ec5f7550e0e50d18f409f746f4",
+        "composite_status": "FAIL_OR_INCOMPLETE",
+        "first_dim_seconds": 10.010845422744751,
+        "dark_touch_executed": false
+      }
+    }
   }
 }

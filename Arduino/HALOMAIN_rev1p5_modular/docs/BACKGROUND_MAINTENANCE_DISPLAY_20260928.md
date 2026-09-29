@@ -61,8 +61,12 @@ not continuous minima or a full resource qualification.
 
 ## Correction and validation status
 
-The implementation, host validation and canonical paired build are complete;
-installation and device timing validation remain pending. The correction gives
+The implementation, host validation, canonical paired build and paired bench
+installation are complete. Device logs measure the panel darkening at 10.011
+seconds despite five natural keepalives. The extra physical touch during the
+background hold remains untested: its guard refused movement after Sense had
+already slept. This is a qualified timing result, not a complete pass of that
+two-part test. The correction gives
 `MAINT_KEEPALIVE` and the future `MAINT_WINDOW` arm grace their own renewable
 eight-second CPU/UART lease. They no longer renew the user's display timer or
 qualify as a real OTA keep-lit hold. The existing foreground idle path may darken
@@ -144,19 +148,78 @@ including both binary images and the exact snapshot gate. Build, static-memory,
 frame comparison, environment and verification receipts are under
 `/Users/MattTaylor/halo-background-display-20260928/build227/receipt-bundle/`.
 
-## Hardware still pending
+## September 28 bench results
 
-A bounded 226 readiness observation (case 29) completed one actuator stroke,
-but neither exact board appeared over USB within 40 seconds. The recorder
-opened neither board and sent no board command; the capture and actuator closed
-cleanly and released the hardware lease. No flash or retry was attempted.
-Physical contact and saved-recording cleanup remain unverified; Matt was asked
-for one manual wake. A later single passive inventory still found neither Halo
-USB port. Neither board has been flashed to 227. The last verified installed
-pair is 226/app1 SDK VALID. The next step is fresh paired identity and mounted
-queue admission, then state-preserving inactive-bank installation and a finite
-natural keepalive/dim/user-tap test. Keep the failed case 29; do not repeatedly
-stroke or erase pending media to bypass it. The offline build is complete.
+Both boards now run the exact private 227 build from app0, SDK VALID. Sense
+`1C:DB:D4:5C:D3:F0` and LCD `20:6E:F1:A1:2B:74` were identified freshly before
+each installation. Each inactive-bank installation verified the complete image,
+preserved 226/app1 and its selector, and verified unchanged NVS, partition table
+and filesystem ranges. No factory erase, queue deletion, provisioning, schedule,
+allowance or public manifest change occurred.
+
+Closed health case 33 independently verified the exact paired build with a fresh
+nonce and CRC, settled Home, both mounted image/voice inventories at zero, and
+normal paired sleep. LCD LVGL free memory was 79,560 B with a largest free block
+of 78,900 B. These are a point-in-time UI allocator reading, not a new full RAM
+qualification. The normal September 29 02:00 Pacific maintenance start was armed;
+this does not prove scheduled execution. Both ports remained absent for 75.267
+seconds after the last close. The current empty stores do not retroactively
+prove the off-window acknowledgement/deletion of manual voice 185.
+
+The separate passive timing case 34 sent no board commands. Ten native Home-age
+samples maintained a stable idle origin (0.215 ms spread). Five natural
+keepalives arrived before the panel/backlight darkened at **10.010845 seconds**.
+Fresh heartbeat and sleep-defer rows then confirmed the LCD remained awake for
+background maintenance with its backlight and panel off. This directly addresses
+the old 32.072-second symptom. It measures display state from firmware telemetry,
+not from a camera or light sensor.
+
+The planned additional dark-held physical tap was **not executed**. Sense
+entered normal sleep at epoch 1790644482.128179 and its USB closed at
+1790644482.312314 while the Uno was starting. The guard then refused with
+`Board closed during dark admission`, before any second PUSH. STOP was
+acknowledged, motor PWM returned zero, stylus was off, the worker was reaped and
+descriptors closed. LCD subsequently entered normal sleep at 1790644490.292450.
+Thus the composite case remains `FAIL_OR_INCOMPLETE`; its first timing assertion
+is qualified, while touch-during-hold and the second idle interval remain gaps.
+Normal physical wake from sleep did pass in the health and timing cases. No
+repeat or stronger stroke was used to bypass the refusal.
+
+### Retained setup failures and corrections
+
+- Case 29, before Matt repositioned the device, completed one stroke but found
+  neither board within 40 seconds. It opened neither board or sent a command.
+  After Matt confirmed placement, case 30 independently admitted paired 226,
+  mounted empty inventories and normal sleep. Case 29 remains a failure.
+- Separate wake 35 followed by service 31 left a 20.12-second host gap before
+  capture. The recorder caught only the LCD's final four seconds; Sense was not
+  observed, and cached readiness indicates capture likely missed its awake
+  interval. No command, ROM access or flash occurred. Corrected Sense
+  case 36 and LCD case 32 used the existing sealed capture-before-tap option,
+  retaining every admission and write guard; no controller or firmware changes
+  were needed.
+- The initial timing launch requested a 65-second cleanup grace beyond the job
+  runner's 60-second maximum. It was rejected before a worker or hardware action.
+  Only that outer argument was corrected to 60; the sealed finite controller,
+  330-second job bound and closed health receipt stayed unchanged.
+
+Raw cases remain outside Git under
+`/Users/MattTaylor/halo-ram-campaign-20260928/bench-private/`.
+
+| Closed case | Result | RESULT.json SHA256 |
+| --- | --- | --- |
+| `followup227-sense-service-20260928-36` | Inactive-bank installation verified; later SDK health proved in 33 | `66d0b471b9b4a257ae61bdcee84c40c9dc05e26a2080c84289572e19b1e40f4d` |
+| `followup227-lcd-service-20260928-32` | Inactive-bank installation verified; later SDK health proved in 33 | `c5db16009d1007e732b568db9e61209c623b6870a90435d7cf24b2333e6dd810` |
+| `followup227-health-20260928-33` | Paired 227/app0 VALID, empty stores, sleep and 75-second quiet | `a9da9f09f3b0fa6ff3775ff61fdd30737928b7faffd069e87f4000dc7eca8c15` |
+| `followup227-idle-timing-20260928-34` | First dim qualified; composite incomplete because extra tap was refused | `800dee8d0e173d0425e1e02e0b8691e970fd20ec5f7550e0e50d18f409f746f4` |
+
+This is a private bench correction, not a new full-product, upload, OTA-transfer
+or scheduled-execution qualification. Public paired 224 remains unchanged.
+Root receipt readback is saved at
+`/Users/MattTaylor/halo-background-display-20260928/ROOT-HARDWARE-READBACK.json`.
+Independent review is saved at
+`/Users/MattTaylor/halo-ram-campaign-20260928/service227-prep/INDEPENDENT-SOURCE-RESULTS-REVIEW.json`,
+SHA256 `861f18b4eca845bbdb10cfcfed6375df8a19b933bc2d3a60df38b309504aed21`.
 
 ## Evidence
 
