@@ -39,6 +39,7 @@ def harness(root):
         ('static ListRequestResult delete_item_from_api(' if 'static ListRequestResult delete_item_from_api(' in text else 'static void delete_item_from_api('))]
     return r'''
 #include <ArduinoJson.h>
+#include "halo_ota_demo/firmware/shared/SystemPowerTransport.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -95,8 +96,13 @@ struct WiFiClientSecure{void setInsecure(){}void stop(){++client_stops;}};
 struct HTTPClient{
   bool begin(WiFiClientSecure&,const String&){return true;}
   void setTimeout(unsigned){}void setConnectTimeout(unsigned){}
-  void addHeader(const char*,const char*){}
-  int POST(const String& body){++post_calls;posted=body;return response_code;}
+  String power_header;
+  void addHeader(const char* name,const char* value){if(!strcmp(name,"X-Halo-System-Power"))power_header=value;}
+  int POST(const String& body){
+    JsonDocument power;check(!deserializeJson(power,power_header),"power header is valid JSON on actual list POST");
+    check(power["measurement"]=="lcd_system_supply" && power["system_supply_mv"].isNull(),"missing rail remains unknown on actual list POST");
+    ++post_calls;posted=body;return response_code;
+  }
   String getString(){return response;}
   void end(){++http_ends;}
 };
@@ -208,7 +214,7 @@ def main():
         cpp.write_text(harness(args.source_root))
         subprocess.run([compiler, '-std=c++11', '-Wall', '-Wextra',
                         '-Wno-unused-variable', '-Wno-deprecated-declarations',
-                        '-I', str(args.arduino_json),
+                        '-I', str(args.arduino_json), '-I', str(args.source_root),
                         str(cpp), '-o', str(executable)], check=True, timeout=30)
         result = subprocess.run([str(executable)], timeout=5)
         raise SystemExit(result.returncode)

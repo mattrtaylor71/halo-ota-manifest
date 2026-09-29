@@ -847,6 +847,7 @@ static std::atomic<uint32_t> g_media_custody_waiters{0};
 static TaskHandle_t g_sense_main_task_handle = NULL;
 static bool sense_uart_ordinary_tx_allowed();  // Defined with the transport guard below.
 #include "sense_diag.h"
+#include "sense_power.h"
 #include "sense_errlog.h"
 // True while the SD-spool drain is streaming an image back from the LCD over
 // COBS. Declared here rather than in sense_spool_drain.h because
@@ -2472,6 +2473,8 @@ static bool parse_input_message(const char* json_str) {
   if (!validate_protocol_message(doc)) {
     return false;  // Validation failed, message dropped
   }
+  // Power metadata cannot extend user/link activity or disturb sleep/OTA.
+  if (sense_power_accept_uart(doc)) return true;
   
 #if defined(HALO_DURABLE_DIAGNOSTICS) && HALO_DURABLE_DIAGNOSTICS
   if(sense_diag_accept_uart(doc))return true;

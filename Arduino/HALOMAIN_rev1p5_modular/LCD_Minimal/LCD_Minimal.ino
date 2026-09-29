@@ -3961,6 +3961,7 @@ static unsigned long wake_retry_interval_for_attempt(uint8_t attempt) {
 #include "lcd_diagnostic_integration.h"
 #endif
 
+#include "lcd_power.h"
 #include "lcd_sleep.h"
 
 // Forward declaration — defined after lcd_activity.h where all dependencies are available
@@ -4487,6 +4488,10 @@ static void lcd_main_lvgl_service() {
 }
 
 void loop() {
+  // Single ADC owner, outside all LVGL/storage/UART locks. Binary transfers
+  // retain their existing priority; a skipped attempt never holds sleep.
+  lcd_power_owner_service(!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode &&
+      !g_img_rx_binary_mode && !g_spool_tx_pending && !g_spool_tx_active);
   if (g_lcd_validation_pending.load()) {
     lcd_ota_self_test();
     if (!g_lcd_validation_pending.load()) lcd_post_validation_continuation();
@@ -5888,6 +5893,7 @@ void loop() {
       Serial.println("[SLEEP_INTENT] enter_sleep");
       sense_sleep_intent_pending = false;
       enterLightSleep();
+      if (s_lcd_power_sleep_pending) sense_sleep_intent_pending = true;
       goto loop_continue;
     }
     if ((now_ms - last_sleep_coord_status_log_ms) >= 10000) {

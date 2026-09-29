@@ -642,6 +642,8 @@ static void init_ui_stack(int saved_count) {
 
 static void enter_ship_ota_sleep() {
   if (!lcd_maintenance_sleep_begin()) return;
+  lcd_power_headless_sample(!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode &&
+      !g_img_rx_binary_mode && !g_spool_tx_pending && !g_spool_tx_active);
   if (g_lcd_initialized) {
     lcd_panel_set_power(false);
   }
@@ -698,11 +700,14 @@ static void enter_ship_ota_sleep() {
   Serial.printf("[SLEEP] wake_gpio=%d\n", WAKE_GPIO);
   Serial.printf("[SLEEP] wake_level=%d\n", HALO_WAKE_LEVEL);
   Serial.println("=================================");
+  lcd_power_deinit();
   esp_deep_sleep_start();
 }
 
 static void enter_maintenance_sleep() {
   if (!lcd_maintenance_sleep_begin()) return;
+  lcd_power_headless_sample(!g_lcd_ota_uart_receiving && !g_lcd_ota_binary_mode &&
+      !g_img_rx_binary_mode && !g_spool_tx_pending && !g_spool_tx_active);
   if (g_lcd_initialized) {
     lcd_panel_set_power(false);
   }
@@ -767,6 +772,7 @@ static void enter_maintenance_sleep() {
   Serial.printf("[SLEEP] wake_gpio=%d\n", WAKE_GPIO);
   Serial.printf("[SLEEP] wake_level=%d\n", HALO_WAKE_LEVEL);
   Serial.println("=================================");
+  lcd_power_deinit();
   esp_deep_sleep_start();
 }
 

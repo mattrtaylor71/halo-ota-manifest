@@ -15,6 +15,7 @@
 #include <lwip/sockets.h>
 #include <sdkconfig.h>
 #include <esp_idf_version.h>
+#include "SystemPowerTransport.h"
 #if ESP_IDF_VERSION_MAJOR!=5 || ESP_IDF_VERSION_MINOR!=5 || ESP_IDF_VERSION_PATCH!=4
 #error "Bounded report transport requires the reviewed IDF5.5.4 connection/cleanup paths"
 #endif
@@ -161,9 +162,19 @@ static __attribute__((noinline)) Result write_request(esp_tls_t*tls,const Reques
   if(hn<0||size_t(hn)>=sizeof(header))return (Result::Invalid);size_t hlen=size_t(hn);
   const char*keys[]={"X-Device-Id","X-Owner-Id","X-Request-Id","X-Halo-B1-Key-Id","X-Halo-B1-Signature"};const char*values[]={q.device,q.owner,q.request,q.b1_key_id,q.b1_signature};
   for(unsigned i=0;i<5;++i)if(values[i]&&values[i][0]){int n=snprintf(header+hlen,sizeof(header)-hlen,"%s: %s\r\n",keys[i],values[i]);if(n<0||size_t(n)>=sizeof(header)-hlen)return (Result::Invalid);hlen+=size_t(n);}
-  if(hlen+2>=sizeof(header))return (Result::Invalid);header[hlen++]='\r';header[hlen++]='\n';
-  const uint8_t*parts[]={reinterpret_cast<const uint8_t*>(header),q.payload};const size_t sizes[]={hlen,q.length};
-  for(unsigned part=0;part<2;++part){size_t off=0;
+  // Power describes this transmission, not the frozen diagnostic body. Write
+  // it separately so the existing768-byte header and authenticated payload are
+  // unchanged. Every fragment shares the original request/cleanup deadline.
+  char power[halo_power_transport::JSON_BYTES];
+  const size_t power_length=halo_power_transport::snapshot(power,sizeof(power));
+  if(!power_length)return Result::Invalid;
+  static constexpr char end_headers[]="\r\n\r\n";
+  const uint8_t*parts[]={reinterpret_cast<const uint8_t*>(header),
+      reinterpret_cast<const uint8_t*>(halo_power_transport::HEADER_PREFIX),
+      reinterpret_cast<const uint8_t*>(power),
+      reinterpret_cast<const uint8_t*>(end_headers),q.payload};
+  const size_t sizes[]={hlen,sizeof(halo_power_transport::HEADER_PREFIX)-1,power_length,sizeof(end_headers)-1,q.length};
+  for(unsigned part=0;part<5;++part){size_t off=0;
     while(off<sizes[part]){
       if(!live(lease,request_end))return (Result::Deadline);size_t n=sizes[part]-off;if(n>CHUNK)n=CHUNK;
       int got=int(esp_tls_conn_write(tls,parts[part]+off,n));

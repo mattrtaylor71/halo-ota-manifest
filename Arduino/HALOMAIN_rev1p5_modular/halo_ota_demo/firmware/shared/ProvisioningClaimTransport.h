@@ -1,5 +1,6 @@
 #pragma once
 #include "ProvisioningClaimJob.h"
+#include "SystemPowerTransport.h"
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #if defined(ARDUINO_ARCH_ESP32) || defined(HALO_SCOPED_TLS_MEMORY_TEST)
@@ -118,6 +119,7 @@ inline Result transport(Job& job, const Request& request, const char* url,
     http.setTimeout(3000);
     http.setReuse(false);
     http.addHeader("Content-Type", "application/json");
+    halo_power_transport::add_header(http);
     result.http_code = http.POST(String(request.body));
     if (result.http_code > 0 && !job.cancelled(request, millis())) {
       if (http.getSize() > int(kResponseBytes)) result.overflow = true;

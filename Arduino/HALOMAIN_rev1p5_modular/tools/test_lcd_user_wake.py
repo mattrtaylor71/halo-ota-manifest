@@ -138,6 +138,9 @@ static void xQueueSend(void*,app_event_t*,int){}
 static void lcd_timer_receiver_wait_release(const char*){}
 static void lcd_media_user_wake(){}
 static void lcd_media_retry_wait_release(const char*){}
+// Optional telemetry proof has no wake behavior; its transport gate is tested
+// independently against the actual adapter by test_lcd_power.
+static void lcd_power_note_control_reply(){}
 static void lcd_allow_visible_ui(const char*){}
 static void sleep_fallback_reset(const char*){}
 static void lcd_clear_maintenance_state(const char*,bool){}

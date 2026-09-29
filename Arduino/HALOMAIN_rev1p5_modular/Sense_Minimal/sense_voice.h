@@ -33,6 +33,7 @@
 #include <mbedtls/sha256.h>
 #include "sense_media_network.h"
 #include "../halo_ota_demo/firmware/shared/ScopedTlsMemory.h"
+#include "../halo_ota_demo/firmware/shared/SystemPowerTransport.h"
 
 // ── Voice WiFi helpers ─────────────────────────────────────────────
 
@@ -468,6 +469,7 @@ static bool voice_upload_and_parse(const UploadJob& job) {
     http.addHeader("x-audio-format", "pcm_s16le_mono");
     http.addHeader("x-session-id", session_id ? session_id : "");
     http.addHeader("x-request-id", job.voice.request_id);
+    halo_power_transport::add_header(http);
 
     Serial.printf("[VOICE] HTTP POST attempt=%u/%u\n", (unsigned)attempt, (unsigned)max_attempts);
     int httpResponseCode = http.POST((uint8_t*)audio_buf, audio_size);

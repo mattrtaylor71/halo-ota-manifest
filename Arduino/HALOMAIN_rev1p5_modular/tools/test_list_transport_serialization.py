@@ -96,8 +96,13 @@ struct HTTPClient{
  ~HTTPClient(){--http_live;lifetime.emplace_back("http_destroy");}
  bool begin(WiFiClientSecure&,const String&){io();return http_begin_ok;}
  void setTimeout(unsigned){}void setConnectTimeout(unsigned){}
- void addHeader(const char*,const char*){}
- int POST(const String& body){io();++post_calls;posted=body;if(inside_post)inside_post();return response_code;}
+ String power_header;
+ void addHeader(const char* name,const char* value){if(!strcmp(name,"X-Halo-System-Power"))power_header=value;}
+ int POST(const String& body){
+  JsonDocument power;check(!deserializeJson(power,power_header),"actual view/remove power header parses");
+  check(power["measurement"]=="lcd_system_supply" && power["system_supply_mv"].isNull(),"actual view/remove unknown rail is null");
+  io();++post_calls;posted=body;if(inside_post)inside_post();return response_code;
+ }
  String getString(){io();return response;}
  String errorToString(int){return "connection failed";}
  void end(){io();++http_ends;}
@@ -256,7 +261,7 @@ def run(root, out, arduino_json, sanitize):
     cpp.write_text(harness(root))
     cmd = [compiler, '-std=c++17', '-Wall', '-Wextra', '-Wno-unused-function',
            '-Wno-unused-variable', '-Wno-deprecated-declarations',
-           '-I', str(arduino_json), '-I', str(root / 'Sense_Minimal'),
+           '-I', str(arduino_json), '-I', str(root), '-I', str(root / 'Sense_Minimal'),
            str(cpp), '-o', str(binary)]
     if sanitize:
         cmd += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
@@ -273,7 +278,9 @@ def run(root, out, arduino_json, sanitize):
               'source_files': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
                                for p in [root / 'Sense_Minimal/sense_list.h',
                                          root / 'Sense_Minimal/sense_list_transport.h',
-                                         root / 'Sense_Minimal/sense_backup_diagnostic.h']},
+                                         root / 'Sense_Minimal/sense_backup_diagnostic.h',
+                                         root / 'halo_ota_demo/firmware/shared/SystemPower.h',
+                                         root / 'halo_ota_demo/firmware/shared/SystemPowerTransport.h']},
               'limits': 'SDK/HTTP/semaphore doubles; voice full-scope lease modeled; no hardware latency or heap guarantee.'}
     (out / 'RESULT.json').write_text(json.dumps(result, indent=2) + '\n')
     return tested.returncode

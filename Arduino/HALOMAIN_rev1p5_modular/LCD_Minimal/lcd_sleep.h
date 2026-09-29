@@ -216,6 +216,8 @@ static void enterLightSleep() {
   if (sleep_defer_for_media()) return;
   s_sleep_provision_deferred = false;
   if (sleep_defer_for_provisioning()) return;
+  if (!lcd_power_prepare_sleep(sense_ready_for_control_tx())) return;
+  LcdPowerSleepScope power_sleep_scope;
   sleep_cancelled_by_user_input = false;
 
   bool force_sleep = false;
@@ -648,6 +650,7 @@ static void enterLightSleep() {
   // Only a committed sleep with a successful SDK timer arm may label the next
   // actual TIMER boot as media. Aborted teardown never creates that identity.
   lcd_media_retry_commit_sleep(sleep_timer_sec, media_timer_selected, sleep_timer_ok);
+  lcd_power_deinit();
   esp_deep_sleep_start();
   
   // Deep sleep never returns. Wake policy and UI restoration live in setup().

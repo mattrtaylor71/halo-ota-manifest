@@ -820,6 +820,27 @@
       "path": "tools/test_haptics_disabled.py",
       "args": [],
       "timeout_seconds": 180
+    },
+    {
+      "id": "test_system_power",
+      "path": "tools/test_system_power.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_lcd_power",
+      "path": "tools/test_lcd_power.py",
+      "args": [],
+      "timeout_seconds": 180
+    },
+    {
+      "id": "test_system_power_transport",
+      "path": "tools/test_system_power_transport.py",
+      "args": [
+        "--out",
+        "{case_out}"
+      ],
+      "timeout_seconds": 180
     }
   ]
 }

@@ -23,6 +23,7 @@
 
 #include "sense_action_summary.h"
 #include "sense_list_transport.h"
+#include "../halo_ota_demo/firmware/shared/SystemPowerTransport.h"
 
 // Forward declarations for .ino functions called by list API code
 static void uart_send_ui_list();
@@ -339,6 +340,7 @@ static ListRequestResult delete_item_from_api(const char* requested_item_id) {
   Serial.print("Request body: ");
   Serial.println(request_body);
 
+  halo_power_transport::add_header(http);
   int httpResponseCode = http.POST(request_body);
   Serial.print("HTTP Response code: ");
   Serial.println(httpResponseCode);
@@ -556,6 +558,7 @@ static ListRequestResult fetch_shopping_list_from_api() {
     req_http.setTimeout(30000);
     req_http.setConnectTimeout(10000);
     req_http.addHeader("Content-Type", "application/json");
+    halo_power_transport::add_header(req_http);
     int httpResponseCode = req_http.POST(request_body);
     err_str = req_http.errorToString(httpResponseCode);
     if (httpResponseCode <= 0) {

@@ -209,6 +209,22 @@ static void uart_send_json(const char* json_str) {
 }
 
 // ── UART send functions ──────────────────────────────────────────────
+// Only the UART task calls this optional telemetry writer. Unlike user-intent
+// helpers, it never wakes Sense, enqueues, retries or renews an activity timer.
+static bool lcd_power_uart_write(const char* json_str) {
+  if (!json_str || g_suppress_uart_json_tx) return false;
+  const size_t length = strlen(json_str);
+  // Both delimiters are in this one driver write. A leading empty line also
+  // closes an older sender's separately-written JSON before its final newline.
+  if (length < 2 || json_str[0] != '\n' || json_str[length - 1] != '\n') return false;
+  const size_t written = senseSerial.write(reinterpret_cast<const uint8_t*>(json_str), length);
+  senseSerial.flush();
+  if (written != length) return false;
+  ++uart_tx_count;
+  uart_note_tx_type(json_str);
+  return true;
+}
+
 static void uart_send_input_message(const char* type, int delta = 0, const char* id = NULL) {
   if (g_suppress_uart_json_tx) return;
   // Suppress non-essential input messages during OTA to prevent UART buffer

@@ -318,6 +318,8 @@ def main():
     passed = negative_ok if args.mutation else bool(ran and ran.returncode == 0)
     files = ['Sense_Minimal/sense_voice.h', 'Sense_Minimal/sense_memory_diag.h',
              'Sense_Minimal/sense_media_retry_client.h',
+             'halo_ota_demo/firmware/shared/SystemPower.h',
+             'halo_ota_demo/firmware/shared/SystemPowerTransport.h',
              'halo_ota_demo/firmware/shared/ScopedTlsMemory.h']
     result = {'status': 'PASS' if passed else 'FAIL', 'qualification': 'HOST_REGRESSION_NO_PHYSICAL_RAM_CLAIM',
               'mutation': args.mutation, 'compiled': built.returncode == 0,

@@ -425,6 +425,7 @@ static void uart_process_received_message(const char* json_str) {
   }
 
   if (strcmp(type, "PONG") == 0) {
+    lcd_power_note_control_reply();
     unsigned long now_ms = millis();
     unsigned long age_ms = prev_rx_ms > 0 ? (now_ms - prev_rx_ms) : 0;
     last_sense_rx_ms = now_ms;
@@ -826,6 +827,7 @@ static void uart_process_received_message(const char* json_str) {
   }
 
   if (strcmp(type, "SYNC_ACK") == 0) {
+    lcd_power_note_control_reply();
     link_synced = true;
     // Go through the same path PONG uses. Setting sense_awake_confirmed on its
     // own left the sense_state enum saying ASLEEP while the flag said awake, and

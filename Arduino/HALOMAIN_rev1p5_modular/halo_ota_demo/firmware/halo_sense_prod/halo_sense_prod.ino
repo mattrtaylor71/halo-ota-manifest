@@ -1353,6 +1353,9 @@ static bool ota_report_build_payload(String& out,
   payload["build"] = kBuildId;
   payload["report_type"] = (report_type && report_type[0]) ? report_type : "pre_sleep";
   payload["ts_epoch"] = static_cast<uint32_t>(now);
+  // The ordinary report retains the same bounded transmission-time snapshot
+  // sent in application headers. Unknown/stale data stays explicit.
+  if (!sense_power_append(payload)) return false;
   if (owner_ok && owner_id[0]) {
     payload["owner_id"] = owner_id;
   }

@@ -25,6 +25,7 @@
 #define SENSE_UPLOAD_H
 
 #include "sense_media_retry_client.h"
+#include "../halo_ota_demo/firmware/shared/SystemPowerTransport.h"
 
 // ── Presign error text ──────────────────────────────────────────────
 
@@ -231,6 +232,7 @@ static bool http_post_json_with_retries(const char* url,
       String auth = String("Bearer ") + bearer;
       http.addHeader("Authorization", auth);
     }
+    halo_power_transport::add_header(http);
     http_code = http.POST(body);
     if (media_retry_network_cancelled()) { http.end(); client.stop(); break; }
     resp_body = http.getString();

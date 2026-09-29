@@ -55,6 +55,7 @@ def _base_harness(root):
     setup = setup[:setup.rfind('{')] + '{ return false; }\nreturn true;\n'
     return r'''
 #include <ArduinoJson.h>
+#include "halo_ota_demo/firmware/shared/SystemPowerTransport.h"
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -170,6 +171,9 @@ struct HTTPClient {
   void addHeader(const char* k,const char* v){headers[k]=v;}
   void addHeader(const char* k,const String& v){headers[k]=v;}
   int POST(uint8_t* p,size_t n){
+    assert(headers.count("X-Halo-System-Power")==1);
+    JsonDocument power;assert(!deserializeJson(power,headers.at("X-Halo-System-Power")));
+    assert(power["measurement"]=="lcd_system_supply" && power["system_supply_mv"].isNull());
     sent_headers.push_back(headers);sent_payloads.emplace_back(p,p+n);
     assert(posts<statuses.size());const int code=statuses[posts++];
     if(cancel_post)paused=true;return code;

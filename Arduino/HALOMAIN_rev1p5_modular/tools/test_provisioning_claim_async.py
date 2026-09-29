@@ -15,7 +15,7 @@ from test_provisioning_display_status import definition
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED = 'halo_ota_demo/firmware/shared/'
-FILES = [SHARED+x for x in ['ProvisioningClaimJob.h', 'ProvisioningClaimTransport.h',
+FILES = [SHARED+x for x in ['ProvisioningClaimJob.h', 'ProvisioningClaimTransport.h', 'SystemPower.h', 'SystemPowerTransport.h',
          'ProvisioningManager.cpp', 'ProvisioningManager.h', 'ScopedTlsMemory.h']]+[
          'Sense_Minimal/sense_memory_diag.h',
          'Sense_Minimal/Sense_Minimal.ino', 'halo_ota_demo/firmware/halo_sense_prod/halo_sense_prod.ino']
@@ -94,8 +94,12 @@ class HTTPClient {public:
  ~HTTPClient(){--http_objects;}
  bool begin(WiFiClientSecure& c,const char*){client=&c;return begin_ok;}
  void setConnectTimeout(int n){ct=n;}void setTimeout(unsigned n){read_ms=n;}
- void setReuse(bool b){reuse=b;}void addHeader(const char*,const char*){}
+ String power_header;
+ void setReuse(bool b){reuse=b;}void addHeader(const char* name,const char* value){if(!strcmp(name,"X-Halo-System-Power"))power_header=value;}
  int POST(String b){
+  check(power_header.find("\"measurement\":\"lcd_system_supply\"")!=String::npos,"actual claim POST has system rail header");
+  check(power_header.find("\"system_supply_mv\":null")!=String::npos,"claim missing peer stays null");
+  check(b.find("system_power")==String::npos,"claim body unchanged");
   ++post_calls;posted=b;
   if(!client->connect("claim.invalid",443,ct))return -1;
   if(!client->write(reinterpret_cast<const uint8_t*>(b.data()),b.size()))return -1;

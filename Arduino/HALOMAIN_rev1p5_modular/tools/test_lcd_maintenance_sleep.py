@@ -126,7 +126,7 @@ static unsigned long last_sense_rx_ms=9500,last_sense_sleep_ready_ms,sense_awake
 static constexpr unsigned long SENSE_RX_STALE_MS=8000,SENSE_SLEEP_READY_GRACE_MS=15000,SENSE_RECENT_RX_FOR_SLEEP_MS=10000,SENSE_UNKNOWN_STALE_EXTENDED_MS=30000;
 static bool sleep_ready_received,sleep_deny_received,sleep_deny_active,sleep_handshake_fail_link,sleep_wait_for_sense_idle,sleep_retry_requires_user,sleep_cancelled_by_user_input;
 static bool sense_sleep_intent_pending=true,g_sleep_transition,g_in_light_sleep;
-static bool g_img_rx_active=false,g_img_rx_binary_mode=false,g_spool_tx_pending=false,g_spool_tx_active=false;
+static bool g_img_rx_active=false,g_img_rx_binary_mode=false,g_spool_tx_pending=false,g_spool_tx_active=false,g_lcd_ota_binary_mode=false;
 static unsigned long sleep_deny_retry_ms,sleep_deny_received_ms,sleep_retry_allowed_ms;
 static unsigned sleep_handshake_fail_count,sleep_fallback_timer_sec;
 static unsigned sleep_deny_count=2;
@@ -146,6 +146,14 @@ static std::string scenario;
 static int ship_user_state_current(){return 0;}
 static const char* ship_user_state_name(int){return "stub";}
 static void lcd_send_diag_pre_sleep(){}
+// ADC/UART preparation is independently executed by test_lcd_power. These
+// existing custody tests begin at an already-completed preparation boundary.
+static bool s_lcd_power_sleep_pending=false;
+static bool sense_ready_for_control_tx(){return true;}
+static bool lcd_power_prepare_sleep(bool){return true;}
+static void lcd_power_headless_sample(bool){}
+static void lcd_power_deinit(){}
+struct LcdPowerSleepScope {};
 static void lcd_sleep_ts(const char*){}
 static void refresh_sense_awake_estimate(unsigned long){}
 static void send_sense_ping(){++pings;}
