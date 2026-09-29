@@ -70,7 +70,7 @@ def harness(root):
 #define ARDUINO_USB_CDC_ON_BOOT 1
 #define EXAMPLE_LCD_H_RES 360
 #define EXAMPLE_LCD_V_RES 360
-LV_FONT_DECLARE(nunito_12);
+LV_FONT_DECLARE(nunito_22);
 LV_IMG_DECLARE(dish_icon_img);
 static uint32_t clock_ms=1000;
 static uint32_t millis(){return clock_ms;}
@@ -123,16 +123,19 @@ static void reading(unsigned mv,bool usb=false){clock_ms+=1000;usb_attached=usb;
 static void force(unsigned mv,bool usb=false){s_home_power_model=home_battery::Model{};reading(mv,usb);lcd_home_power_service();}
 static uint32_t color(uint32_t value){return lv_color_to32(lv_color_hex(value));}
 static uint32_t arc_pixel(int degrees){double angle=degrees*3.141592653589793/180;
- int x=int(std::round(180+174*std::cos(angle))),y=int(std::round(180+174*std::sin(angle)));
+ int x=int(std::round(180+165*std::cos(angle))),y=int(std::round(180+165*std::sin(angle)));
  return pixels[y*W+x];
 }
 static void preserve(const std::vector<uint32_t>& baseline){
  for(int y=0;y<H;++y)for(int x=0;x<W;++x)if(pixels[y*W+x]!=baseline[y*W+x]){
-  check(x>=20&&x<=339&&y>=260&&y<=359,"draw changes only lower indicator band");
+  check(x>=81&&x<=279&&y>=311&&y<=351,"draw changes only compact inset indicator band");
   check((x-180)*(x-180)+(y-180)*(y-180)<=180*180,"indicator and glow fit physical circular aperture");
  }
- const int positions[5][2]={{134,24},{24,134},{244,134},{134,244},{134,134}};
- for(auto &pos:positions)for(int y=pos[1];y<pos[1]+96;++y)for(int x=pos[0];x<pos[0]+96;++x)
+ const int positions[5][2]={{SHIP_MAIN_MENU_TOP_BTN_X,SHIP_MAIN_MENU_TOP_BTN_Y},
+  {SHIP_MAIN_MENU_LEFT_BTN_X,SHIP_MAIN_MENU_LEFT_BTN_Y},{SHIP_MAIN_MENU_RIGHT_BTN_X,SHIP_MAIN_MENU_RIGHT_BTN_Y},
+  {SHIP_MAIN_MENU_BOTTOM_BTN_X,SHIP_MAIN_MENU_BOTTOM_BTN_Y},{SHIP_MAIN_MENU_CENTER_BTN_X,SHIP_MAIN_MENU_CENTER_BTN_Y}};
+ for(unsigned i=0;i<5;++i)for(int y=positions[i][1];y<positions[i][1]+(i==3?SHIP_MENU_MAIN_BOTTOM_H:SHIP_MENU_MAIN_ICON_H)+4;++y)
+  for(int x=positions[i][0];x<positions[i][0]+SHIP_MENU_MAIN_ICON_W+4;++x)
   check(pixels[y*W+x]==baseline[y*W+x],"all five original cards icons and shadows unchanged");
 }
 int main(int argc,char**){
@@ -142,27 +145,30 @@ int main(int argc,char**){
  lv_obj_t* base=lv_scr_act();create();
  check(lv_obj_remove_event_cb(ship_menu_screen,lcd_home_power_draw),"remove callback for unchanged baseline");
  frame("baseline.ppm");std::vector<uint32_t> baseline(pixels,pixels+W*H);
+ for(int y=0;y<H;++y)for(int x=0;x<W;++x)if((x-180)*(x-180)+(y-180)*(y-180)>180*180)
+  check(pixels[y*W+x]==color(COL_CREAM),"whole shifted menu remains inside circular aperture");
  const unsigned object_count=objects(ship_menu_screen);
  lv_mem_monitor_t before_registration,after_registration;lv_mem_monitor(&before_registration);
  if(argc==1)lcd_home_power_register(ship_menu_screen);
  lv_mem_monitor(&after_registration);
  force(3920);frame("battery-78.ppm");
  check(s_home_power_display.mode==home_battery::Mode::Battery&&s_home_power_display.percent==78,"actual policy supplies78 percent");
- check(arc_pixel(90)==color(COL_GREEN),"battery arc visible");
- check(arc_pixel(40)==color(COL_TERT),"unfilled arc remains muted");preserve(baseline);
- unsigned label_ink=0;for(int y=340;y<350;++y)for(int x=150;x<210;++x)
+ check(arc_pixel(90)==color(HOME_POWER_TEAL),"battery arc visible");
+ const uint32_t track=lv_color_to32(lv_color_mix(lv_color_hex(HOME_POWER_TEAL),lv_color_hex(COL_CREAM),51));
+ check(arc_pixel(60)==track,"unfilled arc remains muted");preserve(baseline);
+ unsigned label_ink=0;for(int y=319;y<337;++y)for(int x=144;x<216;++x)
   if(pixels[y*W+x]!=baseline[y*W+x])++label_ink;
- check(label_ink>60,"estimated percentage text visible below More shadow");
+ check(label_ink>200,"estimated percentage text visible below More shadow");
  struct Case {unsigned mv,pct;uint32_t ink;int sample;const char* name;};
- const Case cases[]={{4200,100,COL_GREEN,35,"battery-100.ppm"},
-  {3700,25,COL_GOLD,140,"battery-25.ppm"},{3600,10,COL_RED,145,"battery-10.ppm"},
-  {3300,0,COL_TERT,145,"battery-0.ppm"}};
+ const Case cases[]={{4200,100,HOME_POWER_TEAL,60,"battery-100.ppm"},
+  {3700,25,SHIP_HOME_SYMBOL_GOLD,115,"battery-25.ppm"},{3600,10,COL_RED,122,"battery-10.ppm"},
+  {3300,0,track,122,"battery-0.ppm"}};
  for(auto& c:cases){force(c.mv);frame(c.name);check(s_home_power_display.percent==c.pct,"percentage fixture");
   check(arc_pixel(c.sample)==color(c.ink),"threshold color or empty arc");preserve(baseline);}
  force(4650,true);frame("external-power.ppm");
  check(s_home_power_display.mode==home_battery::Mode::ExternalPower,"high rail gives external power");
- check(arc_pixel(135)==baseline[303*W+57],"external power replaces entire arc outside bolt glow");
- unsigned bolt_ink=0;for(int y=338;y<359;++y)for(int x=171;x<189;++x)
+ check(arc_pixel(110)==baseline[335*W+124],"external power replaces entire arc outside bolt glow");
+ unsigned bolt_ink=0;for(int y=320;y<352;++y)for(int x=168;x<193;++x)
   if(pixels[y*W+x]!=baseline[y*W+x])++bolt_ink;
  check(bolt_ink>40,"green glowing lightning bolt visible");preserve(baseline);
  force(3056,true);frame("unknown-usb-low-rail.ppm");
@@ -230,7 +236,7 @@ def main():
     (out / 'CMakeLists.txt').write_text('cmake_minimum_required(VERSION 3.12)\nproject(home_power C CXX)\n'
         'set(LV_CONF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/lv_conf.h" CACHE STRING "")\n'
         f'add_subdirectory("{lvgl}" lvgl-build)\n'
-        f'add_executable(home home.cpp "{assets}/nunito_12.c" "{assets}/dish_icon.c")\n'
+        f'add_executable(home home.cpp "{assets}/nunito_22.c" "{assets}/dish_icon.c")\n'
         f'target_include_directories(home PRIVATE "{root}/LCD_Minimal" "{root}/halo_ota_demo/firmware/shared")\n'
         'target_compile_features(home PRIVATE cxx_std_17)\ntarget_link_libraries(home PRIVATE lvgl)\n')
     with (out / 'build.log').open('w') as log:
@@ -239,10 +245,10 @@ def main():
     result = subprocess.run([str(out / 'build/home')], cwd=out, capture_output=True, text=True, timeout=30)
     (out / 'render.log').write_text(result.stdout + result.stderr)
     print(result.stdout, end='')
-    result.check_returncode()
     for image in sorted(out.glob('*.ppm')):
         data = image.read_bytes().split(b'\n', 3)[3]
         png(image.with_suffix('.png'), 360, 360, data)
+    result.check_returncode()
     negative = out / 'negative-control'
     negative.mkdir()
     old = subprocess.run([str(out / 'build/home'), 'no-indicator'], cwd=negative, capture_output=True, text=True, timeout=15)
@@ -252,7 +258,7 @@ def main():
              'LCD_Minimal/lcd_ui_task.h', 'LCD_Minimal/LCD_Minimal.ino', 'LCD_Minimal/lcd_theme.h',
              'LCD_Minimal/lcd_ui_design.h', 'LCD_Minimal/lv_conf.h',
              'halo_ota_demo/firmware/shared/HomeBattery.h', 'halo_ota_demo/firmware/shared/SystemPower.h',
-             'halo_ota_demo/firmware/halo_lcd_prod/nunito_12.c', 'halo_ota_demo/firmware/halo_lcd_prod/dish_icon.c']
+             'halo_ota_demo/firmware/halo_lcd_prod/nunito_22.c', 'halo_ota_demo/firmware/halo_lcd_prod/dish_icon.c']
     (out / 'RESULT.json').write_text(json.dumps({'status': 'PASS', 'negative_control': 'missing Home indicator rejected',
         'renderer': str(lvgl), 'scope': 'Actual LVGL production-config software renderer and actual Home helpers; hardware inputs doubled. No physical display, ADC calibration or firmware acceptance.',
         'summary': result.stdout.strip(), 'images': [p.name for p in sorted(out.glob('*.png'))],

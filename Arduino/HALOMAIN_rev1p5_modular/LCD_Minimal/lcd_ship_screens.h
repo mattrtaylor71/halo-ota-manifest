@@ -103,7 +103,7 @@ static void ship_voice_wave_draw(int32_t phase) {
     }
     int height = 7 + ((peak_height[i] - 7) * level) / 1000;
     lv_obj_set_height(bar, height);
-    lv_obj_set_y(bar, 70 - height / 2);
+    lv_obj_set_y(bar, SHIP_MAIN_MENU_TOP_BTN_Y + SHIP_MAIN_MENU_BTN_H / 2 - height / 2);
   }
 }
 
@@ -195,11 +195,13 @@ static void ship_init_ai_listening_screen() {
   lv_obj_t* right = ship_voice_muted_card(SHIP_MAIN_MENU_RIGHT_BTN_X, SHIP_MAIN_MENU_RIGHT_BTN_Y);
   ship_main_menu_add_minus(right, ship_voice_muted_color(COL_RED));
   lv_obj_t* bottom = ship_voice_muted_card(SHIP_MAIN_MENU_BOTTOM_BTN_X, SHIP_MAIN_MENU_BOTTOM_BTN_Y);
+  lv_obj_set_height(bottom, SHIP_MENU_MAIN_BOTTOM_H);
   ship_main_menu_add_dots(bottom, ship_voice_muted_color(SHIP_HOME_SYMBOL_GOLD));
 
   ship_voice_contact_ring = lv_obj_create(ship_ai_listening_screen);
   lv_obj_remove_style_all(ship_voice_contact_ring);
-  lv_obj_set_pos(ship_voice_contact_ring, 123, 123);
+  lv_obj_set_pos(ship_voice_contact_ring, SHIP_MAIN_MENU_CENTER_BTN_X - 11,
+                SHIP_MAIN_MENU_CENTER_BTN_Y - 11);
   lv_obj_set_size(ship_voice_contact_ring, 114, 114);
   lv_obj_set_style_radius(ship_voice_contact_ring, 33, 0);
   lv_obj_set_style_border_width(ship_voice_contact_ring, 2, 0);
@@ -220,7 +222,7 @@ static void ship_init_ai_listening_screen() {
   for (uint8_t i = 0; i < SHIP_VOICE_WAVE_BAR_COUNT; ++i) {
     lv_obj_t* bar = lv_obj_create(ship_ai_listening_screen);
     lv_obj_remove_style_all(bar);
-    lv_obj_set_pos(bar, 98 + i * 13, 66);
+    lv_obj_set_pos(bar, 98 + i * 13, SHIP_MAIN_MENU_TOP_BTN_Y + SHIP_MAIN_MENU_BTN_H / 2 - 4);
     lv_obj_set_size(bar, 7, 8);
     lv_obj_set_style_radius(bar, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(bar, lv_color_hex(COL_TEAL), 0);
@@ -1037,6 +1039,7 @@ static void show_ship_main_menu_impl() {
     ship_main_menu_buttons[3] = lv_obj_create(ship_menu_screen);
     lv_obj_set_pos(ship_main_menu_buttons[3], SHIP_MAIN_MENU_BOTTOM_BTN_X, SHIP_MAIN_MENU_BOTTOM_BTN_Y);
     ship_main_menu_style_button(ship_main_menu_buttons[3], false);
+    lv_obj_set_height(ship_main_menu_buttons[3], SHIP_MENU_MAIN_BOTTOM_H);
     ship_main_menu_add_dots(ship_main_menu_buttons[3], lv_color_hex(SHIP_HOME_SYMBOL_GOLD));
 
     ship_main_menu_ai_button = lv_obj_create(ship_menu_screen);

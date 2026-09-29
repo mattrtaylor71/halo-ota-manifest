@@ -8,21 +8,32 @@ private candidate after 230, not a production publication. Public OTA remains
 
 ## Display behavior
 
-The existing card geometry, symbols and touch targets stay unchanged. The arc
-occupies the lower screen edge; a small centered percentage is prefixed with
-`~` because it is an estimate. The charging-style symbol means **external power**,
-not a verified charging current, full cell or remaining battery percentage.
+The latest reference-matched preview restores the Dish card to y24 and puts
+Check-in/Mic/Discard at y130. The More card is 92×80 at y232, making space for a
+large bold percentage while preserving all five original icon artworks. Other
+cards remain 92×92. Actual touch bounds and voice hold feedback share those
+coordinates and dimensions. The More card's shorter height is a local layout
+change explicitly accepted for matching Matt's latest reference, IMG_5858.
+
+A **70-degree** rounded lower arc is inset **12 pixels** from the round display
+edge. A pale teal remainder sits behind its filled segment. The centered
+**Nunito22** number appears as `78%`, matching the photo; it remains an estimate,
+not a calibrated measurement, and the review page/documents say so explicitly.
+The lightning symbol means **external power**, not verified charging current,
+a full cell or remaining battery percentage.
 
 | Display state | Appearance |
 | --- | --- |
-| Estimated 26–100% | Green arc and number |
-| Estimated 11–25% | Yellow arc and darker gold number for readability |
+| Estimated 26–100% | Teal-green arc and number matching the supplied reference |
+| Estimated 11–25% | Amber arc and number matching the existing microphone/dots |
 | Estimated 0–10% | Red arc and number |
 | External power | Bright green lightning bolt with a static layered glow; no arc or percentage |
 | Unknown or stale | Neutral track and `--`; no fabricated 0%/100% or charging claim |
 
-The exact overlapping user boundaries are resolved as **25% yellow, 10% red**.
-The glow is drawn from fixed vector strokes, not a new animation, image buffer
+The exact overlapping user boundaries are resolved as **25% amber, 10% red**.
+The filled lightning silhouette uses bright local green `#2EA86A`, with a
+thin, low-opacity static glow. Two overlapping convex triangles avoid LVGL's unsupported concave-polygon
+path. The glow is drawn from fixed vector strokes, not a new animation, image buffer
 or periodic wake. The indicator cannot renew the user's activity timer, turn on
 the panel, keep the device awake or interfere with foreground input.
 
@@ -87,7 +98,8 @@ The provisional table may be substantially pessimistic for this particular
 power path. In that high-load experiment the rail reached 3700 mV after about
 1 h 12 min, with about 3 h 59 min remaining to the first reboot, while this table
 would display approximately 25%. Those times are experiment-specific and do not
-establish true battery state of charge either. The `~` qualifier is intentional.
+establish true battery state of charge either. The plain percentage follows
+the requested photo; removing the tilde does not strengthen its accuracy claim.
 
 The current bench has also reported about 3056 mV while USB was attached.
 Historical notes attribute roughly 3.3 V with the LCD switch off to Sense
@@ -149,21 +161,26 @@ paired build/resource checks and finite bench sleep/wake/input checks remain
 separate acceptance steps. Do not call this
 production-ready or electrically calibrated based on a host model pass.
 
-The focused actual-LVGL renderer run passed **355,805 pixel/lifecycle checks**
+The revised focused actual-LVGL renderer run passed **364,912 pixel/lifecycle checks**
 with the production LVGL configuration, actual Home creation block, existing
-theme/icon helpers, dish bitmap and Nunito12 font. Hardware observations and
+theme/icon helpers, dish bitmap and Nunito22 font. Hardware observations and
 clock inputs are host doubles. Native 360×360 PNGs for 100%, 78%, 25%, 10%, 0%,
 external power, ambiguous low USB rail and stale input were generated in
-`/Users/MattTaylor/halo-battery-menu-20260928/render06/`. The root visually
-reviewed the 78% and external-power images and accepted their compact placement.
+`/Users/MattTaylor/halo-battery-menu-20260928/render10/`. The renderer owner
+visually reviewed the reference composition, teal/amber states and external-
+power silhouette. User review of this latest revision is pending.
 `RESULT.json` in that directory records source hashes and the exact scope.
 
-- All 15 existing Home objects remain; every pixel in the five original
-  card/icon/shadow rectangles is unchanged. All new pixels, including the glow,
-  lie inside the round display aperture and the lower indicator region.
-- Percentage text uses Nunito12 at line y339; actual glyph ink fits below the
-  More-card shadow. The arc has center(180,180), outer radius177, width6 and
-  angles30–150. Neither layout nor touch geometry changes.
+- All 15 existing Home objects remain; every pixel in the five relocated
+  card/icon/shadow rectangles matches the relocated reference without an
+  indicator. The entire menu remains within the round display aperture.
+  All new indicator pixels, including the glow, lie within the compact inset
+  footer region and the physical circle.
+- Percentage text uses Nunito22 at line y317; its glyph ink sits below the
+  More-card shadow and above the arc. The arc has center(180,180), outer
+  radius168, width6 and angles55–125. The footer teal is `#2E8C8E`; its track
+  blends that color into cream at 20%. Visible geometry and actual touch bounds
+  move together. The external-power bolt is 18×26 before its restrained glow.
 - Three hundred display-state transitions retain exactly stable LVGL free
   memory. Twenty successive normal Home rebuilds each retain exactly stable
   free memory, unchanged object count and intact allocator state. No animation
@@ -182,13 +199,31 @@ reviewed the 78% and external-power images and accepted their compact placement.
   assertion. Same-value updates cause no extra refresh, and dark, hidden,
   headless, sleep, provisioning and OTA states do not borrow a sample or render.
 
-Earlier failed render receipts remain in `render01` through `render05`. The
+The original visual candidate is preserved separately in the immutable 231
+source/artifact snapshot; it is not installed by this revision. Earlier failed
+render receipts remain in `render01` through `render05`, with the original
+compact design's passing run in `render06`. `render07` preserves the rejected
+30-degree design. `render08` and `render09` preserve the reference layout and
+its focused teal refinement before the final bolt refinement. The
 native comparison caught a real 14-pixel glow overlap with More's translucent
 shadow, corrected by moving only the bolt two pixels lower. Other failures
 were isolated fixture issues: probing inside the valid glow, clearing the
 presentation cache without destroying its screen, and the allocation-order
 comparison described above. The final checks retain exact pixel and heap
 comparisons rather than accepting those failures with wider tolerances.
+
+An independent host harness compiled the actual geometry, hitbox arrays,
+hit-test function, action mappings and tap/reset origins. **304,107 checks
+passed for the final geometry**, including every logical/raw coordinate,
+inclusive edges, gaps, the now-inert old More lower strip, unchanged secondary/
+settings actions, and the fixed actuator center remaining inside the mic.
+Both Home and muted voice More cards use the same 80px height as their touch
+bounds. Restoring the old mic Y only in a generated harness fails the expected
+bounds check. Evidence and source hashes are in
+`/Users/MattTaylor/halo-battery-menu-20260928/menu-route-review/run-2-final/`.
+That external harness is separate evidence, not yet a registered release-gate
+suite. Physical touch timing, hold/release behavior and actual-panel acceptance
+remain pending; command injection cannot prove them.
 
 ## Design provenance
 
@@ -198,10 +233,13 @@ sources read through `trepo-company` were `brand/trepo-brand-guidelines`
 `brand/trepo-app-design-system` (September 23 implementation reference). A search
 for relevant brand amendments did not identify a battery-specific amendment.
 
-The established firmware cream background, white cards, existing symbols,
-Nunito assets and existing green/gold/red tokens are retained. Matt's current
-request authorizes the bright green glow specifically for the external-power
-bolt; its local `#20DE63` treatment is a feature-scoped exception to the usual
-firmware palette, not a new global brand rule. No wordmark is recreated and no
-company source, logo or shared brand rule is overwritten. Brand references do
-not certify the electrical estimate or authorize public OTA publication.
+The established firmware cream background, white cards, existing icon artwork
+and Nunito assets are retained. Matt's latest direction to match IMG_5858
+supersedes the earlier 30-degree arc and uniformly raised 92×92 cross. The local
+footer teal `#2E8C8E` and brighter bolt green `#2EA86A` follow that reference and
+the explicit request for a bright lightning indicator. Low states still use
+the existing microphone/dots amber and discard red. Those colors affect only
+this new footer; no global palette or brand amendment is introduced. No wordmark
+is recreated and no company source, logo or shared brand rule is overwritten.
+Brand references do not certify the electrical estimate or authorize public
+OTA publication.
