@@ -16,8 +16,97 @@ import signal
 import subprocess
 
 import test_fresh_upload_user_priority as fresh
+from host_paths import arduino_data
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def response_wait_sources():
+    sdk = arduino_data() / 'packages/esp32/hardware/esp32/3.3.8'
+    return {name: (sdk / path).read_text() for name, path in {
+        'stream': 'cores/esp32/Stream.cpp',
+        'http': 'libraries/HTTPClient/src/HTTPClient.cpp',
+    }.items()}
+
+
+def delayed_response_harness(code):
+    """Use the pinned Stream loops and HTTP idle branch with scripted TLS bytes.
+
+    The complete HTTP parser, TLS, scheduling and durable storage remain doubles.
+    This exercises the actual owner client's virtual I/O while a response is late;
+    it cannot qualify an in-progress synchronous SDK call's wall-clock bound.
+    """
+    replace = fresh.corners.replace_once
+    definition = fresh.corners.network.definition
+    sdk = response_wait_sources()
+    timed_read = definition(sdk['stream'], 'int Stream::timedRead()')
+    read_line = definition(sdk['stream'], 'String Stream::readStringUntil(')
+    header = definition(sdk['http'], 'int HTTPClient::handleHeaderResponse()')
+    idle_timeout = definition(header, 'if ((millis() - lastDataTime) > _tcpTimeout)')
+    assert idle_timeout + '\n      delay(10);' in header
+    stream = definition(code, 'struct Stream {') + ';'
+    code = replace(code, stream, r'''
+static bool scripted_response=false,response_wait_active=false;
+static uint32_t response_delay_ms=0,response_connect_delay_ms=0,response_started_ms=0;
+static uint32_t sdk_socket_timeout=0;
+static unsigned response_header_prefix=0,response_polls=0,response_partial_waits=0;
+static size_t response_visible_size(){
+ if(response_wait_active&&uint32_t(millis()-response_started_ms)<response_delay_ms)
+  return std::min<size_t>(response_header_prefix,input_bytes.size());
+ return input_bytes.size();
+}
+struct Stream {
+ uint32_t stream_timeout=15000,_timeout=15000,_startMillis=0;
+ void setTimeout(uint32_t ms){stream_timeout=_timeout=ms;last_stream_timeout=ms;}
+ virtual int read()=0;
+ int timedRead();
+ String readStringUntil(char terminator);
+};
+''' + timed_read + '\n' + read_line)
+    code = replace(code, 'boundary("sdk_connect");in_sdk=false;return transport_ok;',
+                   'boundary("sdk_connect");sdk_socket_timeout=timeout;'
+                   'if(scripted_response)delay(response_connect_delay_ms);'
+                   'in_sdk=false;return transport_ok;')
+    code = replace(code,
+        'const int value=input_offset<input_bytes.size()?(uint8_t)input_bytes[input_offset++]:-1;',
+        'if(response_wait_active&&input_offset>=response_visible_size())'
+        '{++response_partial_waits;delay(1);}\n'
+        '  const int value=input_offset<response_visible_size()?(uint8_t)input_bytes[input_offset++]:-1;')
+    code = replace(code, 'return static_cast<int>(input_bytes.size()-input_offset);',
+                   'return static_cast<int>(response_visible_size()-input_offset);')
+    code = replace(code, 'struct HTTPClient {', r'''
+static constexpr int HTTPC_ERROR_READ_TIMEOUT=-11;
+struct HTTPClient {
+ int wait_for_scripted_response(){
+  response_wait_active=true;response_started_ms=millis();
+  input_bytes="HTTP/1.1 202 Accepted\r\n";input_offset=0;
+  const uint32_t _tcpTimeout=http_read_timeout;
+  uint32_t lastDataTime=millis();
+  // Match HTTPClient::connected(): available() is checked before connected().
+  while(client->available()>0||client->connected()){
+   ++response_polls;boundary("response_poll");
+   const size_t len=client->available();
+   if(len>0){
+    const String line=client->readStringUntil('\n');
+    response_wait_active=false;
+    return line=="HTTP/1.1 202 Accepted\r"?202:HTTPC_ERROR_READ_TIMEOUT;
+   }else{
+''' + idle_timeout.replace('return HTTPC_ERROR_READ_TIMEOUT;',
+                           'response_wait_active=false;return HTTPC_ERROR_READ_TIMEOUT;') + r'''
+    delay(10);
+   }
+  }
+  response_wait_active=false;return -5;
+ }
+''')
+    code = replace(code, 'if(client->write(p,n)!=n)return -2;',
+                   '// Real HTTPClient::connect sets the inherited Stream timeout after connect.\n'
+                   '    if(scripted_response)client->setTimeout(http_read_timeout);\n'
+                   '    if(client->write(p,n)!=n)return -2;')
+    code = replace(code, 'boundary("post_status");return code;',
+                   'const int response=scripted_response?wait_for_scripted_response():202;\n'
+                   '    boundary("post_status");return response==202?code:response;')
+    return code
 
 
 def harness(root, negative=False):
@@ -57,6 +146,7 @@ static int xQueuePeek(void* q,OpJob* job,int wait){assert(q==op_queue&&wait==0);
                    'static void camera_dma_reserve_acquire(const char*){assert(semaphore_held);++dma_acquires;}')
     code = replace(code, 'struct HTTPClient {', 'static uint32_t http_read_timeout=0;\nstruct HTTPClient {')
     code = replace(code, 'void setTimeout(uint32_t){}', 'void setTimeout(uint32_t ms){http_read_timeout=ms;}')
+    code = delayed_response_harness(code)
     code = replace(code, 'assert(!strcmp(reason,"voice_post_fail")||',
                    'assert(!strcmp(reason,"network_or_clock_pending")||!strcmp(reason,"voice_post_fail")||')
     code += r'''
@@ -159,7 +249,12 @@ static void user_activity_bump(const char*){}
     if negative:
         # Generated host code only: restore the old all-input cancellation
         # decision for the list-compatible scope without changing firmware.
-        if negative == 'missing_activity':
+        if negative == 'response_timeout':
+            code, count = re.subn(
+                r'((?:client|http)\.setTimeout\(media_voice_list_active\(\) \? )[^:\n]+'
+                r'( : (?:15000|60000)\);)', r'\g<1>1500\2', code)
+            assert count == 2
+        elif negative == 'missing_activity':
             compatible = definition(code, 'static bool sense_voice_list_input_compatible(')
             old = replace(compatible, 'return list_active &&',
                           'return (!type || strcmp(type,"INPUT_USER_ACTIVE")) && list_active &&')
@@ -183,6 +278,9 @@ static void workflow_reset(std::vector<int> codes={202}){
  list_refresh_inflight=false;list_refresh_start_ms=list_refresh_cooldown_until_ms=list_last_fetch_ok_ms=0;
  refresh_enqueues=status_sends=cached_sends=0;
  http_read_timeout=0;
+ scripted_response=response_wait_active=false;
+ response_delay_ms=response_connect_delay_ms=response_started_ms=sdk_socket_timeout=0;
+ response_header_prefix=response_polls=response_partial_waits=0;
  // Do not assume interrupt generation starts at zero: scope snapshots must
  // work after earlier foreground gestures, including counter rollover.
 }
@@ -378,11 +476,72 @@ int main(){
   else {assert(delay_ms==12000&&persisted==1&&!upload_worker_parked_pending());}
   semaphore_held=false;http_inflight=false;released();++scenarios;
  }
+ for(uint32_t start:{1000U,UINT32_MAX-6000U})
+  for(uint32_t response_delay:{2000U,5000U})for(unsigned prefix:{0U,8U}){
+   workflow_reset();clock_ms=start;scripted_response=true;
+   response_delay_ms=response_delay;response_header_prefix=prefix;
+   unsigned browsing=0;
+   boundary_hook=[&](const char* at){if(response_wait_active&&
+       (!strcmp(at,"response_poll")||!strcmp(at,"sdk_read_enter"))){
+    ++browsing;actual_sense_input("INPUT_SCROLL");request_list_refresh("during_response",true);
+    assert(refresh_enqueues==0&&semaphore_held&&http_inflight);
+   }};
+   {MediaRetryNetworkScope scope(job,true);
+    const bool delayed_response_accepted=voice_upload_and_parse(job);
+    assert(delayed_response_accepted);actual_worker_voice_dispatch(job,delayed_response_accepted);
+    assert(!media_retry_network_cancelled()&&refresh_enqueues==0);
+   }
+   assert(uint32_t(clock_ms-start)==response_delay&&browsing>100&&posts==1&&resets==0);
+   assert(http_read_timeout==12000&&sdk_socket_timeout==8000&&last_handshake==8);
+   assert(response_polls>0&&bool(response_partial_waits)==bool(prefix));
+   assert(delivered==1&&persisted==0&&worker_freed==1&&!upload_worker_parked_pending());
+   assert(sent_headers[0]["x-request-id"]==job.voice.request_id);
+   assert(sent_payloads[0]==std::vector<uint8_t>(job.image_buf,job.image_buf+job.image_len));
+   released();actual_followup_tick();assert(refresh_enqueues==1&&operation_queue.size()==1);
+   actual_followup_tick();assert(refresh_enqueues==1);++scenarios;
+  }
+ puts("PASS 2s/5s delayed and partial-header responses accept once while browsing coalesces one refresh, including rollover");
+ for(uint32_t start:{1000U,UINT32_MAX-600U})for(unsigned prefix:{0U,8U}){
+  workflow_reset();clock_ms=start;scripted_response=true;response_delay_ms=5000;
+  response_header_prefix=prefix;bool capture_requested=false;
+  boundary_hook=[&](const char*){if(response_wait_active&&!capture_requested&&
+      uint32_t(clock_ms-response_started_ms)>=900){
+   capture_requested=true;actual_sense_input("INPUT_MENU_SELECT");
+  }};
+  {MediaRetryNetworkScope scope(job,true);
+   assert(!voice_upload_and_parse(job));actual_worker_voice_dispatch(job,false);
+  }
+  assert(capture_requested&&uint32_t(clock_ms-start)<=950&&posts==1&&resets==0);
+  assert(response_partial_waits==0||last_stream_timeout==0);
+  assert(upload_worker_parked_pending()&&persisted==0&&worker_freed==0&&delivered==0);
+  same_job(job,upload_worker_parked_job);released();++scenarios;
+ }
+ puts("PASS camera input cancels delayed-header and actual Stream partial-line waits and parks exact custody without socket work on another task");
+ for(uint32_t start:{0U,UINT32_MAX-6000U})for(uint32_t response_delay:{4000U,5000U,7000U}){
+  workflow_reset();clock_ms=start;scripted_response=true;response_delay_ms=response_delay;
+  response_connect_delay_ms=2000;semaphore_held=true;http_inflight=true;
+  boundary_hook=[start](const char* at){if(!strcmp(at,"lock_wait")&&uint32_t(clock_ms-start)>=5000){
+   semaphore_held=false;http_inflight=false;
+  }};
+  bool accepted=false;
+  {MediaRetryNetworkScope scope(job,true);
+   accepted=voice_upload_and_parse(job);assert(accepted==(response_delay==4000));
+   assert(media_voice_list_timed_out()==!accepted);actual_worker_voice_dispatch(job,accepted);
+  }
+  assert(uint32_t(response_started_ms-start)==7000&&http_read_timeout==7000);
+  assert(sdk_socket_timeout==7000&&last_handshake==7);
+  assert(uint32_t(clock_ms-start)==(accepted?11000U:12000U));
+  assert(posts==1&&resets==0&&worker_freed==1&&!upload_worker_parked_pending());
+  assert(persisted==unsigned(!accepted)&&delivered==unsigned(accepted));
+  if(!accepted){same_job(job,retained);assert(retained_bytes==sent_payloads[0]);}
+  released();++scenarios;
+ }
+ puts("PASS mutex and connect time consume original 12s budget; late responses retain durable custody across rollover without a second POST");
  workflow_reset();semaphore_held=true;http_inflight=true;const uint32_t lock_start=clock_ms;
  boundary_hook=[lock_start](const char* at){if(!strcmp(at,"lock_wait")&&uint32_t(clock_ms-lock_start)>=5000){
   semaphore_held=false;http_inflight=false;}};
  {MediaRetryNetworkScope scope(job,true);assert(voice_upload_and_parse(job));actual_worker_voice_dispatch(job,true);}
- assert(delay_ms==5000&&posts==1&&last_connect==7000&&last_handshake==7&&http_read_timeout==1500);
+ assert(delay_ms==5000&&posts==1&&last_connect==7000&&last_handshake==7&&http_read_timeout==7000);
  assert(semaphore_acquires==1&&semaphore_releases==1&&delivered==1);released();++scenarios;
  puts("PASS actual HTTP acquisition is cancellable/deadline-bound without disturbing another owner; remaining budget reaches TLS");
  printf("PASS %u voice/list workflow assertions across %u scenarios\n",checks,scenarios);
@@ -420,7 +579,10 @@ def main():
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     result = {'current': execute(a.source_root, a.out / 'current'), 'hardware': False,
-              'boundaries': 'SDK, network and durable storage are deterministic doubles'}
+              'boundaries': 'Pinned SDK Stream read loops and HTTP idle-timeout branch; '
+                            'HTTP parsing, TLS I/O, scheduling and durable storage remain deterministic doubles',
+              'sdk_source_sha256': {name: hashlib.sha256(source.encode()).hexdigest()
+                                    for name, source in response_wait_sources().items()}}
     result['pass'] = result['current']['compiled'] and result['current']['exit_code'] == 0
     if a.negative_control:
         negative = execute(a.source_root, a.out / 'negative', True)
@@ -435,6 +597,12 @@ def main():
                 r'FAIL line \d+: lcd_activity_preserved_voice\n', missing.get('stderr', '')))
         result['negative_missing_lcd_wire_activity'] = missing
         result['pass'] &= missing['expected_assertion']
+        response = execute(a.source_root, a.out / 'negative_response_timeout', 'response_timeout')
+        response['expected_assertion'] = bool(response['compiled'] and
+            response['exit_code'] == -signal.SIGABRT and re.fullmatch(
+                r'FAIL line \d+: delayed_response_accepted\n', response.get('stderr', '')))
+        result['negative_1500ms_response_timeout'] = response
+        result['pass'] &= response['expected_assertion']
     paths = ['Sense_Minimal/Sense_Minimal.ino', 'Sense_Minimal/sense_ops.h',
              'Sense_Minimal/sense_media_retry.h', 'Sense_Minimal/sense_media_retry_client.h',
              'Sense_Minimal/sense_user_activity.h', 'Sense_Minimal/sense_voice.h',

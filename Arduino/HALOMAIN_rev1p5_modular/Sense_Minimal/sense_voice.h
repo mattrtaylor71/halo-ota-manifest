@@ -444,7 +444,12 @@ static bool voice_upload_and_parse(const UploadJob& job) {
     SenseMediaRetryClient client;
     HTTPClient http;
     client.setInsecure();
-    client.setTimeout(media_voice_list_active() ? 1500 : 15000);
+    // A successful upload can take longer than 1.5 s to receive its durable
+    // acknowledgement. Use the existing list-workflow budget for response
+    // reads; the owner-local client still cancels on urgent input or expiry.
+    // In the pinned SDK this is Stream's read timeout, not the independent
+    // NetworkClient socket/connect timeout or TLS handshake budget.
+    client.setTimeout(media_voice_list_active() ? media_voice_list_remaining_ms() : 15000);
     client.setHandshakeTimeout(sense_media_network::handshake_timeout_seconds(media_voice_list_remaining_ms()));
 
 
@@ -459,7 +464,7 @@ static bool voice_upload_and_parse(const UploadJob& job) {
     }
 
     http.setReuse(false);
-    http.setTimeout(media_voice_list_active() ? 1500 : 60000);
+    http.setTimeout(media_voice_list_active() ? media_voice_list_remaining_ms() : 60000);
     http.setConnectTimeout(sense_media_network::connect_timeout_ms(media_voice_list_remaining_ms()));
     http.addHeader("Content-Type", "audio/pcm");  // Raw PCM, not WAV
     http.addHeader("x-owner-id", owner_id);
